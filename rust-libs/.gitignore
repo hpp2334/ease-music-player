@@ -1,0 +1,6 @@
+/target
+/ease-client-test/test-dbs/*
+/android
+
+bridge_generated.io.rs
+bridge_generated.rs

@@ -1,0 +1,28 @@
+[package]
+name = "ease-remote-storage"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1.71"
+futures-util = "0.3.28"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
+http-auth = "0.1.8"
+reqwest = { version = "0.11", default-features = false, features = [
+    "stream",
+    "rustls-tls",
+] }
+thiserror = "1.0"
+quick-xml = { version = "0.29.0", features = ["serialize"] }
+serde = { version = "1.0", features = ["derive"] }
+async-stream = "0.3.5"
+tracing = "0.1"
+bytes = "1.5.0"
+once_cell = "1.18.0"
+
+[dev-dependencies]
+dav-server = { version = "0.5.7", features = ["memfs"] }
+hyper = { version = "0.14", features = ["full"] }

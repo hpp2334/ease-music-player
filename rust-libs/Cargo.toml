@@ -1,0 +1,10 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+resolver = "2"
+members = [
+    "ease-remote-storage",
+    "ease-client",
+    "ease-client-test",
+    "ease-client-music-player",
+]
