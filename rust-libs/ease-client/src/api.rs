@@ -157,7 +157,7 @@ fn create_log(dir: &str) -> std::fs::File {
     file
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "android")]
 fn setup_subscriber(dir: &str) {
     use tracing_subscriber::layer::SubscriberExt;
     let log_file = create_log(dir);
@@ -170,7 +170,7 @@ fn setup_subscriber(dir: &str) {
     set_global_default(subscriber).unwrap();
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_os = "android"))]
 fn setup_subscriber(dir: &str) {
     let log_file = create_log(dir);
     let subscriber = tracing_subscriber::FmtSubscriber::builder()

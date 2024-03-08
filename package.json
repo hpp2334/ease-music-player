@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build:apk": "node ./scripts/build.js",
-    "generate": "node ./scripts/update_api.js"
+    "generate": "node ./scripts/update_api.js",
+    "test": "cd ./rust-libs && cargo test"
   },
   "keywords": [],
   "author": "",

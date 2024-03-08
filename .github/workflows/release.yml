@@ -1,0 +1,61 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+    contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: pnpm/action-setup@v3
+      with:
+        version: 8
+    - uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.16.5'
+        channel: 'stable'
+    - uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: r25c
+        add-to-path: false
+    - name: Install scripts runtime
+      run: pnpm install
+    - name: Install cargo-ndk
+      run: |
+        cargo install cargo-ndk
+        rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+    - name: Install flutter dependencies
+      run: flutter pub get
+    - name: Install flutter rust bridge
+      run: |
+        cargo install cargo-expand@1.0.79
+        cargo install 'flutter_rust_bridge_codegen@1.82.6'
+    - name: Generate codes
+      run: pnpm run generate
+    - name: Run tests
+      run: pnpm run test
+    - name: Build APK
+      run: |
+        mkdir -p ~/.gradle
+        echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> ~/.gradle/gradle.properties
+        pnpm run build:apk
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: artifacts/apk/*.apk
+        # tag: ${{ github.ref }}
+        overwrite: true
+        file_glob: true

@@ -48,6 +48,7 @@ impl LocalBackend {
                 is_dir: metadata.is_dir(),
             });
         }
+        ret.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(ret)
     }
 

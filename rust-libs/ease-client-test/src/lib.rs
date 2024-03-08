@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use ease_client::modules::timer::to_host::TimerService;
 use ease_client::{
-    build_state_manager, build_view_manager, modules::*, MistyController, MistyResourceId, MistyServiceManager,
-    RootViewModelState,
+    build_state_manager, build_view_manager, modules::*, MistyController, MistyResourceId,
+    MistyServiceManager, RootViewModelState,
 };
 
 use fake_player::*;
@@ -159,6 +159,7 @@ impl TestApp {
             let storage_id = self.get_first_storage_id_from_latest_state();
             self.call_controller(controller_prepare_import_entries_in_current_playlist, ());
             self.call_controller(controller_select_storage_in_import, storage_id);
+            self.wait_network();
             let state = self.latest_state();
             let entries = state.current_storage_entries.unwrap();
             self.call_controller(controller_select_entry, entries.entries[4].path.clone());
