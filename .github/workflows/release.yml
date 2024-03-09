@@ -45,14 +45,14 @@ jobs:
       run: pnpm install
     - name: Install cargo-ndk
       run: |
-        cargo install cargo-ndk
+        cargo install --locked cargo-ndk || true
         rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
     - name: Install flutter dependencies
       run: flutter pub get
     - name: Install flutter rust bridge
       run: |
-        cargo install cargo-expand@1.0.79
-        cargo install 'flutter_rust_bridge_codegen@1.82.6'
+        cargo install --locked cargo-expand@1.0.79 || true
+        cargo install --locked 'flutter_rust_bridge_codegen@1.82.6' || true
     - name: Generate codes
       run: pnpm run generate
     - name: Run tests
