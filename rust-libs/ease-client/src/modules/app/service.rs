@@ -2,6 +2,7 @@ use ease_remote_storage::set_global_local_storage_path;
 use misty_vm::{
     client::{AsReadonlyMistyClientHandle, MistyClientHandle},
     states::MistyStateTrait,
+    MistyState,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::Level;
@@ -15,7 +16,7 @@ use crate::modules::{
     PreferenceState,
 };
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, MistyState)]
 pub struct GlobalAppState {
     pub storage_path: String,
     pub app_document_dir: String,

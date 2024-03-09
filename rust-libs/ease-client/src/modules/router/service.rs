@@ -1,8 +1,8 @@
-use misty_vm::{client::MistyClientHandle, states::MistyStateTrait};
+use misty_vm::{client::MistyClientHandle, states::MistyStateTrait, MistyState};
 
 use super::RootRouteSubKey;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, MistyState)]
 pub struct RouterState {
     pub current_sub_route_key: RootRouteSubKey,
 }

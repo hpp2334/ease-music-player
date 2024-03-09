@@ -7,7 +7,7 @@ use std::{
 use ease_remote_storage::Entry;
 use misty_vm::{
     async_task::MistyAsyncTaskTrait, client::MistyClientHandle, resources::MistyResourceHandle,
-    services::MistyServiceTrait, states::MistyStateTrait, MistyAsyncTask,
+    services::MistyServiceTrait, states::MistyStateTrait, MistyAsyncTask, MistyState,
 };
 
 use crate::modules::{
@@ -37,17 +37,17 @@ use super::{
     Playlist,
 };
 
-#[derive(Default)]
+#[derive(Default, MistyState)]
 pub struct AllPlaylistState {
     pub map: HashMap<PlaylistId, Arc<Playlist>>,
 }
 
-#[derive(Default)]
+#[derive(Default, MistyState)]
 pub struct CurrentPlaylistState {
     pub current_playlist_id: Option<PlaylistId>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct EditPlaylistState {
     pub id: Option<PlaylistId>,
     pub picture: Option<MistyResourceHandle>,
@@ -61,7 +61,7 @@ pub struct CreatePlaylistEntries {
     pub entries: Vec<Entry>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct CreatePlaylistState {
     pub picture: Option<MistyResourceHandle>,
     pub playlist_name: String,

@@ -9,7 +9,7 @@ use misty_vm::{
     resources::MistyResourceHandle,
     services::MistyServiceTrait,
     states::MistyStateTrait,
-    MistyAsyncTask,
+    MistyAsyncTask, MistyState,
 };
 
 use crate::modules::{
@@ -43,7 +43,7 @@ use super::{
     Music,
 };
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct CurrentMusicState {
     pub music: Option<Music>,
     pub current_duration: Duration,
@@ -57,19 +57,19 @@ pub struct CurrentMusicState {
     pub loading: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, MistyState)]
 pub struct CachedMusicCoverHandlesState {
     map: HashMap<MusicId, MistyResourceHandle>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct TimeToPauseState {
     pub enabled: bool,
     pub expired_time: u64,
     pub left: u64,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct CurrentMusicAssetState {
     pub cover_buf: Option<MistyResourceHandle>,
     pub lyric_load_state: LyricLoadState,

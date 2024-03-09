@@ -10,14 +10,14 @@ use misty_vm::{
     async_task::MistyAsyncTaskTrait,
     client::{MistyClientAccessor, MistyClientHandle},
     states::MistyStateTrait,
-    MistyAsyncTask,
+    MistyAsyncTask, MistyState,
 };
 
 use crate::modules::error::EASE_RESULT_NIL;
 
 use super::super::music::{service::load_music_data, Music};
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct CurrentServerState {
     pub current_music: Option<Music>,
     pub port: u16,

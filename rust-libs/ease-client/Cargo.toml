@@ -10,7 +10,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [dependencies]
 ease-remote-storage = { path = "../ease-remote-storage" }
 ease-database = { path = "../ease-database" }
-misty-vm = { version = "0.1.1" }
+misty-vm = { version = "0.1.2" }
 ease-client-music-player = { path = "../ease-client-music-player" }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 flutter_rust_bridge = "1.82.6"

@@ -11,7 +11,7 @@ use misty_vm::{
     client::{AsReadonlyMistyClientHandle, MistyClientHandle},
     services::MistyServiceTrait,
     states::MistyStateTrait,
-    MistyAsyncTask,
+    MistyAsyncTask, MistyState,
 };
 
 use crate::{
@@ -40,19 +40,19 @@ use super::{
     StorageType,
 };
 
-#[derive(Default)]
+#[derive(Default, MistyState)]
 pub struct StoragesState {
     pub storage_ids: HashSet<StorageId>,
     pub storage_infos: Vec<StorageInfo>,
     pub is_init: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, MistyState)]
 pub struct StorageBackendStaticState {
     backend_map: HashMap<StorageId, Arc<dyn Backend + Send + Sync>>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct CurrentStorageState {
     pub import_type: CurrentStorageImportType,
     pub state_type: CurrentStorageStateType,
@@ -63,12 +63,12 @@ pub struct CurrentStorageState {
     pub attach_music_id: Option<MusicId>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct StoragesRecordState {
     pub last_locate_path: HashMap<StorageId, String>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, MistyState)]
 pub struct EditStorageState {
     pub is_create: bool,
     pub title: String,

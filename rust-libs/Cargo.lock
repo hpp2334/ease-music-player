@@ -1075,9 +1075,9 @@ dependencies = [
 
 [[package]]
 name = "misty-vm"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e799151646af5b337817eacf92da39847a7aa95d521c806c96bc8d15217af99"
+checksum = "71b979b59d92893803e22fee8e25560c395943c0c16d8f4adcec14e041060caa"
 dependencies = [
  "misty-vm-macro",
  "once_cell",
@@ -1089,9 +1089,9 @@ dependencies = [
 
 [[package]]
 name = "misty-vm-macro"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b5affbad3a3f165310de2a711ef2542401037e3c856dc31538788f7eabe2600"
+checksum = "8ac2bd6f3cdcb5c6b9199fceadd5aaf42c5f2dd875e8aed998d41504ba7258fb"
 dependencies = [
  "proc-macro2 1.0.78",
  "quote 1.0.35",
@@ -1100,9 +1100,9 @@ dependencies = [
 
 [[package]]
 name = "misty-vm-test"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c50734bc067bcf368f207f24066c935dfdabf3f8de6f2bbd9385f19bd493f5e1"
+checksum = "c4a614a02ac64c929cd033793313cd44ec6c34e8ed75650b2fedb412f14a1b63"
 dependencies = [
  "misty-vm",
  "tracing",
