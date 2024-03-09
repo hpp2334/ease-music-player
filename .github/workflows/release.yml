@@ -58,6 +58,7 @@ jobs:
     - name: Run tests
       run: pnpm run test
     - name: Build APK
+      if: ${{ startsWith(github.ref, 'refs/tags/v') }}
       run: |
         mkdir -p ~/.gradle
         echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> ~/.gradle/gradle.properties
