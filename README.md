@@ -1,16 +1,19 @@
-# ease_music_player
+# Ease Music Player
 
-A new Flutter project.
+Ease Music Player is an lightweight music player, written in rust and flutter. 
 
-## Getting Started
+Features
+----
 
-This project is a starting point for a Flutter application.
+- WebDAV support  
+- Playlist-based, music cover and lyric support  
 
-A few resources to get you started if this is your first Flutter project:
+ScreenShot
+----
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+![screenshot](./screenshots/screenshot.png)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+License
+----
+
+GPL v3
