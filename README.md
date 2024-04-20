@@ -1,6 +1,6 @@
 # Ease Music Player
 
-Ease Music Player is an lightweight music player, written in rust and flutter. 
+Ease Music Player is a lightweight music player, written in rust and flutter. 
 
 Features
 ----
