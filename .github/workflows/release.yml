@@ -3,7 +3,8 @@ name: Build and release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "pre-v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+"
     branches:
       - master
 
@@ -11,66 +12,73 @@ env:
   CARGO_TERM_COLOR: always
 
 permissions:
-    contents: write
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Prepare cargo cache
-      uses: actions/cache@v3
-      continue-on-error: false
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/ 
-        key: ${{ runner.os }}-cargo
-        restore-keys: ${{ runner.os }}-cargo
-    - uses: pnpm/action-setup@v3
-      with:
-        version: 8
-    - uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.16.5'
-        channel: 'stable'
-    - uses: nttld/setup-ndk@v1
-      id: setup-ndk
-      with:
-        ndk-version: r25c
-        add-to-path: false
-    - name: Install scripts runtime
-      run: pnpm install
-    - name: Install cargo-ndk
-      run: |
-        cargo install --locked cargo-ndk || true
-        rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-    - name: Install flutter dependencies
-      run: flutter pub get
-    - name: Install flutter rust bridge
-      run: |
-        cargo install --locked cargo-expand@1.0.79 || true
-        cargo install --locked 'flutter_rust_bridge_codegen@1.82.6' || true
-    - name: Generate codes
-      run: pnpm run generate
-    - name: Run tests
-      run: pnpm run test
-    - name: Build APK
-      if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      run: |
-        mkdir -p ~/.gradle
-        echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> ~/.gradle/gradle.properties
-        pnpm run build:apk
-      env:
-        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-    - name: Upload binaries to release
-      uses: svenstaro/upload-release-action@v2
-      if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: artifacts/apk/*.apk
-        tag: ${{ github.ref }}
-        overwrite: true
-        file_glob: true
+      - uses: actions/checkout@v3
+      - name: Prepare cargo cache
+        uses: actions/cache@v3
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo
+          restore-keys: ${{ runner.os }}-cargo
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.16.5"
+          channel: "stable"
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r25c
+          add-to-path: false
+      - name: Install scripts runtime
+        run: pnpm install
+      - name: Install cargo-ndk
+        run: |
+          cargo install --locked cargo-ndk || true
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+      - name: Install flutter dependencies
+        run: flutter pub get
+      - name: Install flutter rust bridge
+        run: |
+          cargo install --locked cargo-expand@1.0.79 || true
+          cargo install --locked 'flutter_rust_bridge_codegen@1.82.6' || true
+      - name: Generate codes
+        run: pnpm run generate
+      - name: Run tests
+        run: pnpm run test
+      - name: Build APK
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }} || ${{ startsWith(github.ref, 'refs/tags/pre-v') }}
+        run: |
+          mkdir -p ~/.gradle
+          echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> ~/.gradle/gradle.properties
+          pnpm run build:apk
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      - name: Upload binaries to artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ startsWith(github.ref, 'refs/tags/pre-v') }}
+        with:
+          name: apk
+          path: |
+            artifacts/apk/*.apk
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: artifacts/apk/*.apk
+          tag: ${{ github.ref }}
+          overwrite: true
+          file_glob: true
