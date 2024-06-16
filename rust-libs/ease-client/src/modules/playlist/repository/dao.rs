@@ -228,7 +228,7 @@ fn db_load_playlist_musics(conn: DbConnectionRef) -> EaseResult<HashMap<MusicId,
         r#"
         SELECT music.id, title, duration, playlist_id
         FROM music
-        JOIN playlist_music ON music.id = playlist_music.id
+        JOIN playlist_music ON music.id = playlist_music.music_id
     "#,
         [],
     )?;

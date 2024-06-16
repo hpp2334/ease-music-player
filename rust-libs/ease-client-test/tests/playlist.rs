@@ -301,3 +301,53 @@ fn playlist_import_other_error() {
     let state = state.current_storage_entries.unwrap();
     assert_eq!(state.state_type, CurrentStorageStateType::UnknownError);
 }
+
+#[test]
+fn playlist_full_reimport_discarded_bug() {
+    let mut app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", true);
+    app.setup_preset(PresetDepth::Storage);
+
+    let create_playlist_and_import_music = || {
+        create_playlist(&app, "A");
+
+        let state = app.latest_state();
+        let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
+        app.call_controller(controller_change_current_playlist, playlist_id);
+
+        let storage_id = app.get_first_storage_id_from_latest_state();
+        app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
+        app.call_controller(controller_select_storage_in_import, storage_id);
+        let entries = app.latest_state().current_storage_entries.unwrap();
+        app.call_controller(controller_select_entry, entries.entries[4].path.clone());
+        let state = app.latest_state();
+        let entries = state.current_storage_entries.unwrap();
+        let item = &entries.entries[4];
+        assert_eq!(item.name, "angelical-pad-143276.mp3");
+        assert_eq!(item.path, "/angelical-pad-143276.mp3");
+        assert_eq!(item.is_folder, false);
+        assert_eq!(item.can_check, true);
+        assert_eq!(item.checked, true);
+        assert_eq!(entries.selected_count, 1);
+
+        app.call_controller(controller_finish_selected_entries_in_import, ());
+        app.wait_network();
+        let state = app.latest_state();
+        let state = state.current_playlist.clone().unwrap();
+        assert_eq!(state.duration, "00:00:24");
+        assert_eq!(state.items.len(), 1);
+        let item = state.items[0].clone();
+        assert_eq!(item.title, "angelical-pad-143276");
+
+        return playlist_id;
+    };
+
+    let playlist_id = create_playlist_and_import_music();
+    app.call_controller(controller_remove_playlist, playlist_id);
+    create_playlist_and_import_music();
+
+    // reload
+    let app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", false);
+    let state = app.latest_state().playlist_list.unwrap();
+    assert_eq!(state.playlist_list.len(), 1);
+    assert_eq!(state.playlist_list[0].count, 1);
+}
