@@ -66,6 +66,8 @@ jobs:
           pnpm run build:apk
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_SIGN_JKS: ${{ secrets.ANDROID_SIGN_JKS }}
+          ANDROID_SIGN_PASSWORD: ${{ secrets.ANDROID_SIGN_PASSWORD }}
       - name: Upload binaries to artifacts
         uses: actions/upload-artifact@v4
         if: ${{ startsWith(github.ref, 'refs/tags/pre-v') }}
