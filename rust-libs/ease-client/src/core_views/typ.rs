@@ -5,7 +5,7 @@ use crate::modules::VRootSubKeyState;
 
 macro_rules! impl_root_view_state_merge_from {
     ($s:ident, $($field:tt,$typ:ident),*) => {
-        #[derive(Debug, Default, Clone)]
+        #[derive(Debug, Default, Clone, uniffi::Record)]
         pub struct $s {
             $(pub $field: Option<$typ>),*
         }

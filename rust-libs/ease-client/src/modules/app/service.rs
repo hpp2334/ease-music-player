@@ -24,6 +24,7 @@ pub struct GlobalAppState {
     pub has_storage_permission: bool,
 }
 
+#[derive(Debug, uniffi::Record)]
 pub struct ArgInitializeApp {
     pub app_document_dir: String,
     pub schema_version: u32,

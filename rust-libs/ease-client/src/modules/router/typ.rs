@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, uniffi::Enum)]
 pub enum RootRouteSubKey {
     Playlist,
     Dashboard,
@@ -13,7 +13,7 @@ impl Default for RootRouteSubKey {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, uniffi::Record)]
 pub struct VRootSubKeyState {
     pub subkey: RootRouteSubKey,
 }

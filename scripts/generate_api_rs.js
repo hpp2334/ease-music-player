@@ -76,6 +76,7 @@ module.exports.generateApiRs = function () {
         const list = parseCode(code)
 
         for (const { fnName, controllerName, argTypeName } of list) {
+            apiRsContent += `#[uniffi::export]\n`
             if (argTypeName !== '()') {
                 apiRsContent += `pub fn ${fnName}(arg: ${argTypeName}) -> ApiRet {\n`
                 apiRsContent += `    let ret = call_controller(${controllerName}, arg)?;\n`
@@ -84,7 +85,7 @@ module.exports.generateApiRs = function () {
                 apiRsContent += `    let ret = call_controller(${controllerName}, ())?;\n`
             }
 
-            apiRsContent += `    Ok(SyncReturn(ret))\n`
+            apiRsContent += `    Ok(ret)\n`
             apiRsContent += `}\n\n`
         }
     }

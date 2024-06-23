@@ -140,8 +140,8 @@ fn edit_storage_view_model(state: &EditStorageState, root: &mut RootViewModelSta
         info: state.info.clone(),
         test: state.test,
         update_signal: state.update_signal,
-        music_count: music_id_visited.len(),
-        playlist_count: playlist_id_visited.len(),
+        music_count: music_id_visited.len() as u32,
+        playlist_count: playlist_id_visited.len() as u32,
     });
 }
 

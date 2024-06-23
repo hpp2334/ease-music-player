@@ -13,14 +13,14 @@ pub struct MusicMeta {
     pub duration: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, uniffi::Enum)]
 pub enum PlayMusicEventType {
     Complete,
     Loading,
     Loaded,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, uniffi::Enum)]
 pub enum LyricLoadState {
     Loading,
     Missing,
@@ -34,7 +34,7 @@ impl Default for LyricLoadState {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
 pub struct VCurrentMusicState {
     pub id: Option<MusicId>,
     pub title: String,
@@ -54,13 +54,19 @@ pub struct VCurrentMusicState {
     pub loading: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct VCurrentMusicLyricState {
-    pub load_state: LyricLoadState,
-    pub lyric_lines: Vec<(u64, String)>,
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, uniffi::Record)]
+pub struct VLyricLine {
+    pub time: u32,
+    pub text: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
+pub struct VCurrentMusicLyricState {
+    pub load_state: LyricLoadState,
+    pub lyric_lines: Vec<VLyricLine>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
 pub struct VTimeToPauseState {
     pub enabled: bool,
     pub left_hour: u64,

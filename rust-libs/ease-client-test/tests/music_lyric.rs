@@ -1,5 +1,3 @@
-
-
 use ease_client::modules::*;
 use ease_client_test::{PresetDepth, TestApp};
 
@@ -16,10 +14,34 @@ fn music_lyric_1() {
     let state = app.latest_state().current_music_lyric.unwrap();
     let lines = state.lyric_lines;
     assert_eq!(lines.len(), 4);
-    assert_eq!(lines[0], (4070, "This is the first line".to_string()));
-    assert_eq!(lines[1], (7110, "This is the second line".to_string()));
-    assert_eq!(lines[2], (8910, "This is the third line".to_string()));
-    assert_eq!(lines[3], (19310, "This is the last line".to_string()));
+    assert_eq!(
+        lines[0],
+        VLyricLine {
+            time: 4070,
+            text: "This is the first line".to_string()
+        }
+    );
+    assert_eq!(
+        lines[1],
+        VLyricLine {
+            time: 7110,
+            text: "This is the second line".to_string()
+        }
+    );
+    assert_eq!(
+        lines[2],
+        VLyricLine {
+            time: 8910,
+            text: "This is the third line".to_string()
+        }
+    );
+    assert_eq!(
+        lines[3],
+        VLyricLine {
+            time: 19310,
+            text: "This is the last line".to_string()
+        }
+    );
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, -1);
 

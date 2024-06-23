@@ -1,5 +1,4 @@
 mod api;
-mod bridge_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
 mod core_views;
 pub mod modules;
 pub(crate) mod utils;
@@ -33,6 +32,8 @@ use crate::modules::{
     },
     PreferenceState,
 };
+
+uniffi::setup_scaffolding!();
 
 pub fn build_view_manager() -> MistyViewModelManager<RootViewModelState> {
     let view_manager = with_view_models(MistyViewModelManager::builder()).build();

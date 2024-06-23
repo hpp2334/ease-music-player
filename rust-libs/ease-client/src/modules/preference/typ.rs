@@ -2,7 +2,18 @@ use misty_vm::MistyState;
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromPrimitive, ToPrimitive)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    FromPrimitive,
+    ToPrimitive,
+    uniffi::Enum,
+)]
 pub enum PlayMode {
     Single,
     SingleLoop,

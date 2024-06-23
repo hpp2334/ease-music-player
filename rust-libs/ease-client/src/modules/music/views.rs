@@ -89,6 +89,12 @@ pub fn current_music_lyric_view_model(
 
     root.current_music_lyric = Some(VCurrentMusicLyricState {
         load_state: state.lyric_load_state,
-        lyric_lines,
+        lyric_lines: lyric_lines
+            .into_iter()
+            .map(|(time, text)| VLyricLine {
+                time: time as u32,
+                text,
+            })
+            .collect(),
     });
 }

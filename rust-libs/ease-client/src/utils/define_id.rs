@@ -3,6 +3,7 @@ macro_rules! define_id {
     ($s:ident) => {
         #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Copy)]
         pub struct $s(pub i64);
+        uniffi::custom_type!($s, i64);
 
         impl AsRef<i64> for $s {
             fn as_ref(&self) -> &i64 {
@@ -33,6 +34,17 @@ macro_rules! define_id {
                 D: serde::Deserializer<'de>,
             {
                 i64::deserialize(deserializer).map(|p| Self(p))
+            }
+        }
+        impl crate::UniffiCustomTypeConverter for $s {
+            type Builtin = i64;
+
+            fn into_custom(val: Self::Builtin) -> uniffi::Result<Self> {
+                Ok($s(val))
+            }
+
+            fn from_custom(obj: Self) -> Self::Builtin {
+                obj.0
             }
         }
     };

@@ -27,6 +27,7 @@ pub fn controller_stop_music(ctx: MistyControllerContext, _arg: ()) -> EaseResul
     Ok(())
 }
 
+#[derive(Debug, uniffi::Record)]
 pub struct ArgSeekMusic {
     pub duration: u64,
 }
