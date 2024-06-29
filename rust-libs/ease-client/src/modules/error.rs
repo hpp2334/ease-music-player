@@ -4,7 +4,8 @@ use ease_remote_storage::{BackendError, StatusCode};
 
 use super::StorageId;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum EaseError {
     #[error("server error")]
     ServerError(#[from] axum::Error),

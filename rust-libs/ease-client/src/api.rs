@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use crate::modules::timer::to_host::{HostTimerService, TimerService};
 use crate::{build_state_manager, build_view_manager, RootViewModelState};
+use error::EaseResult;
 use misty_vm::client::SingletonMistyClientPod;
 use misty_vm::controllers::{ControllerRet, MistyController};
 use misty_vm::resources::ResourceUpdateAction;
@@ -22,18 +23,15 @@ pub struct InvokeRet {
     pub resources: Vec<ResourceToHostAction>,
 }
 
-pub type ApiRet = Result<InvokeRet, String>;
+pub type ApiRet = EaseResult<InvokeRet>;
 
-fn apply_controller_ret<E>(
-    ret: Result<ControllerRet<RootViewModelState>, E>,
-) -> Result<InvokeRet, String>
-where
-    E: std::error::Error + Into<anyhow::Error> + Send,
-{
+fn apply_controller_ret(
+    ret: EaseResult<ControllerRet<RootViewModelState>>,
+) -> EaseResult<InvokeRet> {
     if let Err(e) = ret {
         tracing::error!("{}", e);
         CLIENT.destroy();
-        return Err(format!("{}", e));
+        return Err(e);
     }
     let ret = ret.unwrap();
 
@@ -56,22 +54,14 @@ where
     Ok(invoke_ret)
 }
 
-fn call_controller<Controller, Arg, E>(
-    controller: Controller,
-    arg: Arg,
-) -> Result<InvokeRet, String>
+fn call_controller<Controller, Arg>(controller: Controller, arg: Arg) -> EaseResult<InvokeRet>
 where
-    Controller: MistyController<Arg, E>,
-    E: std::error::Error + Sync + Send + 'static,
+    Controller: MistyController<Arg, EaseError>,
 {
     let ret = CLIENT.call_controller(controller, arg);
     apply_controller_ret(ret)
 }
 
-pub struct ArgReportPanic {
-    pub info: String,
-    pub stack_trace: String,
-}
 struct ToHostMusicPlayerService;
 impl IMusicPlayerService for ToHostMusicPlayerService {
     fn resume(&self) {
@@ -236,28 +226,19 @@ pub fn seek_music(arg: ArgSeekMusic) -> ApiRet {
 
 #[uniffi::export]
 pub fn set_current_music_position_for_player_internal(arg: u64) -> ApiRet {
-    let ret = call_controller(
-        controller_set_current_music_position_for_player_internal,
-        arg,
-    )?;
+    let ret = call_controller(controller_set_current_music_position_for_player_internal, arg)?;
     Ok(ret)
 }
 
 #[uniffi::export]
 pub fn update_current_music_total_duration_for_player_internal(arg: u64) -> ApiRet {
-    let ret = call_controller(
-        controller_update_current_music_total_duration_for_player_internal,
-        arg,
-    )?;
+    let ret = call_controller(controller_update_current_music_total_duration_for_player_internal, arg)?;
     Ok(ret)
 }
 
 #[uniffi::export]
 pub fn update_current_music_playing_for_player_internal(arg: bool) -> ApiRet {
-    let ret = call_controller(
-        controller_update_current_music_playing_for_player_internal,
-        arg,
-    )?;
+    let ret = call_controller(controller_update_current_music_playing_for_player_internal, arg)?;
     Ok(ret)
 }
 
@@ -500,3 +481,4 @@ pub fn test_connection(arg: ArgUpsertStorage) -> ApiRet {
     let ret = call_controller(controller_test_connection, arg)?;
     Ok(ret)
 }
+
