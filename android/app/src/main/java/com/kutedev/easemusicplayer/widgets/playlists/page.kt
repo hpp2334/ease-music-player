@@ -18,29 +18,36 @@ import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import uniffi.ease_client.VPlaylistAbstractItem
-import androidx.activity.viewModels
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.IconButton
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.TextUnit
-import androidx.compose.ui.unit.TextUnitType
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
-import uniffi.ease_client.VPlaylistListState
+import com.kutedev.easemusicplayer.components.EaseIconButtonType
 
 @Composable
-fun PlaylistsPage(playlistsViewModel: PlaylistsViewModel) {
-    val state = playlistsViewModel.state.collectAsState().value
+fun PlaylistsSubpage(playlistsVM: PlaylistsViewModel) {
+    val state = playlistsVM.state.collectAsState().value
 
-    Column {
-        Row {
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(24.dp, 8.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
            EaseIconButton(
                sizeType = EaseIconButtonSize.Medium,
+               buttonType = EaseIconButtonType.Default,
                painter = painterResource(id = R.drawable.icon_plus),
                onClick = { /*TODO*/ }
            )
@@ -51,7 +58,10 @@ fun PlaylistsPage(playlistsViewModel: PlaylistsViewModel) {
 
 @Composable
 private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
-    LazyVerticalGrid(columns = GridCells.FixedSize(150.dp)) {
+    LazyVerticalGrid(
+        columns = GridCells.FixedSize(168.dp),
+        horizontalArrangement = Arrangement.Center,
+    ) {
         items(playlists) { playlist ->
             PlaylistItem(playlist = playlist)
         }
@@ -60,29 +70,35 @@ private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
 
 @Composable
 private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
-    Column(
-        modifier = Modifier.padding(8.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.Start
+    Box(Modifier
+        .clickable(
+            onClick = {},
+        )
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.cover_default_image),
-            contentDescription = null,
-            modifier = Modifier.clip(RoundedCornerShape(20.dp))
-        )
-        Text(
-            text = playlist.title,
-            fontSize = 16.sp,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        Text(
-            text = buildAnnotatedString {
-                append("${playlist.count} ${stringResource(id = R.string.playlist_count_unit)}")
-                append("  ·  ")
-                append(playlist.duration)
-            },
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Light,
-        )
+        Column(
+            modifier = Modifier.padding(24.dp, 8.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.Start
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.cover_default_image),
+                contentDescription = null,
+                modifier = Modifier.clip(RoundedCornerShape(20.dp))
+            )
+            Text(
+                text = playlist.title,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                text = buildAnnotatedString {
+                    append("${playlist.count} ${stringResource(id = R.string.playlist_count_unit)}")
+                    append("  ·  ")
+                    append(playlist.duration)
+                },
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Light,
+            )
+        }
     }
 }
