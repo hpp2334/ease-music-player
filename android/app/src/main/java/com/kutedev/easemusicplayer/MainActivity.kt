@@ -17,18 +17,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.home.HomePage
+import uniffi.ease_client.ArgUpsertStorage
 import uniffi.ease_client.CreatePlaylistMode
+import uniffi.ease_client.StorageType
 import uniffi.ease_client.finishCreatePlaylist
 import uniffi.ease_client.prepareCreatePlaylist
 import uniffi.ease_client.updateCreatePlaylistMode
 import uniffi.ease_client.updateCreatePlaylistName
+import uniffi.ease_client.upsertStorage
 
 class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalFoundationApi::class)
@@ -57,6 +62,29 @@ class MainActivity : ComponentActivity() {
         Bridge.invoke { updateCreatePlaylistMode(CreatePlaylistMode.EMPTY) }
         Bridge.invoke { updateCreatePlaylistName("GBC!!!") }
         Bridge.invoke { finishCreatePlaylist() }
+
+        Bridge.invoke {
+            upsertStorage(ArgUpsertStorage(
+                id = null,
+                addr = "http://fake",
+                alias = null,
+                username = "",
+                password = "",
+                isAnonymous = true,
+                typ = StorageType.WEBDAV,
+            ))
+        }
+        Bridge.invoke {
+            upsertStorage(ArgUpsertStorage(
+                id = null,
+                addr = "http://fake2",
+                alias = null,
+                username = "",
+                password = "",
+                isAnonymous = true,
+                typ = StorageType.WEBDAV,
+            ))
+        }
 
         setContent {
             val bottomBarPageState = rememberPagerState(pageCount = {
@@ -98,15 +126,23 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
 
         run {
-            val vm: PlaylistsViewModel by viewModels();
-            Bridge.unregisterView(vm);
+            val vm: PlaylistsViewModel by viewModels()
+            Bridge.unregisterView(vm)
+        }
+        run {
+            val vm: StorageListViewModel by viewModels()
+            Bridge.unregisterView(vm)
         }
     }
 
     private fun registerNotifies() {
         run {
-            val vm: PlaylistsViewModel by viewModels();
-            Bridge.registerView(vm);
+            val vm: PlaylistsViewModel by viewModels()
+            Bridge.registerView(vm)
+        }
+        run {
+            val vm: StorageListViewModel by viewModels()
+            Bridge.registerView(vm)
         }
     }
 }

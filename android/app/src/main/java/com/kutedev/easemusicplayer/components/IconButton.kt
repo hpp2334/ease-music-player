@@ -1,10 +1,12 @@
 package com.kutedev.easemusicplayer.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -59,9 +61,18 @@ fun EaseIconButton(
         }
     }
 
-    IconButton(onClick = onClick, modifier = Modifier
-        .width(buttonSize)
-        .height(buttonSize)) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .width(buttonSize)
+            .height(buttonSize),
+        colors = IconButtonColors(
+            buttonBg,
+            iconTint,
+            Color.Transparent,
+            MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
         Icon(
             painter = painter,
             tint = iconTint,

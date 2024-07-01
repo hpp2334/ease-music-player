@@ -4,4 +4,5 @@
     <string name="app_name">Ease Music Player</string>
     <string name="dashboard_sleep_mode">睡眠模式</string>
     <string name="dashboard_devices">设备</string>
+    <string name="dashboard_devices_add">增加设备</string>
 </resources>
