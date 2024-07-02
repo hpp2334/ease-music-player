@@ -10,10 +10,12 @@ import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
 import com.kutedev.easemusicplayer.widgets.dashboard.DashboardSubpage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsSubpage
+import com.kutedev.easemusicplayer.widgets.settings.SettingSubpage
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomePage(
+    ctx: android.content.Context,
     pagerState: PagerState,
     playlistsVM: PlaylistsViewModel,
     timeToPauseVM: TimeToPauseViewModel,
@@ -27,7 +29,7 @@ fun HomePage(
             DashboardSubpage(timeToPauseVM = timeToPauseVM, storageListVM = storageListVM)
         }
         if (page == 2) {
-            DashboardSubpage(timeToPauseVM = timeToPauseVM, storageListVM = storageListVM)
+            SettingSubpage(ctx = ctx)
         }
     }
 }

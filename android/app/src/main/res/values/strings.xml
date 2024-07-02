@@ -5,4 +5,7 @@
     <string name="dashboard_sleep_mode">SLEEP MODE</string>
     <string name="dashboard_devices">DEVICES</string>
     <string name="dashboard_devices_add">Add Devices</string>
+    <string name="setting_about">ABOUT</string>
+    <string name="setting_git_repo">Git Repository</string>
+    <string name="setting_version">Version</string>
 </resources>

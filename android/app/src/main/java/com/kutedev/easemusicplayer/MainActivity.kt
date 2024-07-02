@@ -101,6 +101,7 @@ class MainActivity : ComponentActivity() {
                             .fillMaxSize()
                     ) {
                         HomePage(
+                            ctx = applicationContext,
                             pagerState = bottomBarPageState,
                             playlistsVM = playlistsVM,
                             timeToPauseVM = timeToPauseVM,
