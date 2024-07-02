@@ -13,7 +13,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -129,7 +131,7 @@ private fun DevicesBlock(vm: StorageListViewModel) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(0.dp, 4.dp)
-                        .clickable {  },
+                        .clickable { },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
@@ -165,7 +167,9 @@ fun DashboardSubpage(
     val storageState = storageListVM.state.collectAsState().value
 
     Column(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
     ) {
         Box(modifier = Modifier.height(48.dp))
         Row(

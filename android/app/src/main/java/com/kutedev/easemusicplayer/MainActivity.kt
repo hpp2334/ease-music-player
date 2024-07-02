@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -95,22 +96,25 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                 ) { innerPadding ->
-                    Box(
+                    Column(
                         modifier = Modifier
                             .padding(innerPadding)
                             .fillMaxSize()
                     ) {
-                        HomePage(
-                            ctx = applicationContext,
-                            pagerState = bottomBarPageState,
-                            playlistsVM = playlistsVM,
-                            timeToPauseVM = timeToPauseVM,
-                            storageListVM = storageListVM,
-                        )
-
                         Box(
                             modifier = Modifier
-                                .align(Alignment.BottomStart)
+                                .weight(1f)
+                        ) {
+                            HomePage(
+                                ctx = applicationContext,
+                                pagerState = bottomBarPageState,
+                                playlistsVM = playlistsVM,
+                                timeToPauseVM = timeToPauseVM,
+                                storageListVM = storageListVM,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
                                 .height(60.dp)
                                 .fillMaxWidth()
                                 .shadow(2.dp)
