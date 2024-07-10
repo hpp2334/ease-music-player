@@ -3,7 +3,6 @@ package com.kutedev.easemusicplayer.widgets.home
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel

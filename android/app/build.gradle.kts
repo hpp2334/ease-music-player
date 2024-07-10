@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
+    kotlin("plugin.serialization") version "2.0.0"
 }
 
 android {
@@ -12,7 +13,7 @@ android {
         minSdk = 29
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -65,6 +66,8 @@ dependencies {
     implementation("androidx.navigation:navigation-fragment-ktx:$nav_version")
     implementation("androidx.navigation:navigation-ui-ktx:$nav_version")
     implementation("androidx.navigation:navigation-dynamic-features-fragment:$nav_version")
+    implementation("androidx.navigation:navigation-compose:$nav_version")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

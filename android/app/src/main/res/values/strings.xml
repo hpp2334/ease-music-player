@@ -8,4 +8,9 @@
     <string name="setting_about">ABOUT</string>
     <string name="setting_git_repo">Git Repository</string>
     <string name="setting_version">Version</string>
+    <string name="storage_edit_username">USERNAME</string>
+    <string name="storage_edit_password">PASSWORD</string>
+    <string name="storage_edit_addr">ADDRESS</string>
+    <string name="storage_edit_alias">NAME (ALIAS)</string>
+    <string name="storage_edit_anonymous">ANONYMOUS</string>
 </resources>

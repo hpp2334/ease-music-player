@@ -6,26 +6,35 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
+import com.kutedev.easemusicplayer.viewmodels.EditStorageViewModel
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
+import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
 import uniffi.ease_client.ArgUpsertStorage
 import uniffi.ease_client.CreatePlaylistMode
@@ -46,46 +55,9 @@ class MainActivity : ComponentActivity() {
         val playlistsVM: PlaylistsViewModel by viewModels()
         val timeToPauseVM: TimeToPauseViewModel by viewModels()
         val storageListVM: StorageListViewModel by viewModels()
+        val editStorageVM: EditStorageViewModel by viewModels()
 
         Bridge.initApp(applicationContext)
-
-        Bridge.invoke { prepareCreatePlaylist() }
-        Bridge.invoke { updateCreatePlaylistMode(CreatePlaylistMode.EMPTY) }
-        Bridge.invoke { updateCreatePlaylistName("ABC") }
-        Bridge.invoke { finishCreatePlaylist() }
-
-        Bridge.invoke { prepareCreatePlaylist() }
-        Bridge.invoke { updateCreatePlaylistMode(CreatePlaylistMode.EMPTY) }
-        Bridge.invoke { updateCreatePlaylistName("容器") }
-        Bridge.invoke { finishCreatePlaylist() }
-
-        Bridge.invoke { prepareCreatePlaylist() }
-        Bridge.invoke { updateCreatePlaylistMode(CreatePlaylistMode.EMPTY) }
-        Bridge.invoke { updateCreatePlaylistName("GBC!!!") }
-        Bridge.invoke { finishCreatePlaylist() }
-
-        Bridge.invoke {
-            upsertStorage(ArgUpsertStorage(
-                id = null,
-                addr = "http://fake",
-                alias = null,
-                username = "",
-                password = "",
-                isAnonymous = true,
-                typ = StorageType.WEBDAV,
-            ))
-        }
-        Bridge.invoke {
-            upsertStorage(ArgUpsertStorage(
-                id = null,
-                addr = "http://fake2",
-                alias = null,
-                username = "",
-                password = "",
-                isAnonymous = true,
-                typ = StorageType.WEBDAV,
-            ))
-        }
 
         setContent {
             val bottomBarPageState = rememberPagerState(pageCount = {
@@ -96,30 +68,40 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                 ) { innerPadding ->
-                    Column(
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .fillMaxSize()
-                    ) {
-                        Box(
+                    CompositionLocalProvider(LocalNavController provides rememberNavController()) {
+                        Column(
                             modifier = Modifier
-                                .weight(1f)
+                                .padding(innerPadding)
+                                .fillMaxSize()
                         ) {
-                            HomePage(
-                                ctx = applicationContext,
-                                pagerState = bottomBarPageState,
-                                playlistsVM = playlistsVM,
-                                timeToPauseVM = timeToPauseVM,
-                                storageListVM = storageListVM,
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .height(60.dp)
-                                .fillMaxWidth()
-                                .shadow(2.dp)
-                        ) {
-                            BottomBar(bottomBarPageState)
+                            Box(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                NavHost(
+                                    navController = LocalNavController.current,
+                                    startDestination = Routes.Home
+                                ) {
+                                    composable(Routes.Home) {
+                                        HomePage(
+                                            ctx = applicationContext,
+                                            pagerState = bottomBarPageState,
+                                            playlistsVM = playlistsVM,
+                                            timeToPauseVM = timeToPauseVM,
+                                            storageListVM = storageListVM,
+                                        )
+                                    }
+                                    composable(Routes.AddDevices) {
+                                        EditStoragesPage(editStorageVM = editStorageVM)
+                                    }
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .shadow(2.dp)
+                            ) {
+                                BottomBar(bottomBarPageState)
+                            }
                         }
                     }
                 }
@@ -138,6 +120,10 @@ class MainActivity : ComponentActivity() {
             val vm: StorageListViewModel by viewModels()
             Bridge.unregisterView(vm)
         }
+        run {
+            val vm: EditStorageViewModel by viewModels()
+            Bridge.unregisterView(vm)
+        }
     }
 
     private fun registerNotifies() {
@@ -147,6 +133,10 @@ class MainActivity : ComponentActivity() {
         }
         run {
             val vm: StorageListViewModel by viewModels()
+            Bridge.registerView(vm)
+        }
+        run {
+            val vm: EditStorageViewModel by viewModels()
             Bridge.registerView(vm)
         }
     }

@@ -8,4 +8,9 @@
     <string name="setting_about">关于</string>
     <string name="setting_git_repo">Git 仓库</string>
     <string name="setting_version">版本</string>
+    <string name="storage_edit_username">用户名</string>
+    <string name="storage_edit_password">密码</string>
+    <string name="storage_edit_addr">服务器地址</string>
+    <string name="storage_edit_alias">服务器名称 (别名)</string>
+    <string name="storage_edit_anonymous">匿名</string>
 </resources>

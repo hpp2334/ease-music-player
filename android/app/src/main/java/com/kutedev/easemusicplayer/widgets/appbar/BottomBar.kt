@@ -24,7 +24,10 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.currentBackStackEntryAsState
+import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.Routes
 import com.kutedev.easemusicplayer.viewmodels.RootSubkeyViewModel
 import kotlinx.coroutines.launch
 import uniffi.ease_client.RootRouteSubKey
@@ -65,11 +68,15 @@ fun BottomBar(bottomBarPageState: PagerState) {
         BSetting
     )
     val animationScope = rememberCoroutineScope()
+    val currentRouteState = LocalNavController.current.currentBackStackEntryAsState().value;
 
+    if (currentRouteState?.destination?.route != Routes.Home) {
+        return;
+    }
 
     Row(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .height(60.dp)
     ) {
         for (item in items) {

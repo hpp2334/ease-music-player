@@ -4,8 +4,12 @@ import androidx.lifecycle.ViewModel
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import uniffi.ease_client.ArgUpsertStorage
 import uniffi.ease_client.RootRouteSubKey
 import uniffi.ease_client.RootViewModelState
+import uniffi.ease_client.StorageConnectionTestResult
+import uniffi.ease_client.StorageType
+import uniffi.ease_client.VEditStorageState
 import uniffi.ease_client.VPlaylistListState
 import uniffi.ease_client.VRootSubKeyState
 import uniffi.ease_client.VStorageListState
@@ -56,8 +60,6 @@ class TimeToPauseViewModel : ViewModel(), IOnNotifyView {
     }
 }
 
-
-
 class StorageListViewModel : ViewModel(), IOnNotifyView {
     private val _state = MutableStateFlow(run {
         VStorageListState(
@@ -69,6 +71,35 @@ class StorageListViewModel : ViewModel(), IOnNotifyView {
     override fun onNotifyView(v: RootViewModelState): Unit {
         if (v.storageList != null) {
             _state.value = v.storageList!!.copy();
+        }
+    }
+}
+
+class EditStorageViewModel : ViewModel(), IOnNotifyView {
+    private val _state = MutableStateFlow(run {
+        VEditStorageState (
+            isCreated = false,
+            title = "",
+            info = ArgUpsertStorage(
+                id = null,
+                addr = "",
+                alias = null,
+                username = "",
+                password = "",
+                isAnonymous = false,
+                typ = StorageType.WEBDAV,
+            ),
+            test = StorageConnectionTestResult.NONE,
+            musicCount = 0u,
+            playlistCount = 0u,
+            updateSignal = 0u,
+        )
+    })
+    val state = _state.asStateFlow()
+
+    override fun onNotifyView(v: RootViewModelState): Unit {
+        if (v.editStorage != null) {
+            _state.value = v.editStorage!!.copy();
         }
     }
 }

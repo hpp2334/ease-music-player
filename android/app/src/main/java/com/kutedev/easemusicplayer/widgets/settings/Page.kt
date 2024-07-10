@@ -1,8 +1,6 @@
 package com.kutedev.easemusicplayer.widgets.settings
 
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,7 +27,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.pm.PackageInfoCompat
 import com.kutedev.easemusicplayer.R
 
 

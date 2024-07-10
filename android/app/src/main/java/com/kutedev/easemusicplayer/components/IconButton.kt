@@ -23,8 +23,9 @@ enum class EaseIconButtonSize {
 }
 
 enum class EaseIconButtonType {
-    Primary,
     Default,
+    Primary,
+    Error,
 }
 
 @Composable
@@ -52,12 +53,14 @@ fun EaseIconButton(
         when (buttonType) {
             EaseIconButtonType.Primary -> MaterialTheme.colorScheme.primary
             EaseIconButtonType.Default -> Color.Transparent
+            EaseIconButtonType.Error -> Color.Transparent
         }
     }
     val iconTint = run {
         when (buttonType) {
             EaseIconButtonType.Primary -> Color.White
             EaseIconButtonType.Default -> MaterialTheme.colorScheme.onSurface
+            EaseIconButtonType.Error -> MaterialTheme.colorScheme.error
         }
     }
 
