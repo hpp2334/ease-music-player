@@ -22,10 +22,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,10 +33,17 @@ import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
+import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.viewmodels.EditStorageViewModel
+import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
+import com.kutedev.easemusicplayer.viewmodels.IFormTextFieldState
+import uniffi.ease_client.StorageConnectionTestResult
 import uniffi.ease_client.StorageType
+import uniffi.ease_client.testConnection
+import uniffi.ease_client.upsertStorage
+
 
 @Composable
 private fun StorageBlock(
@@ -79,9 +82,11 @@ private fun StorageBlock(
 @Composable
 fun FormText(
     label: String,
-    value: String,
-    onChange: (value: String) -> Unit,
+    field: IFormTextFieldState
 ) {
+    val value = field.value.collectAsState().value
+    val error = field.error.collectAsState().value
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -95,8 +100,16 @@ fun FormText(
             modifier = Modifier
                 .fillMaxWidth(),
             value = value,
-            onValueChange = onChange
+            onValueChange = {value -> field.update(value)},
+            isError = error != null
         )
+        if (error != null) {
+            Text(
+                text =  stringResource(id = error),
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 10.sp,
+            )
+        }
     }
 }
 
@@ -121,37 +134,57 @@ fun FormSwitch(
 
 @Composable
 fun EditStoragesPage(
-    editStorageVM: EditStorageViewModel
+    formVM: EditStorageFormViewModel,
 ) {
-    val state = editStorageVM.state.collectAsState().value;
     val navController = LocalNavController.current
+//
+//    var formStorageType by remember {
+//        mutableStateOf(state.info.typ)
+//    }
+//    var formIsAnonymous by remember {
+//        mutableStateOf(state.info.isAnonymous)
+//    }
+//    var formAlias by remember {
+//        mutableStateOf(state.info.alias ?: "")
+//    }
+//    var formAddr by remember {
+//        mutableStateOf(state.info.addr)
+//    }
+//    var formUsername by remember {
+//        mutableStateOf(state.info.username)
+//    }
+//    var formPassword by remember {
+//        mutableStateOf(state.info.password)
+//    }
+//
+//    LaunchedEffect(state.updateSignal) {
+//        formStorageType = state.info.typ
+//        formIsAnonymous = state.info.isAnonymous
+//        formAlias = state.info.alias ?: ""
+//        formAddr = state.info.addr
+//        formUsername = state.info.username
+//        formPassword = state.info.password
+//    }
 
-    var formStorageType by remember {
-        mutableStateOf(state.info.typ)
-    }
-    var formIsAnonymous by remember {
-        mutableStateOf(state.info.isAnonymous)
-    }
-    var formAlias by remember {
-        mutableStateOf(state.info.alias ?: "")
-    }
-    var formAddr by remember {
-        mutableStateOf(state.info.addr)
-    }
-    var formUsername by remember {
-        mutableStateOf(state.info.username)
-    }
-    var formPassword by remember {
-        mutableStateOf(state.info.password)
-    }
+    val isCreated = formVM.isCreated.collectAsState().value
+    val isAnonymous = formVM.isAnonymous.collectAsState().value
+    val storageType = formVM.storageType.collectAsState().value
+    val testing = formVM.testing.collectAsState().value
 
-    LaunchedEffect(state.updateSignal) {
-        formStorageType = state.info.typ
-        formIsAnonymous = state.info.isAnonymous
-        formAlias = state.info.alias ?: ""
-        formAddr = state.info.addr
-        formUsername = state.info.username
-        formPassword = state.info.password
+    val testingColors = when (testing) {
+        StorageConnectionTestResult.NONE -> null
+        StorageConnectionTestResult.TESTING -> EaseIconButtonColors(
+            Color.Transparent,
+            MaterialTheme.colorScheme.tertiary,
+        )
+        StorageConnectionTestResult.SUCCESS -> EaseIconButtonColors(
+            Color.Transparent,
+            MaterialTheme.colorScheme.primary,
+        )
+        else -> EaseIconButtonColors(
+            Color.Transparent,
+            MaterialTheme.colorScheme.error,
+        )
     }
 
     Column(
@@ -176,23 +209,41 @@ fun EditStoragesPage(
                 )
             }
             Row {
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Medium,
-                    buttonType = EaseIconButtonType.Error,
-                    painter = painterResource(id = R.drawable.icon_deleteseep),
-                    onClick = {}
-                )
+                if (!isCreated) {
+                    EaseIconButton(
+                        sizeType = EaseIconButtonSize.Medium,
+                        buttonType = EaseIconButtonType.Error,
+                        painter = painterResource(id = R.drawable.icon_deleteseep),
+                        onClick = {}
+                    )
+                }
                 EaseIconButton(
                     sizeType = EaseIconButtonSize.Medium,
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_wifitethering),
-                    onClick = {}
+                    overrideColors = testingColors,
+                    onClick = {
+                        val value = formVM.validateAndGetSubmit()
+                        if (value != null) {
+                            Bridge.invoke {
+                                testConnection(value)
+                            }
+                        }
+                    }
                 )
                 EaseIconButton(
                     sizeType = EaseIconButtonSize.Medium,
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_ok),
-                    onClick = {}
+                    onClick = {
+                        val value = formVM.validateAndGetSubmit()
+                        if (value != null) {
+                            Bridge.invoke {
+                                upsertStorage(value)
+                            }
+                            navController.popBackStack()
+                        }
+                    }
                 )
             }
         }
@@ -206,38 +257,34 @@ fun EditStoragesPage(
             Row {
                 StorageBlock(
                     title = "WebDAV",
-                    isActive = state.info.typ == StorageType.WEBDAV,
+                    isActive = storageType == StorageType.WEBDAV,
                     onSelect = {
-                        formStorageType = StorageType.WEBDAV
+                        formVM.updateStorageType(StorageType.WEBDAV)
                     }
                 )
             }
             Box(modifier = Modifier.height(30.dp))
             FormSwitch(
                 label = stringResource(id = R.string.storage_edit_anonymous),
-                value = formIsAnonymous,
-                onChange = { value -> formIsAnonymous = value; }
+                value = isAnonymous,
+                onChange = { value -> formVM.updateIsAnonymous(value) }
             )
             FormText(
                 label = stringResource(id = R.string.storage_edit_alias),
-                value = formAlias,
-                onChange = { value -> formAlias = value; }
+                field = formVM.alias,
             )
             FormText(
                 label = stringResource(id = R.string.storage_edit_addr),
-                value = formAddr,
-                onChange = { value -> formAddr = value; }
+                field = formVM.address,
             )
-            if (!formIsAnonymous) {
+            if (!isAnonymous) {
                 FormText(
                     label = stringResource(id = R.string.storage_edit_username),
-                    value = formUsername,
-                    onChange = { value -> formUsername = value; }
+                    field = formVM.username,
                 )
                 FormText(
                     label = stringResource(id = R.string.storage_edit_password),
-                    value = formPassword,
-                    onChange = { value -> formPassword = value; }
+                    field = formVM.password,
                 )
             }
         }

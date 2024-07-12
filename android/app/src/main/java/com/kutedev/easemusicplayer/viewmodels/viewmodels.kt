@@ -75,31 +75,31 @@ class StorageListViewModel : ViewModel(), IOnNotifyView {
     }
 }
 
-class EditStorageViewModel : ViewModel(), IOnNotifyView {
-    private val _state = MutableStateFlow(run {
-        VEditStorageState (
-            isCreated = false,
-            title = "",
-            info = ArgUpsertStorage(
-                id = null,
-                addr = "",
-                alias = null,
-                username = "",
-                password = "",
-                isAnonymous = false,
-                typ = StorageType.WEBDAV,
-            ),
-            test = StorageConnectionTestResult.NONE,
-            musicCount = 0u,
-            playlistCount = 0u,
-            updateSignal = 0u,
-        )
-    })
-    val state = _state.asStateFlow()
-
-    override fun onNotifyView(v: RootViewModelState): Unit {
-        if (v.editStorage != null) {
-            _state.value = v.editStorage!!.copy();
-        }
-    }
-}
+//class EditStorageViewModel : ViewModel(), IOnNotifyView {
+//    private val _state = MutableStateFlow(run {
+//        VEditStorageState (
+//            isCreated = false,
+//            title = "",
+//            info = ArgUpsertStorage(
+//                id = null,
+//                addr = "",
+//                alias = null,
+//                username = "",
+//                password = "",
+//                isAnonymous = false,
+//                typ = StorageType.WEBDAV,
+//            ),
+//            test = StorageConnectionTestResult.NONE,
+//            musicCount = 0u,
+//            playlistCount = 0u,
+//            updateSignal = 0u,
+//        )
+//    })
+//    val state = _state.asStateFlow()
+//
+//    override fun onNotifyView(v: RootViewModelState): Unit {
+//        if (v.editStorage != null) {
+//            _state.value = v.editStorage!!.copy();
+//        }
+//    }
+//}

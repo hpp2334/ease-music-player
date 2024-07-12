@@ -28,12 +28,18 @@ enum class EaseIconButtonType {
     Error,
 }
 
+data class EaseIconButtonColors(
+    val buttonBg: Color,
+    val iconTint: Color,
+)
+
 @Composable
 fun EaseIconButton(
     sizeType: EaseIconButtonSize,
     buttonType: EaseIconButtonType,
     painter: Painter,
     onClick: () -> Unit,
+    overrideColors: EaseIconButtonColors? = null
 ) {
     val buttonSize = run {
           when (sizeType) {
@@ -50,14 +56,16 @@ fun EaseIconButton(
         }
     }
     val buttonBg = run {
-        when (buttonType) {
-            EaseIconButtonType.Primary -> MaterialTheme.colorScheme.primary
-            EaseIconButtonType.Default -> Color.Transparent
-            EaseIconButtonType.Error -> Color.Transparent
-        }
+        overrideColors?.buttonBg
+            ?: when (buttonType) {
+                EaseIconButtonType.Primary -> MaterialTheme.colorScheme.primary
+                EaseIconButtonType.Default -> Color.Transparent
+                EaseIconButtonType.Error -> Color.Transparent
+            }
     }
     val iconTint = run {
-        when (buttonType) {
+        overrideColors?.iconTint
+            ?: when (buttonType) {
             EaseIconButtonType.Primary -> Color.White
             EaseIconButtonType.Default -> MaterialTheme.colorScheme.onSurface
             EaseIconButtonType.Error -> MaterialTheme.colorScheme.error

@@ -119,10 +119,6 @@ pub fn get_has_local_storage_permission(client: MistyClientHandle) -> bool {
 }
 
 pub fn app_boostrap(client: MistyClientHandle, arg: ArgInitializeApp) -> EaseResult<()> {
-    let _ = std::fs::remove_file(arg.app_document_dir.clone() + "app.db");
-    let _ = std::fs::remove_file(arg.app_document_dir.clone() + "preference.json");
-    let _ = std::fs::remove_file(arg.app_document_dir.clone() + "meta.json");
-
     // Update global state
     GlobalAppState::update(client, |state| {
         state.app_document_dir = arg.app_document_dir;

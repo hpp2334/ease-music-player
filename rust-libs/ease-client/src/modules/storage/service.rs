@@ -291,6 +291,7 @@ pub fn prepare_edit_storage(
             state.is_create = true;
             state.info = Default::default();
             state.test = StorageConnectionTestResult::None;
+            state.update_signal += 1;
         })
     }
     Ok(())

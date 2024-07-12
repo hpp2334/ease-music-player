@@ -22,6 +22,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.draw.clip
@@ -35,6 +36,25 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 @Composable
 fun PlaylistsSubpage(playlistsVM: PlaylistsViewModel) {
     val state = playlistsVM.state.collectAsState().value
+
+    if (state.playlistList.isEmpty()) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Image(painter = painterResource(id = R.drawable.empty_playlists), contentDescription = null)
+                Box(modifier = Modifier.height(20.dp))
+                Text(
+                    text = stringResource(id = R.string.playlist_empty),
+                )
+            }
+        }
+
+        return
+    }
 
     Column(
         modifier = Modifier

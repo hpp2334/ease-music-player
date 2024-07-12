@@ -23,22 +23,33 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavHostController
 import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.Routes
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
+import uniffi.ease_client.StorageId
 import uniffi.ease_client.StorageType
+import uniffi.ease_client.VStorageListItem
+import uniffi.ease_client.prepareEditStorage
 
 private val paddingX = 24.dp
+
+private fun toEditStorage(navController: NavHostController, arg: StorageId?) {
+    Bridge.invoke { prepareEditStorage(arg) }
+    navController.navigate(Routes.AddDevices)
+}
 
 @Composable
 private fun Title(title: String) {
@@ -92,19 +103,22 @@ private fun SleepModeBlock(timeToPauseViewModel: TimeToPauseViewModel) {
 }
 
 @Composable
-private fun DevicesBlock(vm: StorageListViewModel) {
-    val state = vm.state.collectAsState().value;
+private fun DevicesBlock(storageItems: List<VStorageListItem>) {
+    val navController = LocalNavController.current
 
     Column(
-        modifier = Modifier.padding(paddingX, 0.dp)
+        modifier = Modifier
+            .padding(paddingX, 0.dp)
     ) {
-        if (state.items.isEmpty()) {
+        if (storageItems.isEmpty()) {
             Box(modifier = Modifier
                 .fillMaxWidth()
                 .height(72.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable { }
+                .clickable {
+                    toEditStorage(navController, null)
+                }
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -122,35 +136,36 @@ private fun DevicesBlock(vm: StorageListViewModel) {
                     )
                 }
             }
+            return
         }
-        if (state.items.isNotEmpty()) {
-            for (item in state.items.filter { v -> v.typ != StorageType.LOCAL }) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(0.dp, 4.dp)
-                        .clickable { },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        modifier = Modifier.size(32.dp),
-                        painter = painterResource(id = R.drawable.icon_cloud),
-                        contentDescription = null
+        for (item in storageItems) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(0.dp, 4.dp)
+                    .clickable {
+                        toEditStorage(navController, item.storageId)
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    modifier = Modifier.size(32.dp),
+                    painter = painterResource(id = R.drawable.icon_cloud),
+                    contentDescription = null
+                )
+                Box(modifier = Modifier
+                    .width(20.dp)
+                )
+                Column {
+                    Text(
+                        text = item.name,
+                        fontSize = 14.sp,
                     )
-                    Box(modifier = Modifier
-                        .width(20.dp)
+                    Text(
+                        text = item.subTitle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
                     )
-                    Column {
-                        Text(
-                            text = item.name,
-                            fontSize = 14.sp,
-                        )
-                        Text(
-                            text = item.subTitle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp,
-                        )
-                    }
                 }
             }
         }
@@ -163,6 +178,7 @@ fun DashboardSubpage(
     storageListVM: StorageListViewModel,
 ) {
     val storageState = storageListVM.state.collectAsState().value
+    val storageItems = storageState.items.filter { v -> v.typ != StorageType.LOCAL }
     val navController = LocalNavController.current
 
     Column(
@@ -187,17 +203,17 @@ fun DashboardSubpage(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Title(title = stringResource(id = R.string.dashboard_devices))
-            if (storageState.items.isNotEmpty()) {
+            if (storageItems.isNotEmpty()) {
                 EaseIconButton(
                     sizeType = EaseIconButtonSize.Small,
                     buttonType = EaseIconButtonType.Primary,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        navController.navigate(Routes.AddDevices)
+                        toEditStorage(navController, null)
                     }
                 )
             }
         }
-        DevicesBlock(storageListVM)
+        DevicesBlock(storageItems)
     }
 }
