@@ -17,4 +17,9 @@
     <string name="storage_edit_form_address">Address cannot be empty</string>
     <string name="storage_edit_form_username">Username cannot be empty</string>
     <string name="storage_edit_form_password">Password cannot be empty</string>
+    <string name="storage_edit_testing_toast_testing">Testing...</string>
+    <string name="storage_edit_testing_toast_timeout">Error: Timeout</string>
+    <string name="storage_edit_testing_toast_unauth">Error: Unauthorized</string>
+    <string name="storage_edit_testing_toast_other_error">Error: Other error</string>
+    <string name="storage_edit_testing_toast_success">Sucess</string>
 </resources>

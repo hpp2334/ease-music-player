@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.widgets.devices
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,8 +14,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -22,12 +26,18 @@ import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.LocalNavController
@@ -82,8 +92,11 @@ private fun StorageBlock(
 @Composable
 fun FormText(
     label: String,
-    field: IFormTextFieldState
+    field: IFormTextFieldState,
+    isPassword: Boolean = false
 ) {
+    var passwordVisibleState = remember { mutableStateOf(false) }
+    val passwordVisible = passwordVisibleState.value
     val value = field.value.collectAsState().value
     val error = field.error.collectAsState().value
 
@@ -96,13 +109,38 @@ fun FormText(
             fontSize = 10.sp,
             letterSpacing = 1.sp,
         )
-        TextField(
-            modifier = Modifier
-                .fillMaxWidth(),
-            value = value,
-            onValueChange = {value -> field.update(value)},
-            isError = error != null
-        )
+        if (!isPassword) {
+            TextField(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                value = value,
+                onValueChange = {value -> field.update(value)},
+                isError = error != null,
+            )
+        } else {
+            TextField(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                value = value,
+                onValueChange = {value -> field.update(value)},
+                isError = error != null,
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    val painter = if (!passwordVisible) {
+                        painterResource(id = R.drawable.icon_visibility)
+                    } else {
+                        painterResource(id = R.drawable.icon_visibility_off)
+                    }
+
+                    IconButton(onClick = {
+                        passwordVisibleState.value = !passwordVisible
+                    }) {
+                        Icon(painter = painter, contentDescription = null)
+                    }
+                }
+            )
+        }
         if (error != null) {
             Text(
                 text =  stringResource(id = error),
@@ -166,6 +204,12 @@ fun EditStoragesPage(
 //        formPassword = state.info.password
 //    }
 
+    val context = LocalContext.current
+
+    val toast = remember {
+        Toast.makeText(context, "", Toast.LENGTH_SHORT)
+    }
+
     val isCreated = formVM.isCreated.collectAsState().value
     val isAnonymous = formVM.isAnonymous.collectAsState().value
     val storageType = formVM.storageType.collectAsState().value
@@ -185,6 +229,33 @@ fun EditStoragesPage(
             Color.Transparent,
             MaterialTheme.colorScheme.error,
         )
+    }
+
+    LaunchedEffect(testing) {
+        println(testing)
+        if (testing == StorageConnectionTestResult.NONE) {
+            return@LaunchedEffect;
+        }
+
+        when (testing) {
+            StorageConnectionTestResult.TESTING -> {
+                toast.setText(R.string.storage_edit_testing_toast_testing)
+            }
+            StorageConnectionTestResult.SUCCESS -> {
+                toast.setText(R.string.storage_edit_testing_toast_success)
+            }
+            StorageConnectionTestResult.TIMEOUT -> {
+                toast.setText(R.string.storage_edit_testing_toast_timeout)
+            }
+            StorageConnectionTestResult.UNAUTHORIZED -> {
+                toast.setText(R.string.storage_edit_testing_toast_unauth)
+            }
+            StorageConnectionTestResult.OTHER_ERROR -> {
+                toast.setText(R.string.storage_edit_testing_toast_other_error)
+            }
+            else -> {}
+        }
+        toast.show();
     }
 
     Column(
@@ -224,6 +295,7 @@ fun EditStoragesPage(
                     overrideColors = testingColors,
                     onClick = {
                         val value = formVM.validateAndGetSubmit()
+                        println(value)
                         if (value != null) {
                             Bridge.invoke {
                                 testConnection(value)
@@ -285,6 +357,7 @@ fun EditStoragesPage(
                 FormText(
                     label = stringResource(id = R.string.storage_edit_password),
                     field = formVM.password,
+                    isPassword = true,
                 )
             }
         }

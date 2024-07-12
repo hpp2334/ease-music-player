@@ -17,4 +17,9 @@
     <string name="storage_edit_form_address">地址不能为空</string>
     <string name="storage_edit_form_username">用户名不能为空</string>
     <string name="storage_edit_form_password">密码不能为空</string>
+    <string name="storage_edit_testing_toast_testing">测试中...</string>
+    <string name="storage_edit_testing_toast_timeout">测试错误：超时</string>
+    <string name="storage_edit_testing_toast_unauth">测试错误：认证错误</string>
+    <string name="storage_edit_testing_toast_other_error">测试错误：其他错误</string>
+    <string name="storage_edit_testing_toast_success">测试成功</string>
 </resources>

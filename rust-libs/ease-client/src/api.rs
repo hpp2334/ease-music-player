@@ -1,5 +1,5 @@
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::modules::timer::to_host::{HostTimerService, TimerService};
 use crate::{build_state_manager, build_view_manager, RootViewModelState};
@@ -9,6 +9,7 @@ use misty_vm::controllers::{ControllerRet, MistyController};
 use misty_vm::resources::ResourceUpdateAction;
 use misty_vm::services::MistyServiceManager;
 use misty_vm::signals::MistySignal;
+use once_cell::sync::Lazy;
 use tracing::subscriber::set_global_default;
 
 use self::error::EaseError;
@@ -16,6 +17,12 @@ use self::error::EaseError;
 use super::modules::*;
 
 static CLIENT: SingletonMistyClientPod<RootViewModelState> = SingletonMistyClientPod::new();
+
+#[uniffi::export(with_foreign)]
+pub trait FlushSignal: Send + Sync + 'static {
+    fn flush(&self);
+}
+static FLUSH_SIGNAL: Lazy<Mutex<Option<Arc<dyn FlushSignal>>>> = Lazy::new(|| Default::default());
 
 #[derive(Default, uniffi::Record)]
 pub struct InvokeRet {
@@ -132,19 +139,6 @@ fn initialize_trace(dir: &str) {
         setup_subscriber(dir);
     }
 
-    std::panic::set_hook(Box::new(|info| {
-        // let stacktrace = std::backtrace::Backtrace::force_capture();
-
-        // CLIENT.destroy();
-        // try_invoke_sink(
-        //     &REPORT_PANIC_SINK,
-        //     ArgReportPanic {
-        //         info: format!("{:?}", info),
-        //         stack_trace: format!("{}", stacktrace),
-        //     },
-        // );
-    }));
-
     tracing::info!("initialize log and backtrace");
 }
 
@@ -152,6 +146,12 @@ fn initialize_trace(dir: &str) {
 pub struct ResourceToHostAction {
     pub id: u64,
     pub buf: Option<Vec<u8>>,
+}
+
+#[uniffi::export]
+pub fn bind_flush_signal(v: Arc<dyn FlushSignal>) {
+    let mut w = FLUSH_SIGNAL.lock().unwrap();
+    *w = Some(v);
 }
 
 #[uniffi::export]
@@ -168,7 +168,15 @@ pub fn initialize_client(arg: ArgInitializeApp) -> ApiRet {
     CLIENT.reset();
     CLIENT.create(view_manager, state_manager, service_manager);
     CLIENT.on_signal(|signal| match signal {
-        MistySignal::Schedule => todo!(),
+        MistySignal::Schedule => {
+            let f = {
+                let f = FLUSH_SIGNAL.lock().unwrap();
+                f.as_ref().map(|v| v.clone())
+            };
+            if let Some(f) = f {
+                f.flush();
+            }
+        }
     });
 
     let ret: InvokeRet = call_controller(controller_initialize_app, arg)?;
