@@ -46,9 +46,10 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.components.FormSwitch
+import com.kutedev.easemusicplayer.components.FormText
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
-import com.kutedev.easemusicplayer.viewmodels.IFormTextFieldState
 import uniffi.ease_client.StorageConnectionTestResult
 import uniffi.ease_client.StorageType
 import uniffi.ease_client.testConnection
@@ -89,121 +90,13 @@ private fun StorageBlock(
     }
 }
 
-@Composable
-fun FormText(
-    label: String,
-    field: IFormTextFieldState,
-    isPassword: Boolean = false
-) {
-    var passwordVisibleState = remember { mutableStateOf(false) }
-    val passwordVisible = passwordVisibleState.value
-    val value = field.value.collectAsState().value
-    val error = field.error.collectAsState().value
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-    ) {
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            letterSpacing = 1.sp,
-        )
-        if (!isPassword) {
-            TextField(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                value = value,
-                onValueChange = {value -> field.update(value)},
-                isError = error != null,
-            )
-        } else {
-            TextField(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                value = value,
-                onValueChange = {value -> field.update(value)},
-                isError = error != null,
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                trailingIcon = {
-                    val painter = if (!passwordVisible) {
-                        painterResource(id = R.drawable.icon_visibility)
-                    } else {
-                        painterResource(id = R.drawable.icon_visibility_off)
-                    }
-
-                    IconButton(onClick = {
-                        passwordVisibleState.value = !passwordVisible
-                    }) {
-                        Icon(painter = painter, contentDescription = null)
-                    }
-                }
-            )
-        }
-        if (error != null) {
-            Text(
-                text =  stringResource(id = error),
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 10.sp,
-            )
-        }
-    }
-}
-
-@Composable
-fun FormSwitch(
-    label: String,
-    value: Boolean,
-    onChange: (value: Boolean) -> Unit,
-) {
-    Column {
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            letterSpacing = 1.sp,
-        )
-        Switch(
-            checked = value,
-            onCheckedChange = onChange
-        )
-    }
-}
 
 @Composable
 fun EditStoragesPage(
     formVM: EditStorageFormViewModel,
 ) {
     val navController = LocalNavController.current
-//
-//    var formStorageType by remember {
-//        mutableStateOf(state.info.typ)
-//    }
-//    var formIsAnonymous by remember {
-//        mutableStateOf(state.info.isAnonymous)
-//    }
-//    var formAlias by remember {
-//        mutableStateOf(state.info.alias ?: "")
-//    }
-//    var formAddr by remember {
-//        mutableStateOf(state.info.addr)
-//    }
-//    var formUsername by remember {
-//        mutableStateOf(state.info.username)
-//    }
-//    var formPassword by remember {
-//        mutableStateOf(state.info.password)
-//    }
-//
-//    LaunchedEffect(state.updateSignal) {
-//        formStorageType = state.info.typ
-//        formIsAnonymous = state.info.isAnonymous
-//        formAlias = state.info.alias ?: ""
-//        formAddr = state.info.addr
-//        formUsername = state.info.username
-//        formPassword = state.info.password
-//    }
-
     val context = LocalContext.current
 
     val toast = remember {

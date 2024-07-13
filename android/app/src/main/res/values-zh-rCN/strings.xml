@@ -22,4 +22,10 @@
     <string name="storage_edit_testing_toast_unauth">测试错误：认证错误</string>
     <string name="storage_edit_testing_toast_other_error">测试错误：其他错误</string>
     <string name="storage_edit_testing_toast_success">测试成功</string>
+    <string name="playlists_dialog_tab_full">完整列表</string>
+    <string name="playlists_dialog_tab_empty">空列表</string>
+    <string name="playlists_dialog_playlist_name">列表名称</string>
+    <string name="playlists_dialog_button_reset">重置</string>
+    <string name="playlists_dialog_button_cancel">取消</string>
+    <string name="playlists_dialog_button_ok">确认</string>
 </resources>

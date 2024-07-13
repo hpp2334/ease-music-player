@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.widgets.playlists
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
@@ -32,9 +34,13 @@ import androidx.compose.ui.text.font.FontWeight
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
 
 @Composable
-fun PlaylistsSubpage(playlistsVM: PlaylistsViewModel) {
+fun PlaylistsSubpage(
+    playlistsVM: PlaylistsViewModel,
+    createPlaylistVM: CreatePlaylistViewModel
+) {
     val state = playlistsVM.state.collectAsState().value
 
     if (state.playlistList.isEmpty()) {
@@ -43,7 +49,13 @@ fun PlaylistsSubpage(playlistsVM: PlaylistsViewModel) {
             modifier = Modifier.fillMaxSize()
         ) {
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clickable {
+                        createPlaylistVM.openDialog()
+                    }
+                    .clip(RoundedCornerShape(16.dp))
+                    .padding(24.dp, 24.dp),
             ) {
                 Image(painter = painterResource(id = R.drawable.empty_playlists), contentDescription = null)
                 Box(modifier = Modifier.height(20.dp))
@@ -52,29 +64,30 @@ fun PlaylistsSubpage(playlistsVM: PlaylistsViewModel) {
                 )
             }
         }
-
-        return
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-    ) {
-        Row(
+    } else {
+        Column(
             modifier = Modifier
-                .padding(24.dp, 8.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+                .fillMaxSize()
         ) {
-           EaseIconButton(
-               sizeType = EaseIconButtonSize.Medium,
-               buttonType = EaseIconButtonType.Default,
-               painter = painterResource(id = R.drawable.icon_plus),
-               onClick = { /*TODO*/ }
-           )
+            Row(
+                modifier = Modifier
+                    .padding(24.dp, 8.dp)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                EaseIconButton(
+                    sizeType = EaseIconButtonSize.Medium,
+                    buttonType = EaseIconButtonType.Default,
+                    painter = painterResource(id = R.drawable.icon_plus),
+                    onClick = {
+                        createPlaylistVM.openDialog()
+                    }
+                )
+            }
+            GridPlaylists(playlists = state.playlistList)
         }
-        GridPlaylists(playlists = state.playlistList)
     }
+    PlaylistsDialog(vm = createPlaylistVM)
 }
 
 @Composable

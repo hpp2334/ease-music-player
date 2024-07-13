@@ -24,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
+import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
@@ -56,6 +57,7 @@ class MainActivity : ComponentActivity() {
         val timeToPauseVM: TimeToPauseViewModel by viewModels()
         val storageListVM: StorageListViewModel by viewModels()
         val editStorageVM: EditStorageFormViewModel by viewModels()
+        val createPlaylistVM: CreatePlaylistViewModel by viewModels()
 
         Bridge.initApp(applicationContext)
 
@@ -86,6 +88,7 @@ class MainActivity : ComponentActivity() {
                                             ctx = applicationContext,
                                             pagerState = bottomBarPageState,
                                             playlistsVM = playlistsVM,
+                                            createPlaylistVM = createPlaylistVM,
                                             timeToPauseVM = timeToPauseVM,
                                             storageListVM = storageListVM,
                                         )
@@ -117,12 +120,14 @@ class MainActivity : ComponentActivity() {
         unregisterViewModel<PlaylistsViewModel>()
         unregisterViewModel<StorageListViewModel>()
         unregisterViewModel<EditStorageFormViewModel>()
+        unregisterViewModel<CreatePlaylistViewModel>()
     }
 
     private fun registerNotifies() {
         registerViewModel<PlaylistsViewModel>()
         registerViewModel<StorageListViewModel>()
         registerViewModel<EditStorageFormViewModel>()
+        registerViewModel<CreatePlaylistViewModel>()
     }
 }
 

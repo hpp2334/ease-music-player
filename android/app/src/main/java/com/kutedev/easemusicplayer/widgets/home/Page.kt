@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
+import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
@@ -19,10 +20,14 @@ fun HomePage(
     playlistsVM: PlaylistsViewModel,
     timeToPauseVM: TimeToPauseViewModel,
     storageListVM: StorageListViewModel,
+    createPlaylistVM: CreatePlaylistViewModel,
 ) {
     HorizontalPager(state = pagerState) { page ->
         if (page == 0) {
-            PlaylistsSubpage(playlistsVM = playlistsVM)
+            PlaylistsSubpage(
+                playlistsVM = playlistsVM,
+                createPlaylistVM = createPlaylistVM,
+            )
         }
         if (page == 1) {
             DashboardSubpage(timeToPauseVM = timeToPauseVM, storageListVM = storageListVM)

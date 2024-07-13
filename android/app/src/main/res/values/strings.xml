@@ -21,5 +21,11 @@
     <string name="storage_edit_testing_toast_timeout">Error: Timeout</string>
     <string name="storage_edit_testing_toast_unauth">Error: Unauthorized</string>
     <string name="storage_edit_testing_toast_other_error">Error: Other error</string>
-    <string name="storage_edit_testing_toast_success">Sucess</string>
+    <string name="storage_edit_testing_toast_success">Success</string>
+    <string name="playlists_dialog_tab_full">FULL</string>
+    <string name="playlists_dialog_tab_empty">EMPTY</string>
+    <string name="playlists_dialog_playlist_name">PLAYLIST NAME</string>
+    <string name="playlists_dialog_button_reset">RESET</string>
+    <string name="playlists_dialog_button_cancel">CANCEL</string>
+    <string name="playlists_dialog_button_ok">OK</string>
 </resources>

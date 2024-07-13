@@ -1,54 +1,16 @@
 package com.kutedev.easemusicplayer.viewmodels
 
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.util.fastAll
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.R
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.components.FormTextFieldState
+import com.kutedev.easemusicplayer.components.IFormTextFieldState
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import uniffi.ease_client.ArgUpsertStorage
 import uniffi.ease_client.RootViewModelState
 import uniffi.ease_client.StorageConnectionTestResult
 import uniffi.ease_client.StorageId
 import uniffi.ease_client.StorageType
-import uniffi.ease_client.upsertStorage
-
-interface IFormTextFieldState {
-    val error: StateFlow<Int?>
-    val value: StateFlow<String>
-    fun update(value: String): Unit
-}
-
-private class FormTextFieldState(
-    private val initValue: String,
-    private val validator: ((value: String) -> Int?)?
-): IFormTextFieldState {
-    private val _error = MutableStateFlow<Int?>(null)
-    private val _value = MutableStateFlow(initValue)
-
-    override val error = _error.asStateFlow()
-    override val value = _value.asStateFlow()
-
-    override fun update(value: String) {
-        _value.value = value
-
-        if (validator != null) {
-            _error.value = null
-        }
-    }
-
-    fun validate(): Boolean {
-        if (validator != null) {
-            _error.value = validator!!(_value.value)
-        }
-        return _error.value == null
-    }
-}
 
 class EditStorageFormViewModel(): ViewModel(), IOnNotifyView {
     private var _lastUpdateSignal: UShort = 0u
