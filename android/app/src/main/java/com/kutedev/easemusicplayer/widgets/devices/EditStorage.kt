@@ -233,14 +233,11 @@ fun EditStoragesPage(
 
     LaunchedEffect(testing) {
         println(testing)
-        if (testing == StorageConnectionTestResult.NONE) {
+        if (testing == StorageConnectionTestResult.NONE || testing == StorageConnectionTestResult.TESTING) {
             return@LaunchedEffect;
         }
 
         when (testing) {
-            StorageConnectionTestResult.TESTING -> {
-                toast.setText(R.string.storage_edit_testing_toast_testing)
-            }
             StorageConnectionTestResult.SUCCESS -> {
                 toast.setText(R.string.storage_edit_testing_toast_success)
             }
@@ -255,7 +252,8 @@ fun EditStoragesPage(
             }
             else -> {}
         }
-        toast.show();
+        toast.cancel()
+        toast.show()
     }
 
     Column(

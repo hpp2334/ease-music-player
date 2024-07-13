@@ -7,9 +7,9 @@ const { generateApiRs } = require('./generate_api_rs')
 generateApiRs()
 
 const TARGETS = [
-    'x86_64',
+    // 'x86_64',
     'x86',
-    'arm64-v8a',
+    // 'arm64-v8a',
     // 'armeabi-v7a'
 ]
 const ANDROID_NDK_HOME = "D:\\Android_SDK\\ndk"
