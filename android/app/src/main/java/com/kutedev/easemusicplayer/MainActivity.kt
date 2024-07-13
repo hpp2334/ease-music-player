@@ -25,6 +25,7 @@ import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
+import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
@@ -32,6 +33,7 @@ import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
+import com.kutedev.easemusicplayer.widgets.playlist.PlaylistPage
 
 inline fun <reified T> MainActivity.registerViewModel()
 where T : ViewModel, T : IOnNotifyView {
@@ -58,6 +60,7 @@ class MainActivity : ComponentActivity() {
         val storageListVM: StorageListViewModel by viewModels()
         val editStorageVM: EditStorageFormViewModel by viewModels()
         val createPlaylistVM: CreatePlaylistViewModel by viewModels()
+        val currentPlaylistVM: CurrentPlaylistViewModel by viewModels()
 
         Bridge.initApp(applicationContext)
 
@@ -81,9 +84,9 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 NavHost(
                                     navController = LocalNavController.current,
-                                    startDestination = Routes.Home
+                                    startDestination = Routes.HOME
                                 ) {
-                                    composable(Routes.Home) {
+                                    composable(Routes.HOME) {
                                         HomePage(
                                             ctx = applicationContext,
                                             pagerState = bottomBarPageState,
@@ -93,10 +96,13 @@ class MainActivity : ComponentActivity() {
                                             storageListVM = storageListVM,
                                         )
                                     }
-                                    composable(Routes.AddDevices) {
+                                    composable(Routes.ADD_DEVICES) {
                                         EditStoragesPage(
                                             formVM = editStorageVM,
                                         )
+                                    }
+                                    composable(Routes.PLAYLIST) {
+                                        PlaylistPage(vm = currentPlaylistVM)
                                     }
                                 }
                             }
@@ -121,6 +127,7 @@ class MainActivity : ComponentActivity() {
         unregisterViewModel<StorageListViewModel>()
         unregisterViewModel<EditStorageFormViewModel>()
         unregisterViewModel<CreatePlaylistViewModel>()
+        unregisterViewModel<CurrentPlaylistViewModel>()
     }
 
     private fun registerNotifies() {
@@ -128,6 +135,7 @@ class MainActivity : ComponentActivity() {
         registerViewModel<StorageListViewModel>()
         registerViewModel<EditStorageFormViewModel>()
         registerViewModel<CreatePlaylistViewModel>()
+        registerViewModel<CurrentPlaylistViewModel>()
     }
 }
 

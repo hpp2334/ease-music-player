@@ -24,6 +24,7 @@ enum class EaseIconButtonSize {
 
 enum class EaseIconButtonType {
     Default,
+    Surface,
     Primary,
     Error,
 }
@@ -59,6 +60,7 @@ fun EaseIconButton(
         overrideColors?.buttonBg
             ?: when (buttonType) {
                 EaseIconButtonType.Primary -> MaterialTheme.colorScheme.primary
+                EaseIconButtonType.Surface -> Color.Transparent
                 EaseIconButtonType.Default -> Color.Transparent
                 EaseIconButtonType.Error -> Color.Transparent
             }
@@ -67,6 +69,7 @@ fun EaseIconButton(
         overrideColors?.iconTint
             ?: when (buttonType) {
             EaseIconButtonType.Primary -> Color.White
+            EaseIconButtonType.Surface -> MaterialTheme.colorScheme.surface
             EaseIconButtonType.Default -> MaterialTheme.colorScheme.onSurface
             EaseIconButtonType.Error -> MaterialTheme.colorScheme.error
         }

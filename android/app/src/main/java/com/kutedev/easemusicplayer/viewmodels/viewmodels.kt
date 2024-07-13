@@ -11,6 +11,7 @@ import uniffi.ease_client.RootViewModelState
 import uniffi.ease_client.StorageConnectionTestResult
 import uniffi.ease_client.StorageType
 import uniffi.ease_client.VCreatePlaylistState
+import uniffi.ease_client.VCurrentPlaylistState
 import uniffi.ease_client.VEditStorageState
 import uniffi.ease_client.VPlaylistListState
 import uniffi.ease_client.VRootSubKeyState
@@ -77,3 +78,23 @@ class StorageListViewModel : ViewModel(), IOnNotifyView {
     }
 }
 
+
+class CurrentPlaylistViewModel : ViewModel(), IOnNotifyView {
+    private val _state = MutableStateFlow(run {
+        VCurrentPlaylistState(
+            id = null,
+            items = emptyList(),
+            title = "",
+            duration = "",
+            picture = null,
+            firstPictureInMusics = null,
+        )
+    })
+    val state = _state.asStateFlow()
+
+    override fun onNotifyView(v: RootViewModelState): Unit {
+        if (v.currentPlaylist != null) {
+            _state.value = v.currentPlaylist!!.copy();
+        }
+    }
+}

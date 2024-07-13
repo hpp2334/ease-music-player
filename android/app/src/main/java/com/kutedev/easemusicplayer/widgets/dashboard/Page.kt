@@ -23,7 +23,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -48,7 +47,7 @@ private val paddingX = 24.dp
 
 private fun toEditStorage(navController: NavHostController, arg: StorageId?) {
     Bridge.invoke { prepareEditStorage(arg) }
-    navController.navigate(Routes.AddDevices)
+    navController.navigate(Routes.ADD_DEVICES)
 }
 
 @Composable

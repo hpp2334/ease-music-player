@@ -31,10 +31,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import com.kutedev.easemusicplayer.LocalNavController
+import com.kutedev.easemusicplayer.Routes
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
+import uniffi.ease_client.changeCurrentPlaylist
 
 @Composable
 fun PlaylistsSubpage(
@@ -104,9 +108,16 @@ private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
 
 @Composable
 private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
+    val navController = LocalNavController.current
+
     Box(Modifier
         .clickable(
-            onClick = {},
+            onClick = {
+                Bridge.invoke {
+                    changeCurrentPlaylist(playlist.id)
+                }
+                navController.navigate(Routes.PLAYLIST)
+            },
         )
     ) {
         Column(
