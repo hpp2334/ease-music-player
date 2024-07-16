@@ -15,10 +15,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,10 +32,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.components.EaseContextMenu
+import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
@@ -39,6 +48,7 @@ import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
 fun PlaylistPage(vm: CurrentPlaylistViewModel) {
     val navController = LocalNavController.current
     val state = vm.state.collectAsState().value
+    var moreMenuExpanded by remember { mutableStateOf(false) }
 
     val items = state.items
 
@@ -81,12 +91,45 @@ fun PlaylistPage(vm: CurrentPlaylistViewModel) {
                             navController.popBackStack()
                         }
                     )
-                    EaseIconButton(
-                        sizeType = EaseIconButtonSize.Medium,
-                        buttonType = EaseIconButtonType.Surface,
-                        painter = painterResource(id = R.drawable.icon_vertialcal_more),
-                        onClick = { /*TODO*/ }
-                    )
+                    Box {
+                        EaseIconButton(
+                            sizeType = EaseIconButtonSize.Medium,
+                            buttonType = EaseIconButtonType.Surface,
+                            painter = painterResource(id = R.drawable.icon_vertialcal_more),
+                            onClick = { moreMenuExpanded = true; }
+                        )
+                        Box(
+                            contentAlignment = Alignment.TopEnd,
+                            modifier = Modifier
+                                .offset(20.dp, (20).dp)
+                        ) {
+                            EaseContextMenu(
+                                expanded = moreMenuExpanded,
+                                onDismissRequest = { moreMenuExpanded = false; },
+                                items = listOf(
+                                    EaseContextMenuItem(
+                                        stringId = R.string.playlist_context_menu_import,
+                                        onClick = {
+
+                                        }
+                                    ),
+                                    EaseContextMenuItem(
+                                        stringId = R.string.playlist_context_menu_edit,
+                                        onClick = {
+
+                                        }
+                                    ),
+                                    EaseContextMenuItem(
+                                        stringId = R.string.playlist_context_menu_remove,
+                                        isError = true,
+                                        onClick = {
+
+                                        }
+                                    ),
+                                )
+                            )
+                        }
+                    }
                 }
                 Column(
                     modifier = Modifier
@@ -94,6 +137,7 @@ fun PlaylistPage(vm: CurrentPlaylistViewModel) {
                 ) {
                     Text(
                         text = state.title,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.surface,
                         fontSize = 24.sp,
                     )

@@ -31,4 +31,7 @@
     <string name="playlist_empty_list">Empty Musics in playlist</string>
     <string name="playlist_list_count_suffixes">Musics</string>
     <string name="playlist_list_count_suffix">Music</string>
+    <string name="playlist_context_menu_import">Import Musics</string>
+    <string name="playlist_context_menu_edit">Edit</string>
+    <string name="playlist_context_menu_remove">Remove</string>
 </resources>

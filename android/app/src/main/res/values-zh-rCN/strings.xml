@@ -31,4 +31,7 @@
     <string name="playlist_empty_list">空播放列表</string>
     <string name="playlist_list_count_suffixes">首曲目</string>
     <string name="playlist_list_count_suffix">首曲目</string>
+    <string name="playlist_context_menu_import">导入音乐</string>
+    <string name="playlist_context_menu_edit">编辑</string>
+    <string name="playlist_context_menu_remove">删除</string>
 </resources>
