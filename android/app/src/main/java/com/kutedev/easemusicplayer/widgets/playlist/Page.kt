@@ -37,18 +37,54 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
+import uniffi.ease_client.PlaylistId
+import uniffi.ease_client.removePlaylist
+import java.util.Timer
+import kotlin.concurrent.schedule
+
+@Composable
+private fun RemovePlaylistDialog(
+    id: PlaylistId,
+    title: String,
+    open: Boolean,
+    onClose: () -> Unit
+) {
+    val navController = LocalNavController.current
+
+    ConfirmDialog(
+        open = open,
+        onConfirm = {
+            onClose()
+            navController.popBackStack()
+            Timer("Remove playlist", false).schedule(0) {
+                Bridge.invoke {
+                    removePlaylist(id)
+                }
+            }
+        },
+        onCancel = onClose
+    ) {
+        Text(
+            text = "${stringResource(id = R.string.playlist_remove_dialog_text)} “${title}”"
+        )
+    }
+}
 
 @Composable
 fun PlaylistPage(vm: CurrentPlaylistViewModel) {
     val navController = LocalNavController.current
     val state = vm.state.collectAsState().value
     var moreMenuExpanded by remember { mutableStateOf(false) }
+    var removeDialogOpen by remember { mutableStateOf(false) }
+    val id = state.id
 
     val items = state.items
 
@@ -56,6 +92,10 @@ fun PlaylistPage(vm: CurrentPlaylistViewModel) {
         R.string.playlist_list_count_suffix
     } else {
         R.string.playlist_list_count_suffixes
+    }
+
+    if (id == null) {
+        return
     }
 
     Box(
@@ -123,7 +163,8 @@ fun PlaylistPage(vm: CurrentPlaylistViewModel) {
                                         stringId = R.string.playlist_context_menu_remove,
                                         isError = true,
                                         onClick = {
-
+                                            moreMenuExpanded = false;
+                                            removeDialogOpen = true
                                         }
                                     ),
                                 )
@@ -184,4 +225,10 @@ fun PlaylistPage(vm: CurrentPlaylistViewModel) {
             }
         }
     }
+    RemovePlaylistDialog(
+        id = id,
+        title = state.title,
+        open = removeDialogOpen,
+        onClose = { removeDialogOpen = false }
+    )
 }

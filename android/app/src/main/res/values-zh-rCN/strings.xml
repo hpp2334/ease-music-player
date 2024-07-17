@@ -34,4 +34,8 @@
     <string name="playlist_context_menu_import">导入音乐</string>
     <string name="playlist_context_menu_edit">编辑</string>
     <string name="playlist_context_menu_remove">删除</string>
+    <string name="confirm_dialog_title">确认</string>
+    <string name="confirm_dialog_btn_ok">确定</string>
+    <string name="confirm_dialog_btn_cancel">取消</string>
+    <string name="playlist_remove_dialog_text">是否确认删除播放列表</string>
 </resources>

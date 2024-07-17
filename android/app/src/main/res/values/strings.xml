@@ -34,4 +34,8 @@
     <string name="playlist_context_menu_import">Import Musics</string>
     <string name="playlist_context_menu_edit">Edit</string>
     <string name="playlist_context_menu_remove">Remove</string>
+    <string name="confirm_dialog_title">CONFIRM</string>
+    <string name="confirm_dialog_btn_ok">OK</string>
+    <string name="confirm_dialog_btn_cancel">CANCEL</string>
+    <string name="playlist_remove_dialog_text">Are you sure to remove playlist</string>
 </resources>
