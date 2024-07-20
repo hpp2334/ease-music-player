@@ -1,10 +1,10 @@
 use ease_client::modules::{controller_update_music_playmode_to_next, PlayMode};
 use ease_client_test::{PresetDepth, TestApp};
 
-#[test]
-fn app_loaded_state_1() {
+#[tokio::test]
+async fn app_loaded_state_1() {
     let mut app = TestApp::new("test-dbs/app_loaded_state_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let app = TestApp::new("test-dbs/app_loaded_state_1", false);
     let state = app.latest_state();
@@ -16,10 +16,10 @@ fn app_loaded_state_1() {
     assert_eq!(playlist_list.playlist_list.len(), 1);
 }
 
-#[test]
-fn app_loaded_state_2() {
+#[tokio::test]
+async fn app_loaded_state_2() {
     let mut app = TestApp::new("test-dbs/app_loaded_state_2", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
     app.call_controller(controller_update_music_playmode_to_next, ());
 
     let app = TestApp::new("test-dbs/app_loaded_state_2", false);

@@ -1,16 +1,17 @@
 use ease_client::modules::*;
 use ease_client_test::{PresetDepth, TestApp};
 
-#[test]
-fn music_lyric_1() {
+#[tokio::test]
+async fn music_lyric_1() {
     let mut app = TestApp::new("test-dbs/music_lyric_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     let state = app.latest_state().current_playlist.unwrap();
     assert_eq!(state.duration, "00:00:30");
 
     app.call_controller(controller_play_music, a_music_id);
+    app.wait_network().await;
     let state = app.latest_state().current_music_lyric.unwrap();
     let lines = state.lyric_lines;
     assert_eq!(lines.len(), 4);
@@ -45,28 +46,28 @@ fn music_lyric_1() {
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, -1);
 
-    app.advance_timer(5);
+    app.advance_timer(5).await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, 0);
 
-    app.advance_timer(3);
+    app.advance_timer(3).await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, 1);
 
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, 2);
 }
 
-#[test]
-fn music_lyric_2() {
+#[tokio::test]
+async fn music_lyric_2() {
     let mut app = TestApp::new("test-dbs/music_lyric_2", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, a_music_id);
 
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().current_music_lyric.unwrap();
     let lines = state.lyric_lines;
     assert_eq!(lines.len(), 4);
@@ -79,7 +80,7 @@ fn music_lyric_2() {
     assert_eq!(state.load_state, LyricLoadState::Missing);
 
     app.call_controller(controller_prepare_import_lyric, ());
-    app.wait_network();
+    app.wait_network().await;
 
     let state = app.latest_state().current_storage_entries.unwrap();
     let entry = state.entries[3].clone();
@@ -88,7 +89,7 @@ fn music_lyric_2() {
 
     app.call_controller(controller_select_entry, entry.path);
     app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().current_music_lyric.unwrap();
     let lines = state.lyric_lines;
     assert_eq!(lines.len(), 4);

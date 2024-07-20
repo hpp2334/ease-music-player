@@ -11,12 +11,12 @@ fn create_playlist(app: &TestApp, name: &str) {
     app.call_controller(controller_finish_create_playlist, ());
 }
 
-#[test]
-fn playlist_crud_1() {
+#[tokio::test]
+async fn playlist_crud_1() {
     let app = TestApp::new("test-dbs/playlist_crud_1", true);
 
     create_playlist(&app, "Playlist A");
-    app.advance_timer(1);
+    app.advance_timer(1).await;
     create_playlist(&app, "Playlist B");
     let state = app.latest_state();
     let list = state.playlist_list.clone().unwrap_or_default();
@@ -27,7 +27,7 @@ fn playlist_crud_1() {
     let id = item.id.clone();
     assert_eq!(item.title, "Playlist A");
 
-    app.advance_timer(1);
+    app.advance_timer(1).await;
 
     app.call_controller(controller_prepare_edit_playlist, id);
     app.call_controller(
@@ -51,10 +51,10 @@ fn playlist_crud_1() {
     assert_eq!(item.title, "Playlist B");
 }
 
-#[test]
-fn playlist_import_select_non_music_1() {
+#[tokio::test]
+async fn playlist_import_select_non_music_1() {
     let mut app = TestApp::new("test-dbs/playlist_import_select_non_music_1", true);
-    app.setup_preset(PresetDepth::Playlist);
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
@@ -63,6 +63,7 @@ fn playlist_import_select_non_music_1() {
     let storage_id = app.get_first_storage_id_from_latest_state();
     app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
     app.call_controller(controller_select_storage_in_import, storage_id);
+    app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
     assert_eq!(entries.entries.len(), 7);
@@ -81,10 +82,10 @@ fn playlist_import_select_non_music_1() {
     assert_eq!(entries.selected_count, 0);
 }
 
-#[test]
-fn playlist_import_musics_1() {
+#[tokio::test]
+async fn playlist_import_musics_1() {
     let mut app = TestApp::new("test-dbs/playlist_import_musics_1", true);
-    app.setup_preset(PresetDepth::Playlist);
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
@@ -93,6 +94,7 @@ fn playlist_import_musics_1() {
     let storage_id = app.get_first_storage_id_from_latest_state();
     app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
     app.call_controller(controller_select_storage_in_import, storage_id);
+    app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
     assert_eq!(entries.entries.len(), 7);
@@ -133,7 +135,7 @@ fn playlist_import_musics_1() {
     assert_eq!(entries.selected_count, 1);
 
     app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_playlist.clone().unwrap();
     assert_eq!(state.duration, "00:00:24");
@@ -142,10 +144,10 @@ fn playlist_import_musics_1() {
     assert_eq!(item.title, "angelical-pad-143276");
 }
 
-#[test]
-fn playlist_import_musics_2() {
+#[tokio::test]
+async fn playlist_import_musics_2() {
     let mut app = TestApp::new("test-dbs/playlist_import_musics_2", true);
-    app.setup_preset(PresetDepth::Playlist);
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
@@ -154,7 +156,7 @@ fn playlist_import_musics_2() {
     let storage_id = app.get_first_storage_id_from_latest_state();
     app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
     app.call_controller(controller_select_storage_in_import, storage_id);
-    app.wait_network();
+    app.wait_network().await;
 
     app.call_controller(controller_toggle_all_checked_entries, ());
     let state = app.latest_state();
@@ -167,10 +169,10 @@ fn playlist_import_musics_2() {
     assert_eq!(entries.selected_count, 0);
 }
 
-#[test]
-fn playlist_import_musics_3() {
+#[tokio::test]
+async fn playlist_import_musics_3() {
     let mut app = TestApp::new("test-dbs/playlist_import_musics_3", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
     app.call_controller(
         controller_change_current_playlist,
         app.get_first_playlist_id_from_latest_state(),
@@ -189,10 +191,10 @@ fn playlist_import_musics_3() {
     assert_eq!(state.items.len(), 1);
 }
 
-#[test]
-fn playlist_import_from_local_1() {
+#[tokio::test]
+async fn playlist_import_from_local_1() {
     let mut app = TestApp::new("test-dbs/playlist_import_from_local_1", true);
-    app.setup_preset(PresetDepth::Playlist);
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
@@ -208,10 +210,12 @@ fn playlist_import_from_local_1() {
     let storage_id = state.items[1].clone().storage_id.clone();
     app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
     app.call_controller(controller_select_storage_in_import, storage_id);
+    app.wait_network().await;
 
     let cwd = std::env::current_dir().unwrap().join("test-files");
     let cwd = cwd.to_string_lossy().to_string().replace('\\', "/");
     app.call_controller(controller_locate_entry, cwd);
+    app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
     assert_eq!(entries.entries.len(), 7);
@@ -223,6 +227,7 @@ fn playlist_import_from_local_1() {
 
     app.call_controller(controller_select_entry, entries.entries[4].path.clone());
     app.call_controller(controller_finish_selected_entries_in_import, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_playlist.clone().unwrap();
     assert_eq!(state.duration, "00:00:24");
@@ -231,16 +236,17 @@ fn playlist_import_from_local_1() {
     assert_eq!(item.title, "angelical-pad-143276");
 
     app.call_controller(controller_play_all_musics, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.clone().unwrap();
     assert_eq!(state.current_duration, "00:00:00");
     assert_eq!(state.total_duration, "00:00:24");
 }
 
-#[test]
-fn playlist_import_need_permission() {
+#[tokio::test]
+async fn playlist_import_need_permission() {
     let mut app = TestApp::new("test-dbs/playlist_import_need_permission", true);
-    app.setup_preset(PresetDepth::Playlist);
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
@@ -253,6 +259,7 @@ fn playlist_import_need_permission() {
     let storage_id = state.items[1].clone().storage_id.clone();
     app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
     app.call_controller(controller_select_storage_in_import, storage_id);
+    app.wait_network().await;
 
     let state = app.latest_state();
     let state = state.current_storage_entries.unwrap();
@@ -260,22 +267,25 @@ fn playlist_import_need_permission() {
 
     app.call_controller(controller_update_storage_permission, true);
     app.call_controller(controller_refresh_current_storage_in_import, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_storage_entries.unwrap();
     assert_eq!(state.state_type, CurrentStorageStateType::OK);
 }
 
-#[test]
-fn playlist_import_authentication() {
+#[tokio::test]
+async fn playlist_import_authentication() {
     let mut app = TestApp::new("test-dbs/playlist_import_authentication", true);
-    app.setup_preset(PresetDepth::Playlist);
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
     app.call_controller(controller_change_current_playlist, playlist_id);
+    app.wait_network().await;
     app.set_inteceptor_req(Some(ReqInteceptor::AuthenticationFailed));
     app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
+    app.wait_network().await;
 
     let state = app.latest_state();
     let state = state.current_storage_entries.unwrap();
@@ -285,29 +295,31 @@ fn playlist_import_authentication() {
     );
 }
 
-#[test]
-fn playlist_import_other_error() {
+#[tokio::test]
+async fn playlist_import_other_error() {
     let mut app = TestApp::new("test-dbs/playlist_import_other_error", true);
-    app.setup_preset(PresetDepth::Playlist);
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
     app.call_controller(controller_change_current_playlist, playlist_id);
+    app.wait_network().await;
     app.set_inteceptor_req(Some(ReqInteceptor::InternalError));
     app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
+    app.wait_network().await;
 
     let state = app.latest_state();
     let state = state.current_storage_entries.unwrap();
     assert_eq!(state.state_type, CurrentStorageStateType::UnknownError);
 }
 
-#[test]
-fn playlist_full_reimport_discarded_bug() {
+#[tokio::test]
+async fn playlist_full_reimport_discarded_bug() {
     let mut app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", true);
-    app.setup_preset(PresetDepth::Storage);
+    app.setup_preset(PresetDepth::Storage).await;
 
-    let create_playlist_and_import_music = || {
+    let create_playlist_and_import_music = || async {
         create_playlist(&app, "A");
 
         let state = app.latest_state();
@@ -317,6 +329,7 @@ fn playlist_full_reimport_discarded_bug() {
         let storage_id = app.get_first_storage_id_from_latest_state();
         app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
         app.call_controller(controller_select_storage_in_import, storage_id);
+        app.wait_network().await;
         let entries = app.latest_state().current_storage_entries.unwrap();
         app.call_controller(controller_select_entry, entries.entries[4].path.clone());
         let state = app.latest_state();
@@ -330,7 +343,7 @@ fn playlist_full_reimport_discarded_bug() {
         assert_eq!(entries.selected_count, 1);
 
         app.call_controller(controller_finish_selected_entries_in_import, ());
-        app.wait_network();
+        app.wait_network().await;
         let state = app.latest_state();
         let state = state.current_playlist.clone().unwrap();
         assert_eq!(state.duration, "00:00:24");
@@ -341,9 +354,9 @@ fn playlist_full_reimport_discarded_bug() {
         return playlist_id;
     };
 
-    let playlist_id = create_playlist_and_import_music();
+    let playlist_id = create_playlist_and_import_music().await;
     app.call_controller(controller_remove_playlist, playlist_id);
-    create_playlist_and_import_music();
+    create_playlist_and_import_music().await;
 
     // reload
     let app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", false);

@@ -1,10 +1,10 @@
 use ease_client::modules::*;
 use ease_client_test::{PresetDepth, TestApp};
 
-#[test]
-fn create_playlist_full_1() {
+#[tokio::test]
+async fn create_playlist_full_1() {
     let mut app = TestApp::new("test-dbs/create_playlist_full_1", true);
-    app.setup_preset(PresetDepth::Storage);
+    app.setup_preset(PresetDepth::Storage).await;
 
     app.call_controller(controller_prepare_create_playlist, ());
     app.call_controller(
@@ -13,7 +13,7 @@ fn create_playlist_full_1() {
     );
     app.call_controller(controller_prepare_create_playlist_entries, ());
 
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
 
     let e1 = state.entries[4].clone();
@@ -26,7 +26,7 @@ fn create_playlist_full_1() {
     app.call_controller(controller_select_entry, e1.path);
     app.call_controller(controller_select_entry, e2.path);
     app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.wait_network().await;
 
     let state = app.latest_state().create_playlist.unwrap();
     assert_eq!(state.mode, CreatePlaylistMode::Full);
@@ -37,7 +37,7 @@ fn create_playlist_full_1() {
 
     app.call_controller(controller_update_create_playlist_name, "ABC".to_string());
     app.call_controller(controller_finish_create_playlist, ());
-    app.wait_network();
+    app.wait_network().await;
 
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
@@ -45,10 +45,10 @@ fn create_playlist_full_1() {
     assert_ne!(state.playlist_list[0].picture, None)
 }
 
-#[test]
-fn create_playlist_full_2() {
+#[tokio::test]
+async fn create_playlist_full_2() {
     let mut app = TestApp::new("test-dbs/create_playlist_full_2", true);
-    app.setup_preset(PresetDepth::Storage);
+    app.setup_preset(PresetDepth::Storage).await;
 
     app.call_controller(controller_prepare_create_playlist, ());
     app.call_controller(
@@ -56,10 +56,10 @@ fn create_playlist_full_2() {
         CreatePlaylistMode::Full,
     );
     app.call_controller(controller_prepare_create_playlist_entries, ());
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
     app.call_controller(controller_locate_entry, state.entries[0].path.clone());
-    app.wait_network();
+    app.wait_network().await;
 
     let state = app.latest_state().current_storage_entries.unwrap();
     let e1 = state.entries[0].clone();
@@ -68,7 +68,7 @@ fn create_playlist_full_2() {
 
     app.call_controller(controller_select_entry, e1.path);
     app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.wait_network().await;
 
     let state = app.latest_state().create_playlist.unwrap();
     assert_eq!(state.mode, CreatePlaylistMode::Full);
@@ -78,7 +78,7 @@ fn create_playlist_full_2() {
 
     app.call_controller(controller_update_create_playlist_name, "ABC".to_string());
     app.call_controller(controller_finish_create_playlist, ());
-    app.wait_network();
+    app.wait_network().await;
 
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
@@ -86,10 +86,10 @@ fn create_playlist_full_2() {
     assert_eq!(state.playlist_list[0].picture, None)
 }
 
-#[test]
-fn create_playlist_empty_1() {
+#[tokio::test]
+async fn create_playlist_empty_1() {
     let mut app = TestApp::new("test-dbs/create_playlist_empty_1", true);
-    app.setup_preset(PresetDepth::Storage);
+    app.setup_preset(PresetDepth::Storage).await;
 
     app.call_controller(controller_prepare_create_playlist, ());
     app.call_controller(
@@ -99,7 +99,7 @@ fn create_playlist_empty_1() {
 
     app.call_controller(controller_update_create_playlist_name, "ABC".to_string());
     app.call_controller(controller_finish_create_playlist, ());
-    app.wait_network();
+    app.wait_network().await;
 
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
@@ -107,10 +107,10 @@ fn create_playlist_empty_1() {
     assert_eq!(state.playlist_list[0].picture, None)
 }
 
-#[test]
-fn create_playlist_only_cover_1() {
+#[tokio::test]
+async fn create_playlist_only_cover_1() {
     let mut app = TestApp::new("test-dbs/create_playlist_only_cover_1", true);
-    app.setup_preset(PresetDepth::Storage);
+    app.setup_preset(PresetDepth::Storage).await;
 
     app.call_controller(controller_prepare_create_playlist, ());
     app.call_controller(
@@ -119,7 +119,7 @@ fn create_playlist_only_cover_1() {
     );
     app.call_controller(controller_prepare_create_playlist_entries, ());
 
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
 
     let e2 = state.entries[6].clone();
@@ -127,7 +127,7 @@ fn create_playlist_only_cover_1() {
 
     app.call_controller(controller_select_entry, e2.path);
     app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.wait_network().await;
 
     let state = app.latest_state().create_playlist.unwrap();
     assert_eq!(state.mode, CreatePlaylistMode::Full);

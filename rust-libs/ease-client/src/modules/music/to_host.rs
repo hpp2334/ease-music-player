@@ -1,5 +1,6 @@
 use misty_vm::misty_service;
 
+#[uniffi::export(with_foreign)]
 pub trait IMusicPlayerService: Send + Sync + 'static {
     fn resume(&self);
     fn pause(&self);

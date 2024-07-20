@@ -4,12 +4,14 @@ use std::sync::{Arc, Mutex};
 use crate::modules::timer::to_host::{HostTimerService, TimerService};
 use crate::{build_state_manager, build_view_manager, RootViewModelState};
 use error::EaseResult;
+use misty_vm::async_task::IAsyncTaskRuntimeAdapter;
 use misty_vm::client::SingletonMistyClientPod;
 use misty_vm::controllers::{ControllerRet, MistyController};
 use misty_vm::resources::ResourceUpdateAction;
 use misty_vm::services::MistyServiceManager;
 use misty_vm::signals::MistySignal;
 use once_cell::sync::Lazy;
+use tokio::task::JoinHandle;
 use tracing::subscriber::set_global_default;
 
 use self::error::EaseError;
@@ -18,11 +20,61 @@ use super::modules::*;
 
 static CLIENT: SingletonMistyClientPod<RootViewModelState> = SingletonMistyClientPod::new();
 
+static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+});
+
 #[uniffi::export(with_foreign)]
-pub trait FlushSignal: Send + Sync + 'static {
+pub trait IFlushSignal: Send + Sync + 'static {
     fn flush(&self);
 }
-static FLUSH_SIGNAL: Lazy<Mutex<Option<Arc<dyn FlushSignal>>>> = Lazy::new(|| Default::default());
+static FLUSH_SIGNAL: Lazy<Mutex<Option<Arc<dyn IFlushSignal>>>> = Lazy::new(|| Default::default());
+
+struct TokioAsyncRuntime {
+    handles: Mutex<(Vec<Option<JoinHandle<()>>>, Vec<u64>)>,
+}
+
+impl TokioAsyncRuntime {
+    pub fn new() -> Self {
+        Self {
+            handles: Default::default(),
+        }
+    }
+}
+
+impl IAsyncTaskRuntimeAdapter for TokioAsyncRuntime {
+    fn spawn(&self, future: misty_vm::BoxFuture<'static, ()>) -> u64 {
+        let _guard = ASYNC_RT.enter();
+        let handle = tokio::spawn(future);
+
+        let mut w = self.handles.lock().unwrap();
+        if !w.1.is_empty() {
+            let id = w.1.pop().unwrap() as usize;
+            w.0[id] = Some(handle);
+            id as u64
+        } else {
+            w.0.push(Some(handle));
+            w.0.len() as u64 - 1
+        }
+    }
+
+    fn spawn_local(&self, _future: misty_vm::LocalBoxFuture<'static, ()>) -> u64 {
+        unimplemented!("cannot support spawn_local")
+    }
+
+    fn try_abort(&self, task_id: u64) {
+        let task_id = task_id as usize;
+        let mut w = self.handles.lock().unwrap();
+        let handle = w.0[task_id].as_ref().unwrap();
+        handle.abort();
+
+        w.0[task_id] = None;
+        w.1.push(task_id as u64);
+    }
+}
 
 #[derive(Default, uniffi::Record)]
 pub struct InvokeRet {
@@ -67,29 +119,6 @@ where
 {
     let ret = CLIENT.call_controller(controller, arg);
     apply_controller_ret(ret)
-}
-
-struct ToHostMusicPlayerService;
-impl IMusicPlayerService for ToHostMusicPlayerService {
-    fn resume(&self) {
-        todo!()
-    }
-
-    fn pause(&self) {
-        todo!()
-    }
-
-    fn stop(&self) {
-        todo!()
-    }
-
-    fn seek(&self, arg: u64) {
-        todo!()
-    }
-
-    fn set_music_url(&self, url: String) {
-        todo!()
-    }
 }
 
 struct ToHostToastService;
@@ -149,24 +178,28 @@ pub struct ResourceToHostAction {
 }
 
 #[uniffi::export]
-pub fn bind_flush_signal(v: Arc<dyn FlushSignal>) {
+pub fn bind_flush_signal(v: Arc<dyn IFlushSignal>) {
     let mut w = FLUSH_SIGNAL.lock().unwrap();
     *w = Some(v);
 }
 
 #[uniffi::export]
-pub fn initialize_client(arg: ArgInitializeApp) -> ApiRet {
+pub fn initialize_client(
+    arg: ArgInitializeApp,
+    music_player_service: Arc<dyn IMusicPlayerService>,
+) -> ApiRet {
     initialize_trace(&arg.app_document_dir);
 
     let view_manager = build_view_manager();
     let state_manager = build_state_manager();
     let service_manager = MistyServiceManager::builder()
-        .add(MusicPlayerService::new(ToHostMusicPlayerService))
+        .add(MusicPlayerService::new_with_arc(music_player_service))
         .add(ToastService::new(ToHostToastService))
         .add(TimerService::new(HostTimerService))
         .build();
+    let async_runtime = TokioAsyncRuntime::new();
     CLIENT.reset();
-    CLIENT.create(view_manager, state_manager, service_manager);
+    CLIENT.create(view_manager, state_manager, service_manager, async_runtime);
     CLIENT.on_signal(|signal| match signal {
         MistySignal::Schedule => {
             let f = {
@@ -234,19 +267,28 @@ pub fn seek_music(arg: ArgSeekMusic) -> ApiRet {
 
 #[uniffi::export]
 pub fn set_current_music_position_for_player_internal(arg: u64) -> ApiRet {
-    let ret = call_controller(controller_set_current_music_position_for_player_internal, arg)?;
+    let ret = call_controller(
+        controller_set_current_music_position_for_player_internal,
+        arg,
+    )?;
     Ok(ret)
 }
 
 #[uniffi::export]
 pub fn update_current_music_total_duration_for_player_internal(arg: u64) -> ApiRet {
-    let ret = call_controller(controller_update_current_music_total_duration_for_player_internal, arg)?;
+    let ret = call_controller(
+        controller_update_current_music_total_duration_for_player_internal,
+        arg,
+    )?;
     Ok(ret)
 }
 
 #[uniffi::export]
 pub fn update_current_music_playing_for_player_internal(arg: bool) -> ApiRet {
-    let ret = call_controller(controller_update_current_music_playing_for_player_internal, arg)?;
+    let ret = call_controller(
+        controller_update_current_music_playing_for_player_internal,
+        arg,
+    )?;
     Ok(ret)
 }
 
@@ -489,4 +531,3 @@ pub fn test_connection(arg: ArgUpsertStorage) -> ApiRet {
     let ret = call_controller(controller_test_connection, arg)?;
     Ok(ret)
 }
-

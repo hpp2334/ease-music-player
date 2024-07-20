@@ -28,7 +28,7 @@ impl FakeTimerServiceRef {
         *guard = Some(v);
     }
 
-    pub fn advance_timer(&self, duration_s: u64) {
+    pub async fn advance_timer(&self, duration_s: u64) {
         for _ in 0..duration_s {
             self.inner
                 .current
@@ -36,7 +36,7 @@ impl FakeTimerServiceRef {
 
             let guard = self.inner.music_player.lock().unwrap();
             guard.as_ref().unwrap().advance_1sec();
-            std::thread::sleep(Duration::from_millis(100));
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 }

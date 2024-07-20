@@ -1,8 +1,8 @@
 use ease_client::modules::*;
 use ease_client_test::{PresetDepth, TestApp};
 
-#[test]
-fn storage_crud_1() {
+#[tokio::test]
+async fn storage_crud_1() {
     let app = TestApp::new("test-dbs/storage_crud_1", true);
 
     app.call_controller(
@@ -46,8 +46,8 @@ fn storage_crud_1() {
     assert_eq!(item.name, "Demo");
 }
 
-#[test]
-fn storage_crud_2() {
+#[tokio::test]
+async fn storage_crud_2() {
     let app = TestApp::new("test-dbs/storage_crud_2", true);
 
     app.call_controller(
@@ -90,10 +90,10 @@ fn storage_crud_2() {
     assert_eq!(list.items[0].name, "http://2");
 }
 
-#[test]
-fn storage_remove_1() {
+#[tokio::test]
+async fn storage_remove_1() {
     let mut app = TestApp::new("test-dbs/storage_remove_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let state = app.latest_state();
     let list = state.storage_list.clone().unwrap_or_default();

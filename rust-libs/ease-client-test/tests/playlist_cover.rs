@@ -1,13 +1,13 @@
 use ease_client::modules::*;
 use ease_client_test::{PresetDepth, TestApp};
 
-#[test]
-fn create_playlist_cover_1() {
+#[tokio::test]
+async fn create_playlist_cover_1() {
     let mut app = TestApp::new("test-dbs/create_playlist_cover_1", true);
-    app.setup_preset(PresetDepth::Storage);
+    app.setup_preset(PresetDepth::Storage).await;
 
     app.call_controller(controller_prepare_edit_playlist_cover, ());
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
     let entry = state.entries[6].clone();
     assert_eq!(entry.name, "firefox.png");
@@ -15,7 +15,7 @@ fn create_playlist_cover_1() {
 
     app.call_controller(controller_select_entry, entry.path);
     app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().edit_playlist.unwrap();
     let picture = app.load_resource(state.picture.unwrap());
     assert_eq!(picture.len(), 82580);
@@ -25,13 +25,13 @@ fn create_playlist_cover_1() {
     assert_eq!(state.picture, None);
 }
 
-#[test]
-fn edit_playlist_cover_1() {
+#[tokio::test]
+async fn edit_playlist_cover_1() {
     let mut app = TestApp::new("test-dbs/edit_playlist_cover_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     app.call_controller(controller_prepare_edit_playlist_cover, ());
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
     let entry = state.entries[6].clone();
     assert_eq!(entry.name, "firefox.png");
@@ -39,7 +39,7 @@ fn edit_playlist_cover_1() {
 
     app.call_controller(controller_select_entry, entry.path);
     app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().edit_playlist.unwrap();
     let picture = app.load_resource(state.picture.unwrap());
     assert_eq!(picture.len(), 82580);
@@ -49,16 +49,16 @@ fn edit_playlist_cover_1() {
     assert_eq!(state.picture, None);
 }
 
-#[test]
-fn edit_playlist_cover_2() {
+#[tokio::test]
+async fn edit_playlist_cover_2() {
     let mut app = TestApp::new("test-dbs/edit_playlist_cover_2", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     app.call_controller(controller_prepare_edit_playlist, state.playlist_list[0].id);
     app.call_controller(controller_prepare_edit_playlist_cover, ());
-    app.wait_network();
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
     let entry = state.entries[6].clone();
     assert_eq!(entry.name, "firefox.png");
@@ -66,7 +66,7 @@ fn edit_playlist_cover_2() {
 
     app.call_controller(controller_select_entry, entry.path);
     app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.wait_network().await;
     app.call_controller(controller_finish_edit_playlist, ());
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);

@@ -137,7 +137,7 @@ impl TestApp {
         self.call_controller(controller_finish_create_playlist, ());
     }
 
-    pub fn setup_preset(&mut self, depth: PresetDepth) {
+    pub async fn setup_preset(&mut self, depth: PresetDepth) {
         self.call_controller(
             controller_upsert_storage,
             ArgUpsertStorage {
@@ -159,17 +159,25 @@ impl TestApp {
             let storage_id = self.get_first_storage_id_from_latest_state();
             self.call_controller(controller_prepare_import_entries_in_current_playlist, ());
             self.call_controller(controller_select_storage_in_import, storage_id);
-            self.wait_network();
+            for _ in 0..10 {
+                self.wait_network().await;
+                let state = self.latest_state();
+                let entries = state.current_storage_entries.unwrap();
+                if !entries.entries.is_empty() {
+                    break;
+                }
+                tracing::info!("wait storage entries to be not empty");
+            }
             let state = self.latest_state();
             let entries = state.current_storage_entries.unwrap();
             self.call_controller(controller_select_entry, entries.entries[4].path.clone());
             self.call_controller(controller_select_entry, entries.entries[5].path.clone());
             self.call_controller(controller_finish_selected_entries_in_import, ());
+            self.wait_network().await;
         }
     }
 
     pub fn latest_state(&self) -> RootViewModelState {
-        self.wait(100);
         self.app.state()
     }
 
@@ -225,12 +233,12 @@ impl TestApp {
         self.app.app().call_controller(controller, arg);
     }
 
-    pub fn advance_timer(&self, duration_s: u64) {
-        self.timer.advance_timer(duration_s);
+    pub async fn advance_timer(&self, duration_s: u64) {
+        self.timer.advance_timer(duration_s).await;
     }
 
-    pub fn wait_network(&self) {
-        self.wait(200);
+    pub async fn wait_network(&self) {
+        self.wait(200).await
     }
 
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {
@@ -244,8 +252,8 @@ impl TestApp {
             .unwrap()
     }
 
-    fn wait(&self, ms: u64) {
-        std::thread::sleep(Duration::from_millis(ms));
+    async fn wait(&self, ms: u64) {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
     }
 }
 

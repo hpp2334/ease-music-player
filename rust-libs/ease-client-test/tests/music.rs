@@ -3,14 +3,14 @@ use std::time::Duration;
 use ease_client::modules::*;
 use ease_client_test::{PresetDepth, TestApp};
 
-#[test]
-fn music_play_1() {
+#[tokio::test]
+async fn music_play_1() {
     let mut app = TestApp::new("test-dbs/music_play_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, music_id);
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     assert_eq!(state.current_music.as_ref().unwrap().playing, true);
 
@@ -23,7 +23,7 @@ fn music_play_1() {
     assert_eq!(state.total_duration, "00:00:24");
     app.call_controller(controller_resume_music, ());
 
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     assert_eq!(state.current_music.is_some(), true);
     let state = state.current_music.clone().unwrap();
@@ -39,16 +39,16 @@ fn music_play_1() {
     app.call_controller(controller_pause_music, ());
 }
 
-#[test]
-fn music_play_2() {
+#[tokio::test]
+async fn music_play_2() {
     let mut app = TestApp::new("test-dbs/music_play_2", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, a_music_id);
-    app.advance_timer(1);
+    app.advance_timer(1).await;
     app.call_controller(controller_pause_music, ());
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, false);
@@ -60,7 +60,7 @@ fn music_play_2() {
 
     let b_music_id = app.get_second_music_id_from_latest_state();
     app.call_controller(controller_play_music, b_music_id);
-    app.advance_timer(3);
+    app.advance_timer(3).await;
     app.call_controller(controller_pause_music, ());
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
@@ -73,7 +73,7 @@ fn music_play_2() {
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
 
-    app.advance_timer(1);
+    app.advance_timer(1).await;
     app.call_controller(controller_pause_music, ());
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
@@ -84,14 +84,14 @@ fn music_play_2() {
     app.call_controller(controller_pause_music, ());
 }
 
-#[test]
-fn music_play_3() {
+#[tokio::test]
+async fn music_play_3() {
     let mut app = TestApp::new("test-dbs/music_play_3", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, a_music_id);
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -108,14 +108,14 @@ fn music_play_3() {
     app.call_controller(controller_pause_music, ());
 }
 
-#[test]
-fn music_play_4() {
+#[tokio::test]
+async fn music_play_4() {
     let mut app = TestApp::new("test-dbs/music_play_4", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, a_music_id);
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -132,14 +132,14 @@ fn music_play_4() {
     app.call_controller(controller_stop_music, ());
 }
 
-#[test]
-fn music_play_5() {
+#[tokio::test]
+async fn music_play_5() {
     let mut app = TestApp::new("test-dbs/music_play_5", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, a_music_id);
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -148,7 +148,7 @@ fn music_play_5() {
 
     let b_music_id = app.get_second_music_id_from_latest_state();
     app.call_controller(controller_play_music, b_music_id);
-    app.advance_timer(4);
+    app.advance_timer(4).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -161,13 +161,13 @@ fn music_play_5() {
     assert_eq!(state.duration, "00:00:30");
 }
 
-#[test]
-fn music_play_6() {
+#[tokio::test]
+async fn music_play_6() {
     let mut app = TestApp::new("test-dbs/music_play_6", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     app.call_controller(controller_play_all_musics, ());
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -175,13 +175,14 @@ fn music_play_6() {
     assert_eq!(state.total_duration, "00:00:24");
 }
 
-#[test]
-fn music_play_single_non_loop() {
+#[tokio::test]
+async fn music_play_single_non_loop() {
     let mut app = TestApp::new("test-dbs/music_play_single_non_loop", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, a_music_id);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -195,7 +196,7 @@ fn music_play_single_non_loop() {
             duration: Duration::from_secs(23).as_millis() as u64,
         },
     );
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, false);
@@ -204,6 +205,7 @@ fn music_play_single_non_loop() {
     assert_eq!(state.current_duration_ms, 0);
 
     app.call_controller(controller_play_next_music, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.title, "b");
@@ -211,8 +213,9 @@ fn music_play_single_non_loop() {
     let state = app.latest_state().current_music_lyric.unwrap();
     assert_eq!(state.load_state, LyricLoadState::Missing);
 
-    app.advance_timer(1);
+    app.advance_timer(1).await;
     app.call_controller(controller_play_previous_music, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.title, "angelical-pad-143276");
@@ -220,10 +223,10 @@ fn music_play_single_non_loop() {
     app.call_controller(controller_pause_music, ());
 }
 
-#[test]
-fn music_play_list_non_loop_1() {
+#[tokio::test]
+async fn music_play_list_non_loop_1() {
     let mut app = TestApp::new("test-dbs/music_play_list_non_loop_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_update_music_playmode_to_next, ());
@@ -243,7 +246,7 @@ fn music_play_list_non_loop_1() {
     assert_eq!(state.can_play_next, true);
     assert_eq!(state.play_mode, PlayMode::List);
 
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -253,10 +256,10 @@ fn music_play_list_non_loop_1() {
     assert_eq!(state.can_play_next, false);
 }
 
-#[test]
-fn music_play_list_non_loop_to_loop_1() {
+#[tokio::test]
+async fn music_play_list_non_loop_to_loop_1() {
     let mut app = TestApp::new("test-dbs/music_play_list_non_loop_to_loop_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_update_music_playmode_to_next, ());
@@ -278,14 +281,15 @@ fn music_play_list_non_loop_to_loop_1() {
     assert_eq!(state.play_mode, PlayMode::ListLoop);
 }
 
-#[test]
-fn music_play_single_loop_1() {
+#[tokio::test]
+async fn music_play_single_loop_1() {
     let mut app = TestApp::new("test-dbs/music_play_single_loop_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_update_music_playmode_to_next, ());
     app.call_controller(controller_play_music, a_music_id);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -301,7 +305,7 @@ fn music_play_single_loop_1() {
             duration: Duration::from_secs(23).as_millis() as u64,
         },
     );
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -311,13 +315,15 @@ fn music_play_single_loop_1() {
     assert_eq!(state.can_play_next, true);
 
     app.call_controller(controller_play_next_music, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.title, "b");
     assert_eq!(state.playing, true);
 
-    app.advance_timer(1);
+    app.advance_timer(1).await;
     app.call_controller(controller_play_previous_music, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.title, "angelical-pad-143276");
@@ -325,16 +331,17 @@ fn music_play_single_loop_1() {
     app.call_controller(controller_pause_music, ());
 }
 
-#[test]
-fn music_play_list_loop_1() {
+#[tokio::test]
+async fn music_play_list_loop_1() {
     let mut app = TestApp::new("test-dbs/music_play_list_loop_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_update_music_playmode_to_next, ());
     app.call_controller(controller_update_music_playmode_to_next, ());
     app.call_controller(controller_update_music_playmode_to_next, ());
     app.call_controller(controller_play_music, a_music_id);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -348,7 +355,7 @@ fn music_play_list_loop_1() {
             duration: Duration::from_secs(23).as_millis() as u64,
         },
     );
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -361,7 +368,7 @@ fn music_play_list_loop_1() {
             duration: Duration::from_secs(23).as_millis() as u64,
         },
     );
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -369,6 +376,7 @@ fn music_play_list_loop_1() {
     assert_eq!(state.current_duration, "00:00:01");
 
     app.call_controller(controller_play_next_music, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -376,6 +384,7 @@ fn music_play_list_loop_1() {
     assert_eq!(state.current_duration, "00:00:00");
 
     app.call_controller(controller_play_previous_music, ());
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -385,14 +394,14 @@ fn music_play_list_loop_1() {
     app.call_controller(controller_pause_music, ());
 }
 
-#[test]
-fn music_play_buf() {
+#[tokio::test]
+async fn music_play_buf() {
     let mut app = TestApp::new("test-dbs/music_play_buf", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, music_id);
-    app.advance_timer(1);
+    app.advance_timer(1).await;
     app.call_controller(controller_pause_music, ());
 
     let state = app.latest_state();
@@ -404,42 +413,43 @@ fn music_play_buf() {
     app.call_controller(controller_pause_music, ());
 }
 
-#[test]
-fn test_music_import_repeated() {
+#[tokio::test]
+async fn test_music_import_repeated() {
     let mut app = TestApp::new("test-dbs/test_music_import_repeated", true);
-    app.setup_preset(PresetDepth::Playlist);
+    app.setup_preset(PresetDepth::Playlist).await;
     let playlist_id = app.get_first_playlist_id_from_latest_state();
     app.call_controller(controller_change_current_playlist, playlist_id);
 
-    let import_entries = || {
+    let import_entries = || async {
         let storage_id = app.get_first_storage_id_from_latest_state();
         app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
         app.call_controller(controller_select_storage_in_import, storage_id);
+        app.wait_network().await;
         let state = app.latest_state();
         let entries = state.current_storage_entries.unwrap();
         app.call_controller(controller_select_entry, entries.entries[4].path.clone());
         app.call_controller(controller_select_entry, entries.entries[5].path.clone());
         app.call_controller(controller_finish_selected_entries_in_import, ());
     };
-    import_entries();
-    import_entries();
+    import_entries().await;
+    import_entries().await;
     let state = app.latest_state();
     let current_playlist = state.current_playlist.unwrap();
     assert_eq!(current_playlist.items.len(), 2);
 }
 
-#[test]
-fn remove_current_playing_playlist_when_playing_music() {
+#[tokio::test]
+async fn remove_current_playing_playlist_when_playing_music() {
     let mut app: TestApp = TestApp::new(
         "test-dbs/remove_current_playing_playlist_when_playing_music",
         true,
     );
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let playlist_id = app.get_first_playlist_id_from_latest_state();
     let music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, music_id);
-    app.advance_timer(1);
+    app.advance_timer(1).await;
 
     app.call_controller(controller_remove_playlist, playlist_id);
     let state = app.latest_state();
@@ -447,17 +457,17 @@ fn remove_current_playing_playlist_when_playing_music() {
     assert!(state.id.is_none());
 }
 
-#[test]
-fn remove_current_playing_music_when_playing_music() {
+#[tokio::test]
+async fn remove_current_playing_music_when_playing_music() {
     let mut app: TestApp = TestApp::new(
         "test-dbs/remove_current_playing_music_when_playing_music",
         true,
     );
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, music_id.clone());
-    app.advance_timer(1);
+    app.advance_timer(1).await;
 
     app.call_controller(controller_remove_music_from_current_playlist, music_id);
     let state = app.latest_state();
@@ -465,10 +475,10 @@ fn remove_current_playing_music_when_playing_music() {
     assert!(state.id.is_none());
 }
 
-#[test]
-fn time_to_pause_1() {
+#[tokio::test]
+async fn time_to_pause_1() {
     let mut app: TestApp = TestApp::new("test-dbs/time_to_pause_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, music_id.clone());
@@ -481,26 +491,28 @@ fn time_to_pause_1() {
     assert_eq!(state.playing, true);
     let state = app.latest_state().time_to_pause.unwrap();
     assert_eq!(state.enabled, true);
-    app.advance_timer(2);
-    app.wait_network();
+    app.advance_timer(2).await;
+    app.wait_network().await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.playing, false);
     let state = app.latest_state().time_to_pause.unwrap();
     assert_eq!(state.enabled, false);
 }
 
-#[test]
-fn time_to_pause_2() {
+#[tokio::test]
+async fn time_to_pause_2() {
     let mut app: TestApp = TestApp::new("test-dbs/time_to_pause_2", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, music_id.clone());
+    app.wait_network().await;
 
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.playing, true);
 
     app.call_controller(controller_update_time_to_pause, 100_000);
+    app.wait_network().await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.playing, true);
     let state = app.latest_state().time_to_pause.unwrap();
@@ -515,13 +527,14 @@ fn time_to_pause_2() {
     assert_eq!(state.enabled, false);
 }
 
-#[test]
-fn music_cover_1() {
+#[tokio::test]
+async fn music_cover_1() {
     let mut app = TestApp::new("test-dbs/music_cover_1", true);
-    app.setup_preset(PresetDepth::Music);
+    app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     app.call_controller(controller_play_music, a_music_id);
+    app.wait_network().await;
     let state = app.latest_state().current_music.unwrap();
     let picture = app.load_resource(state.cover);
     assert_eq!(picture.len(), 15025);
