@@ -38,4 +38,7 @@
     <string name="confirm_dialog_btn_ok">OK</string>
     <string name="confirm_dialog_btn_cancel">CANCEL</string>
     <string name="playlist_remove_dialog_text">Are you sure to remove playlist</string>
+    <string name="import_musics_title_default">Import Musics</string>
+    <string name="import_musics_title_single_suffix">Music Selected</string>
+    <string name="import_musics_title_multi_suffix">Musics Selected</string>
 </resources>

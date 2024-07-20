@@ -40,7 +40,8 @@ fun EaseIconButton(
     buttonType: EaseIconButtonType,
     painter: Painter,
     onClick: () -> Unit,
-    overrideColors: EaseIconButtonColors? = null
+    overrideColors: EaseIconButtonColors? = null,
+    disabled: Boolean = false,
 ) {
     val buttonSize = run {
           when (sizeType) {
@@ -80,6 +81,7 @@ fun EaseIconButton(
         modifier = Modifier
             .width(buttonSize)
             .height(buttonSize),
+        enabled = !disabled,
         colors = IconButtonColors(
             buttonBg,
             iconTint,

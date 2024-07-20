@@ -12,6 +12,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import com.kutedev.easemusicplayer.R
+import java.util.Timer
+import kotlin.concurrent.schedule
 
 data class EaseContextMenuItem(
     val stringId: Int,
@@ -38,7 +40,12 @@ fun EaseContextMenu(
                         color = if (!item.isError) { Color.Unspecified } else { MaterialTheme.colorScheme.error }
                     )
                 },
-                onClick = item.onClick
+                onClick = {
+                    Timer("Close ContextMenu", false).schedule(160) {
+                        onDismissRequest()
+                    }
+                    item.onClick()
+                }
             )
         }
     }

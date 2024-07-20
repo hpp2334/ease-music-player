@@ -1,7 +1,7 @@
 package com.kutedev.easemusicplayer.core
 
 import uniffi.ease_client.ArgInitializeApp
-import uniffi.ease_client.FlushSignal
+import uniffi.ease_client.IFlushSignal
 import uniffi.ease_client.InvokeRet
 import uniffi.ease_client.RootViewModelState
 import uniffi.ease_client.bindFlushSignal
@@ -17,7 +17,7 @@ interface IOnNotifyView {
 }
 
 object Bridge {
-    private class FlushSignalImpl : FlushSignal {
+    private class FlushSignalImpl : IFlushSignal {
         override fun flush() {
             Timer("Flush signal", false).schedule(0) {
                 invoke {
@@ -37,7 +37,8 @@ object Bridge {
                     context.filesDir.absolutePath,
                     1u,
                     "/"
-                )
+                ),
+                MusicPlayer()
             )
         }
     }

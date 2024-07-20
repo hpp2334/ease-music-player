@@ -26,6 +26,7 @@ import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
+import com.kutedev.easemusicplayer.viewmodels.CurrentStorageEntriesViewModel
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
@@ -33,7 +34,8 @@ import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
-import com.kutedev.easemusicplayer.widgets.playlist.PlaylistPage
+import com.kutedev.easemusicplayer.widgets.musics.ImportMusicsPage
+import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
 
 inline fun <reified T> MainActivity.registerViewModel()
 where T : ViewModel, T : IOnNotifyView {
@@ -61,6 +63,7 @@ class MainActivity : ComponentActivity() {
         val editStorageVM: EditStorageFormViewModel by viewModels()
         val createPlaylistVM: CreatePlaylistViewModel by viewModels()
         val currentPlaylistVM: CurrentPlaylistViewModel by viewModels()
+        val currentStorageEntriesVM: CurrentStorageEntriesViewModel by viewModels()
 
         Bridge.initApp(applicationContext)
 
@@ -104,6 +107,9 @@ class MainActivity : ComponentActivity() {
                                     composable(Routes.PLAYLIST) {
                                         PlaylistPage(vm = currentPlaylistVM)
                                     }
+                                    composable(Routes.IMPORT_MUSICS) {
+                                        ImportMusicsPage(currentStorageEntriesVM = currentStorageEntriesVM)
+                                    }
                                 }
                             }
                             Box(
@@ -128,6 +134,7 @@ class MainActivity : ComponentActivity() {
         unregisterViewModel<EditStorageFormViewModel>()
         unregisterViewModel<CreatePlaylistViewModel>()
         unregisterViewModel<CurrentPlaylistViewModel>()
+        unregisterViewModel<CurrentStorageEntriesViewModel>()
     }
 
     private fun registerNotifies() {
@@ -136,6 +143,7 @@ class MainActivity : ComponentActivity() {
         registerViewModel<EditStorageFormViewModel>()
         registerViewModel<CreatePlaylistViewModel>()
         registerViewModel<CurrentPlaylistViewModel>()
+        registerViewModel<CurrentStorageEntriesViewModel>()
     }
 }
 

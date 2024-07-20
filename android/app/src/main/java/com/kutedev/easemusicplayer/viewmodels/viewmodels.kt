@@ -6,12 +6,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import uniffi.ease_client.ArgUpsertStorage
 import uniffi.ease_client.CreatePlaylistMode
+import uniffi.ease_client.CurrentStorageImportType
+import uniffi.ease_client.CurrentStorageStateType
 import uniffi.ease_client.RootRouteSubKey
 import uniffi.ease_client.RootViewModelState
 import uniffi.ease_client.StorageConnectionTestResult
 import uniffi.ease_client.StorageType
 import uniffi.ease_client.VCreatePlaylistState
 import uniffi.ease_client.VCurrentPlaylistState
+import uniffi.ease_client.VCurrentStorageEntriesState
 import uniffi.ease_client.VEditStorageState
 import uniffi.ease_client.VPlaylistListState
 import uniffi.ease_client.VRootSubKeyState
@@ -95,6 +98,30 @@ class CurrentPlaylistViewModel : ViewModel(), IOnNotifyView {
     override fun onNotifyView(v: RootViewModelState): Unit {
         if (v.currentPlaylist != null) {
             _state.value = v.currentPlaylist!!.copy();
+        }
+    }
+}
+
+
+class CurrentStorageEntriesViewModel : ViewModel(), IOnNotifyView {
+    private val _state = MutableStateFlow(run {
+        VCurrentStorageEntriesState(
+            importType = CurrentStorageImportType.MUSICS,
+            stateType = CurrentStorageStateType.LOADING,
+            currentStorageId = null,
+            storageItems = emptyList(),
+            entries = emptyList(),
+            selectedCount = 0,
+            splitPaths = emptyList(),
+            currentPath = "",
+            disabledToggleAll = false,
+        )
+    })
+    val state = _state.asStateFlow()
+
+    override fun onNotifyView(v: RootViewModelState): Unit {
+        if (v.currentStorageEntries != null) {
+            _state.value = v.currentStorageEntries!!.copy();
         }
     }
 }

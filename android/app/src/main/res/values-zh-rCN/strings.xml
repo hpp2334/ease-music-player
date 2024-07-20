@@ -38,4 +38,7 @@
     <string name="confirm_dialog_btn_ok">确定</string>
     <string name="confirm_dialog_btn_cancel">取消</string>
     <string name="playlist_remove_dialog_text">是否确认删除播放列表</string>
+    <string name="import_musics_title_default">导入曲目</string>
+    <string name="import_musics_title_single_suffix">首曲目被选中</string>
+    <string name="import_musics_title_multi_suffix">首曲目被选中</string>
 </resources>
