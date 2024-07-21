@@ -41,4 +41,5 @@
     <string name="import_musics_title_default">导入曲目</string>
     <string name="import_musics_title_single_suffix">首曲目被选中</string>
     <string name="import_musics_title_multi_suffix">首曲目被选中</string>
+    <string name="import_musics_paths_root">Root</string>
 </resources>

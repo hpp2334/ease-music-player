@@ -24,6 +24,7 @@ fun EaseTextButton(
     type: EaseTextButtonType,
     size: EaseTextButtonSize,
     onClick: () -> Unit,
+    disabled: Boolean = false,
 ) {
     val fontSize = when (size) {
         EaseTextButtonSize.Small -> 10.sp
@@ -40,7 +41,8 @@ fun EaseTextButton(
 
     TextButton(
         colors = buttonColors,
-        onClick = onClick
+        onClick = onClick,
+        enabled = !disabled
     ) {
         Text(
             text = text,

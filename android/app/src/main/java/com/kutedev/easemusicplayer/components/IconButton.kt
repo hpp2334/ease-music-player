@@ -91,9 +91,8 @@ fun EaseIconButton(
     ) {
         Icon(
             painter = painter,
-            tint = iconTint,
             contentDescription = null,
-            modifier = Modifier.padding(buttonPadding)
+            modifier = Modifier.padding(buttonPadding),
         )
     }
 }
