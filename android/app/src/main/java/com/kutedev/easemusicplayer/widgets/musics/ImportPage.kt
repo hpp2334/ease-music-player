@@ -1,8 +1,10 @@
 package com.kutedev.easemusicplayer.widgets.musics
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,17 +17,26 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,18 +46,15 @@ import com.kutedev.easemusicplayer.components.EaseCheckbox
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.components.EaseTextButton
-import com.kutedev.easemusicplayer.components.EaseTextButtonSize
-import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentStorageEntriesViewModel
-import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import uniffi.ease_client.CurrentStorageStateType
 import uniffi.ease_client.StorageEntryType
 import uniffi.ease_client.VCurrentStorageEntriesStateStorageItem
 import uniffi.ease_client.VCurrentStorageEntry
 import uniffi.ease_client.VSplitPathItem
 import uniffi.ease_client.locateEntry
+import uniffi.ease_client.refreshCurrentStorageInImport
 import uniffi.ease_client.selectEntry
 import uniffi.ease_client.selectStorageInImport
 import uniffi.ease_client.toggleAllCheckedEntries
@@ -120,7 +128,8 @@ private fun ImportEntriesSkeleton() {
 
 @Composable
 private fun ImportEntry(
-    entry: VCurrentStorageEntry
+    entry: VCurrentStorageEntry,
+    onLocateEntry: (path: String) -> Unit
 ) {
     val painter = when (entry.entryTyp) {
         StorageEntryType.FOLDER -> painterResource(id = R.drawable.icon_folder)
@@ -128,28 +137,30 @@ private fun ImportEntry(
         StorageEntryType.MUSIC -> painterResource(id = R.drawable.icon_music_note)
         else -> painterResource(id = R.drawable.icon_file)
     }
+    val onClick = {
+        if (entry.canCheck) {
+            Bridge.invoke {
+                selectEntry(entry.path)
+            }
+        } else {
+            onLocateEntry(entry.path)
+        }
+    }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier
             .clickable {
-                if (entry.canCheck) {
-                    Bridge.invoke {
-                        selectEntry(entry.path)
-                    }
-                } else {
-                    Bridge.invoke {
-                        locateEntry(entry.path)
-                    }
-                }
+                onClick()
             }
             .padding(0.dp, 8.dp)
             .fillMaxWidth()
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1.0F)
         ) {
             Image(
                 painter = painter,
@@ -160,13 +171,23 @@ private fun ImportEntry(
             Text(
                 text = entry.name,
                 fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
-        if (entry.canCheck) {
-            EaseCheckbox(
-                value = entry.checked,
-                onChange = {}
-            )
+        Box(modifier = Modifier.width(12.dp))
+        Box(
+            modifier = Modifier
+                .size(16.dp)
+        ) {
+            if (entry.canCheck) {
+                EaseCheckbox(
+                    value = entry.checked,
+                    onChange = {
+                        onClick()
+                    }
+                )
+            }
         }
     }
 }
@@ -174,8 +195,10 @@ private fun ImportEntry(
 @Composable
 private fun ImportEntries(
     splitPaths: List<VSplitPathItem>,
-    entries: List<VCurrentStorageEntry>
+    entries: List<VCurrentStorageEntry>,
+    onLocateEntry: (path: String) -> Unit
 ) {
+
     @Composable
     fun PathTab(
         text: String,
@@ -185,51 +208,64 @@ private fun ImportEntries(
         val color = if (!disabled) {
             MaterialTheme.colorScheme.onSurface
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            MaterialTheme.colorScheme.surfaceVariant
         }
         Text(
             text = text,
             color = color,
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
-                .clickable {
-                    Bridge.invoke {
-                        locateEntry(path)
+                .clickable(
+                    enabled = !disabled,
+                    onClick = {
+                        onLocateEntry(path)
                     }
-                }
+                )
+                .clip(RoundedCornerShape(2.dp))
+                .widthIn(10.dp, 100.dp)
+                .padding(4.dp, 2.dp)
         )
     }
-
     Column {
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .padding(28.dp, 0.dp)
-                .offset((-14).dp)
+                .wrapContentHeight()
+                .padding(28.dp, 8.dp)
+                .horizontalScroll(rememberScrollState())
         ) {
             PathTab(
                 text = stringResource(id = R.string.import_musics_paths_root),
                 path = "/",
-                disabled = entries.isEmpty()
+                disabled = splitPaths.isEmpty()
             )
             for ((index, v) in splitPaths.withIndex()) {
-                Text(text = ">")
+                Text(
+                    text = ">",
+                    fontSize = 10.sp,
+                )
                 PathTab(
                     text = v.name,
                     path = v.path,
-                    disabled = index == entries.size - 1,
+                    disabled = index == splitPaths.size - 1,
                 )
             }
         }
         Column(
             modifier = Modifier
                 .padding(28.dp, 0.dp)
+                .verticalScroll(rememberScrollState())
         ) {
             for (entry in entries) {
                 ImportEntry(
-                    entry = entry
+                    entry = entry,
+                    onLocateEntry = { path -> onLocateEntry(path)},
                 )
             }
+            Box(modifier = Modifier.height(12.dp))
         }
     }
 }
@@ -240,7 +276,9 @@ private fun ImportStorages(
 ) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.padding(28.dp, 0.dp)
+        modifier = Modifier
+            .padding(28.dp, 0.dp)
+            .horizontalScroll(rememberScrollState())
     ) {
         for (item in storageItems) {
             val bgColor = if (item.selected) {
@@ -254,7 +292,7 @@ private fun ImportStorages(
                 Color.Unspecified
             }
 
-            Column(
+            Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .clickable {
@@ -265,23 +303,121 @@ private fun ImportStorages(
                     .background(bgColor)
                     .width(142.dp)
                     .height(65.dp)
-                    .padding(16.dp, 16.dp)
             ) {
-                Text(
-                    text = item.name,
-                    color = textColor,
-                    fontSize = 14.sp,
-                    lineHeight = 14.sp,
-                )
-                Text(
-                    text = item.subtitle,
-                    color = textColor,
-                    fontSize = 10.sp,
-                    lineHeight = 10.sp,
-                )
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp, 16.dp)
+                ) {
+                    Text(
+                        text = item.name,
+                        color = textColor,
+                        fontSize = 14.sp,
+                        lineHeight = 14.sp,
+                    )
+                    Text(
+                        text = item.subtitle,
+                        color = textColor,
+                        fontSize = 10.sp,
+                        lineHeight = 10.sp,
+                    )
+                }
+                if (!item.isLocal) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_cloud),
+                        contentDescription = null,
+                        tint = Color.Black.copy(0.2F),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .width(27.dp)
+                            .offset(7.dp, 1.dp)
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun ImportMusicsWarningImpl(
+    title: String,
+    subTitle: String,
+    color: Color,
+    iconPainter: Painter,
+    onClick: () -> Unit,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .clickable {
+                    onClick()
+                }
+                .padding(10.dp)
+        ) {
+            Box(modifier = Modifier
+                .size(60.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(color)
+            ) {
+                Icon(
+                    painter = iconPainter,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                )
+            }
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                color = color,
+            )
+            Text(
+                text = subTitle,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .widthIn(0.dp, 220.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImportMusicsError(
+    type: CurrentStorageStateType,
+) {
+    val title = when (type) {
+        CurrentStorageStateType.AUTHENTICATION_FAILED -> stringResource(id = R.string.import_musics_error_authentication_title)
+        CurrentStorageStateType.TIMEOUT -> stringResource(id = R.string.import_musics_error_timeout_title)
+        CurrentStorageStateType.UNKNOWN_ERROR -> stringResource(id = R.string.import_musics_error_unknown_title)
+        else -> {
+            throw RuntimeException("unsupported type")
+        }
+    }
+    val desc = when (type) {
+        CurrentStorageStateType.AUTHENTICATION_FAILED -> stringResource(id = R.string.import_musics_error_authentication_desc)
+        CurrentStorageStateType.TIMEOUT -> stringResource(id = R.string.import_musics_error_timeout_desc)
+        CurrentStorageStateType.UNKNOWN_ERROR -> stringResource(id = R.string.import_musics_error_unknown_desc)
+        else -> {
+            throw RuntimeException("unsupported type")
+        }
+    }
+
+    ImportMusicsWarningImpl(
+        title = title,
+        subTitle = desc,
+        color = MaterialTheme.colorScheme.error,
+        iconPainter = painterResource(id = R.drawable.icon_warning),
+        onClick = {
+            Bridge.invoke {
+                refreshCurrentStorageInImport()
+            }
+        }
+    )
 }
 
 @Composable
@@ -290,12 +426,36 @@ fun ImportMusicsPage(
 ) {
     val navController = LocalNavController.current
     val state = currentStorageEntriesVM.state.collectAsState().value
+    val storageItems = state.storageItems.filter { item -> !item.isLocal }
     val titleText = when (state.selectedCount) {
         0 -> stringResource(id = R.string.import_musics_title_default)
         1 -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_single_suffix)}"
         else -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_multi_suffix)}"
     }
+    val undoStack = remember {
+        mutableStateListOf<String>()
+    }
+    fun locateEntryImpl(path: String) {
+        undoStack.add(state.currentPath)
+        Bridge.invoke {
+            locateEntry(path)
+        }
+    }
+    fun doUndo() {
+        if (undoStack.isEmpty()) {
+            navController.popBackStack()
+            return
+        }
 
+        val path = undoStack.removeLast()
+        Bridge.invoke {
+            locateEntry(path)
+        }
+    }
+
+    BackHandler(enabled = undoStack.isNotEmpty()) {
+        doUndo()
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -315,7 +475,7 @@ fun ImportMusicsPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_back),
                     onClick = {
-                        navController.popBackStack()
+                        doUndo()
                     }
                 )
                 Text(
@@ -337,14 +497,18 @@ fun ImportMusicsPage(
             }
         }
         ImportStorages(
-            storageItems = state.storageItems
+            storageItems = storageItems
         )
         when (state.stateType) {
             CurrentStorageStateType.LOADING -> ImportEntriesSkeleton()
+            CurrentStorageStateType.TIMEOUT, CurrentStorageStateType.AUTHENTICATION_FAILED, CurrentStorageStateType.UNKNOWN_ERROR -> ImportMusicsError(
+                type = state.stateType,
+            )
             else -> {
                 ImportEntries(
                     splitPaths = state.splitPaths,
-                    entries = state.entries
+                    entries = state.entries,
+                    onLocateEntry = {path -> locateEntryImpl(path) },
                 )
             }
         }

@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -24,13 +25,14 @@ fun EaseCheckbox(
     onChange: (value: Boolean) -> Unit
 ) {
     val borderColor = if (value) { MaterialTheme.colorScheme.primary } else { MaterialTheme.colorScheme.onSurface }
-    val bgColor = if (value) { Color.Transparent } else { MaterialTheme.colorScheme.primary }
+    val bgColor = if (value) { MaterialTheme.colorScheme.primary } else { Color.Transparent }
 
     Box(
         modifier = Modifier
-            .size(32.dp)
+            .border(1.dp, borderColor, RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(4.dp))
+            .size(16.dp)
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(2.dp))
             .clickable { onChange(!value) },
         contentAlignment = Alignment.Center
     ) {
