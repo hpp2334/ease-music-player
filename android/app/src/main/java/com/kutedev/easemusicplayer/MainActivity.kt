@@ -25,6 +25,7 @@ import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
+import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentStorageEntriesViewModel
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
@@ -41,16 +42,15 @@ inline fun <reified T> MainActivity.registerViewModel()
 where T : ViewModel, T : IOnNotifyView {
     val vm: T by viewModels()
     Bridge.registerView(vm)
-}
 
-inline fun <reified T> MainActivity.unregisterViewModel()
-        where T : ViewModel, T : IOnNotifyView {
-    val vm: T by viewModels()
-    Bridge.unregisterView(vm)
+    vmDestroyers.add {
+        Bridge.unregisterView(vm)
+    }
 }
-
 
 class MainActivity : ComponentActivity() {
+    public val vmDestroyers = mutableListOf<() -> Unit>()
+
     @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
         val createPlaylistVM: CreatePlaylistViewModel by viewModels()
         val currentPlaylistVM: CurrentPlaylistViewModel by viewModels()
         val currentStorageEntriesVM: CurrentStorageEntriesViewModel by viewModels()
+        val currentMusicVM: CurrentMusicViewModel by viewModels()
 
         Bridge.initApp(applicationContext)
 
@@ -105,7 +106,10 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                     composable(Routes.PLAYLIST) {
-                                        PlaylistPage(vm = currentPlaylistVM)
+                                        PlaylistPage(
+                                            vm = currentPlaylistVM,
+                                            currentMusicVM = currentMusicVM,
+                                        )
                                     }
                                     composable(Routes.IMPORT_MUSICS) {
                                         ImportMusicsPage(currentStorageEntriesVM = currentStorageEntriesVM)
@@ -129,12 +133,10 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
 
-        unregisterViewModel<PlaylistsViewModel>()
-        unregisterViewModel<StorageListViewModel>()
-        unregisterViewModel<EditStorageFormViewModel>()
-        unregisterViewModel<CreatePlaylistViewModel>()
-        unregisterViewModel<CurrentPlaylistViewModel>()
-        unregisterViewModel<CurrentStorageEntriesViewModel>()
+        for (destroy in vmDestroyers) {
+            destroy()
+        }
+        vmDestroyers.clear()
     }
 
     private fun registerNotifies() {
@@ -144,6 +146,7 @@ class MainActivity : ComponentActivity() {
         registerViewModel<CreatePlaylistViewModel>()
         registerViewModel<CurrentPlaylistViewModel>()
         registerViewModel<CurrentStorageEntriesViewModel>()
+        registerViewModel<CurrentMusicViewModel>()
     }
 }
 

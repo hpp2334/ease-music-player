@@ -27,6 +27,7 @@ enum class EaseIconButtonType {
     Surface,
     Primary,
     Error,
+    ErrorVariant,
 }
 
 data class EaseIconButtonColors(
@@ -64,15 +65,17 @@ fun EaseIconButton(
                 EaseIconButtonType.Surface -> Color.Transparent
                 EaseIconButtonType.Default -> Color.Transparent
                 EaseIconButtonType.Error -> Color.Transparent
+                EaseIconButtonType.ErrorVariant -> MaterialTheme.colorScheme.error
             }
     }
     val iconTint = run {
         overrideColors?.iconTint
             ?: when (buttonType) {
-            EaseIconButtonType.Primary -> Color.White
+            EaseIconButtonType.Primary -> MaterialTheme.colorScheme.surface
             EaseIconButtonType.Surface -> MaterialTheme.colorScheme.surface
             EaseIconButtonType.Default -> MaterialTheme.colorScheme.onSurface
             EaseIconButtonType.Error -> MaterialTheme.colorScheme.error
+            EaseIconButtonType.ErrorVariant -> MaterialTheme.colorScheme.surface
         }
     }
 

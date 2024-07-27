@@ -22,10 +22,12 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -53,6 +55,7 @@ import uniffi.ease_client.StorageEntryType
 import uniffi.ease_client.VCurrentStorageEntriesStateStorageItem
 import uniffi.ease_client.VCurrentStorageEntry
 import uniffi.ease_client.VSplitPathItem
+import uniffi.ease_client.finishSelectedEntriesInImport
 import uniffi.ease_client.locateEntry
 import uniffi.ease_client.refreshCurrentStorageInImport
 import uniffi.ease_client.selectEntry
@@ -138,12 +141,12 @@ private fun ImportEntry(
         else -> painterResource(id = R.drawable.icon_file)
     }
     val onClick = {
-        if (entry.canCheck) {
+        if (entry.isFolder) {
+            onLocateEntry(entry.path)
+        } else if (entry.canCheck) {
             Bridge.invoke {
                 selectEntry(entry.path)
             }
-        } else {
-            onLocateEntry(entry.path)
         }
     }
 
@@ -194,11 +197,12 @@ private fun ImportEntry(
 
 @Composable
 private fun ImportEntries(
+    selectedCount: Int,
     splitPaths: List<VSplitPathItem>,
     entries: List<VCurrentStorageEntry>,
-    onLocateEntry: (path: String) -> Unit
+    onLocateEntry: (path: String) -> Unit,
+    onPopRoute: () -> Unit,
 ) {
-
     @Composable
     fun PathTab(
         text: String,
@@ -228,44 +232,68 @@ private fun ImportEntries(
                 .padding(4.dp, 2.dp)
         )
     }
-    Column {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .wrapContentHeight()
-                .padding(28.dp, 8.dp)
-                .horizontalScroll(rememberScrollState())
-        ) {
-            PathTab(
-                text = stringResource(id = R.string.import_musics_paths_root),
-                path = "/",
-                disabled = splitPaths.isEmpty()
-            )
-            for ((index, v) in splitPaths.withIndex()) {
-                Text(
-                    text = ">",
-                    fontSize = 10.sp,
-                )
+    Box(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .wrapContentHeight()
+                    .padding(28.dp, 8.dp)
+                    .horizontalScroll(rememberScrollState())
+            ) {
                 PathTab(
-                    text = v.name,
-                    path = v.path,
-                    disabled = index == splitPaths.size - 1,
+                    text = stringResource(id = R.string.import_musics_paths_root),
+                    path = "/",
+                    disabled = splitPaths.isEmpty()
                 )
+                for ((index, v) in splitPaths.withIndex()) {
+                    Text(
+                        text = ">",
+                        fontSize = 10.sp,
+                    )
+                    PathTab(
+                        text = v.name,
+                        path = v.path,
+                        disabled = index == splitPaths.size - 1,
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .padding(28.dp, 0.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                for (entry in entries) {
+                    ImportEntry(
+                        entry = entry,
+                        onLocateEntry = { path -> onLocateEntry(path) },
+                    )
+                }
+                Box(modifier = Modifier.height(12.dp))
             }
         }
-        Column(
-            modifier = Modifier
-                .padding(28.dp, 0.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            for (entry in entries) {
-                ImportEntry(
-                    entry = entry,
-                    onLocateEntry = { path -> onLocateEntry(path)},
+        if (selectedCount > 0) {
+            FloatingActionButton(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.surface,
+                onClick = {
+                    Bridge.invoke {
+                        finishSelectedEntriesInImport()
+                    }
+                    onPopRoute()
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset((-40).dp, (-40).dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_yes),
+                    contentDescription = null,
                 )
             }
-            Box(modifier = Modifier.height(12.dp))
         }
     }
 }
@@ -452,6 +480,10 @@ fun ImportMusicsPage(
             locateEntry(path)
         }
     }
+    fun popRoute() {
+        undoStack.clear()
+        navController.popBackStack()
+    }
 
     BackHandler(enabled = undoStack.isNotEmpty()) {
         doUndo()
@@ -506,9 +538,11 @@ fun ImportMusicsPage(
             )
             else -> {
                 ImportEntries(
+                    selectedCount = state.selectedCount,
                     splitPaths = state.splitPaths,
                     entries = state.entries,
                     onLocateEntry = {path -> locateEntryImpl(path) },
+                    onPopRoute = { popRoute() }
                 )
             }
         }

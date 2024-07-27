@@ -95,7 +95,7 @@ fun PlaylistsSubpage(
 @Composable
 private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
     LazyVerticalGrid(
-        columns = GridCells.FixedSize(168.dp),
+        columns = GridCells.FixedSize(172.dp),
         horizontalArrangement = Arrangement.Center,
     ) {
         items(playlists) { playlist ->
@@ -130,7 +130,7 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
             )
             Text(
                 text = playlist.title,
-                fontSize = 16.sp,
+                fontSize = 14.sp,
                 modifier = Modifier.padding(top = 8.dp)
             )
             Text(
@@ -141,6 +141,7 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
                 },
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Light,
+                maxLines = 1,
             )
         }
     }

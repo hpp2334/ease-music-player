@@ -8,11 +8,13 @@ import uniffi.ease_client.ArgUpsertStorage
 import uniffi.ease_client.CreatePlaylistMode
 import uniffi.ease_client.CurrentStorageImportType
 import uniffi.ease_client.CurrentStorageStateType
+import uniffi.ease_client.PlayMode
 import uniffi.ease_client.RootRouteSubKey
 import uniffi.ease_client.RootViewModelState
 import uniffi.ease_client.StorageConnectionTestResult
 import uniffi.ease_client.StorageType
 import uniffi.ease_client.VCreatePlaylistState
+import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.VCurrentPlaylistState
 import uniffi.ease_client.VCurrentStorageEntriesState
 import uniffi.ease_client.VEditStorageState
@@ -98,6 +100,38 @@ class CurrentPlaylistViewModel : ViewModel(), IOnNotifyView {
     override fun onNotifyView(v: RootViewModelState): Unit {
         if (v.currentPlaylist != null) {
             _state.value = v.currentPlaylist!!.copy();
+        }
+    }
+}
+
+
+
+class CurrentMusicViewModel : ViewModel(), IOnNotifyView {
+    private val _state = MutableStateFlow(run {
+        VCurrentMusicState(
+            id = null,
+            title = "",
+            currentDuration = "",
+            totalDuration = "",
+            currentDurationMs = 0UL,
+            totalDurationMs = 0UL,
+            canChangePosition = false,
+            canPlayNext = false,
+            canPlayPrevious = false,
+            previousCover = 0UL,
+            nextCover = 0UL,
+            cover = 0UL,
+            playMode = PlayMode.SINGLE,
+            playing = false,
+            lyricIndex = 0,
+            loading = false,
+        )
+    })
+    val state = _state.asStateFlow()
+
+    override fun onNotifyView(v: RootViewModelState): Unit {
+        if (v.currentMusic != null) {
+            _state.value = v.currentMusic!!.copy();
         }
     }
 }
