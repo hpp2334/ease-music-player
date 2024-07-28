@@ -1,10 +1,20 @@
 package com.kutedev.easemusicplayer.widgets.playlists
 
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,8 +36,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,17 +49,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.wear.compose.material.ExperimentalWearMaterialApi
-import androidx.wear.compose.material.FractionalThreshold
-import androidx.wear.compose.material.rememberSwipeableState
-import androidx.wear.compose.material.swipeable
 import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.Routes
@@ -57,14 +67,18 @@ import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
+import kotlinx.coroutines.flow.collect
 import uniffi.ease_client.PlaylistId
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.VPlaylistMusicItem
+import uniffi.ease_client.playAllMusics
 import uniffi.ease_client.playMusic
 import uniffi.ease_client.prepareImportEntriesInCurrentPlaylist
+import uniffi.ease_client.removeMusicFromCurrentPlaylist
 import uniffi.ease_client.removePlaylist
 import java.util.Timer
 import kotlin.concurrent.schedule
@@ -229,23 +243,51 @@ private fun EmptyPlaylist() {
     }
 }
 
-@OptIn(ExperimentalWearMaterialApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PlaylistItem(
     item: VPlaylistMusicItem,
     playing: Boolean,
     currentSwipingPlaylistId: PlaylistId?,
     onSwipe: () -> Unit,
+    onRemove: () -> Unit,
 ) {
     val panelWidth = 48f
-    val swipeableState = rememberSwipeableState(initialValue = 0)
-    val anchors = mapOf(0f to 0, -panelWidth to 1) // Maps from position to state
-    val swipeOffsetX = swipeableState.offset.value.roundToInt().dp
+
+    val density = LocalDensity.current
+
+    val anchors = remember {
+        DraggableAnchors {
+            0 at 0f
+            1 at -panelWidth
+        }
+    }
+    val anchoredDraggableState = remember {
+        AnchoredDraggableState(
+            initialValue = 0,
+            anchors = anchors,
+            positionalThreshold = { distance: Float -> distance * 0.5f },
+            velocityThreshold = { with(density) { 100.dp.toPx() } },
+            animationSpec = tween(),
+        )
+    }
+    val interactionSource = remember { MutableInteractionSource() }
+    val swipeOffsetX = anchoredDraggableState.offset.dp
+
+    LaunchedEffect(Unit) {
+        interactionSource.interactions.collect {interaction ->
+            when (interaction) {
+                is DragInteraction.Start -> {
+                    onSwipe()
+                }
+            }
+        }
+    }
 
     LaunchedEffect(currentSwipingPlaylistId) {
         val isSwiping = currentSwipingPlaylistId == item.id
-        if (!isSwiping && swipeableState.currentValue != 0) {
-            swipeableState.animateTo(0, tween(300))
+        if (!isSwiping && swipeOffsetX != 0.dp) {
+            anchoredDraggableState.animateTo(0)
         }
     }
 
@@ -268,9 +310,9 @@ private fun PlaylistItem(
     Box(
         modifier = Modifier
             .padding(
+                start = 20.dp,
                 end = 20.dp,
             )
-            .clipToBounds()
             .fillMaxWidth()
     ) {
         Row(
@@ -278,13 +320,11 @@ private fun PlaylistItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .offset(swipeOffsetX, 0.dp)
-                .swipeable(
-                    state = swipeableState,
-                    anchors = anchors,
-                    thresholds = { _, _ -> FractionalThreshold(0.3f) },
-                    orientation = Orientation.Horizontal
+                .anchoredDraggable(
+                    state = anchoredDraggableState,
+                    orientation = Orientation.Horizontal,
+                    interactionSource = interactionSource,
                 )
-                .padding(start = 20.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .clickable {
                     Bridge.invoke {
@@ -328,10 +368,11 @@ private fun PlaylistItem(
         }
         Row(
             modifier = Modifier
-                .offset(x = panelWidth.dp + swipeOffsetX)
-                .align(alignment = Alignment.CenterEnd)
                 .fillMaxHeight()
                 .width(panelWidth.dp)
+                .clipToBounds()
+                .offset(x = panelWidth.dp + swipeOffsetX)
+                .align(alignment = Alignment.CenterEnd)
         ) {
             Box(modifier = Modifier.width(8.dp))
             EaseIconButton(
@@ -339,18 +380,12 @@ private fun PlaylistItem(
                 buttonType = EaseIconButtonType.ErrorVariant,
                 painter = painterResource(id = R.drawable.icon_deleteseep),
                 onClick = {
+                    onRemove()
                     Bridge.invoke {
-                        removePlaylist(item.id)
+                        removeMusicFromCurrentPlaylist(item.id)
                     }
                 }
             )
-        }
-    }
-
-
-    LaunchedEffect(swipeOffsetX) {
-        if (!swipeableState.isAnimationRunning) {
-            onSwipe()
         }
     }
 }
@@ -369,15 +404,23 @@ private fun PlaylistItemsBlock(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
-        Box(modifier = Modifier.height(24.dp))
+        Box(modifier = Modifier.height(48.dp))
         for (item in items) {
             val playing = item.id == currentMusicState.id
-            PlaylistItem(
-                item = item,
-                playing = playing,
-                currentSwipingPlaylistId = swipingPlaylistId,
-                onSwipe = {swipingPlaylistId = item.id}
-            )
+
+            key(item.id) {
+                PlaylistItem(
+                    item = item,
+                    playing = playing,
+                    currentSwipingPlaylistId = swipingPlaylistId,
+                    onSwipe = {swipingPlaylistId = item.id},
+                    onRemove = {
+                        if (swipingPlaylistId == item.id) {
+                            swipingPlaylistId = null
+                        }
+                    }
+                )
+            }
         }
         Box(modifier = Modifier.height(24.dp))
     }
@@ -421,6 +464,23 @@ fun PlaylistPage(
                     currentMusicState = currentMusicState,
                 )
             }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset((-20).dp, 157.dp - easeIconButtonSizeToDp(EaseIconButtonSize.Large) / 2)
+        ) {
+            EaseIconButton(
+                sizeType = EaseIconButtonSize.Large,
+                buttonType = EaseIconButtonType.Primary,
+                painter = painterResource(id = R.drawable.icon_play),
+                disabled = items.isEmpty(),
+                onClick = {
+                    Bridge.invoke {
+                        playAllMusics()
+                    }
+                }
+            )
         }
     }
     RemovePlaylistDialog(
