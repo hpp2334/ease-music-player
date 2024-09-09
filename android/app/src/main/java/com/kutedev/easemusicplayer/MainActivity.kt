@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -36,6 +38,7 @@ import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
 import com.kutedev.easemusicplayer.widgets.musics.ImportMusicsPage
+import com.kutedev.easemusicplayer.widgets.musics.MusicPlayerPage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
 
 inline fun <reified T> MainActivity.registerViewModel()
@@ -49,22 +52,13 @@ where T : ViewModel, T : IOnNotifyView {
 }
 
 class MainActivity : ComponentActivity() {
-    public val vmDestroyers = mutableListOf<() -> Unit>()
+    val vmDestroyers = mutableListOf<() -> Unit>()
 
     @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         registerNotifies()
-
-        val playlistsVM: PlaylistsViewModel by viewModels()
-        val timeToPauseVM: TimeToPauseViewModel by viewModels()
-        val storageListVM: StorageListViewModel by viewModels()
-        val editStorageVM: EditStorageFormViewModel by viewModels()
-        val createPlaylistVM: CreatePlaylistViewModel by viewModels()
-        val currentPlaylistVM: CurrentPlaylistViewModel by viewModels()
-        val currentStorageEntriesVM: CurrentStorageEntriesViewModel by viewModels()
-        val currentMusicVM: CurrentMusicViewModel by viewModels()
 
         Bridge.initApp(applicationContext)
 
@@ -86,35 +80,9 @@ class MainActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier.weight(1f)
                             ) {
-                                NavHost(
-                                    navController = LocalNavController.current,
-                                    startDestination = Routes.HOME
-                                ) {
-                                    composable(Routes.HOME) {
-                                        HomePage(
-                                            ctx = applicationContext,
-                                            pagerState = bottomBarPageState,
-                                            playlistsVM = playlistsVM,
-                                            createPlaylistVM = createPlaylistVM,
-                                            timeToPauseVM = timeToPauseVM,
-                                            storageListVM = storageListVM,
-                                        )
-                                    }
-                                    composable(Routes.ADD_DEVICES) {
-                                        EditStoragesPage(
-                                            formVM = editStorageVM,
-                                        )
-                                    }
-                                    composable(Routes.PLAYLIST) {
-                                        PlaylistPage(
-                                            vm = currentPlaylistVM,
-                                            currentMusicVM = currentMusicVM,
-                                        )
-                                    }
-                                    composable(Routes.IMPORT_MUSICS) {
-                                        ImportMusicsPage(currentStorageEntriesVM = currentStorageEntriesVM)
-                                    }
-                                }
+                                RouteBlock(
+                                    bottomBarPageState = bottomBarPageState,
+                                )
                             }
                             Box(
                                 modifier = Modifier
@@ -126,6 +94,54 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    fun RouteBlock(
+        bottomBarPageState: PagerState,
+    ) {
+        val playlistsVM: PlaylistsViewModel by viewModels()
+        val timeToPauseVM: TimeToPauseViewModel by viewModels()
+        val storageListVM: StorageListViewModel by viewModels()
+        val editStorageVM: EditStorageFormViewModel by viewModels()
+        val createPlaylistVM: CreatePlaylistViewModel by viewModels()
+        val currentPlaylistVM: CurrentPlaylistViewModel by viewModels()
+        val currentStorageEntriesVM: CurrentStorageEntriesViewModel by viewModels()
+        val currentMusicVM: CurrentMusicViewModel by viewModels()
+
+        NavHost(
+            navController = LocalNavController.current,
+            startDestination = Routes.HOME
+        ) {
+            composable(Routes.HOME) {
+                HomePage(
+                    ctx = applicationContext,
+                    pagerState = bottomBarPageState,
+                    playlistsVM = playlistsVM,
+                    createPlaylistVM = createPlaylistVM,
+                    timeToPauseVM = timeToPauseVM,
+                    storageListVM = storageListVM,
+                )
+            }
+            composable(Routes.ADD_DEVICES) {
+                EditStoragesPage(
+                    formVM = editStorageVM,
+                )
+            }
+            composable(Routes.PLAYLIST) {
+                PlaylistPage(
+                    vm = currentPlaylistVM,
+                    currentMusicVM = currentMusicVM,
+                )
+            }
+            composable(Routes.IMPORT_MUSICS) {
+                ImportMusicsPage(currentStorageEntriesVM = currentStorageEntriesVM)
+            }
+            composable(Routes.MUSIC_PLAYER) {
+                MusicPlayerPage(vm = currentMusicVM)
             }
         }
     }

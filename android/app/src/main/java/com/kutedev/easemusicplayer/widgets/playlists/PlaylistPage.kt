@@ -58,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
 import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.Routes
@@ -255,6 +256,7 @@ private fun PlaylistItem(
     val panelWidth = 48f
 
     val density = LocalDensity.current
+    val navController = LocalNavController.current
 
     val anchors = remember {
         DraggableAnchors {
@@ -330,6 +332,7 @@ private fun PlaylistItem(
                     Bridge.invoke {
                         playMusic(item.id)
                     }
+                    navController.navigate(Routes.MUSIC_PLAYER)
                     onSwipe()
                 }
                 .background(bgColor)

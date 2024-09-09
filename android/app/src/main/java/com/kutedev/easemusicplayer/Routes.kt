@@ -8,6 +8,7 @@ object Routes {
     const val ADD_DEVICES = "AddDevices";
     const val PLAYLIST = "Playlist";
     const val IMPORT_MUSICS = "ImportMusics";
+    const val MUSIC_PLAYER = "MusicPlayer";
 }
 
 val LocalNavController = compositionLocalOf<NavHostController> {

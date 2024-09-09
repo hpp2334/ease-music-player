@@ -1,5 +1,8 @@
 package com.kutedev.easemusicplayer.core
 
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import uniffi.ease_client.ArgInitializeApp
 import uniffi.ease_client.IFlushSignal
 import uniffi.ease_client.InvokeRet
@@ -16,6 +19,24 @@ interface IOnNotifyView {
     fun onNotifyView(view: RootViewModelState);
 }
 
+class BitmapResources {
+    private val store: HashMap<ULong, ImageBitmap> = HashMap()
+
+    fun add(id: ULong, buf: ByteArray) {
+        val bm = BitmapFactory.decodeByteArray(buf, 0, buf.size)
+        val imageBm = bm.asImageBitmap()
+        store[id] = imageBm
+    }
+
+    fun remove(id: ULong) {
+        store.remove(id)
+    }
+
+    fun get(id: ULong): ImageBitmap? {
+        return store[id]
+    }
+}
+
 object Bridge {
     private class FlushSignalImpl : IFlushSignal {
         override fun flush() {
@@ -26,7 +47,12 @@ object Bridge {
             }
         }
     }
-    private val store: HashSet<IOnNotifyView> = HashSet();
+    private val _store: HashSet<IOnNotifyView> = HashSet();
+    private val _resources = BitmapResources()
+
+    fun getResources(): BitmapResources {
+        return _resources
+    }
 
     fun initApp(context: android.content.Context) {
         bindFlushSignal(FlushSignalImpl())
@@ -45,19 +71,28 @@ object Bridge {
 
     fun invoke(f: () -> InvokeRet) {
         val ret = f();
-        val state = ret.view;
-        if (state != null) {
-            for (view in store) {
-                view.onNotifyView(state);
+        val changedView = ret.view;
+        if (changedView != null) {
+            for (view in _store) {
+                view.onNotifyView(changedView);
+            }
+        }
+
+        val changedActions = ret.resources
+        for (action in changedActions) {
+            if (action.buf != null) {
+                _resources.add(action.id, action.buf!!)
+            } else {
+                _resources.remove(action.id)
             }
         }
     }
 
     fun registerView(f: IOnNotifyView) {
-        store.add(f);
+        _store.add(f);
     }
 
     fun unregisterView(f: IOnNotifyView) {
-        store.remove(f);
+        _store.remove(f);
     }
 }
