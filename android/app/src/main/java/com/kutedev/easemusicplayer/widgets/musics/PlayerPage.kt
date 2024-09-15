@@ -54,9 +54,17 @@ import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.widgets.dashboard.DashboardSubpage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsSubpage
 import com.kutedev.easemusicplayer.widgets.settings.SettingSubpage
+import uniffi.ease_client.ArgSeekMusic
+import uniffi.ease_client.PlayMode
+import uniffi.ease_client.VCurrentMusicState
+import uniffi.ease_client.pauseMusic
+import uniffi.ease_client.playMusic
 import uniffi.ease_client.playNextMusic
 import uniffi.ease_client.playPreviousMusic
+import uniffi.ease_client.resumeMusic
+import uniffi.ease_client.seekMusic
 import uniffi.ease_client.setCurrentMusicPositionForPlayerInternal
+import uniffi.ease_client.updateMusicPlaymodeToNext
 
 @Composable
 private fun MusicPlayerHeader(
@@ -185,10 +193,12 @@ private fun MusicSlider(
                 .fillMaxWidth()
         ) {
             Text(
-                text = currentDuration
+                text = currentDuration,
+                fontSize = 10.sp
             )
             Text(
-                text = totalDuration
+                text = totalDuration,
+                fontSize = 10.sp
             )
         }
     }
@@ -239,24 +249,82 @@ private fun MusicPlayerCover(
 
 @Composable
 fun MusicPanel(
-    
+    state: VCurrentMusicState
 ) {
-    EaseIconButton(
-        sizeType = EaseIconButtonSize.Medium,
-        buttonType = EaseIconButtonType.Default,
-        painter = painterResource(id = R.drawable.icon_timelapse),
-        onClick = {
-            // TODO: impl
+    val modeDrawable = when (state.playMode) {
+        PlayMode.SINGLE -> R.drawable.icon_mode_one
+        PlayMode.SINGLE_LOOP -> R.drawable.icon_mode_repeatone
+        PlayMode.LIST -> R.drawable.icon_mode_list
+        PlayMode.LIST_LOOP -> R.drawable.icon_mode_repeat
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        EaseIconButton(
+            sizeType = EaseIconButtonSize.Medium,
+            buttonType = EaseIconButtonType.Default,
+            painter = painterResource(id = R.drawable.icon_timelapse),
+            onClick = {
+                // TODO: impl
+            }
+        )
+        EaseIconButton(
+            sizeType = EaseIconButtonSize.Medium,
+            buttonType = EaseIconButtonType.Default,
+            painter = painterResource(id = R.drawable.icon_play_previous),
+            onClick = {
+                Bridge.invoke {
+                    playPreviousMusic();
+                }
+            }
+        )
+        if (!state.playing) {
+            EaseIconButton(
+                sizeType = EaseIconButtonSize.Large,
+                buttonType = EaseIconButtonType.Primary,
+                painter = painterResource(id = R.drawable.icon_play),
+                onClick = {
+                    Bridge.invoke {
+                        resumeMusic();
+                    }
+                }
+            )
         }
-    )
-    EaseIconButton(
-        sizeType = EaseIconButtonSize.Medium,
-        buttonType = EaseIconButtonType.Default,
-        painter = painterResource(id = R.drawable.icon_timelapse),
-        onClick = {
-            // TODO: impl
+        if (state.playing) {
+            EaseIconButton(
+                sizeType = EaseIconButtonSize.Large,
+                buttonType = EaseIconButtonType.Primary,
+                painter = painterResource(id = R.drawable.icon_pause),
+                onClick = {
+                    Bridge.invoke {
+                        pauseMusic();
+                    }
+                }
+            )
         }
-    )
+        EaseIconButton(
+            sizeType = EaseIconButtonSize.Medium,
+            buttonType = EaseIconButtonType.Default,
+            painter = painterResource(id = R.drawable.icon_play_next),
+            onClick = {
+                Bridge.invoke {
+                    playNextMusic();
+                }
+            }
+        )
+        EaseIconButton(
+            sizeType = EaseIconButtonSize.Medium,
+            buttonType = EaseIconButtonType.Default,
+            painter = painterResource(id = modeDrawable),
+            onClick = {
+                Bridge.invoke {
+                    updateMusicPlaymodeToNext()
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -281,7 +349,6 @@ fun MusicPlayerPage(
             Column(
                 modifier = Modifier
                     .weight(1.0F)
-                    .background(Color.Red)
             ) {
                 MusicPlayerCover(
                     resources = Bridge.getResources(),
@@ -314,18 +381,22 @@ fun MusicPlayerPage(
                     currentDuration = state.currentDuration,
                     currentDurationMS = state.currentDurationMs,
                     totalDuration = state.totalDuration,
-                    totalDurationMS = state.currentDurationMs,
+                    totalDurationMS = state.totalDurationMs,
                     onChangeMusicPosition = { nextMS ->
                         Bridge.invoke {
-                            setCurrentMusicPositionForPlayerInternal(nextMS)
+                            seekMusic(ArgSeekMusic(nextMS))
                         }
                     }
                 )
             }
             Row(
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(0.dp, 48.dp)
             ) {
-                
+                MusicPanel(
+                    state = state,
+                )
             }
         }
     }
@@ -350,7 +421,7 @@ private fun MusicSliderPreview() {
 
     val totalMS = 120uL * 1000uL
     var currentMS by remember {
-        mutableStateOf(0uL)
+        mutableStateOf(60uL * 1000uL)
     }
 
     Box(

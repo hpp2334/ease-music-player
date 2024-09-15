@@ -35,6 +35,7 @@ import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
+import com.kutedev.easemusicplayer.viewmodels.MusicPlayerViewModel
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
 import com.kutedev.easemusicplayer.widgets.musics.ImportMusicsPage
@@ -58,9 +59,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        registerNotifies()
 
+        registerViewModels()
         Bridge.initApp(applicationContext)
+        registerMusicPlayerViewModel()
 
         setContent {
             val bottomBarPageState = rememberPagerState(pageCount = {
@@ -155,7 +157,7 @@ class MainActivity : ComponentActivity() {
         vmDestroyers.clear()
     }
 
-    private fun registerNotifies() {
+    private fun registerViewModels() {
         registerViewModel<PlaylistsViewModel>()
         registerViewModel<StorageListViewModel>()
         registerViewModel<EditStorageFormViewModel>()
@@ -163,6 +165,15 @@ class MainActivity : ComponentActivity() {
         registerViewModel<CurrentPlaylistViewModel>()
         registerViewModel<CurrentStorageEntriesViewModel>()
         registerViewModel<CurrentMusicViewModel>()
+    }
+
+    private fun registerMusicPlayerViewModel() {
+        val vm: MusicPlayerViewModel by viewModels()
+        vm.initialize()
+
+        vmDestroyers.add {
+            vm.destroy()
+        }
     }
 }
 

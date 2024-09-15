@@ -49,13 +49,19 @@ object Bridge {
     }
     private val _store: HashSet<IOnNotifyView> = HashSet();
     private val _resources = BitmapResources()
+    private val _player = MusicPlayer()
 
     fun getResources(): BitmapResources {
         return _resources
     }
 
+    fun getPlayer(): MusicPlayer {
+        return _player
+    }
+
     fun initApp(context: android.content.Context) {
         bindFlushSignal(FlushSignalImpl())
+        _player.install(context)
 
         invoke {
             initializeClient(
@@ -64,7 +70,7 @@ object Bridge {
                     1u,
                     "/"
                 ),
-                MusicPlayer()
+                _player
             )
         }
     }

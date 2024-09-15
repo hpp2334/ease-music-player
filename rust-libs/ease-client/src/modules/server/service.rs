@@ -8,7 +8,7 @@ use axum::{
 };
 use misty_vm::{
     async_task::MistyAsyncTaskTrait,
-    client::{MistyClientAccessor, MistyClientHandle},
+    client::{AsReadonlyMistyClientHandle, MistyClientAccessor, MistyClientHandle},
     states::MistyStateTrait,
     MistyAsyncTask, MistyState,
 };
@@ -104,8 +104,8 @@ pub fn set_serve_music(app: MistyClientHandle, music: Music) {
     });
 }
 
-pub fn get_serve_music_url(app: MistyClientHandle, music: &Music) -> String {
-    let port = CurrentServerState::map(app, |state| state.port);
+pub fn get_serve_music_url<'a>(app: impl AsReadonlyMistyClientHandle<'a>, music: &Music) -> String {
+    let port = CurrentServerState::map(app.readonly_handle(), |state| state.port);
     let addr = format!("http://127.0.0.1:{}/music/{}", port, music.id().as_ref());
     addr
 }

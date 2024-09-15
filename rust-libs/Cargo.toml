@@ -6,6 +6,7 @@ members = [
     "ease-remote-storage",
     "ease-client",
     "ease-client-test",
+    "ease-client-backend",
     "ease-client-music-player",
     "ease-client-android-ffi-builder",
 ]
