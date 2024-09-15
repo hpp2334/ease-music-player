@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
+use ease_client_shared::{MusicId, PlaylistId};
 use misty_vm::views::MistyViewModelManagerBuilder;
 
 use crate::{
     core_views::RootViewModelState,
-    modules::{MusicId, PlaylistId},
     utils::{cmp_name_smartly, decode_component_or_origin},
 };
 
@@ -13,7 +13,6 @@ use super::{
         entry_can_check, get_entry_type, CurrentStorageState, EditStorageState, StoragesState,
     },
     typ::*,
-    StorageType,
 };
 
 fn storage_list_view_model(state: &StoragesState, root: &mut RootViewModelState) {

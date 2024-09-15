@@ -5,18 +5,15 @@ use std::{
     time::Duration,
 };
 
-use ease_remote_storage::{Backend, BuildWebdavArg, Entry, LocalBackend, StreamFile, Webdav};
+use ease_client_shared::{ArgUpsertStorage, MusicId, StorageEntry, StorageEntryType, StorageId};
+
 use misty_vm::{
-    async_task::MistyAsyncTaskTrait,
-    client::{AsReadonlyMistyClientHandle, MistyClientHandle},
-    services::MistyServiceTrait,
-    states::MistyStateTrait,
-    MistyAsyncTask, MistyState,
+    async_task::MistyAsyncTaskTrait, client::MistyClientHandle, services::MistyServiceTrait,
+    states::MistyStateTrait, MistyAsyncTask, MistyState,
 };
 
 use crate::{
     modules::{
-        app::service::get_has_local_storage_permission,
         error::{EaseError, EaseResult, EASE_RESULT_NIL},
         music::service::{get_current_music_id, import_selected_lyric_in_music},
         playlist::service::{
@@ -24,32 +21,18 @@ use crate::{
             import_selected_cover_in_edit_playlist, import_selected_entries_in_create_playlist,
             import_selected_entries_to_current_playlist, remove_musics_in_playlists_by_storage,
         },
-        storage::repository::db_upsert_storage,
         timer::to_host::TimerService,
-        MusicId, PlaylistId,
     },
     utils::cmp_name_smartly,
 };
 
-use super::{
-    repository::{
-        db_init_local_storage_db_if_not_exist, db_load_storage, db_load_storage_infos,
-        db_remove_storage,
-    },
-    typ::*,
-    StorageType,
-};
+use super::typ::*;
 
 #[derive(Default, MistyState)]
 pub struct StoragesState {
     pub storage_ids: HashSet<StorageId>,
     pub storage_infos: Vec<StorageInfo>,
     pub is_init: bool,
-}
-
-#[derive(Default, MistyState)]
-pub struct StorageBackendStaticState {
-    backend_map: HashMap<StorageId, Arc<dyn Backend + Send + Sync>>,
 }
 
 #[derive(Default, Clone, MistyState)]
@@ -74,14 +57,13 @@ pub struct EditStorageState {
     pub title: String,
     pub info: ArgUpsertStorage,
     pub test: StorageConnectionTestResult,
-    pub tuple_maps: HashMap<PlaylistId, Vec<MusicId>>,
     pub update_signal: u16,
 }
 
 #[derive(Debug, MistyAsyncTask)]
 struct LocateEntryOnceAsyncTask;
 
-pub fn get_entry_type(entry: &Entry) -> StorageEntryType {
+pub fn get_entry_type(entry: &StorageEntry) -> StorageEntryType {
     const MUSIC_EXTS: [&str; 5] = [".wav", ".mp3", ".aac", ".flac", ".ogg"];
     const IMAGE_EXTS: [&str; 3] = [".jpg", ".jpeg", ".png"];
     const LYRIC_EXTS: [&str; 1] = [".lrc"];
@@ -117,7 +99,7 @@ fn can_multi_select(import_type: CurrentStorageImportType) -> bool {
     }
 }
 
-pub(super) fn entry_can_check(entry: &Entry, import_type: CurrentStorageImportType) -> bool {
+pub(super) fn entry_can_check(entry: &StorageEntry, import_type: CurrentStorageImportType) -> bool {
     let entry_type = get_entry_type(entry);
 
     match import_type {
@@ -137,7 +119,8 @@ pub fn locate_entry_impl(
     path: String,
     candidate_path: String,
 ) -> EaseResult<()> {
-    let backend: Arc<dyn Backend + Send + Sync> = get_storage_backend(client, storage_id.clone())?;
+    let backend: Arc<dyn StorageBackend + Send + Sync> =
+        get_storage_backend(client, storage_id.clone())?;
 
     let current_path = path.to_string();
     CurrentStorageState::update(client, |state| {
@@ -162,19 +145,6 @@ pub fn locate_entry_impl(
                 return EASE_RESULT_NIL;
             }
 
-            let is_local = StoragesState::map(client, |state| {
-                state
-                    .storage_infos
-                    .iter()
-                    .any(|v| v.typ == StorageType::Local && v.id == storage_id)
-            });
-            let has_local_permission = get_has_local_storage_permission(client);
-            if is_local && !has_local_permission {
-                CurrentStorageState::update(client, |state| {
-                    state.state_type = CurrentStorageStateType::NeedPermission;
-                });
-                return EASE_RESULT_NIL;
-            }
             if let Err(e) = list {
                 tracing::error!("{:?}", e);
                 if e.is_unauthorized() {
@@ -206,7 +176,8 @@ pub fn locate_entry_impl(
 }
 
 fn refresh_storage_in_import(client: MistyClientHandle, storage_id: StorageId) -> EaseResult<()> {
-    let backend: Arc<dyn Backend + Send + Sync> = get_storage_backend(client, storage_id.clone())?;
+    let backend: Arc<dyn StorageBackend + Send + Sync> =
+        get_storage_backend(client, storage_id.clone())?;
 
     let last_path = StoragesRecordState::map(client, |state| {
         state.last_locate_path.get(&storage_id).map(|p| p.clone())
@@ -240,9 +211,9 @@ fn leave_storage(client: MistyClientHandle) {
     });
 }
 
-fn get_checked_entries(client: MistyClientHandle) -> Vec<Entry> {
+fn get_checked_entries(client: MistyClientHandle) -> Vec<StorageEntry> {
     let entries = CurrentStorageState::map(client, |state| {
-        let ret: Vec<Entry> = state
+        let ret: Vec<StorageEntry> = state
             .entries
             .clone()
             .into_iter()
@@ -251,12 +222,6 @@ fn get_checked_entries(client: MistyClientHandle) -> Vec<Entry> {
         return ret;
     });
     return entries;
-}
-
-fn clear_storage_backend_cache(app: MistyClientHandle, id: StorageId) {
-    StorageBackendStaticState::update(app, |state| {
-        state.backend_map.remove(&id);
-    });
 }
 
 pub fn prepare_edit_storage(
@@ -298,17 +263,14 @@ pub fn prepare_edit_storage(
 }
 
 pub fn upsert_storage(app: MistyClientHandle, arg: ArgUpsertStorage) -> EaseResult<()> {
-    tracing::info!("storage with addr {} is upsert", arg.addr);
     let id = arg.id.clone();
     db_upsert_storage(app, arg)?;
-    if let Some(id) = id {
-        clear_storage_backend_cache(app, id);
-    }
-    update_storages_state(app, true)?;
+
+    reload_storages_state(app, true)?;
     return EASE_RESULT_NIL;
 }
 
-pub fn update_storages_state(app: MistyClientHandle, force: bool) -> EaseResult<()> {
+pub fn reload_storages_state(app: MistyClientHandle, force: bool) -> EaseResult<()> {
     if !force {
         let is_init = StoragesState::map(app, |state: &StoragesState| state.is_init);
         if is_init {
@@ -335,87 +297,6 @@ pub fn update_storages_state(app: MistyClientHandle, force: bool) -> EaseResult<
         state.is_init = true;
     });
     return EASE_RESULT_NIL;
-}
-
-fn get_storage_backend<'a>(
-    app: impl AsReadonlyMistyClientHandle<'a>,
-    storage_id: StorageId,
-) -> EaseResult<Arc<dyn Backend + Send + Sync>> {
-    let cache_backend = StorageBackendStaticState::map(app.clone(), |backend_map_state| {
-        let cache_backend = backend_map_state
-            .backend_map
-            .get(&storage_id)
-            .map(|v| v.clone());
-        cache_backend
-    });
-    if cache_backend.is_some() {
-        return Ok(cache_backend.unwrap());
-    }
-
-    let storage = db_load_storage(app, storage_id)?;
-
-    let connect_timeout = Duration::from_secs(5);
-
-    let ret: Arc<dyn Backend + Send + Sync + 'static> = match storage.typ() {
-        StorageType::Local => Arc::new(LocalBackend::new()),
-        StorageType::Webdav => {
-            let arg = BuildWebdavArg {
-                addr: storage.addr().to_string(),
-                username: storage.username().to_string(),
-                password: storage.password().to_string(),
-                is_anonymous: storage.is_anonymous(),
-                connect_timeout,
-            };
-            Arc::new(Webdav::new(arg))
-        }
-        StorageType::Ftp => {
-            unimplemented!()
-        }
-    };
-
-    let cloned_ret = ret.clone();
-    app.readonly_handle()
-        .schedule(move |app| -> EaseResult<()> {
-            StorageBackendStaticState::update(app, |backend_map_state| {
-                backend_map_state.backend_map.insert(storage_id, cloned_ret);
-            });
-            Ok(())
-        });
-    return Ok(ret);
-}
-
-pub async fn load_storage_entry_data(
-    app: impl AsReadonlyMistyClientHandle<'_>,
-    storage_id: StorageId,
-    path: String,
-) -> EaseResult<StreamFile> {
-    let backend = get_storage_backend(app, storage_id)?;
-    let data = backend.get(&path).await?;
-    Ok(data)
-}
-
-fn get_storage_backend_by_upsert_arg(
-    arg: ArgUpsertStorage,
-) -> EaseResult<Arc<dyn Backend + Send + Sync>> {
-    let connect_timeout = Duration::from_secs(5);
-
-    let ret: Arc<dyn Backend + Send + Sync + 'static> = match arg.typ {
-        StorageType::Local => Arc::new(LocalBackend::new()),
-        StorageType::Webdav => {
-            let arg = BuildWebdavArg {
-                addr: arg.addr,
-                username: arg.username,
-                password: arg.password,
-                is_anonymous: arg.is_anonymous,
-                connect_timeout,
-            };
-            Arc::new(Webdav::new(arg))
-        }
-        StorageType::Ftp => {
-            unimplemented!()
-        }
-    };
-    return Ok(ret);
 }
 
 pub fn toggle_all_checked_entries(app: MistyClientHandle) {
@@ -456,11 +337,6 @@ pub fn select_entry(app: MistyClientHandle, path: String) {
             set.insert(path);
         }
     });
-}
-
-pub fn init_local_storage_db_if_not_exist(client: MistyClientHandle) -> EaseResult<()> {
-    db_init_local_storage_db_if_not_exist(client)?;
-    Ok(())
 }
 
 pub fn select_storage_in_import(client: MistyClientHandle, id: StorageId) -> EaseResult<()> {
@@ -504,7 +380,7 @@ pub fn refresh_current_storage_in_import(client: MistyClientHandle) -> EaseResul
 pub(super) fn remove_storage(client: MistyClientHandle, storage_id: StorageId) -> EaseResult<()> {
     remove_musics_in_playlists_by_storage(client, storage_id)?;
     db_remove_storage(client, storage_id)?;
-    update_storages_state(client, true)?;
+    reload_storages_state(client, true)?;
     Ok(())
 }
 

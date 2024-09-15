@@ -1,8 +1,8 @@
+use ease_client_shared::PlaylistId;
 use misty_vm::controllers::MistyControllerContext;
 
 use crate::modules::error::EaseResult;
 use crate::modules::error::EASE_RESULT_NIL;
-use crate::modules::music::MusicId;
 
 use super::service::*;
 use super::typ::*;

@@ -1,8 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use ease_client_music_player::{parse_lrc, Lyrics, MTag};
-use ease_remote_storage::{Entry, StreamFile};
+use ease_client_shared::{MusicDuration, MusicId, PlaylistId, StorageEntry, StorageId};
 use misty_vm::{
     async_task::MistyAsyncTaskTrait,
     client::{AsReadonlyMistyClientHandle, MistyClientHandle},
@@ -14,34 +13,17 @@ use misty_vm::{
 
 use crate::modules::{
     error::{EaseError, EaseResult, EASE_RESULT_NIL},
-    playlist::{
-        service::{
-            change_current_playlist, get_current_playlist_id, get_playlist,
-            update_playlists_state_by_music_cover_change,
-            update_playlists_state_by_music_duration_change,
-        },
-        PlaylistId, PlaylistMusic,
+    playlist::service::{
+        change_current_playlist, get_current_playlist_id, get_playlist,
+        update_playlists_state_by_music_duration_change,
     },
     preference::service::{get_playmode, update_playmode},
-    server::service::{get_serve_music_url, set_serve_music},
-    storage::{
-        service::{enter_storages_to_import, load_storage_entry_data},
-        StorageId,
-    },
+    storage::service::enter_storages_to_import,
     timer::to_host::TimerService,
     CurrentStorageImportType, PlayMode,
 };
 
-use super::{
-    repository::{
-        db_add_music, db_load_music, db_load_music_picture, db_remove_music_lyric,
-        db_update_music_lyric, db_update_music_picture, db_update_music_picture_and_duration,
-        db_update_music_total_duration, ArgDBAddMusic, MusicDuration,
-    },
-    to_host::MusicPlayerService,
-    typ::*,
-    Music,
-};
+use super::{to_host::MusicPlayerService, typ::*};
 
 #[derive(Default, Clone, MistyState)]
 pub struct CurrentMusicState {
@@ -52,14 +34,9 @@ pub struct CurrentMusicState {
     pub lyric_line_index: i32,
     pub can_play_next: bool,
     pub can_play_previous: bool,
-    pub prev_cover: Option<MistyResourceHandle>,
-    pub next_cover: Option<MistyResourceHandle>,
+    pub prev_id: Option<MusicId>,
+    pub next_id: Option<MusicId>,
     pub loading: bool,
-}
-
-#[derive(Default, MistyState)]
-pub struct CachedMusicCoverHandlesState {
-    map: HashMap<MusicId, MistyResourceHandle>,
 }
 
 #[derive(Default, Clone, MistyState)]
@@ -69,13 +46,6 @@ pub struct TimeToPauseState {
     pub left: u64,
 }
 
-#[derive(Default, Clone, MistyState)]
-pub struct CurrentMusicAssetState {
-    pub cover_buf: Option<MistyResourceHandle>,
-    pub lyric_load_state: LyricLoadState,
-    pub lyric: Option<Arc<Lyrics>>,
-}
-
 struct ChangeMusicInfo {
     can_play_next: bool,
     next_index: usize,
@@ -83,26 +53,7 @@ struct ChangeMusicInfo {
     prev_index: usize,
     prev_cover: Option<MistyResourceHandle>,
     next_cover: Option<MistyResourceHandle>,
-    ordered_musics: Vec<PlaylistMusic>,
-}
-
-fn insert_resource_handle(
-    client: MistyClientHandle,
-    id: MusicId,
-    buf: Vec<u8>,
-) -> MistyResourceHandle {
-    let cached = CachedMusicCoverHandlesState::map(client, move |state| {
-        return state.map.get(&id).map(|p| p.clone());
-    });
-    if cached.is_some() && *cached.clone().unwrap().load() == buf {
-        return cached.unwrap();
-    }
-
-    let handle = client.resource_manager().insert(buf);
-    CachedMusicCoverHandlesState::update(client, |state| {
-        state.map.insert(id, handle.clone());
-    });
-    handle
+    music_metas: Vec<MusicMeta>,
 }
 
 fn is_current_music_match(client: MistyClientHandle, id: MusicId) -> bool {
@@ -176,14 +127,6 @@ fn compute_change_music_info(
     })
 }
 
-pub async fn load_music_data(
-    client: impl AsReadonlyMistyClientHandle<'_>,
-    music: Music,
-) -> EaseResult<StreamFile> {
-    let data = load_storage_entry_data(client, music.entry().0, music.entry().1.clone()).await?;
-    return Ok(data);
-}
-
 const EXTS: [&str; 4] = [".mp3", ".wav", ".flac", ".acc"];
 
 fn get_display_name(name: &str) -> String {
@@ -194,24 +137,6 @@ fn get_display_name(name: &str) -> String {
         }
     }
     return name.to_string();
-}
-
-pub fn entries_to_musics(
-    client: MistyClientHandle,
-    storage_id: StorageId,
-    entries: Vec<Entry>,
-) -> EaseResult<Vec<Music>> {
-    let mut ret: Vec<Music> = Default::default();
-    for entry in entries {
-        let arg = ArgDBAddMusic {
-            storage_id: storage_id.clone(),
-            path: entry.path.clone(),
-            title: get_display_name(&entry.name),
-        };
-        let music = db_add_music(client, arg)?;
-        ret.push(music);
-    }
-    return Ok(ret);
 }
 
 pub fn update_current_music_playing(client: MistyClientHandle, playing: bool) {
@@ -305,7 +230,6 @@ fn play_music_impl(
         return Ok(());
     }
 
-    set_serve_music(client, music.clone());
     CurrentMusicState::update(client, |state| {
         state.music = Some(music.clone());
         state.current_playlist_id = Some(playlist_id);
@@ -322,8 +246,8 @@ fn play_music_impl(
     CurrentMusicState::update(client, |state| {
         state.can_play_next = can_change_next;
         state.can_play_previous = can_change_prev;
-        state.prev_cover = prev_cover;
-        state.next_cover = next_cover;
+        state.prev_id = prev_cover;
+        state.next_id = next_cover;
     });
     reload_current_music_picture(client)?;
     schedule_download_current_music_picture(client)?;
@@ -557,68 +481,6 @@ pub fn update_time_to_pause(client: MistyClientHandle, duration: u64) {
     });
 }
 
-#[derive(Debug, MistyAsyncTask)]
-struct UpdateMusicMetadataWhenPlayingAsyncTask;
-
-fn reload_current_music_picture(client: MistyClientHandle) -> EaseResult<()> {
-    let music = CurrentMusicState::map(client, |state| state.music.clone());
-    if music.is_none() {
-        return Ok(());
-    }
-    let music = music.unwrap();
-    if let Some(pic) = db_load_music_picture(client, music.id())? {
-        let cover_handle = insert_resource_handle(client, music.id(), pic.to_vec());
-        CurrentMusicAssetState::update(client, |state| {
-            state.cover_buf = Some(cover_handle);
-        });
-    } else {
-        CurrentMusicAssetState::update(client, |state| {
-            state.cover_buf = None;
-        });
-    }
-    Ok(())
-}
-
-fn schedule_download_current_music_picture(client: MistyClientHandle) -> EaseResult<()> {
-    let music = CurrentMusicState::map(client, |state| state.music.clone());
-    if music.is_none() {
-        return Ok(());
-    }
-    let music = music.unwrap();
-
-    UpdateMusicMetadataWhenPlayingAsyncTask::spawn_once(client, |ctx| async move {
-        let id = music.id();
-        let metadata = {
-            let handle = ctx.handle();
-            let handle = handle.handle();
-            get_music_metadata(handle, music).await?
-        };
-
-        ctx.schedule(move |client| -> EaseResult<()> {
-            let curr_music_now = CurrentMusicState::map(client, |state| state.music.clone());
-            if curr_music_now.is_none() || curr_music_now.as_ref().unwrap().id() != id.clone() {
-                return Ok(());
-            }
-            let pic = metadata.as_ref().map(|m| m.buf.clone()).unwrap_or_default();
-            let prev_pic = CurrentMusicAssetState::map(client, |state| state.cover_buf.clone())
-                .map(|handle| Bytes::copy_from_slice(handle.load()));
-            if prev_pic == pic {
-                return Ok(());
-            }
-
-            let pic = pic.map(|buf| insert_resource_handle(client, id, buf.to_vec()));
-
-            CurrentMusicAssetState::update(client, |state| {
-                state.cover_buf = pic;
-            });
-            db_update_music_picture(client, id, &metadata)?;
-            Ok(())
-        });
-        EASE_RESULT_NIL
-    });
-    Ok(())
-}
-
 pub(super) fn prepare_import_lyrics_to_current_music(client: MistyClientHandle) -> EaseResult<()> {
     enter_storages_to_import(client, CurrentStorageImportType::CurrentMusicLyrics)?;
     Ok(())
@@ -628,7 +490,7 @@ pub fn import_selected_lyric_in_music(
     client: MistyClientHandle,
     id: MusicId,
     storage_id: StorageId,
-    entry: Entry,
+    entry: StorageEntry,
 ) -> EaseResult<()> {
     let path = entry.path;
     db_update_music_lyric(client, id, storage_id, path.clone())?;

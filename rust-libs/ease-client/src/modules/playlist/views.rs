@@ -10,7 +10,6 @@ use crate::{
 use super::{
     service::{AllPlaylistState, CreatePlaylistState, CurrentPlaylistState, EditPlaylistState},
     typ::*,
-    Playlist,
 };
 
 fn playlist_list_view_model(state: &AllPlaylistState, root: &mut RootViewModelState) {

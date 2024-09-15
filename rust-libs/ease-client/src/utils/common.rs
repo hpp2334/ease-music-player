@@ -1,4 +1,4 @@
-use crate::modules::music::repository::MusicDuration;
+use ease_client_shared::MusicDuration;
 
 pub fn get_display_duration(duration: &Option<MusicDuration>) -> String {
     if duration.is_none() {
@@ -11,13 +11,4 @@ pub fn get_display_duration(duration: &Option<MusicDuration>) -> String {
     let seconds = duration.as_secs() % 60;
 
     return format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
-}
-
-pub fn decode_component_or_origin(s: String) -> String {
-    let res = urlencoding::decode(&s);
-    if let Ok(res) = res {
-        res.to_string()
-    } else {
-        s
-    }
 }

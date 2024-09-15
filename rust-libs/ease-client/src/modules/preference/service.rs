@@ -3,10 +3,7 @@ use misty_vm::{
     states::MistyStateTrait,
 };
 
-use crate::modules::{
-    app::service::{load_preference_data, save_preference_data},
-    error::{EaseResult, EASE_RESULT_NIL},
-};
+use crate::modules::error::{EaseResult, EASE_RESULT_NIL};
 
 use super::{PlayMode, PreferenceState};
 

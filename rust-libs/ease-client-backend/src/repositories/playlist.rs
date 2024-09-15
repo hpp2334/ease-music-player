@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
+use ease_client_shared::{MusicId, PlaylistId, StorageId};
 use ease_database::{params, DbConnectionRef};
 
 use crate::models::{
-    music::MusicId,
-    playlist::{PlaylistId, PlaylistModel, PlaylistMusicModel},
-    storage::StorageId,
+    playlist::{PlaylistModel, PlaylistMusicModel},
+    storage::StorageEntryLocModel,
 };
 
 pub struct ArgDBUpsertPlaylist {
@@ -89,138 +89,32 @@ pub fn db_load_playlists(conn: DbConnectionRef) -> anyhow::Result<Vec<PlaylistMo
     Ok(playlist_models)
 }
 
-fn db_load_playlists_impl(app: MistyClientHandle) -> anyhow::Result<HashMap<PlaylistId, Playlist>> {
-    let conn = get_db_conn_v2(app)?;
-    let playlist_models = conn.query::<PlaylistModel>(
-        r#"
-        SELECT id, title, picture, created_time FROM playlist;
-    "#,
-        [],
-    )?;
-
-    let mut playlists: HashMap<PlaylistId, Playlist> = playlist_models
-        .into_iter()
-        .map(|model| Playlist {
-            model,
-            musics: Default::default(),
-            ordered_music_ids: Default::default(),
-            self_picture: Default::default(),
-            picture_owning_music: Default::default(),
-            first_picture_in_musics: Default::default(),
-        })
-        .map(|mut p| {
-            if let Some(picture) = p.model.picture.take() {
-                p.self_picture = Some(app.resource_manager().insert(picture));
-            }
-            (p.model.id, p)
-        })
-        .collect();
-
-    for (music_id, playlist_id, first_picture) in
-        db_load_first_music_cover_in_playlist_impl(conn.get_ref(), app.resource_manager())?
-            .into_iter()
-    {
-        if let Some(p) = playlists.get_mut(&playlist_id) {
-            p.first_picture_in_musics = Some(first_picture);
-            p.picture_owning_music = Some(music_id);
-        }
-    }
-
-    for (id, playlist_music) in db_load_playlist_musics(conn.get_ref())?.into_iter() {
-        if let Some(p) = playlists.get_mut(&playlist_music.playlist_id()) {
-            p.musics.insert(id, playlist_music);
-        }
-    }
-
-    for (_, p) in playlists.iter_mut() {
-        recalc_playlist_ordered_music_ids(p);
-    }
-
-    return Ok(playlists);
-}
-
-pub type FirstMusicCovers = HashMap<PlaylistId, Option<Vec<u8>>>;
+pub type FirstMusicCovers = HashMap<PlaylistId, StorageEntryLocModel>;
 
 pub fn db_load_first_music_covers(conn: DbConnectionRef) -> anyhow::Result<FirstMusicCovers> {
-    let list = conn.query::<(MusicId, PlaylistId, Option<Vec<u8>>)>(
+    let list = conn.query::<(MusicId, PlaylistId, Option<String>, Option<StorageId>)>(
         r#"
-    SELECT music_id, playlist_id, picture
+    SELECT music_id, playlist_id, picture_path, picture_storage_id
     FROM playlist_music
     JOIN music ON music.id = playlist_music.music_id
-    WHERE music.picture NOT NULL
+    WHERE music.picture_path NOT NULL
     GROUP BY playlist_id;
 "#,
         [],
     )?;
 
-    let map: FirstMusicCovers = list.into_iter().map(|v| (v.1, v.2)).collect();
+    let map: FirstMusicCovers = list.into_iter().map(|v| (v.1, (v.2, v.3))).collect();
     Ok(map)
 }
 
-pub(in crate::modules::playlist) fn db_get_playlist_music_tuples(
-    client: MistyClientHandle,
+pub fn db_remove_musics_in_playlists_by_storage(
+    conn: DbConnectionRef,
     storage_id: StorageId,
-) -> EaseResult<HashMap<PlaylistId, Vec<MusicId>>> {
-    let conn = get_db_conn_v2(client)?;
-
-    let tuples = conn.query::<(PlaylistId, MusicId)>(
-        r#"
-    SELECT playlist_id, music_id FROM playlist_music
-    WHERE music_id IN (SELECT id FROM music WHERE storage_id = ?1)
-    "#,
-        params![storage_id],
-    )?;
-
-    let mut map: HashMap<PlaylistId, Vec<MusicId>> = Default::default();
-    for (playlist_id, music_id) in tuples.into_iter() {
-        map.entry(playlist_id).or_default().push(music_id);
-    }
-
-    Ok(map)
-}
-
-pub(in crate::modules::playlist) fn db_remove_musics_in_playlists_by_storage(
-    client: MistyClientHandle,
-    storage_id: StorageId,
-) -> EaseResult<()> {
-    let conn = get_db_conn_v2(client)?;
-
+) -> anyhow::Result<()> {
     conn.execute(
         r#"DELETE FROM playlist_music
     WHERE id IN (SELECT id FROM music WHERE storage_id = ?1)"#,
         params![storage_id],
     )?;
     Ok(())
-}
-
-fn db_load_playlist_musics(conn: DbConnectionRef) -> EaseResult<HashMap<MusicId, PlaylistMusic>> {
-    let list = conn.query::<(MusicId, String, Option<MusicDuration>, PlaylistId)>(
-        r#"
-        SELECT music.id, title, duration, playlist_id
-        FROM music
-        JOIN playlist_music ON music.id = playlist_music.music_id
-    "#,
-        [],
-    )?;
-
-    let list: Vec<PlaylistMusic> = list
-        .into_iter()
-        .map(|(id, title, duration, playlist_id)| PlaylistMusic {
-            model: PlaylistMusicModel {
-                playlist_id,
-                music_id: id,
-            },
-            title,
-            duration,
-        })
-        .collect();
-
-    let musics: HashMap<MusicId, PlaylistMusic> = list
-        .into_iter()
-        .map(|music| {
-            return (music.music_id(), music);
-        })
-        .collect();
-
-    return Ok(musics);
 }

@@ -1,3 +1,4 @@
+use ease_client_shared::MusicDuration;
 use misty_vm::resources::MistyResourceId;
 
 use crate::{
@@ -5,7 +6,6 @@ use crate::{
 };
 
 use super::{
-    repository::MusicDuration,
     service::{CurrentMusicAssetState, CurrentMusicState, TimeToPauseState},
     typ::*,
 };
@@ -36,12 +36,12 @@ pub fn current_music_view_model(
         can_play_next: state.can_play_next,
         can_play_previous: state.can_play_previous,
         previous_cover: *state
-            .prev_cover
+            .prev_id
             .as_ref()
             .map(|p| p.id())
             .unwrap_or(MistyResourceId::invalid()),
         next_cover: *state
-            .next_cover
+            .next_id
             .as_ref()
             .map(|p| p.id())
             .unwrap_or(MistyResourceId::invalid()),

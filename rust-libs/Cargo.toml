@@ -3,10 +3,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "ease-database",
+    "ease-client-shared",
     "ease-remote-storage",
+    "ease-client-backend",
     "ease-client",
     "ease-client-test",
-    "ease-client-backend",
-    "ease-client-music-player",
     "ease-client-android-ffi-builder",
 ]

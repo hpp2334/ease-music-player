@@ -1,21 +1,19 @@
 use std::{collections::HashMap, time::Duration};
 
+use ease_client_shared::{MusicId, PlaylistId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::{result::ChannelResult, schema::IMessage},
     ctx::Context,
     define_message,
-    models::{
-        music::MusicId,
-        playlist::{PlaylistId, PlaylistModel},
-    },
+    models::playlist::PlaylistModel,
     repositories::{
         core::get_conn,
         music::{db_add_music, db_load_music_metas_by_playlist_id, ArgDBAddMusic},
         playlist::{
             db_batch_add_music_to_playlist, db_load_first_music_covers, db_load_playlists,
-            db_upsert_playlist, ArgDBUpsertPlaylist, FirstMusicCovers,
+            db_remove_music_from_playlist, db_remove_playlist, db_upsert_playlist,
+            ArgDBUpsertPlaylist, FirstMusicCovers,
         },
     },
 };
@@ -23,14 +21,14 @@ use crate::{
 use super::{
     code::Code,
     music::{build_music_meta, MusicMeta},
-    storage::StorageEntry,
+    storage::{to_opt_storage_entry, StorageEntryLoc},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlaylistMeta {
     pub id: PlaylistId,
     pub title: String,
-    pub cover_url: String,
+    pub cover_loc: Option<StorageEntryLoc>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,29 +37,21 @@ pub struct Playlist {
     pub musics: Vec<MusicMeta>,
 }
 
-fn build_playlist_meta(
-    cx: &Context,
-    model: PlaylistModel,
-    first_covers: &FirstMusicCovers,
-) -> PlaylistMeta {
-    let cover = if let Some(picture) = model.picture {
-        Some(picture)
-    } else {
-        first_covers
-            .get(&model.id)
-            .map(|c| c.clone())
-            .unwrap_or_default()
-    };
-    let cover_url = if let Some(cover) = cover {
-        cx.server.add_image(cover)
-    } else {
-        Default::default()
-    };
-
+fn build_playlist_meta(model: PlaylistModel, first_covers: &FirstMusicCovers) -> PlaylistMeta {
+    let cover_loc =
+        if let Some(picture) = to_opt_storage_entry(model.picture_path, model.picture_storage_id) {
+            Some(picture)
+        } else {
+            let loc = first_covers
+                .get(&model.id)
+                .map(|c| c.clone())
+                .unwrap_or_default();
+            to_opt_storage_entry(loc.0, loc.1)
+        };
     PlaylistMeta {
         id: model.id,
         title: model.title,
-        cover_url,
+        cover_loc,
     }
 }
 
@@ -81,7 +71,7 @@ pub(crate) async fn cr_get_all_playlist_metas(
 
     let ret: Vec<PlaylistMeta> = models
         .into_iter()
-        .map(|model| build_playlist_meta(&cx, model, &first_covers))
+        .map(|model| build_playlist_meta(model, &first_covers))
         .collect();
     Ok(ret)
 }
@@ -105,7 +95,7 @@ pub(crate) async fn cr_get_playlist(
         return Ok(None);
     }
     let model = model.unwrap();
-    let meta = build_playlist_meta(&cx, model, &first_covers);
+    let meta = build_playlist_meta(model, &first_covers);
 
     let musics = db_load_music_metas_by_playlist_id(conn.get_ref(), arg)?;
     let musics = musics.into_iter().map(|v| build_music_meta(v)).collect();
@@ -117,16 +107,16 @@ pub(crate) async fn cr_get_playlist(
 pub struct ArgUpdatePlaylist {
     id: PlaylistId,
     title: String,
-    picture: Option<StorageEntry>,
+    picture: Option<StorageEntryLoc>,
     current_time_ms: i64,
 }
 define_message!(
     UpdatePlaylistMsg,
-    Code::UpdatePlaylist,
+    Code::UpsertPlaylist,
     ArgUpdatePlaylist,
     ()
 );
-pub(crate) async fn cr_update_playlist(cx: Context, arg: ArgUpdatePlaylist) -> anyhow::Result<()> {
+pub(crate) async fn ccu_upsert_playlist(cx: Context, arg: ArgUpdatePlaylist) -> anyhow::Result<()> {
     let conn = get_conn(&cx)?;
     let current_time_ms = arg.current_time_ms;
     let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
@@ -134,22 +124,22 @@ pub(crate) async fn cr_update_playlist(cx: Context, arg: ArgUpdatePlaylist) -> a
         title: arg.title,
         picture: arg.picture.map(|v| (v.storage_id, v.path)),
     };
-    db_upsert_playlist(conn.get_ref(), arg, current_time_ms);
+    db_upsert_playlist(conn.get_ref(), arg, current_time_ms)?;
     Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgAddMusicsToPlaylist {
     id: PlaylistId,
-    entries: Vec<(StorageEntry, String)>,
+    entries: Vec<(StorageEntryLoc, String)>,
 }
 define_message!(
-    AddMusicsToPlaylist,
+    AddMusicsToPlaylistMsg,
     Code::AddMusicsToPlaylist,
     ArgAddMusicsToPlaylist,
     ()
 );
-pub(crate) async fn cr_add_musics_to_playlist(
+pub(crate) async fn cu_add_musics_to_playlist(
     cx: Context,
     arg: ArgAddMusicsToPlaylist,
 ) -> anyhow::Result<()> {
@@ -169,6 +159,39 @@ pub(crate) async fn cr_add_musics_to_playlist(
         musics.push((music_id, playlist_id));
     }
     db_batch_add_music_to_playlist(conn.get_ref(), musics)?;
+
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArgRemoveMusicFromPlaylist {
+    playlist_id: PlaylistId,
+    music_id: MusicId,
+}
+define_message!(
+    RemoveMusicsToPlaylistMsg,
+    Code::RemoveMusicFromPlaylist,
+    ArgRemoveMusicFromPlaylist,
+    ()
+);
+pub(crate) async fn cd_remove_music_from_playlist(
+    cx: Context,
+    arg: ArgRemoveMusicFromPlaylist,
+) -> anyhow::Result<()> {
+    let conn = get_conn(&cx)?;
+    db_remove_music_from_playlist(conn.get_ref(), arg.playlist_id, arg.music_id)?;
+    Ok(())
+}
+
+define_message!(RemovePlaylistMsg, Code::RemovePlaylist, PlaylistId, ());
+pub(crate) async fn cd_remove_playlist(cx: Context, arg: PlaylistId) -> anyhow::Result<()> {
+    let conn = get_conn(&cx)?;
+    let musics = db_load_music_metas_by_playlist_id(conn.get_ref(), arg)?;
+
+    for music in musics {
+        db_remove_music_from_playlist(conn.get_ref(), arg, music.id)?;
+    }
+    db_remove_playlist(conn.get_ref(), arg)?;
 
     Ok(())
 }

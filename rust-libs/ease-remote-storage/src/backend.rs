@@ -64,7 +64,7 @@ impl BackendError {
 }
 
 #[async_trait]
-pub trait Backend {
+pub trait StorageBackend {
     async fn list(&self, dir: &str) -> BackendResult<Vec<Entry>>;
     async fn remove(&self, p: &str);
     async fn get(&self, p: &str) -> BackendResult<StreamFile>;

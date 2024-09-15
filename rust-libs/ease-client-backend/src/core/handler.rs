@@ -1,9 +1,12 @@
 use futures::future::BoxFuture;
-use std::{any::Any, collections::HashMap, sync::Arc};
+use std::{any::Any, collections::HashMap, future::Future, sync::Arc};
 
-use super::result::{ChannelError, ChannelResult};
+use super::{
+    result::{ChannelError, ChannelResult},
+    schema::IMessage,
+};
 
-pub type HandlerPayload = Box<dyn Any + Send + 'static>;
+pub type HandlerPayload = Vec<u8>;
 
 pub trait IHandler<S>: Send + Sync + 'static {
     fn process(&self, state: S, arg: HandlerPayload) -> BoxFuture<anyhow::Result<HandlerPayload>>;
@@ -67,6 +70,10 @@ where
     where
         H: IHandler<S>,
     {
+        if self.registry.contains_key(&code) {
+            let name = std::any::type_name::<H>();
+            panic!("code {code} has registered, handler is {name}");
+        }
         self.registry.insert(code, BoxedHandler::new(handler));
         self
     }
@@ -95,7 +102,7 @@ where
 macro_rules! generate_handler {
     ($stype: ident, $m: ident, $h: ident) => {
         {
-            mod __handler__ {
+            mod __misty_handler__ {
                 pub struct $m;
                 impl crate::core::handler::IHandler<super::$stype> for $m {
                     fn process(
@@ -105,12 +112,10 @@ macro_rules! generate_handler {
                     ) -> futures::future::BoxFuture<anyhow::Result<crate::core::handler::HandlerPayload>>
                     {
                         Box::pin(async {
-                            let arg = *arg
-                                .downcast::<<super::$m as crate::core::schema::IMessage>::Argument>()
-                                .unwrap();
+                            let arg = crate::core::schema::decode_message_payload::<<super::$m as crate::core::schema::IMessage>::Argument>(arg)?;
                             let ret = super::$h(state, arg).await;
-                            let ret: Box<dyn std::any::Any + Send + 'static> = match ret {
-                                Ok(ret) => Box::new(ret),
+                            let ret = match ret {
+                                Ok(ret) => crate::core::schema::encode_message_payload(ret)?,
                                 Err(e) => return Err(e),
                             };
                             Ok(ret)
@@ -118,7 +123,25 @@ macro_rules! generate_handler {
                     }
                 }
             }
-            (<$m as crate::core::schema::IMessage>::CODE as u32, __handler__::$m)
+            (<$m as crate::core::schema::IMessage>::CODE as u32, __misty_handler__::$m)
         }
     }
+}
+
+#[macro_export]
+macro_rules! generate_handlers {
+    ($stype: ident, $($m: ident, $h: ident),*) => {
+        {
+        crate::core::handler::HandlersBuilder::<$stype>::new()
+           $(
+
+            .add(crate::generate_handler!(
+                $stype,
+                $m,
+                $h
+            ))
+           )*
+           .build()
+        }
+    };
 }

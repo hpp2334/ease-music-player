@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use ease_remote_storage::Entry;
+use ease_client_shared::{MusicId, PlaylistId, StorageEntry, StorageId};
 use misty_vm::{
     async_task::MistyAsyncTaskTrait, client::MistyClientHandle, resources::MistyResourceHandle,
     services::MistyServiceTrait, states::MistyStateTrait, MistyAsyncTask, MistyState,
@@ -12,34 +12,20 @@ use misty_vm::{
 
 use crate::modules::{
     error::{EaseError, EaseResult, EASE_RESULT_NIL},
-    music::{
-        repository::MusicDuration,
-        service::{
-            clear_current_music_state_if_invalid, entries_to_musics, play_music,
-            schedule_download_musics_metadata_when_importing,
-        },
-        Music, MusicId,
+    music::service::{
+        clear_current_music_state_if_invalid, play_music,
+        schedule_download_musics_metadata_when_importing,
     },
-    storage::service::{enter_storages_to_import, get_entry_type, load_storage_entry_data},
+    storage::service::{enter_storages_to_import, get_entry_type},
     timer::to_host::TimerService,
-    CurrentStorageImportType, StorageEntryType, StorageId,
+    CurrentStorageImportType,
 };
 
-use super::{
-    repository::{
-        db_batch_add_music_to_playlist, db_get_playlist_music_tuples,
-        db_load_first_music_cover_in_playlist, db_load_playlists_full,
-        db_load_single_playlist_full, db_remove_all_musics_in_playlist,
-        db_remove_music_from_playlist, db_remove_musics_in_playlists_by_storage,
-        db_remove_playlist, db_upsert_playlist, ArgDBUpsertPlaylist,
-    },
-    typ::*,
-    Playlist,
-};
+use super::typ::*;
 
 #[derive(Default, MistyState)]
 pub struct AllPlaylistState {
-    pub map: HashMap<PlaylistId, Arc<Playlist>>,
+    pub list: Vec<PlaylistMeta>,
 }
 
 #[derive(Default, MistyState)]
@@ -175,54 +161,6 @@ pub fn update_playlists_state_by_music_duration_change(
     });
 }
 
-pub fn update_playlists_state_by_music_cover_change(
-    app: MistyClientHandle,
-    music_id: MusicId,
-    cover: Option<MistyResourceHandle>,
-) -> EaseResult<()> {
-    let mut to_update: HashMap<PlaylistId, Playlist> = AllPlaylistState::map(app, |state| {
-        state
-            .map
-            .clone()
-            .into_iter()
-            .filter(|(_, p)| p.musics().contains_key(&music_id))
-            .map(|(id, p)| (id, Playlist::clone(&p)))
-            .collect()
-    });
-
-    if let Some(cover) = cover {
-        for (_, p) in to_update.iter_mut() {
-            if p.first_picture_in_musics().is_none() {
-                // TODO: more elegant API
-                p.set_preferred_music_cover(Some(music_id), Some(cover.clone()));
-            }
-        }
-    } else {
-        let mut should_reload: HashSet<PlaylistId> = Default::default();
-        for (_, p) in to_update.iter_mut() {
-            if *p.picture_owning_music() == Some(music_id) {
-                p.set_preferred_music_cover(None, None);
-                should_reload.insert(p.id());
-            }
-        }
-
-        for (music_id, playlist_id, cover) in db_load_first_music_cover_in_playlist(app)? {
-            if should_reload.contains(&playlist_id) && to_update.contains_key(&playlist_id) {
-                let playlist = to_update.get_mut(&playlist_id).unwrap();
-                playlist.set_preferred_music_cover(Some(music_id), Some(cover));
-            }
-        }
-    }
-
-    AllPlaylistState::update(app, |state| {
-        for (_, p) in to_update {
-            state.map.insert(p.id(), Arc::new(p));
-        }
-    });
-
-    Ok(())
-}
-
 pub fn initialize_all_playlist_state(app: MistyClientHandle) -> EaseResult<()> {
     let playlists = db_load_playlists_full(app)?;
 
@@ -245,10 +183,6 @@ pub fn change_current_playlist(app: MistyClientHandle, playlist_id: PlaylistId) 
 pub(super) fn prepare_import_entries_in_current_playlist(app: MistyClientHandle) -> EaseResult<()> {
     enter_storages_to_import(app, CurrentStorageImportType::Musics)?;
     Ok(())
-}
-
-pub fn get_playlist(app: MistyClientHandle, playlist_id: PlaylistId) -> Option<Arc<Playlist>> {
-    AllPlaylistState::map(app, |state| state.map.get(&playlist_id).map(|p| p.clone()))
 }
 
 pub fn remove_music_from_current_playlist(
@@ -293,7 +227,7 @@ pub fn play_all_musics(app: MistyClientHandle) -> EaseResult<()> {
 pub fn import_selected_entries_to_current_playlist(
     app: MistyClientHandle,
     storage_id: StorageId,
-    entries: Vec<Entry>,
+    entries: Vec<StorageEntry>,
 ) -> EaseResult<()> {
     let playlist_id = get_playlist_id(app)?;
     let entries = entries

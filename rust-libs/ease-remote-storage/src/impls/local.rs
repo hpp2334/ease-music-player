@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use tokio::io::AsyncReadExt;
 
-use crate::{Backend, BackendResult, Entry, StreamFile};
+use crate::{StorageBackend, BackendResult, Entry, StreamFile};
 
 pub struct LocalBackend;
 
@@ -78,7 +78,7 @@ pub fn set_global_local_storage_path(p: String) {
 }
 
 #[async_trait]
-impl Backend for LocalBackend {
+impl StorageBackend for LocalBackend {
     async fn list(&self, dir: &str) -> BackendResult<Vec<Entry>> {
         self.list_impl(dir).await
     }
@@ -97,7 +97,7 @@ impl Backend for LocalBackend {
 
 #[cfg(test)]
 mod test {
-    use crate::{Backend, LocalBackend};
+    use crate::{StorageBackend, LocalBackend};
 
     #[tokio::test]
     async fn test_list_dir() {

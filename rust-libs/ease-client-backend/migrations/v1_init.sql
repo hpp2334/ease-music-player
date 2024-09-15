@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS playlist (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     title TEXT NOT NULL,
     created_time INTEGER NOT NULL,
-    picture BLOB
+    picture_storage_id INTEGER,
+    picture_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS music (
@@ -21,7 +22,6 @@ CREATE TABLE IF NOT EXISTS music (
     storage_id INTEGER NOT NULL,
     title TEXT NOT NULL,
     duration BIGINT,
-    picture BLOB,
     lyric_storage_id INTEGER,
     lyric_path TEXT,
     picture_storage_id INTEGER,

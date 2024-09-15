@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use ease_client_shared::MusicId;
 use misty_vm::controllers::MistyControllerContext;
 
 use crate::modules::error::EaseResult;

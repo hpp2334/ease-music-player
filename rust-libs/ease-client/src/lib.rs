@@ -5,6 +5,7 @@ pub(crate) mod utils;
 
 use core_views::with_view_models;
 pub use core_views::RootViewModelState;
+use ease_client_shared::uniffi;
 pub use misty_vm::resources::ResourceUpdateAction;
 pub use misty_vm::{
     client::{MistyClientHandle, SingletonMistyClientPod},

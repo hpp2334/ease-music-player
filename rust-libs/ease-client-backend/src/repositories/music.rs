@@ -1,13 +1,10 @@
 use std::time::Duration;
 
 use bytes::Bytes;
+use ease_client_shared::{MusicDuration, MusicId, PlaylistId, StorageId};
 use ease_database::{params, DbConnectionRef};
 
-use crate::models::{
-    music::{MusicId, MusicModel},
-    playlist::PlaylistId,
-    storage::StorageId,
-};
+use crate::models::{music::MusicModel, storage::StorageEntryLocModel};
 
 pub fn db_load_music_metas_by_playlist_id(
     conn: DbConnectionRef,
@@ -24,9 +21,11 @@ pub fn db_load_music_metas_by_playlist_id(
     Ok(models)
 }
 
-pub fn db_load_music(client: MistyClientHandle, music_id: MusicId) -> EaseResult<Option<Music>> {
-    let conn = get_db_conn_v2(client)?;
-    let models = conn
+pub fn db_load_music(
+    conn: DbConnectionRef,
+    music_id: MusicId,
+) -> anyhow::Result<Option<MusicModel>> {
+    let model = conn
         .query::<MusicModel>(
             r#"
         SELECT * FROM music WHERE id = ?1
@@ -35,22 +34,7 @@ pub fn db_load_music(client: MistyClientHandle, music_id: MusicId) -> EaseResult
         )?
         .pop();
 
-    Ok(models.map(|model| build_music(client, model)))
-}
-
-pub fn db_load_music_picture(
-    client: MistyClientHandle,
-    music_id: MusicId,
-) -> EaseResult<Option<Bytes>> {
-    let conn = get_db_conn_v2(client)?;
-
-    let pic_info = conn
-        .query::<Option<Vec<u8>>>("SELECT picture FROM music WHERE id = ?1", params![music_id])?
-        .pop()
-        .unwrap_or_default()
-        .map(|buf| Bytes::from(buf));
-
-    Ok(pic_info)
+    Ok(model)
 }
 
 fn db_load_music_by_key(
@@ -95,13 +79,10 @@ pub fn db_add_music(conn: DbConnectionRef, arg: ArgDBAddMusic) -> anyhow::Result
 }
 
 pub fn db_update_music_total_duration(
-    client: MistyClientHandle,
+    conn: DbConnectionRef,
     id: MusicId,
-    duration: Duration,
-) -> EaseResult<()> {
-    let conn = get_db_conn_v2(client)?;
-    let duration = MusicDuration::new(duration);
-
+    duration: MusicDuration,
+) -> anyhow::Result<()> {
     conn.execute(
         "UPDATE music set duration = ?1 WHERE id = ?2",
         params![duration, id],
@@ -110,87 +91,27 @@ pub fn db_update_music_total_duration(
     Ok(())
 }
 
-fn db_update_music_picture_impl(
+pub fn db_update_music_cover(
     conn: DbConnectionRef,
     id: MusicId,
-    metadata: &Option<MusicMeta>,
+    cover_loc: StorageEntryLocModel,
 ) -> ease_database::Result<()> {
-    let buf = metadata
-        .as_ref()
-        .map(|m| m.buf.clone())
-        .unwrap_or_default()
-        .map(|buf| buf.to_vec());
-
     conn.execute(
-        "UPDATE music set picture = ?2 WHERE id = ?1",
-        params![id, buf],
+        "UPDATE music set picture_path = ?1, picture_storage_id = ?2 WHERE id = ?3",
+        params![cover_loc.0, cover_loc.1, id],
     )?;
 
     Ok(())
 }
 
-fn db_update_music_duration_by_metadata_impl(
+pub fn db_update_music_lyric(
     conn: DbConnectionRef,
     id: MusicId,
-    metadata: &Option<MusicMeta>,
-) -> ease_database::Result<()> {
-    let duration = metadata.as_ref().map(|m| m.duration).unwrap_or_default();
-    if let Some(duration) = duration {
-        conn.execute(
-            "UPDATE music set duration = ?2 WHERE id = ?1",
-            params![id.as_ref(), MusicDuration::new(duration)],
-        )?;
-    }
-    Ok(())
-}
-
-pub fn db_update_music_picture(
-    client: MistyClientHandle,
-    id: MusicId,
-    metadata: &Option<MusicMeta>,
-) -> EaseResult<()> {
-    let conn = get_db_conn_v2(client)?;
-    db_update_music_picture_impl(conn.get_ref(), id, metadata)?;
-    Ok(())
-}
-
-pub fn db_update_music_picture_and_duration(
-    client: MistyClientHandle,
-    id: MusicId,
-    metadata: &Option<MusicMeta>,
-) -> EaseResult<()> {
-    let mut conn = get_db_conn_v2(client)?;
-    conn.transaction(|conn| {
-        db_update_music_picture_impl(conn, id.clone(), &metadata)?;
-        db_update_music_duration_by_metadata_impl(conn, id.clone(), &metadata)
-    })?;
-    Ok(())
-}
-
-pub(in crate::modules::music) fn db_update_music_lyric(
-    client: MistyClientHandle,
-    id: MusicId,
-    lyric_storage_id: StorageId,
-    lyric_path: String,
-) -> EaseResult<()> {
-    let conn = get_db_conn_v2(client)?;
+    lyric_loc: StorageEntryLocModel,
+) -> anyhow::Result<()> {
     conn.execute(
         "UPDATE music set lyric_storage_id = ?2, lyric_path = ?3 WHERE id = ?1",
-        params![id, lyric_storage_id, lyric_path],
+        params![id, lyric_loc.1, lyric_loc.0],
     )?;
-    Ok(())
-}
-
-pub(in crate::modules::music) fn db_remove_music_lyric(
-    client: MistyClientHandle,
-    id: MusicId,
-) -> EaseResult<()> {
-    let conn = get_db_conn_v2(client)?;
-
-    conn.execute(
-        "UPDATE music set lyric_storage_id = ?2, lyric_path = ?3 WHERE id = ?1",
-        params![id.as_ref(), None::<i64>, None::<String>],
-    )?;
-
     Ok(())
 }

@@ -267,19 +267,28 @@ pub fn seek_music(arg: ArgSeekMusic) -> ApiRet {
 
 #[uniffi::export]
 pub fn set_current_music_position_for_player_internal(arg: u64) -> ApiRet {
-    let ret = call_controller(controller_set_current_music_position_for_player_internal, arg)?;
+    let ret = call_controller(
+        controller_set_current_music_position_for_player_internal,
+        arg,
+    )?;
     Ok(ret)
 }
 
 #[uniffi::export]
 pub fn update_current_music_total_duration_for_player_internal(arg: u64) -> ApiRet {
-    let ret = call_controller(controller_update_current_music_total_duration_for_player_internal, arg)?;
+    let ret = call_controller(
+        controller_update_current_music_total_duration_for_player_internal,
+        arg,
+    )?;
     Ok(ret)
 }
 
 #[uniffi::export]
 pub fn update_current_music_playing_for_player_internal(arg: bool) -> ApiRet {
-    let ret = call_controller(controller_update_current_music_playing_for_player_internal, arg)?;
+    let ret = call_controller(
+        controller_update_current_music_playing_for_player_internal,
+        arg,
+    )?;
     Ok(ret)
 }
 
@@ -522,4 +531,3 @@ pub fn test_connection(arg: ArgUpsertStorage) -> ApiRet {
     let ret = call_controller(controller_test_connection, arg)?;
     Ok(ret)
 }
-

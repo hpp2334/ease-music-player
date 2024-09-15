@@ -1,4 +1,4 @@
-use crate::backend::{Backend, BackendResult, Entry, StreamFile};
+use crate::backend::{StorageBackend, BackendResult, Entry, StreamFile};
 use crate::BackendError;
 
 use async_trait::async_trait;
@@ -278,7 +278,7 @@ impl Webdav {
 }
 
 #[async_trait]
-impl Backend for Webdav {
+impl StorageBackend for Webdav {
     async fn list(&self, dir: &str) -> BackendResult<Vec<Entry>> {
         self.list_with_retry_impl(dir).await
     }
@@ -302,7 +302,7 @@ mod test {
     use futures_util::{pin_mut, StreamExt};
     use tokio::task::JoinHandle;
 
-    use crate::backend::Backend;
+    use crate::backend::StorageBackend;
 
     use super::{BuildWebdavArg, Webdav};
 

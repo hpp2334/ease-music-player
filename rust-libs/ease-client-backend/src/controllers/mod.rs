@@ -1,27 +1,56 @@
-use playlist::{
-    cr_get_all_playlist_metas, cr_get_playlist, GetAllPlaylistMetasMsg, GetPlaylistMsg,
-};
+pub use music::*;
+pub use playlist::*;
+pub use storage::*;
 
 use crate::{
     core::{channel::MessageChannel, handler::HandlersBuilder},
     ctx::Context,
-    generate_handler,
+    generate_handlers,
 };
 
-pub mod code;
 pub mod music;
 pub mod playlist;
 pub mod storage;
 
 pub fn build_message_channel(cx: Context) -> MessageChannel<Context> {
-    let handlers = HandlersBuilder::<Context>::new()
-        .add(generate_handler!(
-            Context,
-            GetAllPlaylistMetasMsg,
-            cr_get_all_playlist_metas
-        ))
-        .add(generate_handler!(Context, GetPlaylistMsg, cr_get_playlist))
-        .build();
+    let handlers = generate_handlers!(
+        Context,
+        // Playlist
+        GetAllPlaylistMetasMsg,
+        cr_get_all_playlist_metas,
+        UpdatePlaylistMsg,
+        ccu_upsert_playlist,
+        AddMusicsToPlaylistMsg,
+        cu_add_musics_to_playlist,
+        RemoveMusicsToPlaylistMsg,
+        cd_remove_music_from_playlist,
+        RemovePlaylistMsg,
+        cd_remove_playlist,
+        // Music
+        GetMusicMsg,
+        cr_get_music,
+        UpdateMusicDurationMsg,
+        cu_update_music_duration,
+        UpdateMusicCoverMsg,
+        cu_update_music_cover,
+        UpdateMusicLyricMsg,
+        cu_update_music_lyric,
+        // Storage
+        UpsertStorageMsg,
+        ccu_upsert_storage,
+        ListStorageMsg,
+        cr_list_storage,
+        GetStorageMsg,
+        cr_get_storage,
+        GetToRemoveStorageRefsMsg,
+        cr_get_to_remove_storage_refs,
+        RemoveStorageMsg,
+        cd_remove_storage,
+        TestStorageMsg,
+        cr_test_storage,
+        ListStorageEntryChildrenMsg,
+        cr_list_storage_entry_children
+    );
 
     MessageChannel::<Context>::new(cx, handlers)
 }

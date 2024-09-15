@@ -1,9 +1,11 @@
 use serde::{de::DeserializeOwned, Serialize};
 
+use super::result::ChannelResult;
+
 pub trait IMessage {
     const CODE: u32;
-    type Argument: DeserializeOwned + Send + 'static;
-    type Return: Serialize + Send + 'static;
+    type Argument: Serialize + DeserializeOwned + Send + 'static;
+    type Return: Serialize + DeserializeOwned + Send + 'static;
 }
 
 #[macro_export]
@@ -16,4 +18,20 @@ macro_rules! define_message {
             type Return = $ret;
         }
     };
+}
+
+pub(crate) fn decode_message_payload<T>(arg: Vec<u8>) -> ChannelResult<T>
+where
+    T: Serialize + DeserializeOwned,
+{
+    let ret = rmp_serde::from_slice(arg.as_slice())?;
+    Ok(ret)
+}
+
+pub(crate) fn encode_message_payload<T>(arg: T) -> ChannelResult<Vec<u8>>
+where
+    T: Serialize + DeserializeOwned,
+{
+    let ret = rmp_serde::to_vec(&arg)?;
+    Ok(ret)
 }
