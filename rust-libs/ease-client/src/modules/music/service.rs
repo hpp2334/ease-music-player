@@ -416,10 +416,8 @@ pub fn clear_current_music_state_if_invalid(client: MistyClientHandle) {
         false
     } else {
         let rel_playlist = rel_playlist.unwrap();
-        rel_playlist
-            .musics
-            .iter()
-            .any(|m| m.id == &music_id.unwrap())
+        let music_id = music_id.unwrap();
+        rel_playlist.musics.iter().any(|m| m.id == music_id)
     };
     if !valid {
         stop_music(client);
@@ -443,6 +441,7 @@ pub fn update_time_to_pause(client: MistyClientHandle, duration: u64) {
         state.expired_time = start_time as u64 + duration;
     });
 
+    #[allow(unreachable_code)]
     TimeToPauseAsyncTask::spawn_once(client, |ctx| async move {
         loop {
             ctx.schedule(|client| {

@@ -7,15 +7,15 @@ use ease_client_shared::backends::music::*;
 use ease_client_shared::backends::playlist::*;
 use ease_client_shared::backends::storage::*;
 
-use crate::ctx::Context;
+use crate::ctx::BackendGlobal;
 
 pub mod music;
 pub mod playlist;
 pub mod storage;
 
-pub fn build_message_channel(cx: Context) -> MessageChannel<Context> {
+pub fn build_message_channel(cx: BackendGlobal) -> MessageChannel<BackendGlobal> {
     let handlers = generate_handlers!(
-        Context,
+        BackendGlobal,
         // Playlist
         GetAllPlaylistAbstractsMsg,
         cr_get_all_playlist_abstracts,
@@ -55,5 +55,5 @@ pub fn build_message_channel(cx: Context) -> MessageChannel<Context> {
         cr_list_storage_entry_children
     );
 
-    MessageChannel::<Context>::new(cx, handlers)
+    MessageChannel::<BackendGlobal>::new(cx, handlers)
 }

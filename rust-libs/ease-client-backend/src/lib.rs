@@ -1,4 +1,4 @@
-use ctx::Context;
+use ctx::BackendGlobal;
 
 pub(crate) mod controllers;
 pub(crate) mod ctx;
@@ -15,7 +15,7 @@ use misty_serve::{channel::MessageChannel, result::ChannelResult, schema::IMessa
 use services::app::app_bootstrap;
 
 pub struct Backend {
-    channel: MessageChannel<Context>,
+    channel: MessageChannel<BackendGlobal>,
 }
 
 impl Backend {

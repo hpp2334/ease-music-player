@@ -99,10 +99,15 @@ pub fn reload_all_playlists_state(cx: MistyClientHandle) -> EaseResult<()> {
 }
 
 pub fn reload_current_playlist_state(cx: MistyClientHandle) -> EaseResult<()> {
-    let id = CurrentPlaylistState::map(cx, |state| state.playlist.map(|p| p.meta.id));
+    let id = CurrentPlaylistState::map(cx, |state| state.playlist.map(|p| p.id()));
+    if id.is_none() {
+        return Ok(());
+    }
+    let id = id.unwrap();
+
     let backend = get_backend(cx);
-    GeneralAsyncTask::spawn(cx, |cx| async {
-        let playlist = backend.send::<GetPlaylistMsg>(()).await?;
+    GeneralAsyncTask::spawn(cx, move |cx| async move {
+        let playlist = backend.send::<GetPlaylistMsg>(id).await?;
 
         cx.schedule(|cx| {
             CurrentPlaylistState::update(cx, |state| {
@@ -116,9 +121,21 @@ pub fn reload_current_playlist_state(cx: MistyClientHandle) -> EaseResult<()> {
     return EASE_RESULT_NIL;
 }
 
-pub fn change_current_playlist(app: MistyClientHandle, playlist_id: PlaylistId) {
-    CurrentPlaylistState::update(app, |state| {
-        state.playlist = Some(playlist_id);
+pub fn change_current_playlist(cx: MistyClientHandle, playlist_id: PlaylistId) {
+    CurrentPlaylistState::update(cx, |state| {
+        state.playlist = None;
+    });
+    let backend = get_backend(cx);
+    GeneralAsyncTask::spawn(cx, move |cx| async move {
+        let playlist = backend.send::<GetPlaylistMsg>(playlist_id).await?;
+
+        cx.schedule(|cx| {
+            CurrentPlaylistState::update(cx, |state| {
+                state.playlist = playlist;
+            });
+            return EASE_RESULT_NIL;
+        });
+        return EASE_RESULT_NIL;
     });
 }
 
@@ -128,19 +145,19 @@ pub(super) fn prepare_import_entries_in_current_playlist(app: MistyClientHandle)
 }
 
 pub fn remove_music_from_current_playlist(
-    app: MistyClientHandle,
+    cx: MistyClientHandle,
     music_id: MusicId,
 ) -> EaseResult<()> {
-    let current_playlist_id = CurrentPlaylistState::map(app, |state| state.playlist.clone());
-    if current_playlist_id.is_none() {
+    let playlist = CurrentPlaylistState::map(cx, |state| state.playlist.clone());
+    if playlist.is_none() {
         return Ok(());
     }
+    let playlist = playlist.unwrap();
 
-    let playlist_id = current_playlist_id.unwrap();
-    db_remove_music_from_playlist(app, playlist_id, music_id)?;
+    db_remove_music_from_playlist(cx, playlist, music_id)?;
 
-    update_playlist_state_by_remove_music(app, playlist_id, music_id)?;
-    clear_current_music_state_if_invalid(app);
+    update_playlist_state_by_remove_music(cx, playlist, music_id)?;
+    clear_current_music_state_if_invalid(cx);
     Ok(())
 }
 

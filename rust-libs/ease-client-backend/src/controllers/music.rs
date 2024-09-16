@@ -7,7 +7,7 @@ use ease_client_shared::backends::{
 };
 
 use crate::{
-    ctx::Context,
+    ctx::BackendGlobal,
     error::BResult,
     repositories::{
         core::get_conn,
@@ -25,7 +25,7 @@ use crate::{
 
 use super::storage::{from_opt_storage_entry, load_storage_entry_data, to_opt_storage_entry};
 
-async fn load_lyric(cx: &Context, loc: Option<StorageEntryLoc>) -> Option<MusicLyric> {
+async fn load_lyric(cx: &BackendGlobal, loc: Option<StorageEntryLoc>) -> Option<MusicLyric> {
     if loc.is_none() {
         return None;
     }
@@ -52,7 +52,7 @@ async fn load_lyric(cx: &Context, loc: Option<StorageEntryLoc>) -> Option<MusicL
     Some(MusicLyric { loc, data: lyric })
 }
 
-pub(crate) async fn cr_get_music(cx: Context, id: MusicId) -> BResult<Option<Music>> {
+pub(crate) async fn cr_get_music(cx: BackendGlobal, id: MusicId) -> BResult<Option<Music>> {
     let conn = get_conn(&cx)?;
     let model = db_load_music(conn.get_ref(), id)?;
     if model.is_none() {
@@ -82,7 +82,7 @@ pub(crate) async fn cr_get_music(cx: Context, id: MusicId) -> BResult<Option<Mus
 }
 
 pub(crate) async fn cu_update_music_duration(
-    cx: Context,
+    cx: BackendGlobal,
     arg: ArgUpdateMusicDuration,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
@@ -90,14 +90,20 @@ pub(crate) async fn cu_update_music_duration(
     Ok(())
 }
 
-pub(crate) async fn cu_update_music_cover(cx: Context, arg: ArgUpdateMusicCover) -> BResult<()> {
+pub(crate) async fn cu_update_music_cover(
+    cx: BackendGlobal,
+    arg: ArgUpdateMusicCover,
+) -> BResult<()> {
     let conn = get_conn(&cx)?;
     let cover_loc = from_opt_storage_entry(arg.cover_loc);
     db_update_music_cover(conn.get_ref(), arg.id, cover_loc)?;
     Ok(())
 }
 
-pub(crate) async fn cu_update_music_lyric(cx: Context, arg: ArgUpdateMusicLyric) -> BResult<()> {
+pub(crate) async fn cu_update_music_lyric(
+    cx: BackendGlobal,
+    arg: ArgUpdateMusicLyric,
+) -> BResult<()> {
     let conn = get_conn(&cx)?;
     let cover_loc = from_opt_storage_entry(arg.lyric_loc);
     db_update_music_lyric(conn.get_ref(), arg.id, cover_loc)?;

@@ -4,7 +4,7 @@ use ease_client_shared::backends::storage::{
 };
 
 use crate::{
-    ctx::Context,
+    ctx::BackendGlobal,
     error::BResult,
     models::storage::StorageEntryLocModel,
     repositories::{
@@ -38,19 +38,19 @@ pub(crate) fn from_opt_storage_entry(loc: Option<StorageEntryLoc>) -> StorageEnt
 }
 
 pub(crate) async fn load_storage_entry_data(
-    cx: &Context,
+    cx: &BackendGlobal,
     loc: &StorageEntryLoc,
 ) -> BResult<Option<Vec<u8>>> {
     todo!()
 }
 
-pub async fn ccu_upsert_storage(cx: Context, arg: ArgUpsertStorage) -> BResult<()> {
+pub async fn ccu_upsert_storage(cx: BackendGlobal, arg: ArgUpsertStorage) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_upsert_storage(conn.get_ref(), arg)?;
     Ok(())
 }
 
-pub async fn cr_list_storage(cx: Context, _arg: ()) -> BResult<Vec<Storage>> {
+pub async fn cr_list_storage(cx: BackendGlobal, _arg: ()) -> BResult<Vec<Storage>> {
     let conn = get_conn(&cx)?;
     let models = db_load_storages(conn.get_ref())?;
     let storages = models.into_iter().map(|m| build_storage(m)).collect();
@@ -58,7 +58,7 @@ pub async fn cr_list_storage(cx: Context, _arg: ()) -> BResult<Vec<Storage>> {
     Ok(storages)
 }
 
-pub async fn cr_get_storage(cx: Context, id: StorageId) -> BResult<Option<Storage>> {
+pub async fn cr_get_storage(cx: BackendGlobal, id: StorageId) -> BResult<Option<Storage>> {
     let conn = get_conn(&cx)?;
     let model = db_load_storage(conn.get_ref(), id)?;
     let storage = if let Some(model) = model {
@@ -69,11 +69,11 @@ pub async fn cr_get_storage(cx: Context, id: StorageId) -> BResult<Option<Storag
     Ok(storage)
 }
 
-pub async fn cr_get_to_remove_storage_refs(cx: Context, id: StorageId) -> BResult<()> {
+pub async fn cr_get_to_remove_storage_refs(cx: BackendGlobal, id: StorageId) -> BResult<()> {
     todo!()
 }
 
-pub async fn cd_remove_storage(cx: Context, id: StorageId) -> BResult<()> {
+pub async fn cd_remove_storage(cx: BackendGlobal, id: StorageId) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
     db_remove_storage(conn.get_ref(), id)?;
@@ -81,14 +81,14 @@ pub async fn cd_remove_storage(cx: Context, id: StorageId) -> BResult<()> {
 }
 
 pub async fn cr_test_storage(
-    cx: Context,
+    cx: BackendGlobal,
     arg: ArgUpsertStorage,
 ) -> BResult<StorageConnectionTestResult> {
     todo!()
 }
 
 pub async fn cr_list_storage_entry_children(
-    cx: Context,
+    cx: BackendGlobal,
     arg: StorageEntryLoc,
 ) -> BResult<ListStorageEntryChildrenResp> {
     todo!()
