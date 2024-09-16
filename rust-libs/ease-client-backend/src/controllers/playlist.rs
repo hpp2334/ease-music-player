@@ -21,9 +21,10 @@ use crate::{
             ArgDBUpsertPlaylist, FirstMusicCovers,
         },
     },
+    services::music::build_music_meta,
 };
 
-use super::{music::build_music_meta, storage::to_opt_storage_entry};
+use super::storage::to_opt_storage_entry;
 
 fn build_playlist_meta(model: PlaylistModel, first_covers: &FirstMusicCovers) -> PlaylistMeta {
     let cover_loc =

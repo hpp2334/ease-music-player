@@ -22,7 +22,7 @@ pub fn build_storage(model: StorageModel) -> Storage {
 }
 
 pub fn get_storage_backend(
-    cx: Context,
+    cx: &Context,
     storage_id: StorageId,
 ) -> anyhow::Result<Option<Arc<dyn StorageBackend + Send + Sync>>> {
     let conn = get_conn(&cx)?;

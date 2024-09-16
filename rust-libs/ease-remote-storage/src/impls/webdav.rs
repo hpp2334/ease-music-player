@@ -1,4 +1,4 @@
-use crate::backend::{StorageBackend, BackendResult, Entry, StreamFile};
+use crate::backend::{BackendResult, Entry, StorageBackend, StreamFile};
 use crate::BackendError;
 
 use async_trait::async_trait;
@@ -390,7 +390,7 @@ mod test {
         assert_eq!(item.size, Some(3));
 
         let file = backend.get(&item.path).await.unwrap();
-        assert_eq!(file.get_size(), Some(3));
+        assert_eq!(file.size(), Some(3));
 
         let stream = file.into_stream();
         pin_mut!(stream);
@@ -427,7 +427,7 @@ mod test {
         assert_eq!(item.size, Some(3));
 
         let file = backend.get(&item.path).await.unwrap();
-        assert_eq!(file.get_size(), Some(3));
+        assert_eq!(file.size(), Some(3));
 
         let stream = file.into_stream();
         pin_mut!(stream);

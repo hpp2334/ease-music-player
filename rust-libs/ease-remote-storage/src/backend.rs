@@ -99,7 +99,7 @@ impl StreamFile {
             url: p.to_string(),
         }
     }
-    pub fn get_size(&self) -> Option<usize> {
+    pub fn size(&self) -> Option<usize> {
         self.total
     }
     pub fn content_type(&self) -> Option<&str> {

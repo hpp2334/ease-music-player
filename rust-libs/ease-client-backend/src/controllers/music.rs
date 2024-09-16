@@ -17,18 +17,10 @@ use crate::{
             db_update_music_total_duration,
         },
     },
-    services::lyrics::parse_lrc,
+    services::{lyrics::parse_lrc, music::build_music_meta},
 };
 
 use super::storage::{from_opt_storage_entry, load_storage_entry_data, to_opt_storage_entry};
-
-pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
-    MusicMeta {
-        id: model.id,
-        title: model.title,
-        duration: model.duration,
-    }
-}
 
 async fn load_lyric(cx: &Context, loc: Option<StorageEntryLoc>) -> Option<MusicLyric> {
     if loc.is_none() {

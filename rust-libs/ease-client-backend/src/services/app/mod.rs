@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ease_client_shared::backends::{app::ArgInitializeApp, preference::PreferenceData};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::Level;
@@ -83,8 +85,11 @@ pub fn app_bootstrap(arg: ArgInitializeApp) -> anyhow::Result<Context> {
         storage_path: arg.storage_path,
         app_document_dir: arg.app_document_dir,
         schema_version: arg.schema_version,
-        server_port: start_server(),
+        server_port: Arc::new(Default::default()),
     };
+    let port = start_server(&cx);
+    cx.server_port
+        .store(port, std::sync::atomic::Ordering::Relaxed);
 
     // Init
     init_persistent_state(&cx)?;
