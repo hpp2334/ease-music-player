@@ -4,33 +4,39 @@ use std::{
     time::Duration,
 };
 
-use ease_client_shared::{MusicId, PlaylistId, StorageEntry, StorageId};
+use ease_client_shared::{
+    backends::{
+        music::MusicId,
+        music_duration::MusicDuration,
+        playlist::{
+            AddMusicsToPlaylistMsg, ArgAddMusicsToPlaylist, GetAllPlaylistAbstractsMsg,
+            GetPlaylistMsg, Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta,
+        },
+        storage::{StorageEntry, StorageEntryType, StorageId},
+    },
+    uis::{playlist::CreatePlaylistMode, storage::CurrentStorageImportType},
+};
 use misty_vm::{
     async_task::MistyAsyncTaskTrait, client::MistyClientHandle, resources::MistyResourceHandle,
     services::MistyServiceTrait, states::MistyStateTrait, MistyAsyncTask, MistyState,
 };
 
 use crate::modules::{
+    app::service::get_backend,
     error::{EaseError, EaseResult, EASE_RESULT_NIL},
-    music::service::{
-        clear_current_music_state_if_invalid, play_music,
-        schedule_download_musics_metadata_when_importing,
-    },
+    music::service::{clear_current_music_state_if_invalid, play_music},
     storage::service::{enter_storages_to_import, get_entry_type},
     timer::to_host::TimerService,
-    CurrentStorageImportType,
 };
-
-use super::typ::*;
 
 #[derive(Default, MistyState)]
 pub struct AllPlaylistState {
-    pub list: Vec<PlaylistMeta>,
+    pub list: Vec<PlaylistAbstract>,
 }
 
 #[derive(Default, MistyState)]
 pub struct CurrentPlaylistState {
-    pub current_playlist_id: Option<PlaylistId>,
+    pub playlist: Option<Playlist>,
 }
 
 #[derive(Default, Clone, MistyState)]
@@ -44,7 +50,7 @@ pub struct EditPlaylistState {
 #[derive(Clone)]
 pub struct CreatePlaylistEntries {
     pub storage_id: StorageId,
-    pub entries: Vec<Entry>,
+    pub entries: Vec<StorageEntry>,
 }
 
 #[derive(Default, Clone, MistyState)]
@@ -58,125 +64,61 @@ pub struct CreatePlaylistState {
     pub full_imported: bool,
 }
 
-fn get_playlist_id(app: MistyClientHandle) -> EaseResult<PlaylistId> {
-    CurrentPlaylistState::map(app, |state| state.current_playlist_id)
-        .ok_or(EaseError::CurrentPlaylistNone)
-}
+#[derive(MistyAsyncTask)]
+struct GeneralAsyncTask;
 
 pub fn has_current_playlist(client: MistyClientHandle) -> bool {
     let current_playlist_id = CurrentPlaylistState::map(client, |state: &CurrentPlaylistState| {
-        state.current_playlist_id.clone()
+        state.playlist.clone()
     });
     current_playlist_id.is_some()
 }
 
-pub fn get_current_playlist_id(client: MistyClientHandle) -> Option<PlaylistId> {
+pub fn get_current_playlist(client: MistyClientHandle) -> Option<Playlist> {
     let current_playlist_id = CurrentPlaylistState::map(client, |state: &CurrentPlaylistState| {
-        state.current_playlist_id.clone()
+        state.playlist.clone()
     });
     current_playlist_id
 }
 
-fn update_playlist_state_by_create(app: MistyClientHandle, id: PlaylistId) -> EaseResult<()> {
-    let playlist = db_load_single_playlist_full(app, id)?;
-    if let Some(playlist) = playlist {
-        AllPlaylistState::update(app, |state| {
-            state.map.insert(id, Arc::new(playlist));
+pub fn reload_all_playlists_state(cx: MistyClientHandle) -> EaseResult<()> {
+    let backend = get_backend(cx);
+    GeneralAsyncTask::spawn(cx, |cx| async move {
+        let metas = backend.send::<GetAllPlaylistAbstractsMsg>(()).await?;
+
+        cx.schedule(|cx| {
+            AllPlaylistState::update(cx, |state| {
+                state.list = metas;
+            });
+            return EASE_RESULT_NIL;
         });
-    }
 
-    Ok(())
-}
-
-fn update_playlist_state_by_add_musics(
-    app: MistyClientHandle,
-    playlist_id: PlaylistId,
-    musics: Vec<Music>,
-) -> EaseResult<()> {
-    let playlist = get_playlist(app, playlist_id);
-    if playlist.is_none() {
-        return Ok(());
-    }
-    let mut playlist = Playlist::clone(&playlist.unwrap());
-    playlist.add_musics(musics);
-    AllPlaylistState::update(app, |state| {
-        state.map.insert(playlist_id, Arc::new(playlist));
+        return EASE_RESULT_NIL;
     });
-
-    Ok(())
+    return EASE_RESULT_NIL;
 }
 
-fn update_playlist_state_by_remove(
-    app: MistyClientHandle,
-    playlist_id: PlaylistId,
-) -> EaseResult<()> {
-    AllPlaylistState::update(app, |state| {
-        state.map.remove(&playlist_id);
-    });
-    Ok(())
-}
+pub fn reload_current_playlist_state(cx: MistyClientHandle) -> EaseResult<()> {
+    let id = CurrentPlaylistState::map(cx, |state| state.playlist.map(|p| p.meta.id));
+    let backend = get_backend(cx);
+    GeneralAsyncTask::spawn(cx, |cx| async {
+        let playlist = backend.send::<GetPlaylistMsg>(()).await?;
 
-fn update_playlist_state_by_remove_music(
-    app: MistyClientHandle,
-    playlist_id: PlaylistId,
-    music_id: MusicId,
-) -> EaseResult<()> {
-    let playlist = get_playlist(app, playlist_id);
-    if let Some(playlist) = playlist {
-        let mut playlist = Playlist::clone(&playlist);
-        playlist.remove_music(music_id);
-        AllPlaylistState::update(app, |state| {
-            state.map.insert(playlist_id, Arc::new(playlist));
+        cx.schedule(|cx| {
+            CurrentPlaylistState::update(cx, |state| {
+                state.playlist = playlist;
+            });
+            return EASE_RESULT_NIL;
         });
-    }
-    Ok(())
-}
 
-pub fn update_playlists_state_by_music_duration_change(
-    app: MistyClientHandle,
-    music_id: MusicId,
-    duration: Option<Duration>,
-) {
-    let mut to_update: Vec<Playlist> = AllPlaylistState::map(app, |state| {
-        state
-            .map
-            .clone()
-            .into_iter()
-            .filter(|(_, p)| p.musics().contains_key(&music_id))
-            .map(|(_, p)| Playlist::clone(&p))
-            .collect()
+        return EASE_RESULT_NIL;
     });
-
-    for p in to_update.iter_mut() {
-        p.set_music_duration(
-            music_id,
-            duration.map(|duration| MusicDuration::new(duration)),
-        );
-    }
-
-    AllPlaylistState::update(app, |state| {
-        for p in to_update {
-            state.map.insert(p.id(), Arc::new(p));
-        }
-    });
-}
-
-pub fn initialize_all_playlist_state(app: MistyClientHandle) -> EaseResult<()> {
-    let playlists = db_load_playlists_full(app)?;
-
-    let map: HashMap<PlaylistId, Arc<Playlist>> = playlists
-        .into_iter()
-        .map(|(id, playlist)| (id, Arc::new(playlist)))
-        .collect();
-    AllPlaylistState::update(app, |state| {
-        state.map = map;
-    });
-    Ok(())
+    return EASE_RESULT_NIL;
 }
 
 pub fn change_current_playlist(app: MistyClientHandle, playlist_id: PlaylistId) {
     CurrentPlaylistState::update(app, |state| {
-        state.current_playlist_id = Some(playlist_id);
+        state.playlist = Some(playlist_id);
     });
 }
 
@@ -189,8 +131,7 @@ pub fn remove_music_from_current_playlist(
     app: MistyClientHandle,
     music_id: MusicId,
 ) -> EaseResult<()> {
-    let current_playlist_id =
-        CurrentPlaylistState::map(app, |state| state.current_playlist_id.clone());
+    let current_playlist_id = CurrentPlaylistState::map(app, |state| state.playlist.clone());
     if current_playlist_id.is_none() {
         return Ok(());
     }
@@ -212,9 +153,8 @@ pub fn remove_playlist(app: MistyClientHandle, id: PlaylistId) -> EaseResult<()>
 }
 
 pub fn play_all_musics(app: MistyClientHandle) -> EaseResult<()> {
-    let playlist_id = CurrentPlaylistState::map(app, |state| state.current_playlist_id.clone());
-    let playlist_id = playlist_id.unwrap();
-    let playlist = get_playlist(app, playlist_id).unwrap();
+    let playlist = CurrentPlaylistState::map(app, |state| state.playlist.clone());
+    let playlist_id = playlist.unwrap();
     if playlist.musics().is_empty() {
         return Ok(());
     }
@@ -225,27 +165,37 @@ pub fn play_all_musics(app: MistyClientHandle) -> EaseResult<()> {
 }
 
 pub fn import_selected_entries_to_current_playlist(
-    app: MistyClientHandle,
+    cx: MistyClientHandle,
     storage_id: StorageId,
     entries: Vec<StorageEntry>,
 ) -> EaseResult<()> {
-    let playlist_id = get_playlist_id(app)?;
+    let backend = get_backend(cx);
+    let playlist_id = get_playlist(cx)?;
     let entries = entries
         .into_iter()
         .filter(|entry| get_entry_type(&entry) == StorageEntryType::Music)
         .collect();
+    let arg = ArgAddMusicsToPlaylist {
+        id: playlist_id,
+        entries: entries
+            .into_iter()
+            .map(|v| (StorageEntry {}, v.name))
+            .collect(),
+    };
+    GeneralAsyncTask::spawn(cx, |cx| async {
+        backend.send::<AddMusicsToPlaylistMsg>(arg).await?;
 
-    let musics = entries_to_musics(app, storage_id, entries)?;
-    schedule_download_musics_metadata_when_importing(app, musics.clone());
+        cx.schedule(reload_current_playlist_state);
+    });
 
     db_batch_add_music_to_playlist(
-        app,
+        cx,
         musics
             .iter()
             .map(|music| (music.id(), playlist_id))
             .collect(),
     )?;
-    update_playlist_state_by_add_musics(app, playlist_id, musics)?;
+    update_playlist_state_by_add_musics(cx, playlist_id, musics)?;
     Ok(())
 }
 
@@ -466,7 +416,7 @@ pub fn remove_musics_in_playlists_by_storage(
     storage_id: StorageId,
 ) -> EaseResult<()> {
     db_remove_musics_in_playlists_by_storage(client, storage_id)?;
-    initialize_all_playlist_state(client)?;
+    reload_all_playlist_state(client)?;
     Ok(())
 }
 

@@ -15,7 +15,7 @@ pub struct VPlaylistAbstractItem {
     pub title: String,
     pub count: i32,
     pub duration: String,
-    pub picture: Option<u64>,
+    pub cover_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, uniffi::Record)]
@@ -36,8 +36,7 @@ pub struct VCurrentPlaylistState {
     pub items: Vec<VPlaylistMusicItem>,
     pub title: String,
     pub duration: String,
-    pub picture: Option<u64>,
-    pub first_picture_in_musics: Option<u64>,
+    pub cover_url: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, uniffi::Record)]

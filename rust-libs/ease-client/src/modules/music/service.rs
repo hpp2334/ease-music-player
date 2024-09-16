@@ -1,7 +1,14 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use ease_client_shared::{MusicDuration, MusicId, PlaylistId, StorageEntry, StorageId};
+use ease_client_shared::{
+    backends::{
+        music::{Music, MusicId, MusicMeta},
+        playlist::{Playlist, PlaylistId},
+        storage::{StorageEntry, StorageId},
+    },
+    uis::{music::PlayMusicEventType, preference::PlayMode, storage::CurrentStorageImportType},
+};
 use misty_vm::{
     async_task::MistyAsyncTaskTrait,
     client::{AsReadonlyMistyClientHandle, MistyClientHandle},
@@ -13,29 +20,25 @@ use misty_vm::{
 
 use crate::modules::{
     error::{EaseError, EaseResult, EASE_RESULT_NIL},
-    playlist::service::{
-        change_current_playlist, get_current_playlist_id, get_playlist,
-        update_playlists_state_by_music_duration_change,
-    },
+    playlist::service::{change_current_playlist, get_current_playlist},
     preference::service::{get_playmode, update_playmode},
     storage::service::enter_storages_to_import,
     timer::to_host::TimerService,
-    CurrentStorageImportType, PlayMode,
 };
 
-use super::{to_host::MusicPlayerService, typ::*};
+use super::to_host::MusicPlayerService;
 
 #[derive(Default, Clone, MistyState)]
 pub struct CurrentMusicState {
     pub music: Option<Music>,
     pub current_duration: Duration,
-    pub current_playlist_id: Option<PlaylistId>,
+    pub current_playlist: Option<Playlist>,
     pub playing: bool,
     pub lyric_line_index: i32,
     pub can_play_next: bool,
     pub can_play_previous: bool,
-    pub prev_id: Option<MusicId>,
-    pub next_id: Option<MusicId>,
+    pub prev_music: Option<MusicId>,
+    pub next_music: Option<MusicId>,
     pub loading: bool,
 }
 
@@ -51,8 +54,8 @@ struct ChangeMusicInfo {
     next_index: usize,
     can_play_prev: bool,
     prev_index: usize,
-    prev_cover: Option<MistyResourceHandle>,
-    next_cover: Option<MistyResourceHandle>,
+    prev_music: Option<MusicId>,
+    next_music: Option<MusicId>,
     music_metas: Vec<MusicMeta>,
 }
 
@@ -77,12 +80,8 @@ fn compute_change_music_info(
         .map(|m| m.id())
         .ok_or(EaseError::CurrentMusicNone)?;
 
-    let ordered_musics = {
-        let playlist = get_playlist(client, state.current_playlist_id.clone().unwrap()).unwrap();
-        let orederd_musics = playlist.get_ordered_musics();
-        orederd_musics
-    };
-    let index = ordered_musics
+    let music_metas = state.current_playlist.unwrap().musics;
+    let index = music_metas
         .iter()
         .enumerate()
         .find(|(_, m)| m.music_id() == current_music_id)
@@ -91,27 +90,23 @@ fn compute_change_music_info(
     let loop_enabled = playmode == PlayMode::SingleLoop || playmode == PlayMode::ListLoop;
     let can_play_prev = loop_enabled || index > 0;
     let prev_index = if index == 0 {
-        ordered_musics.len() - 1
+        music_metas.len() - 1
     } else {
         index - 1
     };
-    let prev_cover = if can_play_prev {
-        let id = ordered_musics[prev_index].music_id();
-        let cover = db_load_music_picture(client, id)?;
-        cover.map(|buf| insert_resource_handle(client, id, buf.to_vec()))
+    let prev_music = if can_play_prev {
+        Some(music_metas[prev_index].id)
     } else {
         None
     };
-    let can_play_next = loop_enabled || index + 1 < ordered_musics.len();
-    let next_index = if index + 1 >= ordered_musics.len() {
+    let can_play_next = loop_enabled || index + 1 < music_metas.len();
+    let next_index = if index + 1 >= music_metas.len() {
         0
     } else {
         index + 1
     };
-    let next_cover = if can_play_next {
-        let id = ordered_musics[next_index].music_id();
-        let cover = db_load_music_picture(client, id)?;
-        cover.map(|buf| insert_resource_handle(client, id, buf.to_vec()))
+    let next_music = if can_play_next {
+        Some(music_metas[next_index].id)
     } else {
         None
     };
@@ -119,11 +114,11 @@ fn compute_change_music_info(
     Ok(ChangeMusicInfo {
         can_play_next,
         next_index,
-        next_cover,
+        next_music,
         can_play_prev,
         prev_index,
-        prev_cover,
-        ordered_musics,
+        prev_music,
+        music_metas,
     })
 }
 
@@ -159,7 +154,7 @@ pub fn pause_music(client: MistyClientHandle) {
 
 pub fn stop_music(client: MistyClientHandle) {
     CurrentMusicState::update(client, |state| {
-        state.current_playlist_id = None;
+        state.current_playlist = None;
         state.music = None;
     });
     MusicPlayerService::of(client).stop();
@@ -181,7 +176,7 @@ pub fn update_current_music_total_duration(
     duration: Duration,
 ) -> EaseResult<()> {
     let info = CurrentMusicState::map(client, |state| {
-        state.music.as_ref().map(|m| (m.id(), m.duration()))
+        state.music.as_ref().map(|m| (m.id, m.duration))
     });
     if info.is_none() {
         return Ok(());
@@ -219,7 +214,7 @@ fn play_music_impl(
     let (prev_current_music_id, prev_playlist_id) = CurrentMusicState::map(client, |state| {
         (
             state.music.as_ref().map(|m| m.id()),
-            state.current_playlist_id.clone(),
+            state.current_playlist.clone(),
         )
     });
     if prev_current_music_id.is_some()
@@ -232,24 +227,23 @@ fn play_music_impl(
 
     CurrentMusicState::update(client, |state| {
         state.music = Some(music.clone());
-        state.current_playlist_id = Some(playlist_id);
+        state.current_playlist = Some(playlist_id);
     });
     let next_state = CurrentMusicState::map(client, |state| state.clone());
     let playmode = get_playmode(client);
     let ChangeMusicInfo {
         can_play_next: can_change_next,
         can_play_prev: can_change_prev,
-        prev_cover,
-        next_cover,
+        prev_music,
+        next_music,
         ..
     } = compute_change_music_info(client, &next_state, playmode)?;
     CurrentMusicState::update(client, |state| {
         state.can_play_next = can_change_next;
         state.can_play_previous = can_change_prev;
-        state.prev_id = prev_cover;
-        state.next_id = next_cover;
+        state.prev_music = prev_music;
+        state.next_music = next_music;
     });
-    reload_current_music_picture(client)?;
     schedule_download_current_music_picture(client)?;
     clear_update_current_music_lyric(client);
     schedule_update_current_music_lyric(client);
@@ -259,7 +253,7 @@ fn play_music_impl(
 }
 
 pub fn play_music(client: MistyClientHandle, music_id: MusicId) -> EaseResult<()> {
-    let current_playlist_id = get_current_playlist_id(client);
+    let current_playlist_id = get_current_playlist(client);
 
     if let Some(playlist_id) = current_playlist_id {
         play_music_impl(client, music_id, playlist_id)?;
@@ -271,7 +265,7 @@ fn replay_current_music(client: MistyClientHandle) -> EaseResult<()> {
     let state = CurrentMusicState::map(client, |v| v.clone());
     let current_music_id = state.music.as_ref().map(|m| m.id()).unwrap();
     seek_music(client, 0);
-    play_music_impl(client, current_music_id, state.current_playlist_id.unwrap())?;
+    play_music_impl(client, current_music_id, state.current_playlist.unwrap())?;
     return EASE_RESULT_NIL;
 }
 
@@ -289,18 +283,18 @@ pub fn play_next_music(client: MistyClientHandle) -> EaseResult<()> {
     let ChangeMusicInfo {
         can_play_next,
         next_index,
-        ordered_musics,
+        music_metas,
         ..
     } = compute_change_music_info(client, &state, playmode)?;
     if !can_play_next {
         return EASE_RESULT_NIL;
     }
 
-    let next_music = &ordered_musics[next_index];
+    let next_music = &music_metas[next_index];
     play_music_impl(
         client,
         next_music.music_id(),
-        state.current_playlist_id.unwrap(),
+        state.current_playlist.unwrap(),
     )?;
     return EASE_RESULT_NIL;
 }
@@ -311,18 +305,18 @@ pub fn play_previous_music(client: MistyClientHandle) -> EaseResult<()> {
     let ChangeMusicInfo {
         can_play_prev,
         prev_index,
-        ordered_musics,
+        music_metas,
         ..
     } = compute_change_music_info(client, &state, playmode)?;
     if !can_play_prev {
         return EASE_RESULT_NIL;
     }
 
-    let next_music = &ordered_musics[prev_index];
+    let next_music = &music_metas[prev_index];
     play_music_impl(
         client,
         next_music.music_id(),
-        state.current_playlist_id.unwrap(),
+        state.current_playlist.unwrap(),
     )?;
     return EASE_RESULT_NIL;
 }
@@ -412,22 +406,20 @@ pub(super) fn update_music_play_mode_to_next(client: MistyClientHandle) -> EaseR
 }
 
 pub fn clear_current_music_state_if_invalid(client: MistyClientHandle) {
-    let (music_id, playlist_id) = CurrentMusicState::map(client, |state| {
+    let (music_id, rel_playlist) = CurrentMusicState::map(client, |state| {
         let music_id = state.music.as_ref().map(|m| m.id());
-        let playlist_id = state.current_playlist_id.clone();
+        let playlist = state.current_playlist.clone();
 
-        (music_id, playlist_id)
+        (music_id, playlist)
     });
-    let rel_playlist = if playlist_id.is_none() {
-        None
-    } else {
-        get_playlist(client, playlist_id.unwrap())
-    };
     let valid = if music_id.is_none() || rel_playlist.is_none() {
         false
     } else {
         let rel_playlist = rel_playlist.unwrap();
-        rel_playlist.musics().contains_key(&music_id.unwrap())
+        rel_playlist
+            .musics
+            .iter()
+            .any(|m| m.id == &music_id.unwrap())
     };
     if !valid {
         stop_music(client);
@@ -451,7 +443,6 @@ pub fn update_time_to_pause(client: MistyClientHandle, duration: u64) {
         state.expired_time = start_time as u64 + duration;
     });
 
-    #[allow(unreachable_code)]
     TimeToPauseAsyncTask::spawn_once(client, |ctx| async move {
         loop {
             ctx.schedule(|client| {
@@ -518,67 +509,6 @@ pub(super) fn remove_current_music_lyric(client: MistyClientHandle) -> EaseResul
 }
 
 #[derive(Debug, MistyAsyncTask)]
-struct UpdateMusicsMetadataWhenImportingAsyncTask;
-
-pub fn schedule_download_musics_metadata_when_importing(
-    client: MistyClientHandle,
-    musics: Vec<Music>,
-) {
-    UpdateMusicsMetadataWhenImportingAsyncTask::spawn_once(client, |ctx| async move {
-        for music in musics.into_iter() {
-            let id = music.id();
-            let metadata = {
-                let handle = ctx.handle();
-                let handle = handle.handle();
-                get_music_metadata(handle, music).await?
-            };
-
-            ctx.schedule(move |client| -> EaseResult<()> {
-                db_update_music_picture_and_duration(client, id, &metadata)?;
-
-                let duration = metadata.as_ref().map(|m| m.duration).unwrap_or_default();
-                let cover = metadata
-                    .map(|m| {
-                        m.buf
-                            .map(|buf| insert_resource_handle(client, id, buf.to_vec()))
-                    })
-                    .unwrap_or_default();
-                update_playlists_state_by_music_duration_change(client, id, duration);
-                update_playlists_state_by_music_cover_change(client, id, cover)?;
-                Ok(())
-            });
-        }
-        EaseResult::<()>::Ok(())
-    });
-}
-
-async fn get_music_metadata(
-    client: impl AsReadonlyMistyClientHandle<'_>,
-    music: Music,
-) -> EaseResult<Option<MusicMeta>> {
-    let stream_file = load_music_data(client, music.clone()).await?;
-    let chunk = if stream_file.url().ends_with(".mp3") {
-        stream_file.bytes().await?
-    } else {
-        stream_file.chunk_small().await?
-    };
-
-    let tag = MTag::read_from(chunk);
-    if let Err(_) = tag {
-        return Ok(None);
-    }
-    let tag = tag.unwrap();
-
-    let buf = tag.pic().map(|pic| pic.buf);
-
-    let metadata = MusicMeta {
-        buf,
-        duration: tag.duration(),
-    };
-    Ok(Some(metadata))
-}
-
-#[derive(Debug, MistyAsyncTask)]
 struct UpdateCurrentMusicLyricAsyncTask;
 
 fn clear_update_current_music_lyric(client: MistyClientHandle) {
@@ -588,89 +518,6 @@ fn clear_update_current_music_lyric(client: MistyClientHandle) {
     });
     CurrentMusicState::update(client, |state| {
         state.lyric_line_index = -1;
-    });
-}
-
-fn schedule_update_current_music_lyric(client: MistyClientHandle) {
-    let music = CurrentMusicState::map(client, |state| state.music.clone());
-    if music.is_none() {
-        return;
-    }
-    let music = music.unwrap();
-
-    CurrentMusicAssetState::update(client, |state| {
-        state.lyric_load_state = LyricLoadState::Loading;
-    });
-
-    UpdateCurrentMusicLyricAsyncTask::spawn_once(client, move |ctx| async move {
-        let mut stream_file: Option<StreamFile> = None;
-        let mut lyric_load_state = LyricLoadState::Loading;
-
-        if let Some((lyric_storage_id, lyric_path)) = music.lyric_entry() {
-            let data = {
-                let handle = ctx.handle();
-                let handle = handle.handle();
-                load_storage_entry_data(handle, lyric_storage_id, lyric_path.clone()).await
-            };
-
-            if let Err(e) = &data {
-                tracing::error!("load lyric fail, path: {}, error: {:?}", lyric_path, e);
-                if let EaseError::BackendError(e) = e {
-                    if e.is_not_found() {
-                        lyric_load_state = LyricLoadState::Missing;
-                    } else {
-                        lyric_load_state = LyricLoadState::Failed;
-                    }
-                } else {
-                    lyric_load_state = LyricLoadState::Failed;
-                }
-            } else {
-                stream_file = Some(data.unwrap());
-            }
-        } else {
-            lyric_load_state = LyricLoadState::Missing;
-        }
-
-        if stream_file.is_none() {
-            ctx.schedule(move |client| {
-                CurrentMusicAssetState::update(client, |state| {
-                    state.lyric_load_state = lyric_load_state;
-                });
-                return EASE_RESULT_NIL;
-            });
-            return EASE_RESULT_NIL;
-        }
-
-        let f = || async {
-            let data = stream_file.unwrap();
-            let lrc_data = data.bytes().await?;
-            let lrc_data = {
-                let lrc_data = String::from_utf8(lrc_data.to_vec())
-                    .map_err(|_| EaseError::OtherError("lyric to utf-8 error".to_string()))?;
-                let lrc_data = parse_lrc(lrc_data)?;
-                lrc_data
-            };
-
-            ctx.schedule(|client| {
-                CurrentMusicAssetState::update(client, |state: &mut CurrentMusicAssetState| {
-                    state.lyric_load_state = LyricLoadState::Loaded;
-                    state.lyric = Some(Arc::new(lrc_data));
-                });
-                return EASE_RESULT_NIL;
-            });
-            EASE_RESULT_NIL
-        };
-        let res = f().await;
-        if res.is_err() {
-            tracing::error!("update lyric fail: {}", res.unwrap_err());
-            ctx.schedule(|client| {
-                CurrentMusicAssetState::update(client, |state| {
-                    state.lyric_load_state = LyricLoadState::Failed;
-                });
-                return EASE_RESULT_NIL;
-            });
-        }
-        EASE_RESULT_NIL
     });
 }
 
@@ -697,7 +544,7 @@ fn update_current_music_lyric_index(client: MistyClientHandle) {
 }
 
 pub(super) fn change_to_current_music_playlist(client: MistyClientHandle) -> EaseResult<()> {
-    let playlist_id = CurrentMusicState::map(client, |state| state.current_playlist_id);
+    let playlist_id = CurrentMusicState::map(client, |state| state.current_playlist);
     if playlist_id.is_none() {
         return Ok(());
     }

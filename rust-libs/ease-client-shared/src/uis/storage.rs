@@ -1,6 +1,8 @@
 use serde::Serialize;
 
-use crate::backends::storage::{ArgUpsertStorage, StorageEntryType, StorageId, StorageType};
+use crate::backends::storage::{
+    ArgUpsertStorage, StorageConnectionTestResult, StorageEntryType, StorageId, StorageType,
+};
 
 #[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum CurrentStorageImportType {
@@ -10,17 +12,6 @@ pub enum CurrentStorageImportType {
     CreatePlaylistEntries,
     CreatePlaylistCover,
     CurrentMusicLyrics,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, uniffi::Enum)]
-pub enum StorageConnectionTestResult {
-    #[default]
-    None,
-    Testing,
-    Success,
-    Unauthorized,
-    Timeout,
-    OtherError,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, uniffi::Enum)]

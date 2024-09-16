@@ -4,8 +4,7 @@ pub mod modules;
 pub(crate) mod utils;
 
 use core_views::with_view_models;
-pub use core_views::RootViewModelState;
-use ease_client_shared::uniffi;
+use ease_client_shared::uis::view::RootViewModelState;
 pub use misty_vm::resources::ResourceUpdateAction;
 pub use misty_vm::{
     client::{MistyClientHandle, SingletonMistyClientPod},
@@ -18,19 +17,12 @@ pub use misty_vm::{
 use misty_vm::{misty_states, states::MistyStateManager};
 
 use crate::modules::{
-    app::service::GlobalAppState,
-    music::service::{
-        CachedMusicCoverHandlesState, CurrentMusicAssetState, CurrentMusicState, TimeToPauseState,
-    },
+    music::service::{CurrentMusicState, TimeToPauseState},
     playlist::service::{
         AllPlaylistState, CreatePlaylistState, CurrentPlaylistState, EditPlaylistState,
     },
     router::service::RouterState,
-    server::service::CurrentServerState,
-    storage::service::{
-        CurrentStorageState, EditStorageState, StorageBackendStaticState, StoragesRecordState,
-        StoragesState,
-    },
+    storage::service::{CurrentStorageState, EditStorageState, StoragesRecordState, StoragesState},
     PreferenceState,
 };
 
@@ -43,13 +35,9 @@ pub fn build_view_manager() -> MistyViewModelManager<RootViewModelState> {
 
 pub fn build_state_manager() -> MistyStateManager {
     MistyStateManager::new(misty_states!(
-        // App
-        GlobalAppState,
         // Music
         CurrentMusicState,
-        CachedMusicCoverHandlesState,
         TimeToPauseState,
-        CurrentMusicAssetState,
         // Playlist
         AllPlaylistState,
         CurrentPlaylistState,
@@ -59,11 +47,8 @@ pub fn build_state_manager() -> MistyStateManager {
         PreferenceState,
         // Router
         RouterState,
-        // Server
-        CurrentServerState,
         // Storage
         StoragesState,
-        StorageBackendStaticState,
         CurrentStorageState,
         StoragesRecordState,
         EditStorageState

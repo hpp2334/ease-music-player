@@ -1,12 +1,14 @@
 use std::time::Duration;
 
-use ease_client_shared::MusicId;
+use ease_client_shared::{
+    backends::music::MusicId,
+    uis::music::{ArgSeekMusic, PlayMusicEventType},
+};
 use misty_vm::controllers::MistyControllerContext;
 
 use crate::modules::error::EaseResult;
 
 use super::service::*;
-use super::typ::*;
 
 pub fn controller_play_music(ctx: MistyControllerContext, arg: MusicId) -> EaseResult<()> {
     play_music(ctx.handle(), arg)?;
@@ -26,11 +28,6 @@ pub fn controller_resume_music(ctx: MistyControllerContext, _arg: ()) -> EaseRes
 pub fn controller_stop_music(ctx: MistyControllerContext, _arg: ()) -> EaseResult<()> {
     stop_music(ctx.handle());
     Ok(())
-}
-
-#[derive(Debug, uniffi::Record)]
-pub struct ArgSeekMusic {
-    pub duration: u64,
 }
 
 pub fn controller_seek_music(ctx: MistyControllerContext, arg: ArgSeekMusic) -> EaseResult<()> {

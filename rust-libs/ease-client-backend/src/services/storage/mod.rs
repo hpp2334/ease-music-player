@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use crate::{
     ctx::Context,
+    error::BResult,
     models::storage::StorageModel,
     repositories::{core::get_conn, storage::db_load_storage},
 };
@@ -18,13 +19,15 @@ pub fn build_storage(model: StorageModel) -> Storage {
         password: model.password,
         is_anonymous: model.is_anonymous,
         typ: StorageType::from_i32(model.typ).unwrap(),
+        music_count: 0,
+        playlist_count: 0,
     }
 }
 
 pub fn get_storage_backend(
     cx: &Context,
     storage_id: StorageId,
-) -> anyhow::Result<Option<Arc<dyn StorageBackend + Send + Sync>>> {
+) -> BResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
     let conn = get_conn(&cx)?;
     let storage = db_load_storage(conn.get_ref(), storage_id)?;
     drop(conn);

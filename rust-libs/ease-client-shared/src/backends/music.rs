@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use misty_serve::define_message;
 use serde::{Deserialize, Serialize};
 
@@ -7,25 +9,39 @@ use super::{lyric::Lyrics, music_duration::MusicDuration, storage::StorageEntryL
 
 define_id!(MusicId);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MusicMeta {
     pub id: MusicId,
     pub title: String,
     pub duration: Option<MusicDuration>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MusicLyric {
     pub loc: StorageEntryLoc,
     pub data: Lyrics,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Music {
     pub meta: MusicMeta,
     pub loc: StorageEntryLoc,
-    pub picture_loc: Option<StorageEntryLoc>,
+    pub url: String,
+    pub cover_loc: Option<StorageEntryLoc>,
+    pub cover_url: String,
     pub lyric: Option<MusicLyric>,
+}
+
+impl Music {
+    pub fn id(&self) -> MusicId {
+        self.meta.id
+    }
+    pub fn duration(&self) -> Option<MusicDuration> {
+        self.meta.duration
+    }
+    pub fn title(&self) -> &str {
+        &self.meta.title
+    }
 }
 
 define_message!(GetMusicMsg, Code::GetMusic, MusicId, ());

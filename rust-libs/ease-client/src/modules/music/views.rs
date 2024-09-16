@@ -1,14 +1,12 @@
-use ease_client_shared::MusicDuration;
+use ease_client_shared::uis::{
+    music::{VCurrentMusicState, VTimeToPauseState},
+    view::RootViewModelState,
+};
 use misty_vm::resources::MistyResourceId;
 
-use crate::{
-    core_views::RootViewModelState, modules::PreferenceState, utils::get_display_duration,
-};
+use crate::{modules::PreferenceState, utils::get_display_duration};
 
-use super::{
-    service::{CurrentMusicAssetState, CurrentMusicState, TimeToPauseState},
-    typ::*,
-};
+use super::service::{CurrentMusicState, TimeToPauseState};
 
 pub fn current_music_view_model(
     (state, asset_state, preference): (

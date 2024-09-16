@@ -1,28 +1,30 @@
 use std::collections::HashSet;
 
-use ease_client_shared::{MusicId, PlaylistId};
+use ease_client_shared::{
+    backends::{
+        music::MusicId,
+        playlist::PlaylistId,
+        storage::{Storage, StorageType},
+    },
+    uis::{storage::*, view::RootViewModelState},
+};
 use misty_vm::views::MistyViewModelManagerBuilder;
 
-use crate::{
-    core_views::RootViewModelState,
-    utils::{cmp_name_smartly, decode_component_or_origin},
-};
+use crate::utils::{cmp_name_smartly, decode_component_or_origin};
 
-use super::{
-    service::{
-        entry_can_check, get_entry_type, CurrentStorageState, EditStorageState, StoragesState,
-    },
-    typ::*,
+use super::service::{
+    entry_can_check, get_entry_type, resolve_storage_name, CurrentStorageState, EditStorageState,
+    StoragesState,
 };
 
 fn storage_list_view_model(state: &StoragesState, root: &mut RootViewModelState) {
     let items: Vec<VStorageListItem> = {
         state
-            .storage_infos
+            .storages
             .iter()
             .map(|info| VStorageListItem {
                 storage_id: info.id.clone(),
-                name: info.name.clone(),
+                name: resolve_storage_name(info),
                 sub_title: info.addr.clone(),
                 typ: info.typ.clone(),
             })
@@ -91,11 +93,11 @@ fn current_storage_entries_view_model(
     });
 
     let storage_items: Vec<VCurrentStorageEntriesStateStorageItem> = storages_state
-        .storage_infos
+        .storages
         .iter()
         .map(|v| VCurrentStorageEntriesStateStorageItem {
             id: v.id.clone(),
-            name: v.name.clone(),
+            name: resolve_storage_name(v),
             subtitle: v.addr.clone(),
             selected: Some(v.id.clone()) == state.current_storage_id,
             is_local: v.typ == StorageType::Local,
@@ -123,24 +125,14 @@ fn current_storage_entries_view_model(
 }
 
 fn edit_storage_view_model(state: &EditStorageState, root: &mut RootViewModelState) {
-    let mut music_id_visited: HashSet<MusicId> = Default::default();
-    let mut playlist_id_visited: HashSet<PlaylistId> = Default::default();
-
-    for (playlist_id, music_ids) in state.tuple_maps.iter() {
-        playlist_id_visited.insert(*playlist_id);
-        for music_id in music_ids.iter() {
-            music_id_visited.insert(*music_id);
-        }
-    }
-
     root.edit_storage = Some(VEditStorageState {
         is_created: state.is_create,
         title: state.title.clone(),
         info: state.info.clone(),
         test: state.test,
         update_signal: state.update_signal,
-        music_count: music_id_visited.len() as u32,
-        playlist_count: playlist_id_visited.len() as u32,
+        music_count: state.music_count,
+        playlist_count: state.playlist_count,
     });
 }
 

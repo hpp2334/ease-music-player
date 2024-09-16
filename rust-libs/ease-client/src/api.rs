@@ -2,8 +2,18 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::modules::timer::to_host::{HostTimerService, TimerService};
-use crate::{build_state_manager, build_view_manager, RootViewModelState};
-use error::EaseResult;
+use crate::{build_state_manager, build_view_manager};
+use ease_client_shared::backends::app::ArgInitializeApp;
+use ease_client_shared::backends::music::MusicId;
+use ease_client_shared::backends::playlist::PlaylistId;
+use ease_client_shared::backends::storage::{ArgUpsertStorage, StorageId};
+use ease_client_shared::uis::music::{ArgSeekMusic, PlayMusicEventType};
+use ease_client_shared::uis::playlist::CreatePlaylistMode;
+use ease_client_shared::uis::root::{InvokeRet, ResourceToHostAction};
+use ease_client_shared::uis::rotuer::RootRouteSubKey;
+use ease_client_shared::uis::to_hosts::{IFlushSignal, IMusicPlayerService, IToastService};
+use ease_client_shared::uis::view::RootViewModelState;
+use error::{EaseError, EaseResult};
 use misty_vm::async_task::IAsyncTaskRuntimeAdapter;
 use misty_vm::client::SingletonMistyClientPod;
 use misty_vm::controllers::{ControllerRet, MistyController};
@@ -13,8 +23,6 @@ use misty_vm::signals::MistySignal;
 use once_cell::sync::Lazy;
 use tokio::task::JoinHandle;
 use tracing::subscriber::set_global_default;
-
-use self::error::EaseError;
 
 use super::modules::*;
 
@@ -27,10 +35,6 @@ static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
         .unwrap()
 });
 
-#[uniffi::export(with_foreign)]
-pub trait IFlushSignal: Send + Sync + 'static {
-    fn flush(&self);
-}
 static FLUSH_SIGNAL: Lazy<Mutex<Option<Arc<dyn IFlushSignal>>>> = Lazy::new(|| Default::default());
 
 struct TokioAsyncRuntime {
@@ -76,12 +80,6 @@ impl IAsyncTaskRuntimeAdapter for TokioAsyncRuntime {
     }
 }
 
-#[derive(Default, uniffi::Record)]
-pub struct InvokeRet {
-    pub view: Option<RootViewModelState>,
-    pub resources: Vec<ResourceToHostAction>,
-}
-
 pub type ApiRet = EaseResult<InvokeRet>;
 
 fn apply_controller_ret(
@@ -119,13 +117,6 @@ where
 {
     let ret = CLIENT.call_controller(controller, arg);
     apply_controller_ret(ret)
-}
-
-struct ToHostToastService;
-impl IToastService for ToHostToastService {
-    fn error(&self, msg: String) {
-        todo!()
-    }
 }
 
 fn create_log(dir: &str) -> std::fs::File {
@@ -169,12 +160,6 @@ fn initialize_trace(dir: &str) {
     }
 
     tracing::info!("initialize log and backtrace");
-}
-
-#[derive(Debug, uniffi::Record)]
-pub struct ResourceToHostAction {
-    pub id: u64,
-    pub buf: Option<Vec<u8>>,
 }
 
 #[uniffi::export]

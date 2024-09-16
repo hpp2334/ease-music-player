@@ -547,6 +547,9 @@ dependencies = [
  "tracing",
  "tracing-android",
  "tracing-subscriber",
+ "unicode-segmentation",
+ "uniffi",
+ "urlencoding",
 ]
 
 [[package]]
@@ -596,6 +599,8 @@ dependencies = [
  "num-derive",
  "num-traits",
  "serde",
+ "serde_json",
+ "thiserror",
  "uniffi",
 ]
 

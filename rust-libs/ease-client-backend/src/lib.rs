@@ -2,6 +2,7 @@ use ctx::Context;
 
 pub(crate) mod controllers;
 pub(crate) mod ctx;
+pub mod error;
 pub(crate) mod models;
 pub(crate) mod repositories;
 pub(crate) mod services;
@@ -9,6 +10,7 @@ pub(crate) mod utils;
 
 pub use controllers::*;
 use ease_client_shared::backends::app::ArgInitializeApp;
+pub use misty_serve::result::ChannelError;
 use misty_serve::{channel::MessageChannel, result::ChannelResult, schema::IMessage};
 use services::app::app_bootstrap;
 

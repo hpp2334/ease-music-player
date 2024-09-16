@@ -7,7 +7,7 @@ use super::code::Code;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PreferenceData {
-    pub play_mode: PlayMode,
+    pub playmode: PlayMode,
 }
 
 define_message!(GetPreferenceMsg, Code::GetPreference, (), PreferenceData);

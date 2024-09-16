@@ -6,7 +6,7 @@ use crate::{backends::code::Code, define_id};
 
 define_id!(StorageId);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StorageEntryLoc {
     pub path: String,
     pub storage_id: StorageId,
@@ -49,8 +49,9 @@ pub struct ArgUpsertStorage {
     pub typ: StorageType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, uniffi::Enum)]
 pub enum StorageConnectionTestResult {
+    #[default]
     None,
     Testing,
     Success,
@@ -77,6 +78,8 @@ pub struct Storage {
     pub password: String,
     pub is_anonymous: bool,
     pub typ: StorageType,
+    pub music_count: u32,
+    pub playlist_count: u32,
 }
 
 define_message!(UpsertStorageMsg, Code::UpsertStorage, ArgUpsertStorage, ());
@@ -90,13 +93,30 @@ define_message!(
 );
 
 define_message!(RemoveStorageMsg, Code::RemoveStorage, StorageId, ());
-define_message!(TestStorageMsg, Code::TestStorage, ArgUpsertStorage, ());
+define_message!(
+    TestStorageMsg,
+    Code::TestStorage,
+    ArgUpsertStorage,
+    StorageConnectionTestResult
+);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ListStorageEntryChildrenResp {
-    Ok(StorageEntry),
+    Ok(Vec<StorageEntry>),
     AuthenticationFailed,
     Timeout,
+    Unknown,
+}
+
+impl ListStorageEntryChildrenResp {
+    pub fn is_error(&self) -> bool {
+        match self {
+            ListStorageEntryChildrenResp::Ok(_) => false,
+            ListStorageEntryChildrenResp::AuthenticationFailed => false,
+            ListStorageEntryChildrenResp::Timeout => false,
+            ListStorageEntryChildrenResp::Unknown => false,
+        }
+    }
 }
 
 define_message!(

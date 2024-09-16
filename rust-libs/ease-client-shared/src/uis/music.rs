@@ -58,3 +58,8 @@ pub struct VTimeToPauseState {
     pub left_hour: u64,
     pub left_minute: u64,
 }
+
+#[derive(Debug, uniffi::Record)]
+pub struct ArgSeekMusic {
+    pub duration: u64,
+}

@@ -4,7 +4,7 @@ use ease_client_shared::backends::{app::ArgInitializeApp, preference::Preference
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::Level;
 
-use crate::{ctx::Context, repositories::core::get_conn};
+use crate::{ctx::Context, error::BResult, repositories::core::get_conn};
 
 use super::server::start_server;
 
@@ -80,7 +80,7 @@ pub fn save_preference_data(cx: &Context, data: PreferenceData) {
     save_persistent_data(&cx.app_document_dir, "preference.json", data);
 }
 
-pub fn app_bootstrap(arg: ArgInitializeApp) -> anyhow::Result<Context> {
+pub fn app_bootstrap(arg: ArgInitializeApp) -> BResult<Context> {
     let cx = Context {
         storage_path: arg.storage_path,
         app_document_dir: arg.app_document_dir,
@@ -96,7 +96,7 @@ pub fn app_bootstrap(arg: ArgInitializeApp) -> anyhow::Result<Context> {
     Ok(cx)
 }
 
-fn init_persistent_state(cx: &Context) -> anyhow::Result<()> {
+fn init_persistent_state(cx: &Context) -> BResult<()> {
     let _ = tracing::span!(Level::INFO, "init_persistent_state").enter();
     let meta = load_app_meta(&cx.app_document_dir);
     let prev_version = meta.schema_version;
@@ -115,7 +115,7 @@ fn init_persistent_state(cx: &Context) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn upgrade_db_schema(cx: &Context, prev_version: u32) -> anyhow::Result<()> {
+fn upgrade_db_schema(cx: &Context, prev_version: u32) -> BResult<()> {
     let conn = get_conn(cx)?;
     if prev_version < 1 {
         tracing::info!("start to upgrade to v1");

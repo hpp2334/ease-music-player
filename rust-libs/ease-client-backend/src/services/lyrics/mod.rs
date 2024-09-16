@@ -9,7 +9,6 @@ use nom::{
     multi::many1,
     sequence::tuple,
 };
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]

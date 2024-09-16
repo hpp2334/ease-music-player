@@ -1,33 +1,54 @@
+use ease_client_shared::{
+    backends::preference::{GetPreferenceMsg, PreferenceData, UpdatePreferenceMsg},
+    uis::preference::PlayMode,
+};
 use misty_vm::{
-    client::{AsReadonlyMistyClientHandle, MistyClientHandle},
-    states::MistyStateTrait,
+    async_task::MistyAsyncTaskTrait, client::MistyClientHandle, states::MistyStateTrait,
+    MistyAsyncTask,
 };
 
-use crate::modules::error::{EaseResult, EASE_RESULT_NIL};
+use crate::modules::{
+    app::service::get_backend,
+    error::{EaseResult, EASE_RESULT_NIL},
+};
 
-use super::{PlayMode, PreferenceState};
+use super::PreferenceState;
 
-pub fn update_playmode(app: MistyClientHandle, playmode: PlayMode) -> EaseResult<()> {
-    let _state = PreferenceState::update(app, |state| {
-        state.play_mode = playmode;
-        state.clone()
+#[derive(MistyAsyncTask)]
+struct GeneralAsyncTask;
+
+pub fn update_playmode(cx: MistyClientHandle, playmode: PlayMode) -> EaseResult<()> {
+    let backend = get_backend(cx);
+    let data = PreferenceData { playmode };
+    let cloned_data = data.clone();
+
+    GeneralAsyncTask::spawn(cx, |_cx| async move {
+        backend.send::<UpdatePreferenceMsg>(data).await?;
+        return EASE_RESULT_NIL;
     });
-    save_preference_data(app);
+    PreferenceState::update(cx, |state| {
+        state.data = cloned_data;
+    });
     return EASE_RESULT_NIL;
 }
 
 pub fn get_playmode(app: MistyClientHandle) -> PlayMode {
-    PreferenceState::map(app, |state| state.play_mode.clone())
+    PreferenceState::map(app, |state| state.data.playmode.clone())
 }
 
-pub fn init_preference_state(app: MistyClientHandle) -> EaseResult<()> {
-    let data = load_preference_data(app);
-    PreferenceState::update(app, |state| {
-        *state = data;
+pub fn reload_preference_state(cx: MistyClientHandle) -> EaseResult<()> {
+    let backend = get_backend(cx);
+    GeneralAsyncTask::spawn(cx, |cx| async move {
+        let data = backend.send::<GetPreferenceMsg>(()).await?;
+
+        cx.schedule(move |cx| {
+            PreferenceState::update(cx, |state| {
+                state.data = data;
+            });
+            return EASE_RESULT_NIL;
+        });
+        return EASE_RESULT_NIL;
     });
-    Ok(())
-}
 
-pub fn preference_state_to_data<'a>(app: impl AsReadonlyMistyClientHandle<'a>) -> PreferenceState {
-    PreferenceState::map(app, Clone::clone)
+    Ok(())
 }

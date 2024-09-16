@@ -4,4 +4,3 @@ pub mod to_host;
 pub mod views;
 
 pub use controller::*;
-pub use typ::*;

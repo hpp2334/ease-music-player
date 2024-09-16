@@ -2,9 +2,8 @@ use crate::modules::error::EaseResult;
 use crate::modules::error::EASE_RESULT_NIL;
 
 use super::service::*;
-use super::typ::*;
-use ease_client_shared::ArgUpsertStorage;
-use ease_client_shared::StorageId;
+use ease_client_shared::backends::storage::ArgUpsertStorage;
+use ease_client_shared::backends::storage::StorageId;
 use misty_vm::controllers::MistyControllerContext;
 
 pub fn controller_remove_storage(ctx: MistyControllerContext, id: StorageId) -> EaseResult<()> {

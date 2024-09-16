@@ -1,45 +1,49 @@
 use std::{
-    cmp::Ordering,
     collections::{HashMap, HashSet},
-    sync::Arc,
     time::Duration,
 };
 
-use ease_client_shared::{ArgUpsertStorage, MusicId, StorageEntry, StorageEntryType, StorageId};
-
-use misty_vm::{
-    async_task::MistyAsyncTaskTrait, client::MistyClientHandle, services::MistyServiceTrait,
-    states::MistyStateTrait, MistyAsyncTask, MistyState,
-};
-
-use crate::{
-    modules::{
-        error::{EaseError, EaseResult, EASE_RESULT_NIL},
-        music::service::{get_current_music_id, import_selected_lyric_in_music},
-        playlist::service::{
-            get_playlist_musics_by_storage, import_selected_cover_in_create_playlist,
-            import_selected_cover_in_edit_playlist, import_selected_entries_in_create_playlist,
-            import_selected_entries_to_current_playlist, remove_musics_in_playlists_by_storage,
+use ease_client_shared::{
+    backends::{
+        music::MusicId,
+        storage::{
+            ArgUpsertStorage, GetStorageMsg, ListStorageEntryChildrenMsg, ListStorageMsg,
+            RemoveStorageMsg, Storage, StorageConnectionTestResult, StorageEntry, StorageEntryLoc,
+            StorageEntryType, StorageId, TestStorageMsg, UpsertStorageMsg,
         },
-        timer::to_host::TimerService,
     },
-    utils::cmp_name_smartly,
+    uis::storage::{CurrentStorageImportType, CurrentStorageStateType},
+};
+use misty_vm::{
+    async_task::MistyAsyncTaskTrait,
+    client::{AsMistyClientHandle, MistyClientHandle},
+    services::MistyServiceTrait,
+    states::MistyStateTrait,
+    MistyAsyncTask, MistyState,
 };
 
-use super::typ::*;
+use crate::modules::{
+    app::service::get_backend,
+    error::{EaseError, EaseResult, EASE_RESULT_NIL},
+    music::service::{get_current_music_id, import_selected_lyric_in_music},
+    playlist::service::{
+        import_selected_cover_in_create_playlist, import_selected_cover_in_edit_playlist,
+        import_selected_entries_in_create_playlist, import_selected_entries_to_current_playlist,
+        reload_all_playlists_state,
+    },
+    timer::to_host::TimerService,
+};
 
 #[derive(Default, MistyState)]
 pub struct StoragesState {
-    pub storage_ids: HashSet<StorageId>,
-    pub storage_infos: Vec<StorageInfo>,
-    pub is_init: bool,
+    pub storages: Vec<Storage>,
 }
 
 #[derive(Default, Clone, MistyState)]
 pub struct CurrentStorageState {
     pub import_type: CurrentStorageImportType,
     pub state_type: CurrentStorageStateType,
-    pub entries: Vec<Entry>,
+    pub entries: Vec<StorageEntry>,
     pub checked_entries_path: HashSet<String>,
     pub current_storage_id: Option<StorageId>,
     pub current_path: String,
@@ -56,12 +60,17 @@ pub struct EditStorageState {
     pub is_create: bool,
     pub title: String,
     pub info: ArgUpsertStorage,
+    pub music_count: u32,
+    pub playlist_count: u32,
     pub test: StorageConnectionTestResult,
     pub update_signal: u16,
 }
 
 #[derive(Debug, MistyAsyncTask)]
 struct LocateEntryOnceAsyncTask;
+
+#[derive(Debug, MistyAsyncTask)]
+struct GeneralAsyncTask;
 
 pub fn get_entry_type(entry: &StorageEntry) -> StorageEntryType {
     const MUSIC_EXTS: [&str; 5] = [".wav", ".mp3", ".aac", ".flac", ".ogg"];
@@ -113,14 +122,17 @@ pub(super) fn entry_can_check(entry: &StorageEntry, import_type: CurrentStorageI
     }
 }
 
+pub(super) fn resolve_storage_name(info: &Storage) -> String {
+    info.alias.clone().unwrap_or(info.addr.clone())
+}
+
 pub fn locate_entry_impl(
     client: MistyClientHandle,
     storage_id: StorageId,
     path: String,
     candidate_path: String,
 ) -> EaseResult<()> {
-    let backend: Arc<dyn StorageBackend + Send + Sync> =
-        get_storage_backend(client, storage_id.clone())?;
+    let backend = get_backend(client);
 
     let current_path = path.to_string();
     CurrentStorageState::update(client, |state| {
@@ -131,9 +143,16 @@ pub fn locate_entry_impl(
 
     let path = path.to_string();
     LocateEntryOnceAsyncTask::spawn_once(client, move |ctx| async move {
-        let mut list = backend.list(&path).await;
-        if list.is_err() {
-            list = backend.list(&candidate_path).await;
+        let mut list = backend
+            .send::<ListStorageEntryChildrenMsg>(StorageEntryLoc { path, storage_id })
+            .await?;
+        if list.is_error() {
+            list = backend
+                .send::<ListStorageEntryChildrenMsg>(StorageEntryLoc {
+                    path: candidate_path,
+                    storage_id,
+                })
+                .await?;
         }
 
         ctx.schedule(move |client| {
@@ -145,28 +164,23 @@ pub fn locate_entry_impl(
                 return EASE_RESULT_NIL;
             }
 
-            if let Err(e) = list {
-                tracing::error!("{:?}", e);
-                if e.is_unauthorized() {
-                    CurrentStorageState::update(client, |state| {
-                        state.state_type = CurrentStorageStateType::AuthenticationFailed;
-                    });
-                } else if e.is_timeout() {
-                    CurrentStorageState::update(client, |state: &mut CurrentStorageState| {
-                        state.state_type = CurrentStorageStateType::Timeout;
-                    });
-                } else {
-                    CurrentStorageState::update(client, |state| {
-                        state.state_type = CurrentStorageStateType::UnknownError;
-                    });
-                }
-                return EASE_RESULT_NIL;
-            }
-
-            let list = list.unwrap();
             CurrentStorageState::update(client, |state| {
-                state.state_type = CurrentStorageStateType::OK;
-                state.entries = list;
+                match list {
+                    ease_client_shared::backends::storage::ListStorageEntryChildrenResp::Ok(list) => {
+                        state.state_type = CurrentStorageStateType::OK;
+                        state.entries = list;
+                    },
+                    ease_client_shared::backends::storage::ListStorageEntryChildrenResp::AuthenticationFailed => {
+                        state.state_type = CurrentStorageStateType::AuthenticationFailed;
+                    },
+                    ease_client_shared::backends::storage::ListStorageEntryChildrenResp::Timeout => {
+                        state.state_type = CurrentStorageStateType::Timeout;
+                    },
+                    ease_client_shared::backends::storage::ListStorageEntryChildrenResp::Unknown => {
+                        state.state_type = CurrentStorageStateType::UnknownError;
+                    },
+                }
+
             });
             return EASE_RESULT_NIL;
         });
@@ -176,20 +190,19 @@ pub fn locate_entry_impl(
 }
 
 fn refresh_storage_in_import(client: MistyClientHandle, storage_id: StorageId) -> EaseResult<()> {
-    let backend: Arc<dyn StorageBackend + Send + Sync> =
-        get_storage_backend(client, storage_id.clone())?;
+    const DEFAULT_URL: &str = "/";
 
     let last_path = StoragesRecordState::map(client, |state| {
         state.last_locate_path.get(&storage_id).map(|p| p.clone())
     })
-    .unwrap_or(backend.default_url());
+    .unwrap_or(DEFAULT_URL.to_string());
 
     CurrentStorageState::update(client, |state| {
         state.entries.clear();
         state.current_storage_id = Some(storage_id.clone());
     });
 
-    locate_entry_impl(client, storage_id, last_path, backend.default_url())?;
+    locate_entry_impl(client, storage_id, last_path, DEFAULT_URL.to_string())?;
     return EASE_RESULT_NIL;
 }
 
@@ -225,76 +238,75 @@ fn get_checked_entries(client: MistyClientHandle) -> Vec<StorageEntry> {
 }
 
 pub fn prepare_edit_storage(
-    client: MistyClientHandle,
+    cx: MistyClientHandle,
     storage_id: Option<StorageId>,
 ) -> EaseResult<()> {
-    if let Some(storage_id) = storage_id {
-        let storage = db_load_storage(client, storage_id.clone())?;
-        let tuple_maps = get_playlist_musics_by_storage(client, storage_id)?;
-        EditStorageState::update(client, |state| {
-            state.is_create = false;
-            state.title = storage
-                .alias()
-                .clone()
-                .map(|s| s.to_string())
-                .unwrap_or(storage.addr().to_string());
-            state.info = ArgUpsertStorage {
-                id: Some(storage_id),
-                addr: storage.addr().to_string(),
-                alias: storage.alias().clone().map(|s| s.to_string()),
-                username: storage.username().to_owned(),
-                password: storage.password().to_owned(),
-                is_anonymous: storage.is_anonymous(),
-                typ: storage.typ(),
-            };
-            state.tuple_maps = tuple_maps;
-            state.update_signal += 1;
-            state.test = StorageConnectionTestResult::None;
-        })
-    } else {
-        EditStorageState::update(client, |state| {
-            state.is_create = true;
-            state.info = Default::default();
-            state.test = StorageConnectionTestResult::None;
-            state.update_signal += 1;
-        })
-    }
+    let backend = get_backend(cx);
+    GeneralAsyncTask::spawn(cx, move |cx| async move {
+        let storage = if let Some(storage_id) = storage_id {
+            backend.send::<GetStorageMsg>(storage_id).await?
+        } else {
+            None
+        };
+
+        cx.schedule(move |client| {
+            if let Some(storage) = storage {
+                EditStorageState::update(client, |state| {
+                    state.is_create = false;
+                    state.title = resolve_storage_name(&storage);
+                    state.info = ArgUpsertStorage {
+                        id: Some(storage.id),
+                        addr: storage.addr.clone(),
+                        alias: storage.alias.clone(),
+                        username: storage.username.clone(),
+                        password: storage.password.clone(),
+                        is_anonymous: storage.is_anonymous,
+                        typ: storage.typ,
+                    };
+                    state.update_signal += 1;
+                    state.test = StorageConnectionTestResult::None;
+                })
+            } else {
+                EditStorageState::update(client, |state| {
+                    state.is_create = true;
+                    state.info = Default::default();
+                    state.test = StorageConnectionTestResult::None;
+                    state.update_signal += 1;
+                })
+            }
+            return EASE_RESULT_NIL;
+        });
+
+        return EASE_RESULT_NIL;
+    });
     Ok(())
 }
 
 pub fn upsert_storage(app: MistyClientHandle, arg: ArgUpsertStorage) -> EaseResult<()> {
-    let id = arg.id.clone();
-    db_upsert_storage(app, arg)?;
+    let backend = get_backend(app);
+    GeneralAsyncTask::spawn(app.handle(), |cx| async move {
+        backend.send::<UpsertStorageMsg>(arg).await?;
 
-    reload_storages_state(app, true)?;
+        cx.schedule(reload_storages_state);
+        return EASE_RESULT_NIL;
+    });
+
     return EASE_RESULT_NIL;
 }
 
-pub fn reload_storages_state(app: MistyClientHandle, force: bool) -> EaseResult<()> {
-    if !force {
-        let is_init = StoragesState::map(app, |state: &StoragesState| state.is_init);
-        if is_init {
+pub fn reload_storages_state(cx: MistyClientHandle) -> EaseResult<()> {
+    let backend = get_backend(cx);
+    GeneralAsyncTask::spawn(cx, |cx| async move {
+        let storages = backend.send::<ListStorageMsg>(()).await?;
+
+        cx.schedule(|cx| {
+            StoragesState::update(cx, |state| {
+                state.storages = storages;
+            });
             return EASE_RESULT_NIL;
-        }
-    }
+        });
 
-    let map = db_load_storage_infos(app)?;
-    let storage_ids = map.iter().map(|v| v.0.clone()).collect();
-    let mut storage_infos: Vec<StorageInfo> = map.into_iter().map(|v| v.1).collect();
-    storage_infos.sort_by(|lhs, rhs| {
-        if lhs.typ == StorageType::Local {
-            return Ordering::Greater;
-        }
-        if rhs.typ == StorageType::Local {
-            return Ordering::Less;
-        }
-        return cmp_name_smartly(&lhs.name, &rhs.name);
-    });
-
-    StoragesState::update(app, move |state: &mut StoragesState| {
-        state.storage_ids = storage_ids;
-        state.storage_infos = storage_infos;
-        state.is_init = true;
+        return EASE_RESULT_NIL;
     });
     return EASE_RESULT_NIL;
 }
@@ -349,7 +361,7 @@ pub fn enter_storages_to_import(
     import_type: CurrentStorageImportType,
 ) -> EaseResult<()> {
     let id = StoragesState::map(client, |state| {
-        state.storage_infos.iter().next().map(|v| v.id.clone())
+        state.storages.iter().next().map(|v| v.id.clone())
     });
     if id.is_none() {
         return Ok(());
@@ -377,10 +389,16 @@ pub fn refresh_current_storage_in_import(client: MistyClientHandle) -> EaseResul
     return Ok(());
 }
 
-pub(super) fn remove_storage(client: MistyClientHandle, storage_id: StorageId) -> EaseResult<()> {
-    remove_musics_in_playlists_by_storage(client, storage_id)?;
-    db_remove_storage(client, storage_id)?;
-    reload_storages_state(client, true)?;
+pub(super) fn remove_storage(cx: MistyClientHandle, storage_id: StorageId) -> EaseResult<()> {
+    let backend = get_backend(cx);
+    GeneralAsyncTask::spawn(cx, move |cx| async move {
+        backend.send::<RemoveStorageMsg>(storage_id).await?;
+
+        cx.schedule(reload_storages_state);
+        cx.schedule(reload_all_playlists_state);
+
+        return EASE_RESULT_NIL;
+    });
     Ok(())
 }
 
@@ -427,28 +445,16 @@ pub fn finish_select_entries_in_import(client: MistyClientHandle) -> EaseResult<
 struct TestConnectionAsyncTask;
 
 pub(super) fn edit_storage_test_connection(
-    client: MistyClientHandle,
+    cx: MistyClientHandle,
     arg: ArgUpsertStorage,
 ) -> EaseResult<()> {
-    EditStorageState::update(client, |state| {
+    EditStorageState::update(cx, |state| {
         state.test = StorageConnectionTestResult::Testing;
     });
-    let backend = get_storage_backend_by_upsert_arg(arg)?;
+    let backend = get_backend(cx);
 
-    TestConnectionAsyncTask::spawn_once(client, |ctx| async move {
-        let result = backend.list("/").await;
-
-        let test_result = if let Err(e) = result {
-            if e.is_timeout() {
-                StorageConnectionTestResult::Timeout
-            } else if e.is_unauthorized() {
-                StorageConnectionTestResult::Unauthorized
-            } else {
-                StorageConnectionTestResult::OtherError
-            }
-        } else {
-            StorageConnectionTestResult::Success
-        };
+    TestConnectionAsyncTask::spawn_once(cx, |ctx| async move {
+        let test_result = backend.send::<TestStorageMsg>(arg.clone()).await?;
 
         ctx.schedule(move |handle| {
             EditStorageState::update(handle, |state| {

@@ -1,39 +1,36 @@
-use std::sync::Arc;
-
+use ease_client_shared::uis::{
+    playlist::{
+        VCreatePlaylistState, VCurrentPlaylistState, VEditPlaylistState, VPlaylistAbstractItem,
+        VPlaylistListState, VPlaylistMusicItem,
+    },
+    view::RootViewModelState,
+};
 use misty_vm::views::MistyViewModelManagerBuilder;
 
-use crate::{
-    core_views::RootViewModelState,
-    utils::{decode_component_or_origin, get_display_duration},
-};
+use crate::utils::{decode_component_or_origin, get_display_duration};
 
-use super::{
-    service::{AllPlaylistState, CreatePlaylistState, CurrentPlaylistState, EditPlaylistState},
-    typ::*,
+use super::service::{
+    AllPlaylistState, CreatePlaylistState, CurrentPlaylistState, EditPlaylistState,
 };
 
 fn playlist_list_view_model(state: &AllPlaylistState, root: &mut RootViewModelState) {
-    let mut list: Vec<Arc<Playlist>> = { state.map.iter().map(|(_, item)| item.clone()).collect() };
+    let mut list: Vec<_> = { state.list.iter().map(|item| item.clone()).collect() };
     list.sort_by(|lhs, rhs| {
         rhs.created_time()
-            .partial_cmp(&lhs.created_time())
+            .partial_cmp(lhs.created_time())
             .unwrap_or(std::cmp::Ordering::Less)
     });
 
     let mut playlist_list: Vec<VPlaylistAbstractItem> = Default::default();
 
     for playlist in list.iter() {
-        let duration = playlist.duration();
+        let duration = playlist.duration;
         playlist_list.push(VPlaylistAbstractItem {
-            id: playlist.id().clone(),
+            id: playlist.id(),
             title: playlist.title().to_string(),
-            count: playlist.musics().len() as i32,
+            count: playlist.music_count as i32,
             duration: get_display_duration(&duration),
-            picture: if let Some(v) = playlist.self_picture().as_ref() {
-                Some(*v.id())
-            } else {
-                playlist.first_picture_in_musics().as_ref().map(|v| *v.id())
-            },
+            cover_url: playlist.cover_url().to_string(),
         });
     }
 
@@ -43,49 +40,35 @@ fn playlist_list_view_model(state: &AllPlaylistState, root: &mut RootViewModelSt
 }
 
 fn current_playlist_view_model(
-    (current_playlist, playlist_list): (&CurrentPlaylistState, &AllPlaylistState),
+    (current_playlist): (&CurrentPlaylistState),
     root: &mut RootViewModelState,
 ) {
-    let current_playlist_id = current_playlist.current_playlist_id.clone();
-    let current_playlist = current_playlist_id
-        .map(|id| playlist_list.map.get(&id).map(|v| v.clone()))
-        .unwrap_or_default();
+    let playlist = current_playlist.playlist.clone();
 
-    if current_playlist.is_none() {
+    if playlist.is_none() {
         root.current_playlist = None;
         return;
     }
-    let current_playlist = current_playlist.unwrap();
+    let playlist = playlist.unwrap();
 
-    let items: Vec<VPlaylistMusicItem> = current_playlist
-        .get_ordered_musics()
+    let items: Vec<VPlaylistMusicItem> = playlist
+        .musics
         .iter()
         .map(|music| {
             return VPlaylistMusicItem {
-                id: music.music_id(),
-                title: music.title().to_string(),
-                duration: get_display_duration(&music.duration()),
+                id: music.id,
+                title: music.title.to_string(),
+                duration: get_display_duration(&music.duration),
             };
         })
         .collect();
 
     let current_playlist_state = VCurrentPlaylistState {
-        id: Some(current_playlist.id()),
+        id: Some(playlist.id()),
         items,
-        title: current_playlist.title().to_string(),
-        duration: get_display_duration(&current_playlist.duration()),
-        picture: if let Some(v) = current_playlist.self_picture().as_ref() {
-            Some(*v.id())
-        } else {
-            current_playlist
-                .first_picture_in_musics()
-                .as_ref()
-                .map(|v| *v.id())
-        },
-        first_picture_in_musics: current_playlist
-            .first_picture_in_musics()
-            .clone()
-            .map(|v| *v.id()),
+        title: playlist.title().to_string(),
+        duration: get_display_duration(&playlist.duration()),
+        cover_url: playlist.cover_url().to_string(),
     };
 
     root.current_playlist = Some(current_playlist_state);

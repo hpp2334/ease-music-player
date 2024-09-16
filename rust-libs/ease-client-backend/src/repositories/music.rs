@@ -1,17 +1,17 @@
-use std::time::Duration;
-
-use bytes::Bytes;
 use ease_client_shared::backends::{
     music::MusicId, music_duration::MusicDuration, playlist::PlaylistId, storage::StorageId,
 };
 use ease_database::{params, DbConnectionRef};
 
-use crate::models::{music::MusicModel, storage::StorageEntryLocModel};
+use crate::{
+    error::BResult,
+    models::{music::MusicModel, storage::StorageEntryLocModel},
+};
 
 pub fn db_load_music_metas_by_playlist_id(
     conn: DbConnectionRef,
     playlist_id: PlaylistId,
-) -> anyhow::Result<Vec<MusicModel>> {
+) -> BResult<Vec<MusicModel>> {
     let models = conn.query::<MusicModel>(
         r#"
     SELECT id, title, duration
@@ -23,10 +23,7 @@ pub fn db_load_music_metas_by_playlist_id(
     Ok(models)
 }
 
-pub fn db_load_music(
-    conn: DbConnectionRef,
-    music_id: MusicId,
-) -> anyhow::Result<Option<MusicModel>> {
+pub fn db_load_music(conn: DbConnectionRef, music_id: MusicId) -> BResult<Option<MusicModel>> {
     let model = conn
         .query::<MusicModel>(
             r#"
@@ -43,7 +40,7 @@ fn db_load_music_by_key(
     conn: DbConnectionRef,
     storage_id: StorageId,
     path: String,
-) -> anyhow::Result<Option<MusicModel>> {
+) -> BResult<Option<MusicModel>> {
     let model = conn
         .query::<MusicModel>(
             "SELECT * FROM music WHERE storage_id = ?1 AND path = ?2",
@@ -61,7 +58,7 @@ pub struct ArgDBAddMusic {
     pub title: String,
 }
 
-pub fn db_add_music(conn: DbConnectionRef, arg: ArgDBAddMusic) -> anyhow::Result<MusicId> {
+pub fn db_add_music(conn: DbConnectionRef, arg: ArgDBAddMusic) -> BResult<MusicId> {
     let music = db_load_music_by_key(conn, arg.storage_id.clone(), arg.path.clone())?;
     if let Some(music) = music {
         return Ok(music.id);
@@ -84,7 +81,7 @@ pub fn db_update_music_total_duration(
     conn: DbConnectionRef,
     id: MusicId,
     duration: MusicDuration,
-) -> anyhow::Result<()> {
+) -> BResult<()> {
     conn.execute(
         "UPDATE music set duration = ?1 WHERE id = ?2",
         params![duration, id],
@@ -97,7 +94,7 @@ pub fn db_update_music_cover(
     conn: DbConnectionRef,
     id: MusicId,
     cover_loc: StorageEntryLocModel,
-) -> ease_database::Result<()> {
+) -> BResult<()> {
     conn.execute(
         "UPDATE music set picture_path = ?1, picture_storage_id = ?2 WHERE id = ?3",
         params![cover_loc.0, cover_loc.1, id],
@@ -110,7 +107,7 @@ pub fn db_update_music_lyric(
     conn: DbConnectionRef,
     id: MusicId,
     lyric_loc: StorageEntryLocModel,
-) -> anyhow::Result<()> {
+) -> BResult<()> {
     conn.execute(
         "UPDATE music set lyric_storage_id = ?2, lyric_path = ?3 WHERE id = ?1",
         params![id, lyric_loc.1, lyric_loc.0],

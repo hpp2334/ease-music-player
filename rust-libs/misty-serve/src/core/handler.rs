@@ -34,7 +34,7 @@ where
         let ret = self.f.process(state, arg).await;
         match ret {
             Ok(ret) => Ok(ret),
-            Err(e) => Err(ChannelError::OtherError(e)),
+            Err(e) => Err(ChannelError::HandlerError(e)),
         }
     }
 }
@@ -110,11 +110,8 @@ macro_rules! generate_handler {
                     {
                         Box::pin(async {
                             let arg = misty_serve::schema::decode_message_payload::<<super::$m as misty_serve::schema::IMessage>::Argument>(arg)?;
-                            let ret = super::$h(state, arg).await;
-                            let ret = match ret {
-                                Ok(ret) => misty_serve::schema::encode_message_payload(ret)?,
-                                Err(e) => return Err(e),
-                            };
+                            let ret = super::$h(state, arg).await?;
+                            let ret = misty_serve::schema::encode_message_payload(ret)?;
                             Ok(ret)
                         })
                     }

@@ -5,9 +5,9 @@ use ease_client_shared::backends::{
 
 use crate::{
     ctx::Context,
+    error::BResult,
     models::music::MusicModel,
     repositories::{core::get_conn, music::db_load_music},
-    to_opt_storage_entry,
 };
 
 pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
@@ -18,10 +18,7 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     }
 }
 
-pub fn get_music_storage_entry_loc(
-    cx: &Context,
-    id: MusicId,
-) -> anyhow::Result<Option<StorageEntryLoc>> {
+pub fn get_music_storage_entry_loc(cx: &Context, id: MusicId) -> BResult<Option<StorageEntryLoc>> {
     let conn = get_conn(cx)?;
     let m = db_load_music(conn.get_ref(), id)?;
     if m.is_none() {

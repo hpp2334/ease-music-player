@@ -17,8 +17,10 @@ pub fn build_message_channel(cx: Context) -> MessageChannel<Context> {
     let handlers = generate_handlers!(
         Context,
         // Playlist
-        GetAllPlaylistMetasMsg,
-        cr_get_all_playlist_metas,
+        GetAllPlaylistAbstractsMsg,
+        cr_get_all_playlist_abstracts,
+        GetPlaylistMsg,
+        cr_get_playlist,
         UpdatePlaylistMsg,
         ccu_upsert_playlist,
         AddMusicsToPlaylistMsg,

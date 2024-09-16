@@ -11,6 +11,10 @@ pub enum EaseError {
     EditPlaylistNone,
     #[error("serde error")]
     SerdeJsonError(#[from] serde_json::Error),
+    #[error("backend channel error: {0}")]
+    BackendChannelError(#[from] ease_client_backend::ChannelError),
+    #[error("backend init fail: {0}")]
+    BackendInitFail(anyhow::Error),
     #[error("other error: {0}")]
     OtherError(String),
     #[error("client destroyed")]

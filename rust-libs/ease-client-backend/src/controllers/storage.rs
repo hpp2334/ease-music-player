@@ -1,10 +1,11 @@
 use ease_client_shared::backends::storage::{
-    ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageEntryLoc, StorageId,
+    ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
+    StorageEntryLoc, StorageId,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::{
     ctx::Context,
+    error::BResult,
     models::storage::StorageEntryLocModel,
     repositories::{
         core::get_conn,
@@ -39,17 +40,17 @@ pub(crate) fn from_opt_storage_entry(loc: Option<StorageEntryLoc>) -> StorageEnt
 pub(crate) async fn load_storage_entry_data(
     cx: &Context,
     loc: &StorageEntryLoc,
-) -> anyhow::Result<Option<Vec<u8>>> {
+) -> BResult<Option<Vec<u8>>> {
     todo!()
 }
 
-pub async fn ccu_upsert_storage(cx: Context, arg: ArgUpsertStorage) -> anyhow::Result<()> {
+pub async fn ccu_upsert_storage(cx: Context, arg: ArgUpsertStorage) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_upsert_storage(conn.get_ref(), arg)?;
     Ok(())
 }
 
-pub async fn cr_list_storage(cx: Context, _arg: ()) -> anyhow::Result<Vec<Storage>> {
+pub async fn cr_list_storage(cx: Context, _arg: ()) -> BResult<Vec<Storage>> {
     let conn = get_conn(&cx)?;
     let models = db_load_storages(conn.get_ref())?;
     let storages = models.into_iter().map(|m| build_storage(m)).collect();
@@ -57,7 +58,7 @@ pub async fn cr_list_storage(cx: Context, _arg: ()) -> anyhow::Result<Vec<Storag
     Ok(storages)
 }
 
-pub async fn cr_get_storage(cx: Context, id: StorageId) -> anyhow::Result<Option<Storage>> {
+pub async fn cr_get_storage(cx: Context, id: StorageId) -> BResult<Option<Storage>> {
     let conn = get_conn(&cx)?;
     let model = db_load_storage(conn.get_ref(), id)?;
     let storage = if let Some(model) = model {
@@ -68,24 +69,27 @@ pub async fn cr_get_storage(cx: Context, id: StorageId) -> anyhow::Result<Option
     Ok(storage)
 }
 
-pub async fn cr_get_to_remove_storage_refs(cx: Context, id: StorageId) -> anyhow::Result<()> {
+pub async fn cr_get_to_remove_storage_refs(cx: Context, id: StorageId) -> BResult<()> {
     todo!()
 }
 
-pub async fn cd_remove_storage(cx: Context, id: StorageId) -> anyhow::Result<()> {
+pub async fn cd_remove_storage(cx: Context, id: StorageId) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
     db_remove_storage(conn.get_ref(), id)?;
     Ok(())
 }
 
-pub async fn cr_test_storage(cx: Context, arg: ArgUpsertStorage) -> anyhow::Result<()> {
+pub async fn cr_test_storage(
+    cx: Context,
+    arg: ArgUpsertStorage,
+) -> BResult<StorageConnectionTestResult> {
     todo!()
 }
 
 pub async fn cr_list_storage_entry_children(
     cx: Context,
     arg: StorageEntryLoc,
-) -> anyhow::Result<ListStorageEntryChildrenResp> {
+) -> BResult<ListStorageEntryChildrenResp> {
     todo!()
 }

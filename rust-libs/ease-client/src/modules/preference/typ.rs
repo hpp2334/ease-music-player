@@ -1,13 +1,9 @@
+use ease_client_shared::{backends::preference::PreferenceData, uis::preference::PlayMode};
 use misty_vm::MistyState;
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, FromPrimitive, ToPrimitive)]
-pub enum PreferenceDataKey {
-    PlayMode,
-}
-
 #[derive(Debug, Default, Clone, MistyState, Serialize, Deserialize)]
 pub struct PreferenceState {
-    pub play_mode: PlayMode,
+    pub data: PreferenceData,
 }

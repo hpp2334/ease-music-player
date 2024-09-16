@@ -2,12 +2,12 @@ use ease_client_shared::backends::storage::{ArgUpsertStorage, StorageId};
 use ease_database::{params, DbConnectionRef};
 use num_traits::ToPrimitive;
 
-use crate::models::storage::StorageModel;
+use crate::{error::BResult, models::storage::StorageModel};
 
 pub fn db_load_storage(
     conn: DbConnectionRef,
     storage_id: StorageId,
-) -> anyhow::Result<Option<StorageModel>> {
+) -> BResult<Option<StorageModel>> {
     let model = conn
         .query::<StorageModel>("SELECT * FROM storage WHERE id = ?1", params![storage_id])?
         .pop();
@@ -15,13 +15,13 @@ pub fn db_load_storage(
     Ok(model)
 }
 
-pub fn db_load_storages(conn: DbConnectionRef) -> anyhow::Result<Vec<StorageModel>> {
+pub fn db_load_storages(conn: DbConnectionRef) -> BResult<Vec<StorageModel>> {
     let model = conn.query::<StorageModel>("SELECT * FROM storage", params![])?;
 
     Ok(model)
 }
 
-pub fn db_upsert_storage(conn: DbConnectionRef, arg: ArgUpsertStorage) -> anyhow::Result<()> {
+pub fn db_upsert_storage(conn: DbConnectionRef, arg: ArgUpsertStorage) -> BResult<()> {
     let typ: i32 = arg.typ.to_i32().unwrap();
 
     if arg.id.is_none() {
@@ -62,7 +62,7 @@ pub fn db_upsert_storage(conn: DbConnectionRef, arg: ArgUpsertStorage) -> anyhow
     return Ok(());
 }
 
-pub fn db_remove_storage(conn: DbConnectionRef, storage_id: StorageId) -> anyhow::Result<()> {
+pub fn db_remove_storage(conn: DbConnectionRef, storage_id: StorageId) -> BResult<()> {
     conn.execute("DELETE FROM storage WHERE id = ?1", params![storage_id])?;
     Ok(())
 }
