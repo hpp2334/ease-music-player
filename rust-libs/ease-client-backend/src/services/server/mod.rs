@@ -1,6 +1,11 @@
 use std::net::SocketAddr;
 
-use axum::{extract::State, Router};
+use axum::{
+    extract::State,
+    http::{header, HeaderMap, HeaderValue},
+    response::IntoResponse,
+    Router,
+};
 
 #[axum::debug_handler]
 async fn handle_music_download() -> impl IntoResponse {
@@ -48,7 +53,7 @@ async fn handle_music_download() -> impl IntoResponse {
     return Ok((headers, body));
 }
 
-pub async fn start_server() -> u16 {
+pub fn start_server() -> u16 {
     let router_svc = Router::new()
         .route("/music/:id", axum::routing::get(handle_music_download))
         .into_make_service();

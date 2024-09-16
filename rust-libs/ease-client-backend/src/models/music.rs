@@ -1,6 +1,6 @@
-use std::{ops::Deref, time::Duration};
-
-use ease_client_shared::{MusicDuration, MusicId, StorageId};
+use ease_client_shared::backends::{
+    music::MusicId, music_duration::MusicDuration, storage::StorageId,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

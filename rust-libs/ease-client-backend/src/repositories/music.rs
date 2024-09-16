@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use ease_client_shared::{MusicDuration, MusicId, PlaylistId, StorageId};
+use ease_client_shared::backends::{
+    music::MusicId, music_duration::MusicDuration, playlist::PlaylistId, storage::StorageId,
+};
 use ease_database::{params, DbConnectionRef};
 
 use crate::models::{music::MusicModel, storage::StorageEntryLocModel};

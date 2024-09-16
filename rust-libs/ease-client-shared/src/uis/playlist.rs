@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{MusicId, PlaylistId};
+use crate::backends::{music::MusicId, playlist::PlaylistId};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, uniffi::Enum)]
 pub enum CreatePlaylistMode {

@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 
-use ease_client_shared::{MusicId, PlaylistId, StorageId};
+use ease_client_shared::backends::{music::MusicId, playlist::PlaylistId, storage::StorageId};
 use ease_database::{params, DbConnectionRef};
 
-use crate::models::{
-    playlist::{PlaylistModel, PlaylistMusicModel},
-    storage::StorageEntryLocModel,
-};
+use crate::models::{playlist::PlaylistModel, storage::StorageEntryLocModel};
 
 pub struct ArgDBUpsertPlaylist {
     pub id: Option<PlaylistId>,

@@ -12,5 +12,6 @@ uniffi = "=0.28.0"
 num-traits = "0.2"
 num-derive = "0.2"
 ease-database = { path = "../ease-database" }
+misty-serve = { path = "../misty-serve" }
 
 serde = { version = "1.0", features = ["derive"] }

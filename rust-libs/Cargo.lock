@@ -570,13 +570,14 @@ dependencies = [
  "getset",
  "id3",
  "lofty 0.18.2",
+ "misty-serve",
  "nom",
  "num-derive",
  "num-traits",
  "once_cell",
- "rmp-serde",
  "serde",
  "serde_bytes",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-util",
@@ -590,6 +591,7 @@ name = "ease-client-shared"
 version = "0.1.0"
 dependencies = [
  "ease-database",
+ "misty-serve",
  "num-derive",
  "num-traits",
  "serde",
@@ -1238,6 +1240,17 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "misty-serve"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "rmp-serde",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

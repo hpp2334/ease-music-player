@@ -1,12 +1,10 @@
+use ease_client_shared::backends::{app::ArgInitializeApp, preference::PreferenceData};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::Level;
-#[derive(Debug, Default, Clone, MistyState)]
-pub struct GlobalAppState {
-    pub storage_path: String,
-    pub app_document_dir: String,
-    pub schema_version: u32,
-    pub has_storage_permission: bool,
-}
+
+use crate::{ctx::Context, repositories::core::get_conn};
+
+use super::server::start_server;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AppMeta {
@@ -14,12 +12,11 @@ struct AppMeta {
     pub upgrading: bool,
 }
 
-fn load_persistent_data<'a, T: Serialize + DeserializeOwned>(
-    app: impl AsReadonlyMistyClientHandle<'a>,
+fn load_persistent_data<T: Serialize + DeserializeOwned>(
+    app_document_dir: &str,
     name: &str,
 ) -> Option<T> {
-    let global_state = GlobalAppState::map(app, Clone::clone);
-    let path = global_state.app_document_dir + name;
+    let path = app_document_dir.to_string() + name;
 
     if std::fs::metadata(&path).is_err() {
         return None;
@@ -40,19 +37,18 @@ fn load_persistent_data<'a, T: Serialize + DeserializeOwned>(
 }
 
 fn save_persistent_data<'a, T: Serialize + DeserializeOwned>(
-    app: impl AsReadonlyMistyClientHandle<'a>,
+    app_document_dir: &str,
     name: &str,
     data: T,
 ) {
-    let global_state = GlobalAppState::map(app, Clone::clone);
-    let path = global_state.app_document_dir + name;
+    let path = app_document_dir.to_string() + name;
 
     let data = serde_json::to_string(&data).unwrap();
     std::fs::write(path, data).unwrap();
 }
 
-fn load_app_meta<'a>(app: impl AsReadonlyMistyClientHandle<'a>) -> AppMeta {
-    let meta = load_persistent_data::<AppMeta>(app, "meta.json");
+fn load_app_meta(app_document_dir: &str) -> AppMeta {
+    let meta = load_persistent_data::<AppMeta>(app_document_dir, "meta.json");
     match meta {
         Some(meta) => meta,
         None => AppMeta {
@@ -62,69 +58,44 @@ fn load_app_meta<'a>(app: impl AsReadonlyMistyClientHandle<'a>) -> AppMeta {
     }
 }
 
-fn save_current_app_meta<'a>(app: impl AsReadonlyMistyClientHandle<'a>) {
-    let state = GlobalAppState::map(app, Clone::clone);
+fn save_current_app_meta(cx: &Context) {
     save_persistent_data(
-        app,
+        &cx.app_document_dir,
         "meta.json",
         AppMeta {
-            schema_version: state.schema_version,
+            schema_version: cx.schema_version,
             upgrading: false,
         },
     );
 }
 
-pub fn load_preference_data<'a>(app: impl AsReadonlyMistyClientHandle<'a>) -> PreferenceState {
-    load_persistent_data::<PreferenceState>(app, "preference.json").unwrap_or_default()
+pub fn load_preference_data(cx: &Context) -> PreferenceData {
+    load_persistent_data::<PreferenceData>(&cx.app_document_dir, "preference.json")
+        .unwrap_or_default()
 }
 
-pub fn save_preference_data<'a>(app: impl AsReadonlyMistyClientHandle<'a>) {
-    let data = preference_state_to_data(app);
-    save_persistent_data(app, "preference.json", data);
+pub fn save_preference_data(cx: &Context, data: PreferenceData) {
+    save_persistent_data(&cx.app_document_dir, "preference.json", data);
 }
 
-pub fn get_db_conn_v2<'a>(
-    app: impl AsReadonlyMistyClientHandle<'a>,
-) -> EaseResult<ease_database::DbConnection> {
-    let state = GlobalAppState::map(app, Clone::clone);
-    let conn = ease_database::DbConnection::open(state.app_document_dir + "app.db")?;
-    Ok(conn)
-}
-
-pub fn get_has_local_storage_permission(client: MistyClientHandle) -> bool {
-    GlobalAppState::map(client, |state| state.has_storage_permission)
-}
-
-pub fn app_boostrap(client: MistyClientHandle, arg: ArgInitializeApp) -> EaseResult<()> {
-    // Update global state
-    GlobalAppState::update(client, |state| {
-        state.app_document_dir = arg.app_document_dir;
-        state.schema_version = arg.schema_version;
-        state.storage_path = arg.storage_path;
-    });
+pub fn app_bootstrap(arg: ArgInitializeApp) -> anyhow::Result<Context> {
+    let cx = Context {
+        storage_path: arg.storage_path,
+        app_document_dir: arg.app_document_dir,
+        schema_version: arg.schema_version,
+        server_port: start_server(),
+    };
 
     // Init
-    init_persistent_state(client)?;
-    sync_storage_path(client);
-    init_preference_state(client)?;
-    spawn_server(client);
-
-    // Load Data
-    update_storages_state(client, true)?;
-    initialize_all_playlist_state(client)?;
-    Ok(())
+    init_persistent_state(&cx)?;
+    Ok(cx)
 }
 
-pub fn update_storage_permission(client: MistyClientHandle, arg: bool) {
-    GlobalAppState::update(client, |state| state.has_storage_permission = arg);
-}
-
-fn init_persistent_state(app: MistyClientHandle) -> EaseResult<()> {
+fn init_persistent_state(cx: &Context) -> anyhow::Result<()> {
     let _ = tracing::span!(Level::INFO, "init_persistent_state").enter();
-    let state = GlobalAppState::map(app, Clone::clone);
-    let meta = load_app_meta(app);
+    let meta = load_app_meta(&cx.app_document_dir);
     let prev_version = meta.schema_version;
-    let curr_version = state.schema_version;
+    let curr_version = cx.schema_version;
 
     tracing::info!(
         "previous schema version {:?}, current schema version {:?}",
@@ -133,20 +104,14 @@ fn init_persistent_state(app: MistyClientHandle) -> EaseResult<()> {
     );
 
     if prev_version < curr_version {
-        upgrade_db_schema(app, prev_version)?;
-        save_current_app_meta(app);
+        upgrade_db_schema(cx, prev_version)?;
+        save_current_app_meta(cx);
     }
-    init_local_storage_db_if_not_exist(app)?;
     Ok(())
 }
 
-fn sync_storage_path(client: MistyClientHandle) {
-    let state = GlobalAppState::map(client, Clone::clone);
-    set_global_local_storage_path(state.storage_path.to_string());
-}
-
-fn upgrade_db_schema(app: MistyClientHandle, prev_version: u32) -> EaseResult<()> {
-    let conn = get_db_conn_v2(app)?;
+fn upgrade_db_schema(cx: &Context, prev_version: u32) -> anyhow::Result<()> {
+    let conn = get_conn(cx)?;
     if prev_version < 1 {
         tracing::info!("start to upgrade to v1");
         conn.execute_batch(include_str!("../../../migrations/v1_init.sql"))?;

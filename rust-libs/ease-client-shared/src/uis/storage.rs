@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{ArgUpsertStorage, StorageEntryType, StorageId, StorageType};
+use crate::backends::storage::{ArgUpsertStorage, StorageEntryType, StorageId, StorageType};
 
 #[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum CurrentStorageImportType {

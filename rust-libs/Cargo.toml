@@ -4,6 +4,7 @@
 resolver = "2"
 members = [
     "ease-database",
+    "misty-serve",
     "ease-client-shared",
     "ease-remote-storage",
     "ease-client-backend",

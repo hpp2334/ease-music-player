@@ -1,4 +1,4 @@
-use ease_client_shared::{ArgUpsertStorage, StorageId};
+use ease_client_shared::backends::storage::{ArgUpsertStorage, StorageId};
 use ease_database::{params, DbConnectionRef};
 use num_traits::ToPrimitive;
 

@@ -12,7 +12,7 @@ pub trait IMessage {
 macro_rules! define_message {
     ($msg: ident, $code: expr, $arg: ty, $ret: ty) => {
         pub struct $msg {}
-        impl crate::core::schema::IMessage for $msg {
+        impl misty_serve::schema::IMessage for $msg {
             const CODE: u32 = $code as u32;
             type Argument = $arg;
             type Return = $ret;
@@ -20,7 +20,7 @@ macro_rules! define_message {
     };
 }
 
-pub(crate) fn decode_message_payload<T>(arg: Vec<u8>) -> ChannelResult<T>
+pub fn decode_message_payload<T>(arg: Vec<u8>) -> ChannelResult<T>
 where
     T: Serialize + DeserializeOwned,
 {
@@ -28,7 +28,7 @@ where
     Ok(ret)
 }
 
-pub(crate) fn encode_message_payload<T>(arg: T) -> ChannelResult<Vec<u8>>
+pub fn encode_message_payload<T>(arg: T) -> ChannelResult<Vec<u8>>
 where
     T: Serialize + DeserializeOwned,
 {

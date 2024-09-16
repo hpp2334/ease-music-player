@@ -1,9 +1,14 @@
-use ease_client_shared::{MusicDuration, MusicId};
-use serde::{Deserialize, Serialize};
+use ease_client_shared::backends::{
+    code::Code,
+    music::{
+        ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, Music, MusicId,
+        MusicLyric, MusicMeta,
+    },
+    storage::StorageEntryLoc,
+};
 
 use crate::{
     ctx::Context,
-    define_message,
     models::music::MusicModel,
     repositories::{
         core::get_conn,
@@ -12,33 +17,10 @@ use crate::{
             db_update_music_total_duration,
         },
     },
-    services::lyrics::{parse_lrc, Lyrics},
+    services::lyrics::parse_lrc,
 };
 
-use super::storage::{
-    from_opt_storage_entry, load_storage_entry_data, to_opt_storage_entry, StorageEntryLoc,
-};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MusicMeta {
-    pub id: MusicId,
-    pub title: String,
-    pub duration: Option<MusicDuration>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MusicLyric {
-    pub loc: StorageEntryLoc,
-    pub data: Lyrics,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Music {
-    pub meta: MusicMeta,
-    pub loc: StorageEntryLoc,
-    pub picture_loc: Option<StorageEntryLoc>,
-    pub lyric: Option<MusicLyric>,
-}
+use super::storage::{from_opt_storage_entry, load_storage_entry_data, to_opt_storage_entry};
 
 pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     MusicMeta {
@@ -75,7 +57,6 @@ async fn load_lyric(cx: &Context, loc: Option<StorageEntryLoc>) -> Option<MusicL
     Some(MusicLyric { loc, data: lyric })
 }
 
-define_message!(GetMusicMsg, Code::GetMusic, MusicId, ());
 pub(crate) async fn cr_get_music(cx: Context, id: MusicId) -> anyhow::Result<Option<Music>> {
     let conn = get_conn(&cx)?;
     let model = db_load_music(conn.get_ref(), id)?;
@@ -100,17 +81,6 @@ pub(crate) async fn cr_get_music(cx: Context, id: MusicId) -> anyhow::Result<Opt
     Ok(Some(music))
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ArgUpdateMusicDuration {
-    id: MusicId,
-    duration: MusicDuration,
-}
-define_message!(
-    UpdateMusicDurationMsg,
-    Code::UpdateMusicDuration,
-    ArgUpdateMusicDuration,
-    ()
-);
 pub(crate) async fn cu_update_music_duration(
     cx: Context,
     arg: ArgUpdateMusicDuration,
@@ -120,17 +90,6 @@ pub(crate) async fn cu_update_music_duration(
     Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ArgUpdateMusicCover {
-    id: MusicId,
-    cover_loc: Option<StorageEntryLoc>,
-}
-define_message!(
-    UpdateMusicCoverMsg,
-    Code::UpdateMusicCover,
-    ArgUpdateMusicCover,
-    ()
-);
 pub(crate) async fn cu_update_music_cover(
     cx: Context,
     arg: ArgUpdateMusicCover,
@@ -141,17 +100,6 @@ pub(crate) async fn cu_update_music_cover(
     Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ArgUpdateMusicLyric {
-    id: MusicId,
-    lyric_loc: Option<StorageEntryLoc>,
-}
-define_message!(
-    UpdateMusicLyricMsg,
-    Code::UpdateMusicLyric,
-    ArgUpdateMusicLyric,
-    ()
-);
 pub(crate) async fn cu_update_music_lyric(
     cx: Context,
     arg: ArgUpdateMusicLyric,

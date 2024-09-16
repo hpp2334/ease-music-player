@@ -1,8 +1,7 @@
-use std::sync::Arc;
-
-use serde::{Deserialize, Serialize};
-
 #[derive(Clone)]
 pub struct Context {
-    pub db_uri: String,
+    pub storage_path: String,
+    pub app_document_dir: String,
+    pub schema_version: u32,
+    pub server_port: u16,
 }

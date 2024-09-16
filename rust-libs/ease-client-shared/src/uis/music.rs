@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::MusicId;
+use crate::backends::music::MusicId;
 
 use super::preference::PlayMode;
 

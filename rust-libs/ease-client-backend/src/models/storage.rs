@@ -1,4 +1,4 @@
-use ease_client_shared::StorageId;
+use ease_client_shared::backends::storage::StorageId;
 use serde::{Deserialize, Serialize};
 
 pub type StorageEntryLocModel = (Option<String>, Option<StorageId>);

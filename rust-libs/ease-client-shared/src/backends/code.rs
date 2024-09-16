@@ -22,4 +22,7 @@ pub enum Code {
     RemoveStorage,
     TestStorage,
     ListStorageEntryChildren,
+    // Preference
+    GetPreference,
+    UpdatePreference,
 }

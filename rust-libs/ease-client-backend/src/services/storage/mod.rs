@@ -5,21 +5,9 @@ use crate::{
     models::storage::StorageModel,
     repositories::{core::get_conn, storage::db_load_storage},
 };
-use ease_client_shared::{StorageId, StorageType};
+use ease_client_shared::backends::storage::{Storage, StorageId, StorageType};
 use ease_remote_storage::{BuildWebdavArg, StorageBackend, Webdav};
 use num_traits::FromPrimitive;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Storage {
-    pub id: StorageId,
-    pub addr: String,
-    pub alias: Option<String>,
-    pub username: String,
-    pub password: String,
-    pub is_anonymous: bool,
-    pub typ: StorageType,
-}
 
 pub fn build_storage(model: StorageModel) -> Storage {
     Storage {

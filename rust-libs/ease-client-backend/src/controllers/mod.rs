@@ -1,12 +1,13 @@
+use misty_serve::{channel::MessageChannel, generate_handlers};
 pub use music::*;
 pub use playlist::*;
 pub use storage::*;
 
-use crate::{
-    core::{channel::MessageChannel, handler::HandlersBuilder},
-    ctx::Context,
-    generate_handlers,
-};
+use ease_client_shared::backends::music::*;
+use ease_client_shared::backends::playlist::*;
+use ease_client_shared::backends::storage::*;
+
+use crate::ctx::Context;
 
 pub mod music;
 pub mod playlist;

@@ -1,25 +1,18 @@
-use ease_client_shared::{ArgUpsertStorage, StorageId, StorageType};
+use ease_client_shared::backends::storage::{
+    ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageEntryLoc, StorageId,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     ctx::Context,
-    define_message,
     models::storage::StorageEntryLocModel,
     repositories::{
         core::get_conn,
         playlist::db_remove_musics_in_playlists_by_storage,
         storage::{db_load_storage, db_load_storages, db_remove_storage, db_upsert_storage},
     },
-    services::storage::{build_storage, Storage},
+    services::storage::build_storage,
 };
-
-use super::code::Code;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct StorageEntryLoc {
-    pub path: String,
-    pub storage_id: StorageId,
-}
 
 pub(crate) fn to_opt_storage_entry(
     path: Option<String>,
@@ -50,14 +43,12 @@ pub(crate) async fn load_storage_entry_data(
     todo!()
 }
 
-define_message!(UpsertStorageMsg, Code::UpsertStorage, ArgUpsertStorage, ());
 pub async fn ccu_upsert_storage(cx: Context, arg: ArgUpsertStorage) -> anyhow::Result<()> {
     let conn = get_conn(&cx)?;
     db_upsert_storage(conn.get_ref(), arg)?;
     Ok(())
 }
 
-define_message!(ListStorageMsg, Code::ListStorage, (), Vec<Storage>);
 pub async fn cr_list_storage(cx: Context, _arg: ()) -> anyhow::Result<Vec<Storage>> {
     let conn = get_conn(&cx)?;
     let models = db_load_storages(conn.get_ref())?;
@@ -66,7 +57,6 @@ pub async fn cr_list_storage(cx: Context, _arg: ()) -> anyhow::Result<Vec<Storag
     Ok(storages)
 }
 
-define_message!(GetStorageMsg, Code::GetStorage, StorageId, Option<Storage>);
 pub async fn cr_get_storage(cx: Context, id: StorageId) -> anyhow::Result<Option<Storage>> {
     let conn = get_conn(&cx)?;
     let model = db_load_storage(conn.get_ref(), id)?;
@@ -78,17 +68,10 @@ pub async fn cr_get_storage(cx: Context, id: StorageId) -> anyhow::Result<Option
     Ok(storage)
 }
 
-define_message!(
-    GetToRemoveStorageRefsMsg,
-    Code::GetToRemoveStorageRefs,
-    StorageId,
-    Option<Storage>
-);
 pub async fn cr_get_to_remove_storage_refs(cx: Context, id: StorageId) -> anyhow::Result<()> {
     todo!()
 }
 
-define_message!(RemoveStorageMsg, Code::RemoveStorage, StorageId, ());
 pub async fn cd_remove_storage(cx: Context, id: StorageId) -> anyhow::Result<()> {
     let conn = get_conn(&cx)?;
     db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
@@ -96,30 +79,10 @@ pub async fn cd_remove_storage(cx: Context, id: StorageId) -> anyhow::Result<()>
     Ok(())
 }
 
-define_message!(TestStorageMsg, Code::TestStorage, ArgUpsertStorage, ());
 pub async fn cr_test_storage(cx: Context, arg: ArgUpsertStorage) -> anyhow::Result<()> {
     todo!()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorageEntry {
-    typ: StorageType,
-    name: String,
-    path: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ListStorageEntryChildrenResp {
-    Ok(StorageEntry),
-    AuthenticationFailed,
-    Timeout,
-}
-
-define_message!(
-    ListStorageEntryChildrenMsg,
-    Code::ListStorageEntryChildren,
-    StorageEntryLoc,
-    ListStorageEntryChildrenResp
-);
 pub async fn cr_list_storage_entry_children(
     cx: Context,
     arg: StorageEntryLoc,

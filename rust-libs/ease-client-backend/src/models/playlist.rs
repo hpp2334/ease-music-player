@@ -1,4 +1,4 @@
-use ease_client_shared::{MusicId, PlaylistId, StorageId};
+use ease_client_shared::backends::{music::MusicId, playlist::PlaylistId, storage::StorageId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use ease_client_shared::backends::lyric::Lyrics;
 use nom::IResult;
 use nom::{
     bytes::complete::{tag, take_until},
@@ -10,23 +11,6 @@ use nom::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-#[derive(Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct LrcMetadata {
-    pub artist: String,
-    pub album: String,
-    pub title: String,
-    pub lyricist: String,
-    pub author: String,
-    pub length: String,
-    pub offset: String,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Lyrics {
-    pub metdata: LrcMetadata,
-    pub lines: Vec<(Duration, String)>,
-}
 
 #[derive(Debug, Error)]
 pub enum LrcParseError {
