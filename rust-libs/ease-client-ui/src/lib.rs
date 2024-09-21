@@ -7,14 +7,14 @@ use core_views::with_view_models;
 use ease_client_shared::uis::view::RootViewModelState;
 pub use misty_vm::resources::ResourceUpdateAction;
 pub use misty_vm::{
-    client::{MistyClientHandle, SingletonMistyClientPod},
+    app::{MistyClientHandle, SingletonMistyClientPod},
     controllers::MistyController,
     resources::{MistyResourceHandle, MistyResourceId, MistyResourceManager},
     services::MistyServiceManager,
     signals::MistySignal,
     views::MistyViewModelManager,
 };
-use misty_vm::{misty_states, states::MistyStateManager};
+use misty_vm::{misty_states, models::MistyStateManager};
 
 use crate::modules::{
     music::service::{CurrentMusicState, TimeToPauseState},

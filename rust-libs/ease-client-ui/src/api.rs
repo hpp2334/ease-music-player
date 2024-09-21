@@ -14,8 +14,8 @@ use ease_client_shared::uis::rotuer::RootRouteSubKey;
 use ease_client_shared::uis::to_hosts::{IFlushSignal, IMusicPlayerService, IToastService};
 use ease_client_shared::uis::view::RootViewModelState;
 use error::{EaseError, EaseResult};
-use misty_vm::async_task::IAsyncTaskRuntimeAdapter;
-use misty_vm::client::SingletonMistyClientPod;
+use misty_vm::async_task::IAsyncRuntimeAdapter;
+use misty_vm::app::SingletonMistyClientPod;
 use misty_vm::controllers::{ControllerRet, MistyController};
 use misty_vm::resources::ResourceUpdateAction;
 use misty_vm::services::MistyServiceManager;
@@ -49,7 +49,7 @@ impl TokioAsyncRuntime {
     }
 }
 
-impl IAsyncTaskRuntimeAdapter for TokioAsyncRuntime {
+impl IAsyncRuntimeAdapter for TokioAsyncRuntime {
     fn spawn(&self, future: misty_vm::BoxFuture<'static, ()>) -> u64 {
         let _guard = ASYNC_RT.enter();
         let handle = tokio::spawn(future);

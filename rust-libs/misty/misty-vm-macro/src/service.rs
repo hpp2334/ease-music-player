@@ -21,7 +21,7 @@ impl Parse for ServiceStruct {
     }
 }
 
-pub fn parse_misty_service(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+pub fn parse_to_host(input: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     let input = parse2::<ServiceStruct>(input);
     if let Err(err) = input {
         panic!("parse misty service error: {}", err);

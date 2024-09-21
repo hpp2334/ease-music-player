@@ -3,7 +3,7 @@ use ease_client_shared::{
     uis::preference::PlayMode,
 };
 use misty_vm::{
-    async_task::MistyAsyncTaskTrait, client::MistyClientHandle, states::MistyStateTrait,
+    async_task::MistyAsyncTaskTrait, app::MistyClientHandle, models::MistyStateTrait,
     MistyAsyncTask,
 };
 

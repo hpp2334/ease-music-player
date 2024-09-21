@@ -525,34 +525,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ease-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "ease-client-backend",
- "ease-client-shared",
- "getset",
- "misty-vm",
- "num-derive",
- "num-traits",
- "once_cell",
- "serde",
- "serde_bytes",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-android",
- "tracing-subscriber",
- "unicode-segmentation",
- "uniffi",
- "urlencoding",
-]
-
-[[package]]
 name = "ease-client-android-ffi-builder"
 version = "0.1.0"
 dependencies = [
@@ -610,7 +582,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "dav-server",
- "ease-client",
+ "ease-client-ui",
  "hyper",
  "lofty 0.15.0",
  "misty-vm-test",
@@ -619,6 +591,34 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ease-client-ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "ease-client-backend",
+ "ease-client-shared",
+ "getset",
+ "misty-vm",
+ "num-derive",
+ "num-traits",
+ "once_cell",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-android",
+ "tracing-subscriber",
+ "unicode-segmentation",
+ "uniffi",
+ "urlencoding",
 ]
 
 [[package]]

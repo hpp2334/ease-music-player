@@ -7,8 +7,8 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ease-client = { path = "../ease-client" }
-misty-vm-test = { path = "../misty-vm-test" }
+ease-client-ui = { path = "../ease-client-ui" }
+misty-vm-test = { path = "../misty/misty-vm-test" }
 tokio = { version = "1", features = ["full"] }
 dav-server = { version = "0.5.7", features = ["memfs"] }
 hyper = { version = "0.14", features = ["full"] }

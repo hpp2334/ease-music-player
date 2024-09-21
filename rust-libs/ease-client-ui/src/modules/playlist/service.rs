@@ -17,8 +17,8 @@ use ease_client_shared::{
     uis::{playlist::CreatePlaylistMode, storage::CurrentStorageImportType},
 };
 use misty_vm::{
-    async_task::MistyAsyncTaskTrait, client::MistyClientHandle, resources::MistyResourceHandle,
-    services::MistyServiceTrait, states::MistyStateTrait, MistyAsyncTask, MistyState,
+    async_task::MistyAsyncTaskTrait, app::MistyClientHandle, resources::MistyResourceHandle,
+    services::MistyServiceTrait, models::MistyStateTrait, MistyAsyncTask, MistyState,
 };
 
 use crate::modules::{

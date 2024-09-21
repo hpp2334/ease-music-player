@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ease_client_backend::Backend;
 use ease_client_shared::backends::app::ArgInitializeApp;
-use misty_vm::{client::MistyClientHandle, states::MistyStateTrait, MistyState};
+use misty_vm::{app::MistyClientHandle, models::MistyStateTrait, MistyState};
 
 use crate::modules::error::{EaseError, EaseResult};
 

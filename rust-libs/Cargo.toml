@@ -3,12 +3,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "misty-serve",
-    "misty-vm",
-    "misty-vm-macro",
+    "./misty/misty-serve",
+    "./misty/misty-vm",
+    "./misty/misty-vm-macro",
+    "./misty/misty-vm-test",
     "ease-database",
-    "ease-client-shared",
     "ease-remote-storage",
+    "ease-client-shared",
     "ease-client-backend",
     "ease-client-ui",
     "ease-client-test",

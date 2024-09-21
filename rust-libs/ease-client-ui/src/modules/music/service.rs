@@ -11,10 +11,10 @@ use ease_client_shared::{
 };
 use misty_vm::{
     async_task::MistyAsyncTaskTrait,
-    client::{AsReadonlyMistyClientHandle, MistyClientHandle},
+    app::{AsReadonlyMistyClientHandle, MistyClientHandle},
     resources::MistyResourceHandle,
     services::MistyServiceTrait,
-    states::MistyStateTrait,
+    models::MistyStateTrait,
     MistyAsyncTask, MistyState,
 };
 

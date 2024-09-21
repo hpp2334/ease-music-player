@@ -1,5 +1,5 @@
 use ease_client_shared::uis::rotuer::RootRouteSubKey;
-use misty_vm::{client::MistyClientHandle, states::MistyStateTrait, MistyState};
+use misty_vm::{app::MistyClientHandle, models::MistyStateTrait, MistyState};
 
 #[derive(Debug, Default, MistyState)]
 pub struct RouterState {
