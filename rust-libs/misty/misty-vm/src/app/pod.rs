@@ -4,7 +4,7 @@ use crate::{
     async_task::AsyncTasks,
     models::Models,
     to_host::{ToHosts, ToHostsBuilder},
-    view_models::IViewModels,
+    view_models::BoxedViewModels,
 };
 
 use super::{builder::AppBuilder, internal::AppInternal};

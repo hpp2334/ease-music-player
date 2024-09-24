@@ -4,8 +4,9 @@
 resolver = "2"
 members = [
     "./misty/misty-serve",
-    "./misty/misty-vm",
     "./misty/misty-vm-macro",
+    "./misty/misty-vm",
+    "./misty/misty-vm-widget",
     "./misty/misty-vm-test",
     "ease-database",
     "ease-remote-storage",

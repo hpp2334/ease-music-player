@@ -4,14 +4,14 @@ use crate::internal::AppInternal;
 
 use super::ViewModelContext;
 
-pub trait IViewModel<Event, E>: 'static
+pub trait ViewModel<Event, E>: 'static
 where
     E: Any + 'static,
 {
     fn on_event(&self, cx: &ViewModelContext, e: &Event) -> Result<(), E>;
 }
 
-pub(crate) trait IViewModels {
+pub(crate) trait BoxedViewModels {
     fn handle_event(&self, app: &Arc<AppInternal>, e: Box<dyn Any>);
 }
 
@@ -20,16 +20,16 @@ where
     Event: Any + 'static,
     E: Any + 'static,
 {
-    vms: Vec<Box<dyn IViewModel<Event, E>>>,
+    vms: Vec<Box<dyn ViewModel<Event, E>>>,
 }
 
 impl<Event, E> ViewModels<Event, E> {
-    pub fn new(vms: Vec<Box<dyn IViewModel<Event, E>>>) -> Self {
+    pub fn new(vms: Vec<Box<dyn ViewModel<Event, E>>>) -> Self {
         Self { vms }
     }
 }
 
-impl<Event, E> IViewModels for ViewModels<Event, E>
+impl<Event, E> BoxedViewModels for ViewModels<Event, E>
 where
     Event: Any + 'static,
     E: Any + 'static,
@@ -48,8 +48,8 @@ where
     }
 }
 
-pub(crate) struct DefaultViewModels;
+pub(crate) struct DefaultBoxedViewModels;
 
-impl IViewModels for DefaultViewModels {
+impl BoxedViewModels for DefaultBoxedViewModels {
     fn handle_event(&self, _app: &Arc<AppInternal>, _e: Box<dyn Any>) {}
 }

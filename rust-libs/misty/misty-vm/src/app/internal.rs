@@ -10,13 +10,13 @@ use crate::{
     async_task::{AsyncTasks, IAsyncRuntimeAdapter},
     models::Models,
     to_host::ToHosts,
-    view_models::IViewModels,
+    view_models::BoxedViewModels,
     Model,
 };
 
 pub(crate) struct AppInternal {
     pub models: Models,
-    pub view_models: Box<dyn IViewModels>,
+    pub view_models: Box<dyn BoxedViewModels>,
     pub to_hosts: ToHosts,
     pub async_tasks: AsyncTasks,
 }

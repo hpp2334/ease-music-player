@@ -1,13 +1,13 @@
 use std::any::Any;
 
-use super::pod::{IViewModel, IViewModels, ViewModels};
+use super::pod::{BoxedViewModels, ViewModel, ViewModels};
 
 pub struct ViewModelsBuilder<Event, E>
 where
     Event: Any + 'static,
     E: Any + 'static,
 {
-    vms: Vec<Box<dyn IViewModel<Event, E>>>,
+    vms: Vec<Box<dyn ViewModel<Event, E>>>,
 }
 
 impl<Event, E> ViewModelsBuilder<Event, E>
@@ -21,12 +21,12 @@ where
         }
     }
 
-    pub fn add(mut self, vm: impl IViewModel<Event, E>) -> Self {
+    pub fn add(mut self, vm: impl ViewModel<Event, E>) -> Self {
         self.vms.push(Box::new(vm));
         self
     }
 
-    pub(crate) fn build(self) -> Box<dyn IViewModels> {
+    pub(crate) fn build(self) -> Box<dyn BoxedViewModels> {
         let vms = ViewModels::new(self.vms);
 
         Box::new(vms)

@@ -4,7 +4,7 @@ use crate::{
     async_task::{AsyncTasks, DefaultAsyncRuntimeAdapter, IAsyncRuntimeAdapter},
     models::Models,
     to_host::{ToHosts, ToHostsBuilder},
-    view_models::{DefaultViewModels, IViewModels, ViewModelsBuilder},
+    view_models::{BoxedViewModels, DefaultBoxedViewModels, ViewModelsBuilder},
     Model,
 };
 
@@ -16,7 +16,7 @@ pub struct AppBuilderContext {
 
 pub struct AppBuilder {
     cx: AppBuilderContext,
-    view_models: Box<dyn IViewModels>,
+    view_models: Box<dyn BoxedViewModels>,
     to_hosts: ToHosts,
     async_tasks: AsyncTasks,
 }
@@ -36,7 +36,7 @@ impl AppBuilder {
             cx: AppBuilderContext {
                 models: Models::new(),
             },
-            view_models: Box::new(DefaultViewModels),
+            view_models: Box::new(DefaultBoxedViewModels),
             to_hosts: ToHostsBuilder::new().build(),
             async_tasks: AsyncTasks::new(DefaultAsyncRuntimeAdapter),
         }
