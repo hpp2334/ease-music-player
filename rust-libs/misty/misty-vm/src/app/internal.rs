@@ -29,6 +29,10 @@ impl AppInternal {
         self.view_models.handle_event(self, Box::new(evt));
     }
 
+    pub fn start(&self) {
+        self.view_models.handle_start();
+    }
+
     pub fn read_model<T>(&self) -> std::cell::Ref<'_, T>
     where
         T: 'static,

@@ -14,10 +14,14 @@ pub struct AppBuilderContext {
     models: Models,
 }
 
-pub struct AppBuilder {
+pub struct AppBuilder<Event, E>
+where
+    Event: 'static,
+    E: 'static,
+{
     cx: AppBuilderContext,
-    view_models: Box<dyn BoxedViewModels>,
-    to_hosts: ToHosts,
+    view_models_builder: ViewModelsBuilder<Event, E>,
+    to_hosts_builder: ToHostsBuilder,
     async_tasks: AsyncTasks,
 }
 
@@ -30,37 +34,32 @@ impl AppBuilderContext {
     }
 }
 
-impl AppBuilder {
+impl<Event, E> AppBuilder<Event, E>
+where
+    Event: Any + 'static,
+    E: Any + 'static,
+{
     pub(crate) fn new() -> Self {
         Self {
             cx: AppBuilderContext {
                 models: Models::new(),
             },
-            view_models: Box::new(DefaultBoxedViewModels),
-            to_hosts: ToHostsBuilder::new().build(),
+            view_models_builder: ViewModelsBuilder::new(),
+            to_hosts_builder: ToHostsBuilder::new(),
             async_tasks: AsyncTasks::new(DefaultAsyncRuntimeAdapter),
         }
     }
 
-    pub fn with_view_models<Event, E>(
+    pub fn with_view_models(
         mut self,
-        build: impl FnOnce(
-            &mut AppBuilderContext,
-            ViewModelsBuilder<Event, E>,
-        ) -> ViewModelsBuilder<Event, E>,
-    ) -> Self
-    where
-        Event: Any + 'static,
-        E: Any + 'static,
-    {
-        let builder = ViewModelsBuilder::new();
-        self.view_models = build(&mut self.cx, builder).build();
+        build: impl FnOnce(&mut AppBuilderContext, &mut ViewModelsBuilder<Event, E>),
+    ) -> Self {
+        build(&mut self.cx, &mut self.view_models_builder);
         self
     }
 
-    pub fn with_to_hosts(mut self, build: impl FnOnce(ToHostsBuilder) -> ToHostsBuilder) -> Self {
-        let builder = ToHostsBuilder::new();
-        self.to_hosts = build(builder).build();
+    pub fn with_to_hosts(mut self, build: impl FnOnce(&mut ToHostsBuilder)) -> Self {
+        build(&mut self.to_hosts_builder);
         self
     }
 
@@ -73,8 +72,8 @@ impl AppBuilder {
         App {
             _app: Arc::new(AppInternal {
                 models: self.cx.models,
-                view_models: self.view_models,
-                to_hosts: self.to_hosts,
+                view_models: self.view_models_builder.build(),
+                to_hosts: self.to_hosts_builder.build(),
                 async_tasks: self.async_tasks,
             }),
         }

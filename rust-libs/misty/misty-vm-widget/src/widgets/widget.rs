@@ -11,21 +11,18 @@ pub struct AnyWidget {}
 
 pub struct EmptyWidget {}
 
-
 pub trait IntoWidget {
     fn into_any(&self) -> AnyWidget {
         todo!()
     }
 }
- 
+
 pub trait AsWidget {
     fn as_any(&self) -> &AnyWidget {
         todo!()
     }
 }
-impl AsWidget for &AnyWidget {
-    
-}
+impl AsWidget for &AnyWidget {}
 
 impl Widget for EmptyWidget {
     type Props = ();
@@ -46,12 +43,16 @@ pub fn empty_widgets() -> Vec<EmptyWidget> {
     vec![]
 }
 
-
 pub struct WidgetState<T> {
     state: Rc<RefCell<T>>,
 }
 
 impl<T> WidgetState<T> {
+    pub fn new(value: T) -> Self {
+        Self {
+            state: Rc::new(RefCell::new(value)),
+        }
+    }
     pub fn get(&self, cx: &WidgetContext) -> Ref<'_, T> {
         todo!()
     }
@@ -84,9 +85,11 @@ pub trait WidgetRender {
     fn render(&self, cx: &WidgetContext) -> impl IntoWidget;
 }
 
-
 impl<T> IntoWidget for T where T: Widget {}
-impl<T> AsWidget for &T where T: Widget {
+impl<T> AsWidget for &T
+where
+    T: Widget,
+{
     fn as_any(&self) -> &AnyWidget {
         std::todo!()
     }

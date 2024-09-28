@@ -21,7 +21,7 @@ where
         }
     }
 
-    pub fn add(mut self, vm: impl ViewModel<Event, E>) -> Self {
+    pub fn add(&mut self, vm: impl ViewModel<Event, E>) -> &mut Self {
         self.vms.push(Box::new(vm));
         self
     }

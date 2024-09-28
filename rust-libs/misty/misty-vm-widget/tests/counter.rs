@@ -1,13 +1,19 @@
 use std::{borrow::BorrowMut, convert::Infallible};
 
 use misty_vm_widget::{
-empty_widgets, AnyWidget, App, AppBuilderContext, AsWidget, EmptyWidgets, EventDispatcher, IntoWidget, Model, RenderObject, ViewModelContext, Widget, WidgetAtom, WidgetContext, WidgetRender, WidgetState
+    empty_widgets, AnyWidget, App, AppBuilderContext, AsWidget, EmptyWidgets, EventDispatcher,
+    IntoWidget, Model, RenderObject, ViewModelContext, Widget, WidgetAtom, WidgetContext,
+    WidgetEvent, WidgetRender, WidgetState, WidgetViewModel,
 };
 
 enum HostRenderElement {
     Button { text: String, ed_click_id: u32 },
     Column,
     Text { text: String },
+}
+
+enum Event {
+    Widget(WidgetEvent),
 }
 
 impl RenderObject for HostRenderElement {}
@@ -18,10 +24,10 @@ struct Counter {
 
 #[derive(Default)]
 struct ColumnProps {
-    children: Vec<AnyWidget>
+    children: Vec<AnyWidget>,
 }
 struct Column {
-    props: ColumnProps
+    props: ColumnProps,
 }
 impl Widget for Column {
     type State = ();
@@ -73,7 +79,12 @@ impl Widget for Text {
 }
 impl Text {
     pub fn new(text: String) -> Self {
-        Self { props: TextProps { text, children: EmptyWidgets::default()  } }
+        Self {
+            props: TextProps {
+                text,
+                children: EmptyWidgets::default(),
+            },
+        }
     }
 }
 impl WidgetAtom for Text {
@@ -111,7 +122,10 @@ impl Button {
 }
 impl WidgetAtom for Button {
     fn render_object(&self, cx: &WidgetContext) -> impl RenderObject {
-        HostRenderElement::Button { text: self.props.text.clone(), ed_click_id: self.props.on_click.id(), }
+        HostRenderElement::Button {
+            text: self.props.text.clone(),
+            ed_click_id: self.props.on_click.id(),
+        }
     }
 
     fn children(&self) -> impl Iterator<Item = impl AsWidget> {
@@ -121,6 +135,21 @@ impl WidgetAtom for Button {
 
 struct Root {
     state: WidgetState<u32>,
+}
+impl Widget for Root {
+    type State = ();
+    type Props = ();
+
+    fn init_state() -> Self::State {
+        ()
+    }
+}
+impl Root {
+    pub fn new() -> Self {
+        Root {
+            state: WidgetState::new(0),
+        }
+    }
 }
 impl WidgetRender for Root {
     fn render(&self, cx: &WidgetContext) -> impl IntoWidget {
@@ -151,10 +180,27 @@ impl WidgetRender for Root {
 }
 
 fn build_app() -> App {
-    App::builder().build()
+    let app = App::builder::<Event, Infallible>()
+        .with_view_models(|ctx, builder| {
+            builder.add(WidgetViewModel::new(
+                |e| match e {
+                    Event::Widget(e) => Some(e),
+                },
+                || Root::new(),
+            ));
+        })
+        .build();
+
+    app.start();
+    app
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{build_app, Counter};
+
+    #[test]
+    fn test_render() {
+        let app = build_app();
+    }
 }

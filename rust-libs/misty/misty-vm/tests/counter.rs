@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use misty_vm::{App, AppBuilderContext, IViewModel, Model, ViewModelContext};
+use misty_vm::{App, AppBuilderContext, Model, ViewModel, ViewModelContext};
 
 enum Event {
     Increase,
@@ -24,7 +24,7 @@ impl CounterVM {
     }
 }
 
-impl IViewModel<Event, Infallible> for CounterVM {
+impl ViewModel<Event, Infallible> for CounterVM {
     fn on_event(&self, cx: &ViewModelContext, e: &Event) -> Result<(), Infallible> {
         match e {
             Event::Increase => {
@@ -47,7 +47,9 @@ impl IViewModel<Event, Infallible> for CounterVM {
 
 fn build_app() -> App {
     App::builder()
-        .with_view_models(|cx, builder| builder.add(CounterVM::new(cx)))
+        .with_view_models(|cx, builder| {
+            builder.add(CounterVM::new(cx));
+        })
         .build()
 }
 
@@ -61,7 +63,7 @@ mod tests {
         app.emit(Event::Increase);
 
         {
-            let v = app.read_model::<Counter>();
+            let v = app.model::<Counter>();
             assert_eq!(v.counter, 1);
         }
     }
@@ -73,7 +75,7 @@ mod tests {
         app.emit(Event::Increase);
 
         {
-            let v = app.read_model::<Counter>();
+            let v = app.model::<Counter>();
             assert_eq!(v.counter, 2);
         }
     }
@@ -85,7 +87,7 @@ mod tests {
         app.emit(Event::Decrease);
 
         {
-            let v = app.read_model::<Counter>();
+            let v = app.model::<Counter>();
             assert_eq!(v.counter, 0);
         }
     }

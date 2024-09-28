@@ -14,11 +14,19 @@ pub struct App {
 }
 
 impl App {
-    pub fn builder() -> AppBuilder {
+    pub fn builder<Event, E>() -> AppBuilder<Event, E>
+    where
+        Event: 'static,
+        E: 'static,
+    {
         AppBuilder::new()
     }
 
-    pub fn read_model<T>(&self) -> std::cell::Ref<'_, T>
+    pub fn start(&self) {
+        self._app.start();
+    }
+
+    pub fn model<T>(&self) -> std::cell::Ref<'_, T>
     where
         T: 'static,
     {
