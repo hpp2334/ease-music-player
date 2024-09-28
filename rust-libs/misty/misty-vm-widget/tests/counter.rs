@@ -1,8 +1,7 @@
 use std::{borrow::BorrowMut, convert::Infallible};
 
 use misty_vm_widget::{
-    AnyWidget, App, AppBuilderContext, EventDispatcher, IntoWidget, Model, ViewModelContext,
-    Widget, WidgetAtom, WidgetContext, WidgetRender, WidgetState,
+empty_widgets, AnyWidget, App, AppBuilderContext, AsWidget, EmptyWidgets, EventDispatcher, IntoWidget, Model, RenderObject, ViewModelContext, Widget, WidgetAtom, WidgetContext, WidgetRender, WidgetState
 };
 
 enum HostRenderElement {
@@ -11,14 +10,22 @@ enum HostRenderElement {
     Text { text: String },
 }
 
+impl RenderObject for HostRenderElement {}
+
 struct Counter {
     pub counter: u32,
 }
 
-struct Column;
+#[derive(Default)]
+struct ColumnProps {
+    children: Vec<AnyWidget>
+}
+struct Column {
+    props: ColumnProps
+}
 impl Widget for Column {
     type State = ();
-    type Props = ();
+    type Props = ColumnProps;
 
     fn init_state() -> Self::State {
         ()
@@ -27,31 +34,38 @@ impl Widget for Column {
 
 impl Column {
     pub fn new() -> Self {
-        todo!()
+        Self {
+            props: Default::default(),
+        }
     }
-    pub fn with_child(self, el: impl IntoWidget) -> Self
+    pub fn with_child(mut self, el: impl IntoWidget) -> Self
     where
         Self: Sized,
     {
-        todo!()
+        self.props.children.push(el.into_any());
+        self
     }
 }
 impl WidgetAtom for Column {
-    fn update_render_object(&self, cx: &WidgetContext) {
-        todo!()
+    fn render_object(&self, cx: &WidgetContext) -> impl RenderObject {
+        HostRenderElement::Column
     }
 
-    fn children(&self) -> Vec<AnyWidget> {
-        todo!()
+    fn children(&self) -> impl Iterator<Item = impl AsWidget> {
+        self.props.children.iter()
     }
 }
 
-struct Text {
+struct TextProps {
     text: String,
+    children: EmptyWidgets,
+}
+struct Text {
+    props: TextProps,
 }
 impl Widget for Text {
     type State = ();
-    type Props = String;
+    type Props = TextProps;
 
     fn init_state() -> Self::State {
         ()
@@ -59,23 +73,25 @@ impl Widget for Text {
 }
 impl Text {
     pub fn new(text: String) -> Self {
-        Self { text }
+        Self { props: TextProps { text, children: EmptyWidgets::default()  } }
     }
 }
 impl WidgetAtom for Text {
-    fn children(&self) -> Vec<AnyWidget> {
-        vec![]
+    fn children(&self) -> impl Iterator<Item = impl AsWidget> {
+        self.props.children.iter()
     }
-    fn update_render_object(&self, cx: &WidgetContext) {
+    fn render_object(&self, cx: &WidgetContext) -> impl RenderObject {
         let el = HostRenderElement::Text {
-            text: self.text.clone(),
+            text: self.props.text.clone(),
         };
+        el
     }
 }
 
 struct ButtonProps {
     text: String,
     on_click: EventDispatcher<()>,
+    children: EmptyWidgets,
 }
 struct Button {
     props: ButtonProps,
@@ -94,12 +110,12 @@ impl Button {
     }
 }
 impl WidgetAtom for Button {
-    fn update_render_object(&self, cx: &WidgetContext) {
-        todo!()
+    fn render_object(&self, cx: &WidgetContext) -> impl RenderObject {
+        HostRenderElement::Button { text: self.props.text.clone(), ed_click_id: self.props.on_click.id(), }
     }
 
-    fn children(&self) -> Vec<AnyWidget> {
-        todo!()
+    fn children(&self) -> impl Iterator<Item = impl AsWidget> {
+        self.props.children.iter()
     }
 }
 
@@ -124,10 +140,12 @@ impl WidgetRender for Root {
             .with_child(Button::new(ButtonProps {
                 text: "+".to_string(),
                 on_click: on_incr,
+                children: EmptyWidgets::default(),
             }))
             .with_child(Button::new(ButtonProps {
                 text: "-".to_string(),
                 on_click: on_decr,
+                children: EmptyWidgets::default(),
             }))
     }
 }
