@@ -8,14 +8,14 @@ pub trait ViewModel<Event, E>: 'static
 where
     E: Any + 'static,
 {
-    fn on_start(&self) -> Result<(), E> {
+    fn on_start(&self, cx: &ViewModelContext) -> Result<(), E> {
         Ok(())
     }
     fn on_event(&self, cx: &ViewModelContext, event: &Event) -> Result<(), E>;
 }
 
 pub(crate) trait BoxedViewModels {
-    fn handle_start(&self);
+    fn handle_start(&self, cx: &ViewModelContext);
     fn handle_event(&self, app: &Arc<AppInternal>, e: Box<dyn Any>);
 }
 
@@ -38,9 +38,9 @@ where
     Event: Any + 'static,
     E: Any + 'static,
 {
-    fn handle_start(&self) {
+    fn handle_start(&self, cx: &ViewModelContext) {
         for vm in self.vms.iter() {
-            let res = vm.on_start();
+            let res = vm.on_start(cx);
             if let Err(_) = res {
                 // TODO: error handler
                 panic!("ViewModel on start error");
@@ -64,6 +64,6 @@ where
 pub(crate) struct DefaultBoxedViewModels;
 
 impl BoxedViewModels for DefaultBoxedViewModels {
-    fn handle_start(&self) {}
+    fn handle_start(&self, cx: &ViewModelContext) {}
     fn handle_event(&self, _app: &Arc<AppInternal>, _e: Box<dyn Any>) {}
 }

@@ -4,7 +4,7 @@ use crate::{
     async_task::AsyncTasks,
     models::Models,
     to_host::{ToHosts, ToHostsBuilder},
-    view_models::BoxedViewModels,
+    view_models::BoxedViewModels, IToHost,
 };
 
 use super::{builder::AppBuilder, internal::AppInternal};
@@ -38,5 +38,11 @@ impl App {
         Event: 'static,
     {
         self._app.emit(evt);
+    }
+
+    pub fn to_host<C>(&self) -> Arc<C>
+    where
+        C: IToHost {
+        self._app.to_host::<C>()
     }
 }

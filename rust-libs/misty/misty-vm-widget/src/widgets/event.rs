@@ -1,30 +1,20 @@
 use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone)]
-struct EventDispatcherInternal<Tp> {
+pub struct EventDispatcher<Tp> {
+    id: u64,
     handler: Rc<RefCell<dyn Fn(Tp)>>,
 }
 
-#[derive(Clone)]
-pub struct EventDispatcher<Tp> {
-    _internal: EventDispatcherInternal<Tp>,
-}
-
-#[derive(Clone)]
-pub struct EventEmitter<Tp> {
-    _internal: EventDispatcherInternal<Tp>,
-}
-
 impl<Tp> EventDispatcher<Tp> {
-    pub fn id(&self) -> u32 {
-        todo!()
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
-    pub fn new(handler: impl Fn(Tp)) -> Self {
-        todo!()
-    }
-
-    pub fn emitter(&self) -> EventEmitter<Tp> {
-        todo!()
+    pub fn new(id: u64, handler: impl Fn(Tp) + 'static) -> Self {
+        Self {
+            id,
+            handler: Rc::new(RefCell::new(handler))
+        }
     }
 }

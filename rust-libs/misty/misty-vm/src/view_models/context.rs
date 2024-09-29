@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{internal::AppInternal, utils::PhantomUnsend, Model};
+use crate::{internal::AppInternal, utils::PhantomUnsend, IToHost, Model};
 
 pub struct ViewModelContext {
     _app: Arc<AppInternal>,
@@ -21,4 +21,10 @@ impl ViewModelContext {
     {
         self._app.update_model(model, update);
     }
+
+    pub fn to_host<C>(&self) -> Arc<C>
+    where
+        C: IToHost {
+        self._app.to_host::<C>()
+    }   
 }

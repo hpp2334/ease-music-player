@@ -16,7 +16,7 @@ pub struct ToHosts {
     to_hosts: HashMap<TypeId, Arc<dyn Any + Send + Sync + 'static>>,
 }
 
-pub enum ServiceImplPtr<T: ?Sized> {
+pub enum ToHostImplPtr<T: ?Sized> {
     Boxed(Box<T>),
     Arc(Arc<T>),
 }
@@ -28,7 +28,7 @@ impl ToHostsBuilder {
         }
     }
 
-    pub fn add<C>(mut self, to_host: C) -> Self
+    pub fn add<C>(&mut self, to_host: C) -> &mut Self
     where
         C: IToHost,
     {

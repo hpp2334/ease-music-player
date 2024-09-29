@@ -33,28 +33,28 @@ pub fn parse_to_host(input: proc_macro2::TokenStream) -> proc_macro2::TokenStrea
 
     let output: proc_macro2::TokenStream = quote! {
         pub struct #marker_name {
-            ptr: misty_vm::services::ServiceImplPtr<dyn #impl_name>,
+            ptr: misty_vm::ToHostImplPtr<dyn #impl_name>,
         }
         const _: () = {
-            use misty_vm::services::*;
+            use misty_vm::*;
             use std::sync::Arc;
-            impl MistyServiceTrait for #marker_name {
+            impl IToHost for #marker_name {
 
             }
             impl #marker_name {
                 pub fn new(service: impl #impl_name + 'static) -> Self {
                     Self {
-                        ptr: ServiceImplPtr::Boxed(Box::new(service)),
+                        ptr: ToHostImplPtr::Boxed(Box::new(service)),
                     }
                 }
                 pub fn new_with_box(service: Box<dyn #impl_name>) -> Self {
                     Self {
-                        ptr: ServiceImplPtr::Boxed(service),
+                        ptr: ToHostImplPtr::Boxed(service),
                     }
                 }
                 pub fn new_with_arc(service: Arc<dyn #impl_name>) -> Self {
                     Self {
-                        ptr: ServiceImplPtr::Arc(service),
+                        ptr: ToHostImplPtr::Arc(service),
                     }
                 }
             }
@@ -63,8 +63,8 @@ pub fn parse_to_host(input: proc_macro2::TokenStream) -> proc_macro2::TokenStrea
 
                 fn deref(&self) -> &Self::Target {
                     match (&self.ptr) {
-                        ServiceImplPtr::Boxed(ptr) => ptr.as_ref(),
-                        ServiceImplPtr::Arc(ptr) => ptr.as_ref(),
+                        ToHostImplPtr::Boxed(ptr) => ptr.as_ref(),
+                        ToHostImplPtr::Arc(ptr) => ptr.as_ref(),
                     }
                 }
             }
