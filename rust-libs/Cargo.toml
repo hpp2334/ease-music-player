@@ -8,6 +8,7 @@ members = [
     "./misty/misty-vm",
     "./misty/misty-vm-widget",
     "./misty/misty-vm-test",
+    "./misty/misty-vm-widget-test",
     "ease-database",
     "ease-remote-storage",
     "ease-client-shared",

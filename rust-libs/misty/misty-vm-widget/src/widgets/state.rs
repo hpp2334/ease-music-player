@@ -9,6 +9,7 @@ pub struct AnyWidgetState {
     value: Rc<RefCell<dyn Any>>,
 }
 
+#[derive(Clone)]
 pub struct WidgetState<T> {
     state: AnyWidgetState,
     _marker: PhantomData<T>,

@@ -6,10 +6,10 @@ use std::{
     rc::Rc,
 };
 
-use super::{context::WidgetContext, props::AnyProps, AnyRenderObject, AnyWidgetState, RenderObject, WidgetState};
-
-
-
+use super::{
+    context::WidgetContext, props::AnyProps, AnyRenderObject, AnyWidgetState, RenderObject,
+    WidgetState,
+};
 
 #[derive(Clone)]
 pub struct AnyWidgetData {
@@ -18,12 +18,14 @@ pub struct AnyWidgetData {
     state: AnyWidgetState,
 }
 
+
 impl AnyWidgetData {
     pub fn new<T, P, S>(props: P, state: S) -> Self
     where
-    T: 'static,
-    P: Clone + Any + 'static,
-    S: Clone + 'static {
+        T: 'static,
+        P: Clone + Any + 'static,
+        S: Clone + 'static,
+    {
         let type_id = std::any::TypeId::of::<T>();
         AnyWidgetData {
             type_id,
@@ -34,17 +36,19 @@ impl AnyWidgetData {
 }
 
 pub struct AnyWidget {
-    widget: Box<dyn WidgetInternal>,
+    widget: Rc<dyn WidgetInternal>,
 }
 
 #[derive(Clone, Default)]
 pub struct AnyWidgets {
-    widgets: Rc<RefCell<Vec<AnyWidget>>>
+    widgets: Rc<RefCell<Vec<AnyWidget>>>,
 }
 
 impl AnyWidgets {
     pub fn new() -> Self {
-        Self { widgets: Default::default() }
+        Self {
+            widgets: Default::default(),
+        }
     }
 
     pub fn push(&self, widget: impl IntoAnyWidget) {
@@ -65,7 +69,7 @@ pub trait WidgetMeta: 'static {
     fn init_state() -> Self::State;
 }
 
-pub trait WidgetMetaExt {
+pub trait WidgetPropsState {
     type State;
     type Props;
 
@@ -73,8 +77,12 @@ pub trait WidgetMetaExt {
     fn state(&self) -> WidgetState<Self::State>;
 }
 
-impl<T, P, S> WidgetMetaExt for T
-where T: WidgetMeta<State = S, Props = P>, P: Clone + 'static, S: 'static, {
+impl<T, P, S> WidgetPropsState for T
+where
+    T: WidgetMeta<State = S, Props = P>,
+    P: Clone + 'static,
+    S: 'static,
+{
     type Props = T::Props;
     type State = T::State;
 
@@ -98,9 +106,7 @@ macro_rules! define_widget {
                 let state = Self::init_state();
                 let data = misty_vm_widget::AnyWidgetData::new::<Self, _, _>(props, state);
 
-                Self {
-                    data,
-                }
+                Self { data }
             }
         }
 
@@ -126,6 +132,18 @@ macro_rules! define_widget {
 }
 
 impl AnyWidget {
+    fn new(widget: impl WidgetInternal + 'static) -> Self {
+        Self {
+            widget: Rc::new(widget),
+        }
+    }
+
+    pub(crate) fn clone_widget(&self) -> Self {
+        Self {
+            widget: self.widget.clone(),
+        }
+    }
+
     pub fn is_atom(&self) -> bool {
         self.widget.widget_type_id() == std::any::TypeId::of::<WithRenderObject>()
     }
@@ -190,9 +208,7 @@ where
     T: Widget + 'static,
 {
     fn into_any(self) -> AnyWidget {
-        AnyWidget {
-            widget: Box::new(self),
-        }
+        AnyWidget::new(self)
     }
 }
 
@@ -207,10 +223,7 @@ pub struct WithRenderObject {
 }
 
 impl WithRenderObject {
-    pub(crate) fn new(
-        o: impl RenderObject,
-        children: AnyWidgets,
-    ) -> Self {
+    pub(crate) fn new(o: impl RenderObject, children: AnyWidgets) -> Self {
         let object = o.into_any();
 
         Self {
@@ -238,8 +251,46 @@ impl WidgetInternal for WithRenderObject {
 
 impl IntoAnyWidget for WithRenderObject {
     fn into_any(self) -> AnyWidget {
-        AnyWidget {
-            widget: Box::new(self),
-        }
+        AnyWidget::new(self)
+    }
+}
+
+pub(crate) struct WidgetRootPlaceholder;
+impl WidgetInternal for WidgetRootPlaceholder {
+    fn widget_type_id(&self) -> TypeId {
+        panic!("cannot get WidgetRoot type_id")
+    }
+
+    fn data(&self) -> &AnyWidgetData {
+        panic!("cannot get WidgetRoot data")
+    }
+
+    fn render(&self, cx: &WidgetContext) -> AnyWidget {
+        panic!("cannot render WidgetRoot")
+    }
+}
+impl WidgetRootPlaceholder {
+    pub fn new_any() -> AnyWidget {
+        AnyWidget::new(WidgetRootPlaceholder)
+    }
+}
+
+pub(crate) struct RenderObjectPlaceholder;
+impl WidgetInternal for RenderObjectPlaceholder {
+    fn widget_type_id(&self) -> TypeId {
+        panic!("cannot get RenderObjectPlaceholder type_id")
+    }
+
+    fn data(&self) -> &AnyWidgetData {
+        panic!("cannot get RenderObjectPlaceholder data")
+    }
+
+    fn render(&self, cx: &WidgetContext) -> AnyWidget {
+        panic!("cannot render RenderObjectPlaceholder")
+    }
+}
+impl RenderObjectPlaceholder {
+    pub fn new_any() -> AnyWidget {
+        AnyWidget::new(RenderObjectPlaceholder)
     }
 }

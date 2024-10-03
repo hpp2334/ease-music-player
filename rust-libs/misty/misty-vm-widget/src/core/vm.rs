@@ -8,7 +8,11 @@ use std::{
 
 use misty_vm::{ViewModel, ViewModelContext};
 
-use crate::{utils::{id_alloc::IdAlloc, lazy::Lazy}, AnyWidget, IntoAnyWidget, ObjectAction, WidgetContext, WidgetEvent};
+use crate::{
+    utils::{id_alloc::IdAlloc, lazy::Lazy},
+    AnyWidget, IntoAnyWidget, ObjectAction, WidgetContext, WidgetEvent, WidgetVMEvent,
+    WidgetVMStore,
+};
 
 use super::WidgetToHost;
 
@@ -17,10 +21,8 @@ where
     Event: Any + 'static,
     E: Any + 'static,
 {
-    root: Lazy<AnyWidget>,
-    atom_id_alloc: IdAlloc,
-    ed_id_alloc: IdAlloc,
-    event_mapper: fn(&Event) -> Option<&WidgetEvent>,
+    store: WidgetVMStore,
+    event_mapper: fn(&Event) -> Option<&WidgetVMEvent>,
     _marker: PhantomData<(Event, E)>,
 }
 
@@ -29,65 +31,44 @@ where
     Event: Any + 'static,
     E: Any + 'static,
 {
-    pub fn new<R, W>(event_mapper: fn(&Event) -> Option<&WidgetEvent>, render_fn: R) -> Self
-    where
-        R: FnOnce() -> W + 'static,
-        W: IntoAnyWidget,
-    {
+    pub fn new(event_mapper: fn(&Event) -> Option<&WidgetVMEvent>) -> Self {
         Self {
-            root: Lazy::new(move || render_fn().into_any()),
-            atom_id_alloc: IdAlloc::new(),
-            ed_id_alloc: IdAlloc::new(),
+            store: WidgetVMStore::new(),
             event_mapper,
             _marker: Default::default(),
         }
     }
 
-    fn init_root_impl(&self, cx: &mut WidgetContext, widget: &AnyWidget, parent_id: u64) {
-        if widget.is_atom() {
-            let (object, children) = widget.render_atom(cx);
-
-            let id = cx.atom_id_alloc.allocate();
-            cx.to_notify_objects.push(ObjectAction::Add { parent_id, id, data: object });
-
-            for child in children.widgets().iter() {
-                self.init_root_impl(cx, child, id);
-            }
-        } else {
-            let widget = widget.render(cx);
-            self.init_root_impl(cx, &widget, parent_id);
-        }
-    }
-
-    fn init_root(&self, vm_cx: &ViewModelContext) {
-        let r = self.root.get();
-        let mut cx = WidgetContext {
-            atom_id_alloc: self.atom_id_alloc.clone(),
-            ed_id_alloc: self.ed_id_alloc.clone(),
-            to_notify_objects: Default::default(),
-        };
-        self.init_root_impl(&mut cx, r.borrow(), 0);
-        
-        let mut to_notify_objects: Vec<ObjectAction> = Default::default();
-        std::mem::swap(&mut cx.to_notify_objects, &mut to_notify_objects);
-        vm_cx.to_host::<WidgetToHost>().notify_render_objects(to_notify_objects);
+    fn build_widget_context(&self) -> WidgetContext {
+        WidgetContext::new(self.store.clone())
     }
 }
 
 impl<Event, E> ViewModel<Event, E> for WidgetViewModel<Event, E> {
-    fn on_start(&self, cx: &ViewModelContext) -> Result<(), E> {
-        self.init_root(cx);
-        Ok(())
-    }
-
     fn on_event(&self, cx: &ViewModelContext, event: &Event) -> Result<(), E> {
         let event = (self.event_mapper)(event);
+        let mut cx_widget = self.build_widget_context();
+        let store = cx_widget.store.clone();
         if let Some(event) = event {
             match event {
-                WidgetEvent::Channel(id) => {
-                    todo!()
+                WidgetVMEvent::InitRender(f) => {
+                    let f = f.take();
+                    self.store.render_tree.init(&mut cx_widget, f);
+                }
+                WidgetVMEvent::Widget(evt) => {
+                    let evt = evt.take();
+                    let id = evt.ed_id;
+                    let payload = evt.payload;
+                    let event_dispatchers = RefCell::borrow(&self.store.event_dispatchers);
+                    event_dispatchers.notify(&mut cx_widget, id, payload);
                 }
             }
+        }
+        store.render_tree.rerender_if_dirty(&mut cx_widget);
+        if !cx_widget.to_notify_objects.is_empty() {
+            let mut objects: Vec<ObjectAction> = Default::default();
+            std::mem::swap(&mut objects, &mut cx_widget.to_notify_objects);
+            cx.to_host::<WidgetToHost>().notify_render_objects(objects);
         }
         Ok(())
     }

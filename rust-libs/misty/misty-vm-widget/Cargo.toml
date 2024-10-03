@@ -15,3 +15,4 @@ thread_local = "1.1.7"
 once_cell = "1.18.0"
 serde = { version = "1.0", features = ["derive"] }
 futures = "0.3.30"
+slab = "0.4"

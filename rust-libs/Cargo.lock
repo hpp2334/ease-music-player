@@ -1301,8 +1301,21 @@ dependencies = [
  "misty-vm-macro",
  "once_cell",
  "serde",
+ "slab",
  "thread_local",
  "tracing",
+]
+
+[[package]]
+name = "misty-vm-widget-test"
+version = "0.2.0"
+dependencies = [
+ "futures",
+ "misty-vm-widget",
+ "rand",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
