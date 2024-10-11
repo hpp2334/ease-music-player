@@ -1268,6 +1268,7 @@ dependencies = [
  "once_cell",
  "serde",
  "thread_local",
+ "tokio",
  "tracing",
 ]
 

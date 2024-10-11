@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    cell::{Ref, RefCell},
+    cell::{Ref, RefCell, RefMut},
     collections::{HashMap, HashSet},
     fmt::Debug,
     marker::PhantomData,
@@ -19,6 +19,14 @@ pub(crate) struct Models {
 
 impl<T> Model<T> {
     fn new() -> Self {
+        Self {
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl<T> Clone for Model<T> {
+    fn clone(&self) -> Self {
         Self {
             _marker: Default::default(),
         }
@@ -49,12 +57,11 @@ impl Models {
         model.read::<T>()
     }
 
-    pub fn update_model<T>(&self, update: impl FnOnce(&mut T))
+    pub fn read_mut<T>(&self) -> RefMut<'_, T>
     where
         T: 'static,
     {
         let model = self.raw.read::<T>();
-        let mut v = model.read_mut::<T>();
-        update(&mut v);
+        model.read_mut::<T>()
     }
 }

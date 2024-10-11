@@ -1,6 +1,7 @@
 use std::{
     any::TypeId,
     collections::HashMap,
+    future::Future,
     marker::PhantomData,
     sync::{atomic::AtomicU64, Arc, RwLock, Weak},
 };
@@ -20,6 +21,13 @@ impl AsyncTasks {
         Self {
             adapter: Box::new(adapter),
         }
+    }
+
+    pub fn spawn_local<Fut>(&self, fut: Fut)
+    where
+        Fut: Future<Output = ()> + 'static,
+    {
+        self.adapter.spawn_local(Box::pin(fut));
     }
 }
 

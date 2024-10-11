@@ -28,16 +28,12 @@ impl ViewModel<Event, Infallible> for CounterVM {
     fn on_event(&self, cx: &ViewModelContext, e: &Event) -> Result<(), Infallible> {
         match e {
             Event::Increase => {
-                cx.update(&self.counter, |state| {
-                    state.counter += 1;
-                });
+                let mut value = cx.model_mut(&self.counter);
+                value.counter += 1;
             }
             Event::Decrease => {
-                cx.update(&self.counter, |state| {
-                    if state.counter > 0 {
-                        state.counter -= 1;
-                    }
-                });
+                let mut value = cx.model_mut(&self.counter);
+                value.counter -= 1;
             }
         }
 

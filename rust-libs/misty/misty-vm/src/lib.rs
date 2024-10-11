@@ -6,9 +6,10 @@ pub(crate) mod utils;
 pub(crate) mod view_models;
 
 pub use app::*;
+pub use async_task::IAsyncRuntimeAdapter;
 pub use models::*;
-pub use view_models::*;
 pub use to_host::*;
+pub use view_models::*;
 
 // External
 
