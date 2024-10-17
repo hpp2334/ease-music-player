@@ -6,3 +6,4 @@ pub mod music_duration;
 pub mod playlist;
 pub mod preference;
 pub mod storage;
+pub mod message;

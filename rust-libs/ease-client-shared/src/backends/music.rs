@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use misty_serve::define_message;
 use serde::{Deserialize, Serialize};
 
-use crate::{backends::code::Code, define_id};
+use crate::{backends::code::Code, define_id, define_message};
 
 use super::{lyric::Lyrics, music_duration::MusicDuration, storage::StorageEntryLoc};
 

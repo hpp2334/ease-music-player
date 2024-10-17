@@ -574,7 +574,6 @@ dependencies = [
  "getset",
  "id3",
  "lofty 0.18.2",
- "misty-serve",
  "nom",
  "num-derive",
  "num-traits",
@@ -595,10 +594,11 @@ name = "ease-client-shared"
 version = "0.1.0"
 dependencies = [
  "ease-database",
- "misty-serve",
  "num-derive",
  "num-traits",
+ "rmp-serde",
  "serde",
+ "serde_bytes",
  "serde_json",
  "thiserror",
  "uniffi",
@@ -1246,17 +1246,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "misty-serve"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "futures",
- "rmp-serde",
- "serde",
- "thiserror",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use crate::{
-    ctx::BackendGlobal,
+    ctx::BackendContext,
     error::BResult,
     models::storage::StorageModel,
     repositories::{core::get_conn, storage::db_load_storage},
@@ -25,7 +25,7 @@ pub fn build_storage(model: StorageModel) -> Storage {
 }
 
 pub fn get_storage_backend(
-    cx: &BackendGlobal,
+    cx: &BackendContext,
     storage_id: StorageId,
 ) -> BResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
     let conn = get_conn(&cx)?;

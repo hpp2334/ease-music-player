@@ -1,7 +1,7 @@
-use misty_serve::define_message;
+
 use serde::{Deserialize, Serialize};
 
-use crate::uis::preference::PlayMode;
+use crate::{define_message, uis::preference::PlayMode};
 
 use super::code::Code;
 

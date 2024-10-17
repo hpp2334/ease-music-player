@@ -11,7 +11,7 @@ use ease_client_shared::backends::{
 use ease_database::DbConnectionRef;
 
 use crate::{
-    ctx::BackendGlobal,
+    ctx::BackendContext,
     error::BResult,
     models::playlist::PlaylistModel,
     repositories::{
@@ -29,7 +29,7 @@ use crate::{
 use super::storage::to_opt_storage_entry;
 
 fn build_playlist_meta(
-    cx: &BackendGlobal,
+    cx: &BackendContext,
     model: PlaylistModel,
     first_covers: &FirstMusicCovers,
 ) -> PlaylistMeta {
@@ -64,7 +64,7 @@ fn compute_musics_duration(list: &Vec<MusicMeta>) -> Option<MusicDuration> {
 }
 
 fn build_playlist_abstract(
-    cx: &BackendGlobal,
+    cx: &BackendContext,
     conn: DbConnectionRef,
     model: PlaylistModel,
     first_covers: &FirstMusicCovers,
@@ -85,7 +85,7 @@ fn build_playlist_abstract(
 }
 
 pub(crate) async fn cr_get_all_playlist_abstracts(
-    cx: BackendGlobal,
+    cx: BackendContext,
     _arg: (),
 ) -> BResult<Vec<PlaylistAbstract>> {
     let conn = get_conn(&cx)?;
@@ -101,7 +101,7 @@ pub(crate) async fn cr_get_all_playlist_abstracts(
     Ok(ret)
 }
 
-pub(crate) async fn cr_get_playlist(cx: BackendGlobal, arg: PlaylistId) -> BResult<Option<Playlist>> {
+pub(crate) async fn cr_get_playlist(cx: BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
     let conn = get_conn(&cx)?;
     let models = db_load_playlists(conn.get_ref())?;
     let first_covers = db_load_first_music_covers(conn.get_ref())?;
@@ -116,7 +116,7 @@ pub(crate) async fn cr_get_playlist(cx: BackendGlobal, arg: PlaylistId) -> BResu
     Ok(Some(Playlist { abstr, musics }))
 }
 
-pub(crate) async fn ccu_upsert_playlist(cx: BackendGlobal, arg: ArgUpdatePlaylist) -> BResult<()> {
+pub(crate) async fn ccu_upsert_playlist(cx: BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
     let conn = get_conn(&cx)?;
     let current_time_ms = arg.current_time_ms;
     let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
@@ -129,7 +129,7 @@ pub(crate) async fn ccu_upsert_playlist(cx: BackendGlobal, arg: ArgUpdatePlaylis
 }
 
 pub(crate) async fn cu_add_musics_to_playlist(
-    cx: BackendGlobal,
+    cx: BackendContext,
     arg: ArgAddMusicsToPlaylist,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
@@ -153,7 +153,7 @@ pub(crate) async fn cu_add_musics_to_playlist(
 }
 
 pub(crate) async fn cd_remove_music_from_playlist(
-    cx: BackendGlobal,
+    cx: BackendContext,
     arg: ArgRemoveMusicFromPlaylist,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
@@ -161,7 +161,7 @@ pub(crate) async fn cd_remove_music_from_playlist(
     Ok(())
 }
 
-pub(crate) async fn cd_remove_playlist(cx: BackendGlobal, arg: PlaylistId) -> BResult<()> {
+pub(crate) async fn cd_remove_playlist(cx: BackendContext, arg: PlaylistId) -> BResult<()> {
     let conn = get_conn(&cx)?;
     let musics = db_load_music_metas_by_playlist_id(conn.get_ref(), arg)?;
 

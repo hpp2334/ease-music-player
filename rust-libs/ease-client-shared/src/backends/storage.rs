@@ -1,8 +1,7 @@
-use misty_serve::define_message;
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
-use crate::{backends::code::Code, define_id};
+use crate::{backends::code::Code, define_id, define_message};
 
 define_id!(StorageId);
 

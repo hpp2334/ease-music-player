@@ -4,7 +4,7 @@ use ease_client_shared::backends::{app::ArgInitializeApp, preference::Preference
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::Level;
 
-use crate::{ctx::BackendGlobal, error::BResult, repositories::core::get_conn};
+use crate::{ctx::BackendContext, error::BResult, repositories::core::get_conn};
 
 use super::server::start_server;
 
@@ -60,7 +60,7 @@ fn load_app_meta(app_document_dir: &str) -> AppMeta {
     }
 }
 
-fn save_current_app_meta(cx: &BackendGlobal) {
+fn save_current_app_meta(cx: &BackendContext) {
     save_persistent_data(
         &cx.app_document_dir,
         "meta.json",
@@ -71,17 +71,17 @@ fn save_current_app_meta(cx: &BackendGlobal) {
     );
 }
 
-pub fn load_preference_data(cx: &BackendGlobal) -> PreferenceData {
+pub fn load_preference_data(cx: &BackendContext) -> PreferenceData {
     load_persistent_data::<PreferenceData>(&cx.app_document_dir, "preference.json")
         .unwrap_or_default()
 }
 
-pub fn save_preference_data(cx: &BackendGlobal, data: PreferenceData) {
+pub fn save_preference_data(cx: &BackendContext, data: PreferenceData) {
     save_persistent_data(&cx.app_document_dir, "preference.json", data);
 }
 
-pub fn app_bootstrap(arg: ArgInitializeApp) -> BResult<BackendGlobal> {
-    let cx = BackendGlobal {
+pub fn app_bootstrap(arg: ArgInitializeApp) -> BResult<BackendContext> {
+    let cx = BackendContext {
         storage_path: arg.storage_path,
         app_document_dir: arg.app_document_dir,
         schema_version: arg.schema_version,
@@ -96,7 +96,7 @@ pub fn app_bootstrap(arg: ArgInitializeApp) -> BResult<BackendGlobal> {
     Ok(cx)
 }
 
-fn init_persistent_state(cx: &BackendGlobal) -> BResult<()> {
+fn init_persistent_state(cx: &BackendContext) -> BResult<()> {
     let _ = tracing::span!(Level::INFO, "init_persistent_state").enter();
     let meta = load_app_meta(&cx.app_document_dir);
     let prev_version = meta.schema_version;
@@ -115,7 +115,7 @@ fn init_persistent_state(cx: &BackendGlobal) -> BResult<()> {
     Ok(())
 }
 
-fn upgrade_db_schema(cx: &BackendGlobal, prev_version: u32) -> BResult<()> {
+fn upgrade_db_schema(cx: &BackendContext, prev_version: u32) -> BResult<()> {
     let conn = get_conn(cx)?;
     if prev_version < 1 {
         tracing::info!("start to upgrade to v1");
