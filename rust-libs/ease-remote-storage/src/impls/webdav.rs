@@ -1,5 +1,5 @@
-use crate::backend::{BackendResult, Entry, StorageBackend, StreamFile};
-use crate::BackendError;
+use crate::backend::{Entry, StorageBackend, StorageBackendResult, StreamFile};
+use crate::StorageBackendError;
 
 use async_trait::async_trait;
 
@@ -86,9 +86,9 @@ fn build_authorization_header_value(
     return Some(ret);
 }
 
-fn is_auth_error<T>(r: &BackendResult<T>) -> bool {
+fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
     if let Err(e) = r {
-        if let BackendError::RequestFail(e) = e {
+        if let StorageBackendError::RequestFail(e) = e {
             if let Some(StatusCode::UNAUTHORIZED) = e.status() {
                 return true;
             }
@@ -158,9 +158,9 @@ impl Webdav {
         return header_map;
     }
 
-    async fn list_core(&self, dir: &str) -> BackendResult<reqwest::Response> {
+    async fn list_core(&self, dir: &str) -> StorageBackendResult<reqwest::Response> {
         let mut url = reqwest::Url::parse(&self.addr)
-            .map_err(|e| BackendError::UrlParseError(e.to_string()))?;
+            .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
         url.set_path(dir);
 
         let method = reqwest::Method::from_bytes(b"PROPFIND").unwrap();
@@ -182,7 +182,7 @@ impl Webdav {
         Ok(resp)
     }
 
-    async fn list_impl(&self, dir: &str) -> BackendResult<Vec<Entry>> {
+    async fn list_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
         let resp = self.list_core(dir).await?.error_for_status()?;
         let text: String = resp.text().await?;
         let obj: webdav_list_types::Root = quick_xml::de::from_str(&text).unwrap();
@@ -236,7 +236,7 @@ impl Webdav {
         Ok(ret)
     }
 
-    async fn list_with_retry_impl(&self, dir: &str) -> BackendResult<Vec<Entry>> {
+    async fn list_with_retry_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
         let r = self.list_impl(dir).await;
         if !is_auth_error(&r) {
             return r;
@@ -244,9 +244,9 @@ impl Webdav {
         return self.list_impl(dir).await;
     }
 
-    async fn get_impl(&self, p: &str) -> BackendResult<StreamFile> {
+    async fn get_impl(&self, p: &str) -> StorageBackendResult<StreamFile> {
         let mut url = reqwest::Url::parse(&self.addr)
-            .map_err(|e| BackendError::UrlParseError(e.to_string()))?;
+            .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
         url.set_path(p);
 
         let resp = self
@@ -261,7 +261,7 @@ impl Webdav {
         Ok(res)
     }
 
-    async fn get_with_retry_impl(&self, p: &str) -> BackendResult<StreamFile> {
+    async fn get_with_retry_impl(&self, p: &str) -> StorageBackendResult<StreamFile> {
         let r = self.get_impl(p).await;
         if !is_auth_error(&r) {
             return r;
@@ -269,7 +269,7 @@ impl Webdav {
         return self.get_impl(p).await;
     }
 
-    fn build_client(&self) -> BackendResult<reqwest::Client> {
+    fn build_client(&self) -> StorageBackendResult<reqwest::Client> {
         let client = reqwest::Client::builder()
             .connect_timeout(self.connect_timeout)
             .build()?;
@@ -279,14 +279,14 @@ impl Webdav {
 
 #[async_trait]
 impl StorageBackend for Webdav {
-    async fn list(&self, dir: &str) -> BackendResult<Vec<Entry>> {
+    async fn list(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
         self.list_with_retry_impl(dir).await
     }
     async fn remove(&self, _p: &str) {
         unimplemented!()
     }
 
-    async fn get(&self, p: &str) -> BackendResult<StreamFile> {
+    async fn get(&self, p: &str) -> StorageBackendResult<StreamFile> {
         self.get_with_retry_impl(p).await
     }
     fn default_url(&self) -> String {

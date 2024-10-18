@@ -2,9 +2,9 @@ use std::sync::atomic::AtomicBool;
 
 use std::time::Duration;
 
-use ease_client::modules::timer::to_host::TimerService;
+use ease_client::view_models::timer::to_host::TimerService;
 use ease_client::{
-    build_state_manager, build_view_manager, modules::*, MistyController, MistyResourceId,
+    build_state_manager, build_view_manager, view_models::*, MistyController, MistyResourceId,
     MistyServiceManager, RootViewModelState,
 };
 

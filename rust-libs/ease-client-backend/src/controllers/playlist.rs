@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use ease_client_shared::backends::{
-    music::{MusicId, MusicMeta},
+    music::{MusicAbstract, MusicId, MusicMeta},
     music_duration::MusicDuration,
     playlist::{
         ArgAddMusicsToPlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist, Playlist,
@@ -23,7 +23,7 @@ use crate::{
             db_remove_playlist, db_upsert_playlist, ArgDBUpsertPlaylist, FirstMusicCovers,
         },
     },
-    services::{music::build_music_meta, server::loc::get_serve_url_from_opt_loc},
+    services::{music::{build_music_abstract, build_music_meta}, server::loc::get_serve_url_from_opt_loc},
 };
 
 use super::storage::to_opt_storage_entry;
@@ -51,10 +51,10 @@ fn build_playlist_meta(
     }
 }
 
-fn compute_musics_duration(list: &Vec<MusicMeta>) -> Option<MusicDuration> {
+fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<MusicDuration> {
     let mut sum: Duration = Default::default();
     for v in list {
-        if let Some(v) = v.duration {
+        if let Some(v) = v.meta.duration {
             sum += *v;
         } else {
             return None;
@@ -68,11 +68,11 @@ fn build_playlist_abstract(
     conn: DbConnectionRef,
     model: PlaylistModel,
     first_covers: &FirstMusicCovers,
-) -> BResult<(PlaylistAbstract, Vec<MusicMeta>)> {
+) -> BResult<(PlaylistAbstract, Vec<MusicAbstract>)> {
     let id = model.id;
     let meta = build_playlist_meta(&cx, model, &first_covers);
     let musics = db_load_music_metas_by_playlist_id(conn, id)?;
-    let musics = musics.into_iter().map(|v| build_music_meta(v)).collect();
+    let musics = musics.into_iter().map(|v| build_music_abstract(cx, v)).collect();
     let duration = compute_musics_duration(&musics);
 
     let abstr = PlaylistAbstract {

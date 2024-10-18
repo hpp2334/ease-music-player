@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc};
+use std::{any::Any, rc::Rc, sync::Arc};
 
 use crate::internal::AppInternal;
 
@@ -8,6 +8,10 @@ pub trait ViewModel<Event, E>: 'static
 where
     E: Any + 'static,
 {
+    fn of(cx: &ViewModelContext) -> Rc<Self>
+    where Self: Sized {
+        cx.vm::<Self, _, _>()
+    }
     fn on_start(&self, cx: &ViewModelContext) -> Result<(), E> {
         Ok(())
     }

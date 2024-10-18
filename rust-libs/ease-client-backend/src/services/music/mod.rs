@@ -1,5 +1,5 @@
 use ease_client_shared::backends::{
-    music::{MusicId, MusicMeta},
+    music::{MusicAbstract, MusicId, MusicMeta},
     storage::StorageEntryLoc,
 };
 
@@ -7,8 +7,10 @@ use crate::{
     ctx::BackendContext,
     error::BResult,
     models::music::MusicModel,
-    repositories::{core::get_conn, music::db_load_music},
+    repositories::{core::get_conn, music::db_load_music}, to_opt_storage_entry,
 };
+
+use super::server::loc::get_serve_url_from_opt_loc;
 
 pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     MusicMeta {
@@ -17,6 +19,17 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
         duration: model.duration,
     }
 }
+
+pub(crate) fn build_music_abstract(cx: &BackendContext, model: MusicModel) -> MusicAbstract {
+    let cover_loc = to_opt_storage_entry(model.picture_path.clone(), model.picture_storage_id);
+    let cover_url = get_serve_url_from_opt_loc(&cx, cover_loc.clone());
+    
+    MusicAbstract {
+        cover_url,
+        meta: build_music_meta(model),
+    }
+}
+
 
 pub fn get_music_storage_entry_loc(
     cx: &BackendContext,

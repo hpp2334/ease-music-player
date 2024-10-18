@@ -18,7 +18,6 @@ pub enum Code {
     UpsertStorage,
     ListStorage,
     GetStorage,
-    GetToRemoveStorageRefs,
     RemoveStorage,
     TestStorage,
     ListStorageEntryChildren,

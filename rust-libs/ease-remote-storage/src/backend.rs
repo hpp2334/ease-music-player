@@ -26,7 +26,7 @@ pub struct StreamFile {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum BackendError {
+pub enum StorageBackendError {
     #[error(transparent)]
     RequestFail(#[from] reqwest::Error),
     #[error("Parse XML Fail")]
@@ -37,18 +37,18 @@ pub enum BackendError {
     UrlParseError(String),
 }
 
-pub type BackendResult<T> = std::result::Result<T, BackendError>;
+pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
 
-impl BackendError {
+impl StorageBackendError {
     pub fn is_timeout(&self) -> bool {
-        if let BackendError::RequestFail(e) = self {
+        if let StorageBackendError::RequestFail(e) = self {
             return e.is_timeout();
         }
         return false;
     }
 
     pub fn is_unauthorized(&self) -> bool {
-        if let BackendError::RequestFail(e) = self {
+        if let StorageBackendError::RequestFail(e) = self {
             return e.status() == Some(StatusCode::UNAUTHORIZED);
         }
         return false;
@@ -56,8 +56,8 @@ impl BackendError {
 
     pub fn is_not_found(&self) -> bool {
         match self {
-            BackendError::RequestFail(e) => e.status() == Some(StatusCode::NOT_FOUND),
-            BackendError::TokioIO(e) => e.kind() == ErrorKind::NotFound,
+            StorageBackendError::RequestFail(e) => e.status() == Some(StatusCode::NOT_FOUND),
+            StorageBackendError::TokioIO(e) => e.kind() == ErrorKind::NotFound,
             _ => false,
         }
     }
@@ -65,9 +65,9 @@ impl BackendError {
 
 #[async_trait]
 pub trait StorageBackend {
-    async fn list(&self, dir: &str) -> BackendResult<Vec<Entry>>;
+    async fn list(&self, dir: &str) -> StorageBackendResult<Vec<Entry>>;
     async fn remove(&self, p: &str);
-    async fn get(&self, p: &str) -> BackendResult<StreamFile>;
+    async fn get(&self, p: &str) -> StorageBackendResult<StreamFile>;
     fn default_url(&self) -> String;
 }
 
@@ -109,7 +109,7 @@ impl StreamFile {
         &self.url
     }
 
-    pub fn into_stream(self) -> impl futures_util::Stream<Item = BackendResult<Bytes>> {
+    pub fn into_stream(self) -> impl futures_util::Stream<Item = StorageBackendResult<Bytes>> {
         stream! {
             match self.inner {
                 StreamFileInner::Response(mut response) => {
@@ -124,7 +124,7 @@ impl StreamFile {
         }
     }
 
-    pub async fn chunk_small(self) -> BackendResult<Bytes> {
+    pub async fn chunk_small(self) -> StorageBackendResult<Bytes> {
         const N: usize = 6_000_000;
         match self.inner {
             StreamFileInner::Response(mut response) => {
@@ -148,7 +148,7 @@ impl StreamFile {
         }
     }
 
-    pub async fn bytes(self) -> BackendResult<Bytes> {
+    pub async fn bytes(self) -> StorageBackendResult<Bytes> {
         match self.inner {
             StreamFileInner::Response(response) => Ok(response.bytes().await?),
             StreamFileInner::Total(buf) => Ok(buf),

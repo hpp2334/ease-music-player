@@ -1,4 +1,4 @@
-use ease_client::modules::*;
+use ease_client::view_models::*;
 use ease_client_test::{PresetDepth, ReqInteceptor, TestApp};
 
 fn create_playlist(app: &TestApp, name: &str) {
