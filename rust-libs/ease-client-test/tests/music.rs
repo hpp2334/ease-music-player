@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ease_client::modules::*;
+use ease_client::view_models::*;
 use ease_client_test::{PresetDepth, TestApp};
 
 #[tokio::test]

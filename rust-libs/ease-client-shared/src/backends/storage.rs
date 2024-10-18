@@ -84,12 +84,6 @@ pub struct Storage {
 define_message!(UpsertStorageMsg, Code::UpsertStorage, ArgUpsertStorage, ());
 define_message!(ListStorageMsg, Code::ListStorage, (), Vec<Storage>);
 define_message!(GetStorageMsg, Code::GetStorage, StorageId, Option<Storage>);
-define_message!(
-    GetToRemoveStorageRefsMsg,
-    Code::GetToRemoveStorageRefs,
-    StorageId,
-    Option<Storage>
-);
 
 define_message!(RemoveStorageMsg, Code::RemoveStorage, StorageId, ());
 define_message!(

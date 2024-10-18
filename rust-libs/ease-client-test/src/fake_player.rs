@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
-use ease_client::{modules::*, RootViewModelState};
+use ease_client::{view_models::*, RootViewModelState};
 use hyper::StatusCode;
 use lofty::AudioFile;
 use misty_vm_test::TestAppContainer;

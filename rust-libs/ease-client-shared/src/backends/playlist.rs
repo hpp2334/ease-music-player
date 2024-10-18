@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{backends::code::Code, define_id, define_message};
 
 use super::{
-    music::{MusicId, MusicMeta},
+    music::{MusicAbstract, MusicId, MusicMeta},
     music_duration::MusicDuration,
     storage::StorageEntryLoc,
 };
@@ -30,7 +30,7 @@ pub struct PlaylistAbstract {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Playlist {
     pub abstr: PlaylistAbstract,
-    pub musics: Vec<MusicMeta>,
+    pub musics: Vec<MusicAbstract>,
 }
 
 impl PlaylistAbstract {

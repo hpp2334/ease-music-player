@@ -1,4 +1,4 @@
-use ease_client::modules::{controller_update_music_playmode_to_next, PlayMode};
+use ease_client::view_models::{controller_update_music_playmode_to_next, PlayMode};
 use ease_client_test::{PresetDepth, TestApp};
 
 #[tokio::test]

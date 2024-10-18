@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use ease_client::modules::timer::to_host::ITimerService;
+use ease_client::view_models::timer::to_host::ITimerService;
 
 use crate::fake_player::FakeMusicPlayerRef;
 

@@ -63,9 +63,10 @@ impl CountdownVM {
         };
         if emit_next_tick {
             let session = cx.model_get(&model).ticking_session;
-            cx.spawn(|cx| async move {
+            cx.spawn::<_, _, Infallible>(|cx| async move {
                 cx.sleep(Duration::from_secs(1)).await;
                 cx.enqueue_emit(Event::Tick { session });
+                Ok(())
             });
         }
     }

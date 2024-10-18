@@ -1,4 +1,4 @@
-use ease_client::modules::{controller_update_root_subkey, RootRouteSubKey};
+use ease_client::view_models::{controller_update_root_subkey, RootRouteSubKey};
 use ease_client_test::{PresetDepth, TestApp};
 
 #[tokio::test]

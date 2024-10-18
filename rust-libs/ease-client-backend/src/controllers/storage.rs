@@ -1,6 +1,9 @@
-use ease_client_shared::backends::storage::{
-    ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
-    StorageEntryLoc, StorageId,
+use ease_client_shared::backends::{
+    message::IMessage,
+    storage::{
+        ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
+        StorageEntry, StorageEntryLoc, StorageId, TestStorageMsg,
+    },
 };
 
 use crate::{
@@ -12,7 +15,7 @@ use crate::{
         playlist::db_remove_musics_in_playlists_by_storage,
         storage::{db_load_storage, db_load_storages, db_remove_storage, db_upsert_storage},
     },
-    services::storage::build_storage,
+    services::storage::{build_storage, get_storage_backend, get_storage_backend_by_arg},
 };
 
 pub(crate) fn to_opt_storage_entry(
@@ -41,7 +44,19 @@ pub(crate) async fn load_storage_entry_data(
     cx: &BackendContext,
     loc: &StorageEntryLoc,
 ) -> BResult<Option<Vec<u8>>> {
-    todo!()
+    let backend = get_storage_backend(cx, loc.storage_id)?;
+    if let Some(backend) = backend {
+        match backend.get(&loc.path).await {
+            Ok(data) => {
+                let data = data.bytes().await?;
+                let data = data.to_vec();
+                Ok(Some(data))
+            }
+            Err(e) => Ok(None),
+        }
+    } else {
+        Ok(None)
+    }
 }
 
 pub async fn ccu_upsert_storage(cx: BackendContext, arg: ArgUpsertStorage) -> BResult<()> {
@@ -69,10 +84,6 @@ pub async fn cr_get_storage(cx: BackendContext, id: StorageId) -> BResult<Option
     Ok(storage)
 }
 
-pub async fn cr_get_to_remove_storage_refs(cx: BackendContext, id: StorageId) -> BResult<()> {
-    todo!()
-}
-
 pub async fn cd_remove_storage(cx: BackendContext, id: StorageId) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
@@ -82,14 +93,58 @@ pub async fn cd_remove_storage(cx: BackendContext, id: StorageId) -> BResult<()>
 
 pub async fn cr_test_storage(
     cx: BackendContext,
-    arg: ArgUpsertStorage,
-) -> BResult<StorageConnectionTestResult> {
-    todo!()
+    arg: <TestStorageMsg as IMessage>::Argument,
+) -> BResult<<TestStorageMsg as IMessage>::Return> {
+    let backend = get_storage_backend_by_arg(&cx, arg)?;
+    let res = backend.get("/").await;
+
+    match res {
+        Ok(_) => Ok(StorageConnectionTestResult::Success),
+        Err(e) => {
+            if e.is_unauthorized() {
+                Ok(StorageConnectionTestResult::Unauthorized)
+            } else if e.is_timeout() {
+                Ok(StorageConnectionTestResult::Timeout)
+            } else {
+                Ok(StorageConnectionTestResult::OtherError)
+            }
+        }
+    }
 }
 
 pub async fn cr_list_storage_entry_children(
     cx: BackendContext,
     arg: StorageEntryLoc,
 ) -> BResult<ListStorageEntryChildrenResp> {
-    todo!()
+    let backend = get_storage_backend(&cx, arg.storage_id)?;
+    if backend.is_none() {
+        return Ok(ListStorageEntryChildrenResp::Unknown);
+    }
+    let backend = backend.unwrap();
+
+    let res = backend.list(&arg.path).await;
+
+    match res {
+        Ok(entries) => {
+            let entries = entries
+                .into_iter()
+                .map(|entry| StorageEntry {
+                    name: entry.name,
+                    path: entry.path,
+                    size: entry.size,
+                    is_dir: entry.is_dir,
+                })
+                .collect();
+            Ok(ListStorageEntryChildrenResp::Ok(entries))
+        }
+        Err(e) => {
+            if e.is_unauthorized() {
+                Ok(ListStorageEntryChildrenResp::AuthenticationFailed)
+            } else if e.is_timeout() {
+                Ok(ListStorageEntryChildrenResp::Timeout)
+            } else {
+                Ok(ListStorageEntryChildrenResp::Unknown)
+            }
+        }
+    }
 }

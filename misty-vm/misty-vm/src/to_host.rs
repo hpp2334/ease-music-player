@@ -5,7 +5,13 @@ use std::{
     sync::Arc,
 };
 
-pub trait IToHost: Any + Send + Sync + Sized + 'static {}
+use crate::ViewModelContext;
+
+pub trait IToHost: Any + Send + Sync + Sized + 'static {
+    fn of(cx: &ViewModelContext) -> Arc<Self> {
+        cx.app().to_hosts.get()
+    }
+}
 
 pub struct ToHostsBuilder {
     to_hosts: HashMap<TypeId, Arc<dyn Any + Send + Sync + 'static>>,

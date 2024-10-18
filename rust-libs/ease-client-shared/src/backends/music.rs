@@ -16,6 +16,12 @@ pub struct MusicMeta {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MusicAbstract {
+    pub meta: MusicMeta,
+    pub cover_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MusicLyric {
     pub loc: StorageEntryLoc,
     pub data: Lyrics,
@@ -43,7 +49,13 @@ impl Music {
     }
 }
 
-define_message!(GetMusicMsg, Code::GetMusic, MusicId, ());
+impl MusicAbstract {
+    pub fn id(&self) -> MusicId {
+        self.meta.id
+    }
+}
+
+define_message!(GetMusicMsg, Code::GetMusic, MusicId, Option<Music>);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgUpdateMusicDuration {

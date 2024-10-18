@@ -72,8 +72,6 @@ generate_dispatch_message!(
     cr_list_storage,
     GetStorageMsg,
     cr_get_storage,
-    GetToRemoveStorageRefsMsg,
-    cr_get_to_remove_storage_refs,
     RemoveStorageMsg,
     cd_remove_storage,
     TestStorageMsg,
