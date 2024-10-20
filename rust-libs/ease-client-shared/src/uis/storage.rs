@@ -1,16 +1,18 @@
 use serde::Serialize;
 
 use crate::backends::{
-    music::MusicId,
-    storage::{
+    music::MusicId, playlist::PlaylistId, storage::{
         ArgUpsertStorage, StorageConnectionTestResult, StorageEntryType, StorageId, StorageType,
-    },
+    }
 };
 
 #[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, uniffi::Enum)]
 pub enum CurrentStorageImportType {
     #[default]
-    Musics,
+    None,
+    ImportMusics {
+        id: PlaylistId
+    },
     EditPlaylistCover,
     CreatePlaylistEntries,
     CreatePlaylistCover,

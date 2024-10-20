@@ -2,15 +2,20 @@ use std::collections::HashSet;
 
 use ease_client_shared::{
     backends::storage::{
-            ListStorageEntryChildrenResp, StorageEntry, StorageEntryLoc, StorageEntryType,
-            StorageId,
-        },
+        ListStorageEntryChildrenResp, StorageEntry, StorageEntryLoc, StorageEntryType, StorageId,
+    },
     uis::storage::{CurrentStorageImportType, CurrentStorageStateType},
 };
 use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
 
 use crate::{
-    actions::{Action, Widget, WidgetActionType}, error::{EaseError, EaseResult}, view_models::{connector::Connector, music::lyric::MusicLyricVM}
+    actions::{Action, Widget, WidgetActionType},
+    error::{EaseError, EaseResult},
+    view_models::{
+        connector::Connector,
+        music::lyric::MusicLyricVM,
+        playlist::{create::PlaylistCreateVM, detail::PlaylistDetailVM, edit::PlaylistEditVM},
+    },
 };
 
 use super::state::{AllStorageState, CurrentStorageState};
@@ -52,7 +57,9 @@ fn get_entry_type(entry: &StorageEntry) -> StorageEntryType {
 
 fn can_multi_select(import_type: CurrentStorageImportType) -> bool {
     match import_type {
-        CurrentStorageImportType::Musics | CurrentStorageImportType::CreatePlaylistEntries => true,
+        CurrentStorageImportType::None |
+        CurrentStorageImportType::ImportMusics { .. }
+        | CurrentStorageImportType::CreatePlaylistEntries => true,
         CurrentStorageImportType::CreatePlaylistCover
         | CurrentStorageImportType::EditPlaylistCover
         | CurrentStorageImportType::CurrentMusicLyrics { .. } => false,
@@ -63,12 +70,13 @@ fn entry_can_check(entry: &StorageEntry, import_type: CurrentStorageImportType) 
     let entry_type = get_entry_type(entry);
 
     match import_type {
+        CurrentStorageImportType::None |
         CurrentStorageImportType::CreatePlaylistCover
         | CurrentStorageImportType::EditPlaylistCover => entry_type == StorageEntryType::Image,
         CurrentStorageImportType::CreatePlaylistEntries => {
             entry_type == StorageEntryType::Image || entry_type == StorageEntryType::Music
         }
-        CurrentStorageImportType::Musics => entry_type == StorageEntryType::Music,
+        CurrentStorageImportType::ImportMusics {..} => entry_type == StorageEntryType::Music,
         CurrentStorageImportType::CurrentMusicLyrics { .. } => {
             entry_type == StorageEntryType::Lyric
         }
@@ -197,19 +205,55 @@ impl StorageImportVM {
         let current_state = cx.model_get(&self.current).clone();
         let mut entries: Vec<StorageEntry> = current_state.entries.into_iter().collect();
         let storage_id = current_state.current_storage_id;
+        let storage_id = match storage_id {
+            Some(id) => id,
+            None => return Ok(()),
+        };
 
         match current_state.import_type {
-            CurrentStorageImportType::Musics => {}
-            CurrentStorageImportType::EditPlaylistCover => {}
-            CurrentStorageImportType::CreatePlaylistEntries => {}
-            CurrentStorageImportType::CreatePlaylistCover => {}
-            CurrentStorageImportType::CurrentMusicLyrics { id } => {
+            CurrentStorageImportType::None => {
+                panic!("CurrentStorageImportType is None");
+            }
+            CurrentStorageImportType::ImportMusics { id } => {
+                PlaylistDetailVM::of(cx).finish_import(cx, id, storage_id, entries)?;
+            }
+            CurrentStorageImportType::EditPlaylistCover => {
                 let entry = entries.pop();
-                if let (Some(entry), Some(id)) = (entry, storage_id) {
-                    MusicLyricVM::of(cx).handle_import_lyric(cx, StorageEntryLoc {
-                        storage_id: id,
-                        path: entry.path,
-                    })?;
+                if let Some(entry) = entry {
+                    PlaylistEditVM::of(cx).finish_cover(
+                        cx,
+                        StorageEntryLoc {
+                            storage_id,
+                            path: entry.path,
+                        },
+                    )?;
+                }
+            }
+            CurrentStorageImportType::CreatePlaylistEntries => {
+                PlaylistCreateVM::of(cx).finish_import(cx, storage_id, entries)?;
+            }
+            CurrentStorageImportType::CreatePlaylistCover => {
+                let entry = entries.pop();
+                if let Some(entry) = entry {
+                    PlaylistCreateVM::of(cx).finish_cover(
+                        cx,
+                        StorageEntryLoc {
+                            storage_id,
+                            path: entry.path,
+                        },
+                    )?;
+                }
+            }
+            CurrentStorageImportType::CurrentMusicLyrics { id: _id } => {
+                let entry = entries.pop();
+                if let Some(entry) = entry {
+                    MusicLyricVM::of(cx).handle_import_lyric(
+                        cx,
+                        StorageEntryLoc {
+                            storage_id,
+                            path: entry.path,
+                        },
+                    )?;
                 }
             }
         }
@@ -249,7 +293,6 @@ impl ViewModel<Action, EaseError> for StorageImportVM {
                     StorageImportWidget::Import => {
                         self.handle_import(cx)?;
                     }
-                    _ => {}
                 },
                 _ => {}
             },

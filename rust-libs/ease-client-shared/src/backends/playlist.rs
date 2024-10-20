@@ -16,7 +16,7 @@ define_id!(PlaylistId);
 pub struct PlaylistMeta {
     pub id: PlaylistId,
     pub title: String,
-    pub cover_url: String,
+    pub cover: Option<StorageEntryLoc>,
     pub created_time: Duration,
 }
 
@@ -43,8 +43,8 @@ impl PlaylistAbstract {
     pub fn created_time(&self) -> &Duration {
         &self.meta.created_time
     }
-    pub fn cover_url(&self) -> &str {
-        &self.meta.cover_url
+    pub fn cover(&self) -> &Option<StorageEntryLoc> {
+        &self.meta.cover
     }
 }
 
@@ -58,8 +58,8 @@ impl Playlist {
     pub fn created_time(&self) -> &Duration {
         self.abstr.created_time()
     }
-    pub fn cover_url(&self) -> &str {
-        self.abstr.cover_url()
+    pub fn cover(&self) -> &Option<StorageEntryLoc> {
+        &self.abstr.cover()
     }
     pub fn duration(&self) -> &Option<MusicDuration> {
         &self.abstr.duration
@@ -84,13 +84,25 @@ define_message!(
 pub struct ArgUpdatePlaylist {
     pub id: PlaylistId,
     pub title: String,
-    pub picture: Option<StorageEntryLoc>,
-    pub current_time_ms: i64,
+    pub cover: Option<StorageEntryLoc>,
 }
 define_message!(
     UpdatePlaylistMsg,
-    Code::UpsertPlaylist,
+    Code::UpdatePlaylist,
     ArgUpdatePlaylist,
+    ()
+);
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArgCreatePlaylist {
+    pub title: String,
+    pub cover: Option<StorageEntryLoc>,
+    pub entries: Vec<StorageEntryLoc>,
+}
+define_message!(
+    CreatePlaylistMsg,
+    Code::CreatePlaylist,
+    ArgCreatePlaylist,
     ()
 );
 

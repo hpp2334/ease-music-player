@@ -23,7 +23,10 @@ use crate::{
             db_remove_playlist, db_upsert_playlist, ArgDBUpsertPlaylist, FirstMusicCovers,
         },
     },
-    services::{music::{build_music_abstract, build_music_meta}, server::loc::get_serve_url_from_opt_loc},
+    services::{
+        music::{build_music_abstract, build_music_meta},
+        server::loc::get_serve_url_from_opt_loc,
+    },
 };
 
 use super::storage::to_opt_storage_entry;
@@ -46,7 +49,7 @@ fn build_playlist_meta(
     PlaylistMeta {
         id: model.id,
         title: model.title,
-        cover_url: get_serve_url_from_opt_loc(cx, cover_loc),
+        cover: cover_loc,
         created_time: Duration::from_millis(model.created_time as u64),
     }
 }
@@ -72,7 +75,10 @@ fn build_playlist_abstract(
     let id = model.id;
     let meta = build_playlist_meta(&cx, model, &first_covers);
     let musics = db_load_music_metas_by_playlist_id(conn, id)?;
-    let musics = musics.into_iter().map(|v| build_music_abstract(cx, v)).collect();
+    let musics = musics
+        .into_iter()
+        .map(|v| build_music_abstract(cx, v))
+        .collect();
     let duration = compute_musics_duration(&musics);
 
     let abstr = PlaylistAbstract {
@@ -101,7 +107,10 @@ pub(crate) async fn cr_get_all_playlist_abstracts(
     Ok(ret)
 }
 
-pub(crate) async fn cr_get_playlist(cx: BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
+pub(crate) async fn cr_get_playlist(
+    cx: BackendContext,
+    arg: PlaylistId,
+) -> BResult<Option<Playlist>> {
     let conn = get_conn(&cx)?;
     let models = db_load_playlists(conn.get_ref())?;
     let first_covers = db_load_first_music_covers(conn.get_ref())?;
@@ -118,11 +127,11 @@ pub(crate) async fn cr_get_playlist(cx: BackendContext, arg: PlaylistId) -> BRes
 
 pub(crate) async fn ccu_upsert_playlist(cx: BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
     let conn = get_conn(&cx)?;
-    let current_time_ms = arg.current_time_ms;
+    let current_time_ms = cx.current_time().as_millis() as i64;
     let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
         id: Some(arg.id),
         title: arg.title,
-        picture: arg.picture.map(|v| (v.storage_id, v.path)),
+        picture: arg.cover.map(|v| (v.storage_id, v.path)),
     };
     db_upsert_playlist(conn.get_ref(), arg, current_time_ms)?;
     Ok(())

@@ -9,7 +9,9 @@ where
     E: Any + 'static,
 {
     fn of(cx: &ViewModelContext) -> Rc<Self>
-    where Self: Sized {
+    where
+        Self: Sized,
+    {
         cx.vm::<Self, _, _>()
     }
     fn on_start(&self, cx: &ViewModelContext) -> Result<(), E> {

@@ -5,7 +5,8 @@ pub enum Code {
     // Playlist
     GetAllPlaylistMetas,
     GetPlaylist,
-    UpsertPlaylist,
+    CreatePlaylist,
+    UpdatePlaylist,
     AddMusicsToPlaylist,
     RemoveMusicFromPlaylist,
     RemovePlaylist,
