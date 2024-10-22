@@ -7,7 +7,7 @@ pub type StorageEntryLocModel = (Option<String>, Option<StorageId>);
 pub struct StorageModel {
     pub id: StorageId,
     pub addr: String,
-    pub alias: Option<String>,
+    pub alias: String,
     pub username: String,
     pub password: String,
     pub is_anonymous: bool,

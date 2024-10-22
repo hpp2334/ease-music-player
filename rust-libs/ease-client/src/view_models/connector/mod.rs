@@ -1,8 +1,13 @@
 use ease_client_backend::error::BResult;
 use ease_client_shared::backends::{
     music::{ArgUpdateMusicLyric, Music, MusicId},
-    playlist::{ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgUpdatePlaylist, Playlist, PlaylistId},
-    storage::{ListStorageEntryChildrenResp, StorageEntryLoc},
+    playlist::{
+        ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgUpdatePlaylist, Playlist, PlaylistId,
+    },
+    storage::{
+        ArgUpsertStorage, ListStorageEntryChildrenResp, StorageConnectionTestResult,
+        StorageEntryLoc, StorageId,
+    },
 };
 use misty_vm::{ViewModel, ViewModelContext};
 
@@ -54,6 +59,21 @@ impl Connector {
         &self,
         loc: StorageEntryLoc,
     ) -> BResult<ListStorageEntryChildrenResp> {
+        todo!()
+    }
+
+    pub async fn remove_storage(&self, id: StorageId) -> BResult<()> {
+        todo!()
+    }
+
+    pub async fn test_storage(
+        &self,
+        arg: ArgUpsertStorage,
+    ) -> BResult<StorageConnectionTestResult> {
+        todo!()
+    }
+
+    pub async fn upsert_storage(&self, arg: ArgUpsertStorage) -> BResult<()> {
         todo!()
     }
 }

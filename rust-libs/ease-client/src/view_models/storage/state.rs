@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use ease_client_shared::{
-    backends::storage::{Storage, StorageEntry, StorageId},
+    backends::storage::{
+        ArgUpsertStorage, Storage, StorageConnectionTestResult, StorageEntry, StorageId,
+    },
     uis::storage::{CurrentStorageImportType, CurrentStorageStateType},
 };
 
@@ -9,6 +11,14 @@ use ease_client_shared::{
 pub struct AllStorageState {
     pub storages: HashMap<StorageId, Storage>,
     pub storage_ids: Vec<StorageId>,
+}
+
+#[derive(Default, Clone)]
+pub struct EditStorageState {
+    pub is_create: bool,
+    pub title: String,
+    pub info: ArgUpsertStorage,
+    pub test: StorageConnectionTestResult,
 }
 
 #[derive(Default, Clone)]

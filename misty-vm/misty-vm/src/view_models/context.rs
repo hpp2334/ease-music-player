@@ -34,8 +34,9 @@ impl ViewModelContext {
 
     pub(crate) fn vm<V, Event, E>(&self) -> Rc<V>
     where
-    E: Any + 'static,
-    V: ViewModel<Event, E> {
+        E: Any + 'static,
+        V: ViewModel<Event, E>,
+    {
         todo!()
     }
 
@@ -72,6 +73,10 @@ impl ViewModelContext {
                 tracing::error!("spawn error");
             }
         });
+    }
+
+    pub fn cancel_spawned(&self) {
+        todo!()
     }
 
     pub async fn sleep(&self, duration: Duration) {

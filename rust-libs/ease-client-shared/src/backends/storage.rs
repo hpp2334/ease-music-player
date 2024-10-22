@@ -17,6 +17,7 @@ pub struct StorageEntryLoc {
     Serialize,
     Deserialize,
     Clone,
+    Copy,
     Debug,
     PartialEq,
     Eq,
@@ -41,7 +42,7 @@ pub struct StorageEntry {
 pub struct ArgUpsertStorage {
     pub id: Option<StorageId>,
     pub addr: String,
-    pub alias: Option<String>,
+    pub alias: String,
     pub username: String,
     pub password: String,
     pub is_anonymous: bool,
@@ -72,7 +73,7 @@ pub enum StorageEntryType {
 pub struct Storage {
     pub id: StorageId,
     pub addr: String,
-    pub alias: Option<String>,
+    pub alias: String,
     pub username: String,
     pub password: String,
     pub is_anonymous: bool,

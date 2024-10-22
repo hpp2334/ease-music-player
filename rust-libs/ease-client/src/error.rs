@@ -23,4 +23,3 @@ pub enum EaseError {
 
 pub type EaseResult<T> = Result<T, EaseError>;
 
-pub const EASE_RESULT_NIL: EaseResult<()> = EaseResult::<()>::Ok(());
