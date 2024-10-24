@@ -22,6 +22,13 @@ pub struct CurrentMusicState {
     pub loading: bool,
 }
 
+#[derive(Default, Clone)]
+pub struct TimeToPauseState {
+    pub enabled: bool,
+    pub expired_time: Duration,
+    pub left: Duration,
+}
+
 impl CurrentMusicState {
     pub fn can_play_next(&self) -> bool {
         match self.play_mode {

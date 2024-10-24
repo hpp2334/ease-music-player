@@ -1,13 +1,11 @@
-use std::{
-    future::Future, time::Duration}
-;
+use std::{future::Future, time::Duration};
 
 use futures::future::LocalBoxFuture;
 
 pub trait IAsyncRuntimeAdapter: 'static {
     fn spawn_local(&self, future: LocalBoxFuture<'static, ()>) -> u64;
-    fn sleep(&self, duration: std::time::Duration) -> LocalBoxFuture<'static, ()>;
-    fn get_time(&self) -> std::time::Duration;
+    fn sleep(&self, duration: Duration) -> LocalBoxFuture<'static, ()>;
+    fn get_time(&self) -> Duration;
 }
 
 pub struct AsyncTasks {
@@ -30,6 +28,10 @@ impl AsyncTasks {
 
     pub async fn sleep(&self, duration: Duration) {
         self.adapter.sleep(duration).await
+    }
+
+    pub fn get_time(&self) -> Duration {
+        self.adapter.get_time()
     }
 }
 

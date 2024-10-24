@@ -83,6 +83,10 @@ impl ViewModelContext {
         self._app.async_tasks().sleep(duration).await
     }
 
+    pub fn get_time(&self) -> Duration {
+        self._app.async_tasks().get_time()
+    }
+
     pub fn enqueue_emit<Event>(&self, evt: Event)
     where
         Event: 'static,

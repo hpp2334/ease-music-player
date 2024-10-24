@@ -9,7 +9,11 @@ use crate::{
     view_models::connector::Connector,
 };
 
-use super::{lyric::MusicLyricVM, state::CurrentMusicState};
+use super::{
+    lyric::MusicLyricVM,
+    state::{CurrentMusicState, TimeToPauseState},
+    time_to_pause::TimeToPauseVM,
+};
 
 #[derive(Debug, uniffi::Enum)]
 pub enum MusicCommonAction {
@@ -18,12 +22,14 @@ pub enum MusicCommonAction {
 
 pub struct MusicCommonVM {
     current: Model<CurrentMusicState>,
+    time_to_pause: Model<TimeToPauseState>,
 }
 
 impl MusicCommonVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             current: cx.model(),
+            time_to_pause: cx.model(),
         }
     }
 
@@ -44,17 +50,29 @@ impl MusicCommonVM {
         }
     }
 
-    pub(crate) fn tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    pub(crate) fn schedule_tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let this = Self::of(cx);
-        MusicLyricVM::of(cx).tick_lyric_index(&cx)?;
+        cx.spawn::<_, _, EaseError>(move |cx| async move {
+            cx.sleep(Duration::from_secs(1)).await;
+            this.tick(&cx)?;
+            Ok(())
+        });
+        Ok(())
+    }
 
+    fn tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let is_playing = cx.model_get(&self.current).playing;
+        let time_to_pause_enabled = cx.model_get(&self.time_to_pause).enabled;
+
         if is_playing {
-            cx.spawn::<_, _, EaseError>(move |cx| async move {
-                cx.sleep(Duration::from_secs(1)).await;
-                this.tick(&cx)?;
-                Ok(())
-            });
+            MusicLyricVM::of(cx).tick_lyric_index(cx)?;
+        }
+        if time_to_pause_enabled {
+            TimeToPauseVM::of(cx).tick(cx)?;
+        }
+
+        if is_playing || time_to_pause_enabled {
+            self.schedule_tick(&cx)?;
         }
         Ok(())
     }

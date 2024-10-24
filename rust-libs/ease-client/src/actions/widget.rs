@@ -1,5 +1,8 @@
 use crate::view_models::{
-    music::{control::MusicControlWidget, detail::MusicDetailWidget, lyric::MusicLyricWidget},
+    music::{
+        control::MusicControlWidget, detail::MusicDetailWidget, lyric::MusicLyricWidget,
+        time_to_pause::TimeToPauseWidget,
+    },
     playlist::{
         create::PlaylistCreateWidget, detail::PlaylistDetailWidget, edit::PlaylistEditWidget,
     },
@@ -17,6 +20,7 @@ pub enum Widget {
     MusicControl(MusicControlWidget),
     MusicLyric(MusicLyricWidget),
     MusicDetail(MusicDetailWidget),
+    TimeToPause(TimeToPauseWidget),
     PlaylistDetail(PlaylistDetailWidget),
     PlaylistEdit(PlaylistEditWidget),
     PlaylistCreate(PlaylistCreateWidget),
