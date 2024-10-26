@@ -1,5 +1,5 @@
 use crate::{
-    actions::{Action, Widget, WidgetActionType},
+    actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::EaseError,
 };
 use ease_client_shared::backends::storage::StorageId;
@@ -33,17 +33,22 @@ impl StorageListVM {
 impl ViewModel<Action, EaseError> for StorageListVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::StorageList(action), WidgetActionType::Click) => match action {
-                    StorageListWidget::Create => {
-                        StorageUpsertVM::of(&cx).prepare_create(&cx)?;
-                    }
-                    StorageListWidget::Item { id } => {
-                        StorageUpsertVM::of(&cx).prepare_edit(cx, *id)?;
-                    }
-                },
-                _ => {}
-            },
+            Action::View(action) => {
+                match action {
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::StorageList(action), WidgetActionType::Click) => match action {
+                            StorageListWidget::Create => {
+                                StorageUpsertVM::of(&cx).prepare_create(&cx)?;
+                            }
+                            StorageListWidget::Item { id } => {
+                                StorageUpsertVM::of(&cx).prepare_edit(cx, *id)?;
+                            }
+                        },
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
             _ => {}
         }
         Ok(())

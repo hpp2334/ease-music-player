@@ -9,7 +9,7 @@ use ease_client_shared::{
 use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
 
 use crate::{
-    actions::{Action, Widget, WidgetActionType},
+    actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
     view_models::{
         connector::Connector,
@@ -77,7 +77,7 @@ impl PlaylistEditVM {
             }
         };
         cx.spawn::<_, _, EaseError>(move |cx| async move {
-            Connector::of(&cx).update_playlist(arg).await?;
+            Connector::of(&cx).update_playlist(&cx, arg).await?;
             Ok(())
         });
         Ok(())
@@ -87,33 +87,38 @@ impl PlaylistEditVM {
 impl ViewModel<Action, EaseError> for PlaylistEditVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::PlaylistEdit(action), WidgetActionType::Click) => match action {
-                    PlaylistEditWidget::Cover => StorageImportVM::of(cx)
-                        .prepare(cx, CurrentStorageImportType::EditPlaylistCover)?,
-                    PlaylistEditWidget::ClearCover => {
-                        let mut form = cx.model_mut(&self.form);
-                        form.cover = None;
-                    }
-                    PlaylistEditWidget::FinishEdit => {
-                        self.finish_edit(cx)?;
-                    }
-                    _ => {}
-                },
-                (Widget::PlaylistEdit(action), WidgetActionType::ChangeText { text }) => {
-                    match action {
-                        PlaylistEditWidget::Name => {
-                            let mut form = cx.model_mut(&self.form);
-                            form.playlist_name = text.clone();
-                        }
-                        PlaylistEditWidget::Cover => {
-                            self.prepare_cover(cx)?;
+            Action::View(action) => {
+                match action {
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::PlaylistEdit(action), WidgetActionType::Click) => match action {
+                            PlaylistEditWidget::Cover => StorageImportVM::of(cx)
+                                .prepare(cx, CurrentStorageImportType::EditPlaylistCover)?,
+                            PlaylistEditWidget::ClearCover => {
+                                let mut form = cx.model_mut(&self.form);
+                                form.cover = None;
+                            }
+                            PlaylistEditWidget::FinishEdit => {
+                                self.finish_edit(cx)?;
+                            }
+                            _ => {}
+                        },
+                        (Widget::PlaylistEdit(action), WidgetActionType::ChangeText { text }) => {
+                            match action {
+                                PlaylistEditWidget::Name => {
+                                    let mut form = cx.model_mut(&self.form);
+                                    form.playlist_name = text.clone();
+                                }
+                                PlaylistEditWidget::Cover => {
+                                    self.prepare_cover(cx)?;
+                                }
+                                _ => {}
+                            }
                         }
                         _ => {}
-                    }
+                    },
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             _ => {}
         }
         Ok(())

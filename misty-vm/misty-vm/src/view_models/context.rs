@@ -75,6 +75,20 @@ impl ViewModelContext {
         });
     }
 
+    pub fn spawn_background<F, Fut, E>(&self, f: F)
+    where
+        F: FnOnce(WeakViewModelContext) -> Fut,
+        Fut: Future<Output = Result<(), E>> + Send + Sync + 'static,
+    {
+        let fut = f(self.weak());
+        self._app.async_tasks().spawn_local(async move {
+            let r = fut.await;
+            if let Err(e) = r {
+                tracing::error!("spawn error");
+            }
+        });
+    }
+
     pub fn cancel_spawned(&self) {
         todo!()
     }

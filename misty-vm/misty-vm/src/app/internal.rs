@@ -41,11 +41,6 @@ impl AppInternal {
         });
     }
 
-    pub fn start(self: &Arc<AppInternal>) {
-        let cx = ViewModelContext::new(self.clone());
-        self.view_models.handle_start(&cx);
-    }
-
     pub fn model_get<T>(&self) -> std::cell::Ref<'_, T>
     where
         T: 'static,

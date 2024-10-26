@@ -8,7 +8,7 @@ use ease_client_shared::{
 use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
 
 use super::{common::MusicCommonAction, state::CurrentMusicState};
-use crate::{actions::Widget, to_host::player::MusicPlayerService};
+use crate::{actions::{event::ViewAction, Widget}, to_host::player::MusicPlayerService};
 use crate::{
     actions::{Action, WidgetActionType},
     view_models::connector::Connector,
@@ -90,7 +90,7 @@ impl MusicControlVM {
 
         let this = Self::of(cx);
         cx.spawn::<_, _, EaseError>(move |cx| async move {
-            let playlist = Connector::of(&cx).get_playlist(playlist_id).await?;
+            let playlist = Connector::of(&cx).get_playlist(&cx, playlist_id).await?;
             if let Some(playlist) = playlist {
                 let ordered_musics = &playlist.musics;
                 let current_index = ordered_musics
@@ -164,8 +164,8 @@ impl MusicControlVM {
     ) -> EaseResult<()> {
         let this = Self::of(cx);
         cx.spawn::<_, _, EaseError>(move |cx| async move {
-            let music = Connector::of(&cx).get_music(music_id).await?;
-            let playlist = Connector::of(&cx).get_playlist(playlist_id).await?;
+            let music = Connector::of(&cx).get_music(&cx, music_id).await?;
+            let playlist = Connector::of(&cx).get_playlist(&cx, playlist_id).await?;
             if music.is_none() || playlist.is_none() {
                 return Ok(());
             }
@@ -206,32 +206,37 @@ impl MusicControlVM {
 impl ViewModel<Action, EaseError> for MusicControlVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::MusicControl(action) => match action {
-                MusicControlAction::Seek(arg) => self.seek(cx, arg)?,
-            },
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::MusicControl(widget), WidgetActionType::Click) => match widget {
-                    MusicControlWidget::Pause => {
-                        self.pause(cx)?;
-                    }
-                    MusicControlWidget::Play => {
-                        self.resume(cx)?;
-                    }
-                    MusicControlWidget::PlayNext => {
-                        self.play_next(cx)?;
-                    }
-                    MusicControlWidget::PlayPrevious => {
-                        self.play_previous(cx)?;
-                    }
-                    MusicControlWidget::Stop => {
-                        self.stop(cx)?;
-                    }
-                    MusicControlWidget::Playmode => {
-                        self.update_playmode_to_next(cx)?;
-                    }
-                },
-                _ => {}
-            },
+            Action::View(action) => {
+                match action {
+                    ViewAction::MusicControl(action) => match action {
+                        MusicControlAction::Seek(arg) => self.seek(cx, arg)?,
+                    },
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::MusicControl(widget), WidgetActionType::Click) => match widget {
+                            MusicControlWidget::Pause => {
+                                self.pause(cx)?;
+                            }
+                            MusicControlWidget::Play => {
+                                self.resume(cx)?;
+                            }
+                            MusicControlWidget::PlayNext => {
+                                self.play_next(cx)?;
+                            }
+                            MusicControlWidget::PlayPrevious => {
+                                self.play_previous(cx)?;
+                            }
+                            MusicControlWidget::Stop => {
+                                self.stop(cx)?;
+                            }
+                            MusicControlWidget::Playmode => {
+                                self.update_playmode_to_next(cx)?;
+                            }
+                        },
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
             _ => {}
         }
         Ok(())

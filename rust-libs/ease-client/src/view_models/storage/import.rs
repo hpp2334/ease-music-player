@@ -9,7 +9,7 @@ use ease_client_shared::{
 use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
 
 use crate::{
-    actions::{Action, Widget, WidgetActionType},
+    actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
     view_models::{
         connector::Connector,
@@ -144,7 +144,7 @@ impl StorageImportVM {
         cx.spawn::<_, _, EaseError>(move |cx| async move {
             let connector = Connector::of(&cx);
             let res = connector
-                .list_storage_entry_children(StorageEntryLoc {
+                .list_storage_entry_children(&cx, StorageEntryLoc {
                     path: entry.path,
                     storage_id,
                 })
@@ -279,22 +279,27 @@ impl StorageImportVM {
 impl ViewModel<Action, EaseError> for StorageImportVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::StroageImport(widget), WidgetActionType::Click) => match widget {
-                    StorageImportWidget::StorageItem { id } => {
-                        self.change_storage(cx, *id)?;
-                    }
-                    StorageImportWidget::StorageEntry { path } => {
-                        self.select_entry(cx, path.clone())?;
-                    }
-                    StorageImportWidget::Nav { path } => {
-                        self.select_entry(cx, path.clone())?;
-                    }
-                    StorageImportWidget::Import => {
-                        self.handle_import(cx)?;
-                    }
-                },
-                _ => {}
+            Action::View(action) => {
+                match action {
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::StroageImport(widget), WidgetActionType::Click) => match widget {
+                            StorageImportWidget::StorageItem { id } => {
+                                self.change_storage(cx, *id)?;
+                            }
+                            StorageImportWidget::StorageEntry { path } => {
+                                self.select_entry(cx, path.clone())?;
+                            }
+                            StorageImportWidget::Nav { path } => {
+                                self.select_entry(cx, path.clone())?;
+                            }
+                            StorageImportWidget::Import => {
+                                self.handle_import(cx)?;
+                            }
+                        },
+                        _ => {}
+                    },
+                    _ => {}
+                }
             },
             _ => {}
         }

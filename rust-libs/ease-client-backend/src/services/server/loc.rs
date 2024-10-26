@@ -4,7 +4,7 @@ use ease_client_shared::backends::{music::MusicId, storage::StorageEntryLoc};
 use crate::ctx::BackendContext;
 
 fn base_url(cx: &BackendContext) -> String {
-    let port = cx.server_port.load(std::sync::atomic::Ordering::Relaxed);
+    let port = cx.get_server_port();
     format!("http://127.0.0.1:{}", port)
 }
 

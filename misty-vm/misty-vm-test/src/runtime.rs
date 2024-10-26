@@ -84,14 +84,20 @@ impl AsyncRuntime {
     }
 }
 
-impl IAsyncRuntimeAdapter for AsyncRuntime {
-    fn spawn_local(&self, future: misty_vm::LocalBoxFuture<'static, ()>) -> u64 {
-        self.store.local.borrow().spawn_local(future);
+impl AsyncRuntime {
+    fn allocate(&self) -> u64 {
         let id = self
             .store
             .id_alloc
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         id
+    }
+}
+
+impl IAsyncRuntimeAdapter for AsyncRuntime {
+    fn spawn_local(&self, future: misty_vm::LocalBoxFuture<'static, ()>) -> u64 {
+        self.store.local.borrow().spawn_local(future);
+        self.allocate()
     }
 
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + 'static>> {
@@ -101,5 +107,10 @@ impl IAsyncRuntimeAdapter for AsyncRuntime {
 
     fn get_time(&self) -> std::time::Duration {
         self.store.timers.get_current_time()
+    }
+    
+    fn spawn(&self, future: misty_vm::BoxFuture<'static, ()>) -> u64 {
+        tokio::spawn(future);
+        self.allocate()
     }
 }

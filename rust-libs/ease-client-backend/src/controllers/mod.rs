@@ -52,7 +52,7 @@ generate_dispatch_message!(
     ccu_upsert_playlist,
     AddMusicsToPlaylistMsg,
     cu_add_musics_to_playlist,
-    RemoveMusicsToPlaylistMsg,
+    RemoveMusicsFromPlaylistMsg,
     cd_remove_music_from_playlist,
     RemovePlaylistMsg,
     cd_remove_playlist,

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::{
-    actions::{Action, Widget, WidgetActionType},
+    actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
     view_models::connector::Connector,
 };
@@ -89,7 +89,7 @@ impl StorageUpsertVM {
         let id = cx.model_get(&self.edit).info.id.unwrap();
 
         cx.spawn::<_, _, EaseError>(move |cx| async move {
-            Connector::of(&cx).remove_storage(id).await?;
+            Connector::of(&cx).remove_storage(&cx, id).await?;
             Ok(())
         });
         Ok(())
@@ -99,7 +99,7 @@ impl StorageUpsertVM {
         let arg = cx.model_get(&self.edit).info.clone();
         let edit_model = self.edit.clone();
         cx.spawn::<_, _, EaseError>(move |cx| async move {
-            let res = Connector::of(&cx).test_storage(arg).await?;
+            let res = Connector::of(&cx).test_storage(&cx, arg).await?;
 
             {
                 let mut edit = cx.model_mut(&edit_model);
@@ -121,7 +121,7 @@ impl StorageUpsertVM {
     fn finish(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let arg = cx.model_get(&self.edit).info.clone();
         cx.spawn::<_, _, EaseError>(move |cx| async move {
-            Connector::of(&cx).upsert_storage(arg).await?;
+            Connector::of(&cx).upsert_storage(&cx, arg).await?;
             Ok(())
         });
         Ok(())
@@ -131,52 +131,57 @@ impl StorageUpsertVM {
 impl ViewModel<Action, EaseError> for StorageUpsertVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::StorageUpsert(action), WidgetActionType::Click) => match action {
-                    StorageUpsertWidget::Type { value } => {
-                        let mut form = cx.model_mut(&self.edit);
-                        form.info.typ = *value;
-                    }
-                    StorageUpsertWidget::IsAnonymous => {
-                        let mut form = cx.model_mut(&self.edit);
-                        let value = &mut form.info.is_anonymous;
-                        *value = !*value;
-                    }
-                    StorageUpsertWidget::Remove => {
-                        self.remove(cx)?;
-                    }
-                    StorageUpsertWidget::Test => {
-                        self.test(cx)?;
-                    }
-                    StorageUpsertWidget::Finish => {
-                        self.finish(cx)?;
-                    }
-                    _ => {
-                        unimplemented!()
-                    }
-                },
-                (Widget::StorageUpsert(action), WidgetActionType::ChangeText { text }) => {
-                    match action {
-                        StorageUpsertWidget::Alias => {
-                            let mut form = cx.model_mut(&self.edit);
-                            form.info.alias = text.to_string();
+            Action::View(action) => {
+                match action {
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::StorageUpsert(action), WidgetActionType::Click) => match action {
+                            StorageUpsertWidget::Type { value } => {
+                                let mut form = cx.model_mut(&self.edit);
+                                form.info.typ = *value;
+                            }
+                            StorageUpsertWidget::IsAnonymous => {
+                                let mut form = cx.model_mut(&self.edit);
+                                let value = &mut form.info.is_anonymous;
+                                *value = !*value;
+                            }
+                            StorageUpsertWidget::Remove => {
+                                self.remove(cx)?;
+                            }
+                            StorageUpsertWidget::Test => {
+                                self.test(cx)?;
+                            }
+                            StorageUpsertWidget::Finish => {
+                                self.finish(cx)?;
+                            }
+                            _ => {
+                                unimplemented!()
+                            }
+                        },
+                        (Widget::StorageUpsert(action), WidgetActionType::ChangeText { text }) => {
+                            match action {
+                                StorageUpsertWidget::Alias => {
+                                    let mut form = cx.model_mut(&self.edit);
+                                    form.info.alias = text.to_string();
+                                }
+                                StorageUpsertWidget::Address => {
+                                    let mut form = cx.model_mut(&self.edit);
+                                    form.info.addr = text.to_string();
+                                }
+                                StorageUpsertWidget::Username => {
+                                    let mut form = cx.model_mut(&self.edit);
+                                    form.info.username = text.to_string();
+                                }
+                                StorageUpsertWidget::Password => {
+                                    let mut form = cx.model_mut(&self.edit);
+                                    form.info.password = text.to_string();
+                                }
+                                _ => unimplemented!(),
+                            }
                         }
-                        StorageUpsertWidget::Address => {
-                            let mut form = cx.model_mut(&self.edit);
-                            form.info.addr = text.to_string();
-                        }
-                        StorageUpsertWidget::Username => {
-                            let mut form = cx.model_mut(&self.edit);
-                            form.info.username = text.to_string();
-                        }
-                        StorageUpsertWidget::Password => {
-                            let mut form = cx.model_mut(&self.edit);
-                            form.info.password = text.to_string();
-                        }
-                        _ => unimplemented!(),
-                    }
+                        _ => {}
+                    },
+                    _ => {}
                 }
-                _ => {}
             },
             _ => {}
         }

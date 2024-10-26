@@ -17,10 +17,6 @@ impl App {
         AppBuilder::new()
     }
 
-    pub fn start(&self) {
-        self._app.start();
-    }
-
     pub fn model<T>(&self) -> std::cell::Ref<'_, T>
     where
         T: 'static,

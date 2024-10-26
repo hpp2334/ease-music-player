@@ -18,13 +18,22 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn new(arg: ArgInitializeApp) -> BResult<Self> {
-        let cx = app_bootstrap(arg)?;
-        Ok(Backend { cx })
+    pub fn new() -> Self {
+        Self {
+            cx: BackendContext::new(),
+        }
     }
 
-    pub async fn send(&self, arg: MessagePayload) -> BResult<MessagePayload>
-    {
+    pub fn init(&self, arg: ArgInitializeApp) -> BResult<()> {
+        app_bootstrap(&self.cx, arg)?;
+        Ok(())
+    }
+
+    pub async fn request(&self, arg: MessagePayload) -> BResult<MessagePayload> {
         dispatch_message(self.cx.clone(), arg).await
+    }
+
+    pub fn port(&self) -> u16 {
+        self.cx.get_server_port()
     }
 }

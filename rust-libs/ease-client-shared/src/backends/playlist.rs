@@ -124,7 +124,7 @@ pub struct ArgRemoveMusicFromPlaylist {
     pub music_id: MusicId,
 }
 define_message!(
-    RemoveMusicsToPlaylistMsg,
+    RemoveMusicsFromPlaylistMsg,
     Code::RemoveMusicFromPlaylist,
     ArgRemoveMusicFromPlaylist,
     ()

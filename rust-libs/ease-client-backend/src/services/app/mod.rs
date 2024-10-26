@@ -62,45 +62,41 @@ fn load_app_meta(app_document_dir: &str) -> AppMeta {
 
 fn save_current_app_meta(cx: &BackendContext) {
     save_persistent_data(
-        &cx.app_document_dir,
+        &cx.get_app_document_dir(),
         "meta.json",
         AppMeta {
-            schema_version: cx.schema_version,
+            schema_version: cx.get_schema_version(),
             upgrading: false,
         },
     );
 }
 
 pub fn load_preference_data(cx: &BackendContext) -> PreferenceData {
-    load_persistent_data::<PreferenceData>(&cx.app_document_dir, "preference.json")
+    load_persistent_data::<PreferenceData>(&cx.get_app_document_dir(), "preference.json")
         .unwrap_or_default()
 }
 
 pub fn save_preference_data(cx: &BackendContext, data: PreferenceData) {
-    save_persistent_data(&cx.app_document_dir, "preference.json", data);
+    save_persistent_data(&cx.get_app_document_dir().as_ref(), "preference.json", data);
 }
 
-pub fn app_bootstrap(arg: ArgInitializeApp) -> BResult<BackendContext> {
-    let cx = BackendContext {
-        storage_path: arg.storage_path,
-        app_document_dir: arg.app_document_dir,
-        schema_version: arg.schema_version,
-        server_port: Arc::new(Default::default()),
-    };
+pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
+    cx.set_storage_path(&arg.storage_path);
+    cx.set_app_document_dir(&arg.app_document_dir);
+    cx.set_schema_version(arg.schema_version);
     let port = start_server(&cx);
-    cx.server_port
-        .store(port, std::sync::atomic::Ordering::Relaxed);
+    cx.set_server_port(port);
 
     // Init
     init_persistent_state(&cx)?;
-    Ok(cx)
+    Ok(())
 }
 
 fn init_persistent_state(cx: &BackendContext) -> BResult<()> {
     let _ = tracing::span!(Level::INFO, "init_persistent_state").enter();
-    let meta = load_app_meta(&cx.app_document_dir);
+    let meta = load_app_meta(&cx.get_app_document_dir());
     let prev_version = meta.schema_version;
-    let curr_version = cx.schema_version;
+    let curr_version = cx.get_schema_version();
 
     tracing::info!(
         "previous schema version {:?}, current schema version {:?}",

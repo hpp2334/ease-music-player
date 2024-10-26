@@ -5,7 +5,7 @@ use ease_client_shared::{backends::{
 use misty_vm::{AppBuilderContext, ViewModel, ViewModelContext};
 
 use crate::{
-    actions::{Action, Widget, WidgetActionType},
+    actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
     view_models::{connector::Connector, music::{common::MusicCommonVM, control::MusicControlVM}, storage::import::StorageImportVM},
 };
@@ -17,7 +17,7 @@ pub enum PlaylistDetailWidget {
     Remove,
     Edit,
     Music { id: MusicId },
-    RemoveMusic { id: MusicId },
+    RemoveMusic { id: MusicId, playlist_id: PlaylistId },
     Import,
 }
 
@@ -49,7 +49,7 @@ impl PlaylistDetailVM {
             .collect();
             
         cx.spawn::<_, _, EaseError>(move |cx| async move {
-            Connector::of(&cx).add_musics_to_playlist(ArgAddMusicsToPlaylist {
+            Connector::of(&cx).add_musics_to_playlist(&cx, ArgAddMusicsToPlaylist {
                 id: playlist_id,
                 entries,
             }).await?;
@@ -63,32 +63,37 @@ impl PlaylistDetailVM {
 impl ViewModel<Action, EaseError> for PlaylistDetailVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::PlaylistDetail(action), WidgetActionType::Click) => match action {
-                    PlaylistDetailWidget::Remove => {
-                        PlaylistCommonVM::of(cx).remove_current(cx)?;
-                    }
-                    PlaylistDetailWidget::Edit => {
-                        let playlist = PlaylistCommonVM::of(cx)
-                            .get_current(cx)?
-                            .expect("edit playlist but current playlist is None");
-                        PlaylistEditVM::of(cx).prepare_edit(cx, &playlist)?;
-                    }
-                    PlaylistDetailWidget::Music { id } => {
-                        MusicControlVM::of(cx).play(cx, *id)?;
-                    }
-                    PlaylistDetailWidget::RemoveMusic { id } => {
-                        MusicCommonVM::of(cx).remove(cx, *id)?;
-                    }
-                    PlaylistDetailWidget::Import => {
-                        let current = PlaylistCommonVM::of(cx).get_current(cx)?;
-                        if let Some(current) = current {
-                            StorageImportVM::of(cx).prepare(cx, CurrentStorageImportType::ImportMusics { id: current.id(), })?;
-                        }
-                    }
-                },
-                _ => {}
-            },
+            Action::View(action) => {
+                match action {
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::PlaylistDetail(action), WidgetActionType::Click) => match action {
+                            PlaylistDetailWidget::Remove => {
+                                PlaylistCommonVM::of(cx).remove_current(cx)?;
+                            }
+                            PlaylistDetailWidget::Edit => {
+                                let playlist = PlaylistCommonVM::of(cx)
+                                    .get_current(cx)?
+                                    .expect("edit playlist but current playlist is None");
+                                PlaylistEditVM::of(cx).prepare_edit(cx, &playlist)?;
+                            }
+                            PlaylistDetailWidget::Music { id } => {
+                                MusicControlVM::of(cx).play(cx, *id)?;
+                            }
+                            PlaylistDetailWidget::RemoveMusic { id, playlist_id } => {
+                                MusicCommonVM::of(cx).remove(cx, *id, *playlist_id)?;
+                            }
+                            PlaylistDetailWidget::Import => {
+                                let current = PlaylistCommonVM::of(cx).get_current(cx)?;
+                                if let Some(current) = current {
+                                    StorageImportVM::of(cx).prepare(cx, CurrentStorageImportType::ImportMusics { id: current.id(), })?;
+                                }
+                            }
+                        },
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
             _ => {}
         }
         Ok(())

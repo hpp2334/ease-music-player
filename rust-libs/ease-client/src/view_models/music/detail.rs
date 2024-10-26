@@ -2,7 +2,7 @@
 use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
 
 use crate::{
-    actions::{Action, Widget, WidgetActionType},
+    actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
 };
 
@@ -31,13 +31,18 @@ impl MusicDetailVM {
 impl ViewModel<Action, EaseError> for MusicDetailVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::MusicDetail(action), WidgetActionType::Click) => match action {
-                    MusicDetailWidget::Remove => {
-                        MusicCommonVM::of(cx).remove_current(cx)?;
-                    }
-                },
-                _ => {}
+            Action::View(action) => {
+                match action {
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::MusicDetail(action), WidgetActionType::Click) => match action {
+                            MusicDetailWidget::Remove => {
+                                MusicCommonVM::of(cx).remove_current(cx)?;
+                            }
+                        },
+                        _ => {}
+                    },
+                    _ => {}
+                }
             },
             _ => {}
         }

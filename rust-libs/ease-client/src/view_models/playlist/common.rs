@@ -25,7 +25,7 @@ impl PlaylistCommonVM {
 
     pub(crate) fn remove(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(move |cx| async move {
-            Connector::of(&cx).remove_playlist(id).await?;
+            Connector::of(&cx).remove_playlist(&cx, id).await?;
             Ok(())
         });
         Ok(())

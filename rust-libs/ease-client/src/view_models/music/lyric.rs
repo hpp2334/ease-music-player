@@ -1,8 +1,5 @@
 use crate::{
-    actions::{Action, Widget, WidgetActionType},
-    view_models::connector::Connector,
-    error::{EaseError, EaseResult},
-    view_models::storage::import::StorageImportVM,
+    actions::{event::ViewAction, Action, Widget, WidgetActionType}, error::{EaseError, EaseResult}, view_models::{connector::Connector, storage::import::StorageImportVM}
 };
 use ease_client_shared::{
     backends::{
@@ -45,7 +42,7 @@ impl MusicLyricVM {
 
         cx.spawn::<_, _, EaseError>(move |cx| async move {
             Connector::of(&cx)
-                .update_music_lyric(ArgUpdateMusicLyric { id, lyric_loc: loc })
+                .update_music_lyric(&cx, ArgUpdateMusicLyric { id, lyric_loc: loc })
                 .await?;
 
             Ok(())
@@ -97,17 +94,22 @@ impl MusicLyricVM {
 impl ViewModel<Action, EaseError> for MusicLyricVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::MusicLyric(action), WidgetActionType::Click) => match action {
-                    MusicLyricWidget::Add => {
-                        self.prepare_storage(cx)?;
-                    }
-                    MusicLyricWidget::Remove => {
-                        self.remove(cx)?;
-                    }
-                },
-                _ => {}
-            },
+            Action::View(action) => {
+                match action {
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::MusicLyric(action), WidgetActionType::Click) => match action {
+                            MusicLyricWidget::Add => {
+                                self.prepare_storage(cx)?;
+                            }
+                            MusicLyricWidget::Remove => {
+                                self.remove(cx)?;
+                            }
+                        },
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
             _ => {}
         }
         Ok(())

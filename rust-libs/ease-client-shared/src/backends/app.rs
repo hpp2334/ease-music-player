@@ -1,4 +1,4 @@
-#[derive(Debug, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct ArgInitializeApp {
     pub app_document_dir: String,
     pub schema_version: u32,

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ease_client_shared::backends::music::MusicId;
+use ease_client_shared::backends::{music::MusicId, playlist::PlaylistId};
 use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
 
 use crate::{
@@ -33,18 +33,19 @@ impl MusicCommonVM {
         }
     }
 
-    pub(crate) fn remove(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
+    pub(crate) fn remove(&self, cx: &ViewModelContext, id: MusicId, playlist_id: PlaylistId) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(move |cx| async move {
             let connector = Connector::of(&cx);
-            connector.remove_music(id).await?;
+            connector.remove_music(&cx, id, playlist_id).await?;
             Ok(())
         });
         Ok(())
     }
 
     pub(crate) fn remove_current(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        if let Some(current_id) = cx.model_get(&self.current).id {
-            self.remove(cx, current_id)
+        let m = cx.model_get(&self.current);
+        if let (Some(current_id), Some(playlist_id)) = (m.id, m.playlist_id) {
+            self.remove(cx, current_id, playlist_id)
         } else {
             Ok(())
         }

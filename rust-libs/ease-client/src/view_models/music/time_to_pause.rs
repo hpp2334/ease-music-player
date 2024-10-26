@@ -3,7 +3,7 @@ use std::time::Duration;
 use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
 
 use crate::{
-    actions::{Action, Widget, WidgetActionType},
+    actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
 };
 
@@ -72,19 +72,24 @@ impl TimeToPauseVM {
 impl ViewModel<Action, EaseError> for TimeToPauseVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::Widget(action) => match (&action.widget, &action.typ) {
-                (Widget::TimeToPause(action), WidgetActionType::Click) => match action {
-                    TimeToPauseWidget::Delete => {
-                        self.pause(cx)?;
-                    }
-                },
-                _ => {}
-            },
-            Action::TimeToPause(action) => match action {
-                TimeToPauseAction::Finish { hour, minute } => {
-                    self.start_timer(cx, *hour, *minute)?;
+            Action::View(action) => {
+                match action {
+                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                        (Widget::TimeToPause(action), WidgetActionType::Click) => match action {
+                            TimeToPauseWidget::Delete => {
+                                self.pause(cx)?;
+                            }
+                        },
+                        _ => {}
+                    },
+                    ViewAction::TimeToPause(action) => match action {
+                        TimeToPauseAction::Finish { hour, minute } => {
+                            self.start_timer(cx, *hour, *minute)?;
+                        }
+                    },
+                    _ => {}
                 }
-            },
+            }
             _ => {}
         }
         Ok(())

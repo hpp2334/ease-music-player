@@ -1,9 +1,10 @@
 use std::{future::Future, time::Duration};
 
-use futures::future::LocalBoxFuture;
+use futures::future::{BoxFuture, LocalBoxFuture};
 
 pub trait IAsyncRuntimeAdapter: 'static {
     fn spawn_local(&self, future: LocalBoxFuture<'static, ()>) -> u64;
+    fn spawn(&self, future: BoxFuture<'static, ()>) -> u64;
     fn sleep(&self, duration: Duration) -> LocalBoxFuture<'static, ()>;
     fn get_time(&self) -> Duration;
 }
@@ -26,6 +27,13 @@ impl AsyncTasks {
         self.adapter.spawn_local(Box::pin(fut));
     }
 
+    pub fn spawn<Fut>(&self, fut: Fut)
+    where
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.adapter.spawn(Box::pin(fut));
+    }
+
     pub async fn sleep(&self, duration: Duration) {
         self.adapter.sleep(duration).await
     }
@@ -40,6 +48,10 @@ pub(crate) struct DefaultAsyncRuntimeAdapter;
 impl IAsyncRuntimeAdapter for DefaultAsyncRuntimeAdapter {
     fn spawn_local(&self, _future: LocalBoxFuture<'static, ()>) -> u64 {
         panic!("async runtime adapter not registered")
+    }
+    
+    fn spawn(&self, future: BoxFuture<'static, ()>) -> u64 {
+        todo!()
     }
 
     fn sleep(&self, _duration: std::time::Duration) -> LocalBoxFuture<'static, ()> {
