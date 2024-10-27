@@ -1,12 +1,10 @@
 use crate::view_models::{
-    music::{
+    main::MainBodyWidget, music::{
         control::MusicControlWidget, detail::MusicDetailWidget, lyric::MusicLyricWidget,
         time_to_pause::TimeToPauseWidget,
-    },
-    playlist::{
+    }, playlist::{
         create::PlaylistCreateWidget, detail::PlaylistDetailWidget, edit::PlaylistEditWidget, list::PlaylistListWidget,
-    },
-    storage::{import::StorageImportWidget, list::StorageListWidget, upsert::StorageUpsertWidget},
+    }, storage::{import::StorageImportWidget, list::StorageListWidget, upsert::StorageUpsertWidget}
 };
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -17,6 +15,7 @@ pub enum WidgetActionType {
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum Widget {
+    MainBody(MainBodyWidget),
     MusicControl(MusicControlWidget),
     MusicLyric(MusicLyricWidget),
     MusicDetail(MusicDetailWidget),

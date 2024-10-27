@@ -81,6 +81,8 @@ impl StorageUpsertVM {
             typ: storage.typ.clone(),
         };
         edit.test = StorageConnectionTestResult::None;
+        edit.music_count = storage.music_count;
+        edit.playlist_count = storage.playlist_count;
         edit.is_create = false;
         Ok(())
     }

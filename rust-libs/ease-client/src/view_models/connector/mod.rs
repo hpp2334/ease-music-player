@@ -16,7 +16,10 @@ use ease_client_shared::backends::{
         StorageId, TestStorageMsg, UpsertStorageMsg,
     },
 };
-use misty_vm::{AppBuilderContext, IToHost, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
+use state::ConnectorState;
+
+pub mod state;
 
 use crate::{
     actions::Action,
@@ -32,22 +35,30 @@ pub enum ConnectorAction {
     Storages(Vec<Storage>),
 }
 
-pub struct Connector {}
+pub struct Connector {
+    state: Model<ConnectorState>
+}
 
 impl Connector {
-    pub fn new(_cx: &mut AppBuilderContext) -> Self {
-        Self {}
+    pub fn new(cx: &mut AppBuilderContext) -> Self {
+        Self {
+            state: cx.model(),
+        }
     }
 
     pub fn serve_url(&self, cx: &ViewModelContext, loc: StorageEntryLoc) -> String {
-        let port = ConnectorHostService::of(cx).port();
-        let sp = URL_SAFE.encode(loc.path);
-        let id: i64 = *loc.storage_id.as_ref();
-        format!("http://127.0.0.1:{}/asset/{}?sp={}", port, id, sp)
+        let state= cx.model_get(&self.state);
+        state.serve_url(loc)
     }
 
     fn init(&self, cx: &ViewModelContext, arg: ArgInitializeApp) -> EaseResult<()> {
-        ConnectorHostService::of(cx).init(arg)?;
+        let host= ConnectorHostService::of(cx);
+        host.init(arg)?;
+        {
+            let mut state = cx.model_mut(&self.state);
+            state.port = host.port();
+        }
+
         let this = Self::of(cx);
         cx.spawn::<_, _, EaseError>(move |cx| async move {
             this.sync_storages(&cx).await?;

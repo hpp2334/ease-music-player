@@ -4,26 +4,101 @@ use ease_client_shared::{
     backends::{
         music::MusicId,
         playlist::PlaylistId,
-        storage::{Storage, StorageType},
+        storage::{
+            ArgUpsertStorage, Storage, StorageConnectionTestResult, StorageEntryType, StorageId,
+            StorageType,
+        },
     },
-    uis::{storage::*, view::RootViewModelState},
+    uis::storage::*,
 };
-use misty_vm::views::MistyViewModelManagerBuilder;
+use serde::Serialize;
 
-use crate::utils::{cmp_name_smartly, decode_component_or_origin};
-
-use super::service::{
-    entry_can_check, get_entry_type, resolve_storage_name, CurrentStorageState, EditStorageState,
-    StoragesState,
+use crate::{
+    utils::{cmp_name_smartly::cmp_name_smartly, common::decode_component_or_origin},
+    view_models::storage::{
+        import::{entry_can_check, get_entry_type},
+        state::{AllStorageState, CurrentStorageState, EditStorageState},
+    },
 };
 
-fn storage_list_view_model(state: &StoragesState, root: &mut RootViewModelState) {
+use super::models::RootViewModelState;
+
+#[derive(Debug, Clone, Serialize, uniffi::Record)]
+pub struct VStorageListItem {
+    pub storage_id: StorageId,
+    pub name: String,
+    pub sub_title: String,
+    pub typ: StorageType,
+}
+
+#[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
+pub struct VStorageListState {
+    pub items: Vec<VStorageListItem>,
+}
+
+#[derive(Debug, Clone, Serialize, uniffi::Record)]
+pub struct VCurrentStorageEntry {
+    pub path: String,
+    pub name: String,
+    pub is_folder: bool,
+    pub can_check: bool,
+    pub checked: bool,
+    pub entry_typ: StorageEntryType,
+}
+
+#[derive(Debug, Clone, Serialize, uniffi::Record)]
+pub struct VSplitPathItem {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, uniffi::Record)]
+pub struct VCurrentStorageEntriesStateStorageItem {
+    pub id: StorageId,
+    pub name: String,
+    pub subtitle: String,
+    pub selected: bool,
+    pub is_local: bool,
+}
+
+#[derive(Debug, Clone, Serialize, uniffi::Record)]
+pub struct VCurrentStorageEntriesState {
+    pub import_type: CurrentStorageImportType,
+    pub state_type: CurrentStorageStateType,
+    pub current_storage_id: Option<StorageId>,
+    pub storage_items: Vec<VCurrentStorageEntriesStateStorageItem>,
+    pub entries: Vec<VCurrentStorageEntry>,
+    pub selected_count: i32,
+    pub split_paths: Vec<VSplitPathItem>,
+    pub current_path: String,
+    pub disabled_toggle_all: bool,
+}
+
+#[derive(Debug, Clone, Serialize, uniffi::Record)]
+pub struct VEditStorageState {
+    pub is_created: bool,
+    pub title: String,
+    pub info: ArgUpsertStorage,
+    pub test: StorageConnectionTestResult,
+    pub music_count: u32,
+    pub playlist_count: u32,
+}
+
+fn resolve_storage_name(storage: &Storage) -> String {
+    if !storage.alias.is_empty() {
+        storage.alias.clone()
+    } else {
+        storage.addr.clone()
+    }
+}
+
+pub fn storage_list_vs(state: &AllStorageState, root: &mut RootViewModelState) {
     let items: Vec<VStorageListItem> = {
         state
             .storages
             .iter()
-            .map(|info| VStorageListItem {
-                storage_id: info.id.clone(),
+            .map(|(id, info)| VStorageListItem {
+                storage_id: *id,
                 name: resolve_storage_name(info),
                 sub_title: info.addr.clone(),
                 typ: info.typ.clone(),
@@ -34,8 +109,8 @@ fn storage_list_view_model(state: &StoragesState, root: &mut RootViewModelState)
     root.storage_list = Some(list);
 }
 
-fn current_storage_entries_view_model(
-    (state, storages_state): (&CurrentStorageState, &StoragesState),
+pub fn current_storage_entries_vs(
+    (state, storages_state): (&CurrentStorageState, &AllStorageState),
     root: &mut RootViewModelState,
 ) {
     let current_storage = state.clone();
@@ -95,7 +170,7 @@ fn current_storage_entries_view_model(
     let storage_items: Vec<VCurrentStorageEntriesStateStorageItem> = storages_state
         .storages
         .iter()
-        .map(|v| VCurrentStorageEntriesStateStorageItem {
+        .map(|(id, v)| VCurrentStorageEntriesStateStorageItem {
             id: v.id.clone(),
             name: resolve_storage_name(v),
             subtitle: v.addr.clone(),
@@ -124,23 +199,13 @@ fn current_storage_entries_view_model(
     root.current_storage_entries = Some(current_storage_entries);
 }
 
-fn edit_storage_view_model(state: &EditStorageState, root: &mut RootViewModelState) {
+pub fn edit_storage_vs(state: &EditStorageState, root: &mut RootViewModelState) {
     root.edit_storage = Some(VEditStorageState {
         is_created: state.is_create,
         title: state.title.clone(),
         info: state.info.clone(),
         test: state.test,
-        update_signal: state.update_signal,
         music_count: state.music_count,
         playlist_count: state.playlist_count,
     });
-}
-
-pub fn register_storage_viewmodels(
-    builder: MistyViewModelManagerBuilder<RootViewModelState>,
-) -> MistyViewModelManagerBuilder<RootViewModelState> {
-    builder
-        .register(storage_list_view_model)
-        .register(current_storage_entries_view_model)
-        .register(edit_storage_view_model)
 }

@@ -33,7 +33,7 @@ pub struct StorageImportVM {
     store: Model<AllStorageState>,
 }
 
-fn get_entry_type(entry: &StorageEntry) -> StorageEntryType {
+pub(crate) fn get_entry_type(entry: &StorageEntry) -> StorageEntryType {
     const MUSIC_EXTS: [&str; 5] = [".wav", ".mp3", ".aac", ".flac", ".ogg"];
     const IMAGE_EXTS: [&str; 3] = [".jpg", ".jpeg", ".png"];
     const LYRIC_EXTS: [&str; 1] = [".lrc"];
@@ -66,7 +66,7 @@ fn can_multi_select(import_type: CurrentStorageImportType) -> bool {
     }
 }
 
-fn entry_can_check(entry: &StorageEntry, import_type: CurrentStorageImportType) -> bool {
+pub(crate) fn entry_can_check(entry: &StorageEntry, import_type: CurrentStorageImportType) -> bool {
     let entry_type = get_entry_type(entry);
 
     match import_type {

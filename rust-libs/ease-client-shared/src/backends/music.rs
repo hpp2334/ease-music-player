@@ -59,6 +59,12 @@ impl MusicAbstract {
     pub fn id(&self) -> MusicId {
         self.meta.id
     }
+    pub fn title(&self) -> &str {
+        &self.meta.title
+    }
+    pub fn duration(&self) -> Option<MusicDuration> {
+        self.meta.duration
+    }
 }
 
 define_message!(GetMusicMsg, Code::GetMusic, MusicId, Option<Music>);

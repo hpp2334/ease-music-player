@@ -54,6 +54,12 @@ impl ViewModelContext {
         self._app.model_mut()
     }
 
+    pub fn model_dirty<T>(&self, model: &Model<T>) -> bool
+    where
+    T: 'static {
+        todo!()
+    }
+
     pub fn to_host<C>(&self) -> Arc<C>
     where
         C: IToHost,

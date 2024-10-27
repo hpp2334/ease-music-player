@@ -1,3 +1,3 @@
-mod cmp_name_smartly;
-mod common;
+pub mod cmp_name_smartly;
+pub mod common;
 

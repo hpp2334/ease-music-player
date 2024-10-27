@@ -19,6 +19,8 @@ pub struct EditStorageState {
     pub title: String,
     pub info: ArgUpsertStorage,
     pub test: StorageConnectionTestResult,
+    pub music_count: u32,
+    pub playlist_count: u32,
 }
 
 #[derive(Default, Clone)]
