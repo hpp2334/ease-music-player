@@ -1,18 +1,19 @@
 use ease_client_shared::{
-    backends::{
-        music::MusicId,
-        playlist::PlaylistId,
-    },
+    backends::{music::MusicId, playlist::PlaylistId},
     uis::{music::ArgSeekMusic, preference::PlayMode},
 };
 use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
 
 use super::{common::MusicCommonAction, state::CurrentMusicState};
-use crate::{actions::{event::ViewAction, Widget}, to_host::player::MusicPlayerService};
+use crate::{
+    actions::{event::ViewAction, Widget},
+    to_host::player::MusicPlayerService,
+    view_models::{connector::ConnectorAction, playlist::common::PlaylistCommonVM},
+};
 use crate::{
     actions::{Action, WidgetActionType},
-    view_models::connector::Connector,
     error::{EaseError, EaseResult},
+    view_models::connector::Connector,
 };
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -201,42 +202,67 @@ impl MusicControlVM {
         });
         Ok(())
     }
+
+    fn stop_if_invalid(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        let is_valid = {
+            let state = cx.model_get(&self.current);
+            if let (Some(id), Some(playlist_id)) = (state.id, state.playlist_id) {
+                if !PlaylistCommonVM::of(cx).has_playlist(cx, playlist_id) {
+                    false
+                } else if !state.playlist_musics.iter().any(|v| v.id() == id) {
+                    false
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        };
+        if !is_valid {
+            self.stop(cx)?;
+        }
+        Ok(())
+    }
 }
 
 impl ViewModel<Action, EaseError> for MusicControlVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::View(action) => {
-                match action {
-                    ViewAction::MusicControl(action) => match action {
-                        MusicControlAction::Seek(arg) => self.seek(cx, arg)?,
-                    },
-                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
-                        (Widget::MusicControl(widget), WidgetActionType::Click) => match widget {
-                            MusicControlWidget::Pause => {
-                                self.pause(cx)?;
-                            }
-                            MusicControlWidget::Play => {
-                                self.resume(cx)?;
-                            }
-                            MusicControlWidget::PlayNext => {
-                                self.play_next(cx)?;
-                            }
-                            MusicControlWidget::PlayPrevious => {
-                                self.play_previous(cx)?;
-                            }
-                            MusicControlWidget::Stop => {
-                                self.stop(cx)?;
-                            }
-                            MusicControlWidget::Playmode => {
-                                self.update_playmode_to_next(cx)?;
-                            }
-                        },
-                        _ => {}
+            Action::View(action) => match action {
+                ViewAction::MusicControl(action) => match action {
+                    MusicControlAction::Seek(arg) => self.seek(cx, arg)?,
+                },
+                ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                    (Widget::MusicControl(widget), WidgetActionType::Click) => match widget {
+                        MusicControlWidget::Pause => {
+                            self.pause(cx)?;
+                        }
+                        MusicControlWidget::Play => {
+                            self.resume(cx)?;
+                        }
+                        MusicControlWidget::PlayNext => {
+                            self.play_next(cx)?;
+                        }
+                        MusicControlWidget::PlayPrevious => {
+                            self.play_previous(cx)?;
+                        }
+                        MusicControlWidget::Stop => {
+                            self.stop(cx)?;
+                        }
+                        MusicControlWidget::Playmode => {
+                            self.update_playmode_to_next(cx)?;
+                        }
                     },
                     _ => {}
+                },
+                _ => {}
+            },
+            Action::Connector(action) => match action {
+                ConnectorAction::Playlist(_) | ConnectorAction::PlaylistAbstracts(_) => {
+                    self.stop_if_invalid(cx)?;
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
         Ok(())

@@ -32,7 +32,6 @@ pub enum PlaylistCreateWidget {
 }
 
 pub struct PlaylistCreateVM {
-    current: Model<CurrentPlaylistState>,
     form: Model<CreatePlaylistState>,
 }
 
@@ -56,9 +55,12 @@ fn build_recommend_playlist_names(entries: &Vec<StorageEntryLoc>) -> Vec<String>
 impl PlaylistCreateVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
-            current: cx.model(),
             form: cx.model(),
         }
+    }
+
+    pub(crate) fn prepare(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.clear(cx)
     }
 
     fn clear(&self, cx: &ViewModelContext) -> EaseResult<()> {

@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::{Any, TypeId}, collections::HashSet};
 
 use super::pod::{BoxedViewModels, ViewModel, ViewModels};
 
@@ -8,6 +8,7 @@ where
     E: Any + 'static,
 {
     vms: Vec<Box<dyn ViewModel<Event, E>>>,
+    vm_ids: HashSet<TypeId>
 }
 
 impl<Event, E> ViewModelsBuilder<Event, E>
@@ -18,10 +19,18 @@ where
     pub fn new() -> Self {
         Self {
             vms: Default::default(),
+            vm_ids: Default::default(),
         }
     }
 
-    pub fn add(&mut self, vm: impl ViewModel<Event, E>) -> &mut Self {
+    pub fn add<VM>(&mut self, vm: VM) -> &mut Self
+    where VM: ViewModel<Event, E> {
+        let type_id = vm.type_id();
+        if self.vm_ids.contains(&type_id) {
+            let name = std::any::type_name::<VM>();
+            panic!("ViewModel {} already added", name);
+        }
+        self.vm_ids.insert(type_id);
         self.vms.push(Box::new(vm));
         self
     }

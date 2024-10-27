@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{f32::consts::PI, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +46,12 @@ impl Music {
     }
     pub fn title(&self) -> &str {
         &self.meta.title
+    }
+    pub fn music_abstract(&self) -> MusicAbstract {
+        MusicAbstract {
+            meta: self.meta.clone(),
+            cover_url: self.cover_url.clone(),
+        }
     }
 }
 

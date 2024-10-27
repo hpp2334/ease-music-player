@@ -1,31 +1,36 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
-use ease_client_backend::{error::BResult, Backend};
 use ease_client_shared::backends::{
-    app::ArgInitializeApp, message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload}, music::{ArgUpdateMusicLyric, GetMusicMsg, Music, MusicId, UpdateMusicLyricMsg}, playlist::{
-        AddMusicsToPlaylistMsg, ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist, CreatePlaylistMsg, GetAllPlaylistAbstractsMsg, GetPlaylistMsg, Playlist, PlaylistAbstract, PlaylistId, RemoveMusicsFromPlaylistMsg, RemovePlaylistMsg, UpdatePlaylistMsg
-    }, storage::{
-        ArgUpsertStorage, GetStorageMsg, ListStorageEntryChildrenMsg, ListStorageEntryChildrenResp, ListStorageMsg, RemoveStorageMsg, Storage, StorageConnectionTestResult, StorageEntryLoc, StorageId, TestStorageMsg, UpsertStorageMsg
-    }
+    app::ArgInitializeApp,
+    message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload},
+    music::{ArgUpdateMusicLyric, GetMusicMsg, Music, MusicId, UpdateMusicLyricMsg},
+    playlist::{
+        AddMusicsToPlaylistMsg, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
+        ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist, CreatePlaylistMsg,
+        GetAllPlaylistAbstractsMsg, GetPlaylistMsg, Playlist, PlaylistAbstract, PlaylistId,
+        RemoveMusicsFromPlaylistMsg, RemovePlaylistMsg, UpdatePlaylistMsg,
+    },
+    storage::{
+        ArgUpsertStorage, ListStorageEntryChildrenMsg, ListStorageEntryChildrenResp,
+        ListStorageMsg, RemoveStorageMsg, Storage, StorageConnectionTestResult, StorageEntryLoc,
+        StorageId, TestStorageMsg, UpsertStorageMsg,
+    },
 };
 use misty_vm::{AppBuilderContext, IToHost, ViewModel, ViewModelContext};
 
 use crate::{
-    actions::{event::ViewAction, Action},
+    actions::Action,
     error::{EaseError, EaseResult},
     to_host::connector::ConnectorHostService,
 };
-
 
 #[derive(Debug)]
 pub enum ConnectorAction {
     PlaylistAbstracts(Vec<PlaylistAbstract>),
     Playlist(Playlist),
     Music(Music),
-    Stroages(Vec<Storage>),
+    Storages(Vec<Storage>),
 }
-
 
 pub struct Connector {}
 
@@ -56,21 +61,38 @@ impl Connector {
         self.request::<GetMusicMsg>(cx, id).await
     }
 
-    pub async fn get_playlist(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<Option<Playlist>> {
+    pub async fn get_playlist(
+        &self,
+        cx: &ViewModelContext,
+        id: PlaylistId,
+    ) -> EaseResult<Option<Playlist>> {
         self.request::<GetPlaylistMsg>(cx, id).await
     }
 
-    pub async fn remove_music(&self, cx: &ViewModelContext, id: MusicId, playlist_id: PlaylistId) -> EaseResult<()> {
-        self.request::<RemoveMusicsFromPlaylistMsg>(cx, ArgRemoveMusicFromPlaylist {
-            playlist_id,
-            music_id: id,
-        }).await?;
+    pub async fn remove_music(
+        &self,
+        cx: &ViewModelContext,
+        id: MusicId,
+        playlist_id: PlaylistId,
+    ) -> EaseResult<()> {
+        self.request::<RemoveMusicsFromPlaylistMsg>(
+            cx,
+            ArgRemoveMusicFromPlaylist {
+                playlist_id,
+                music_id: id,
+            },
+        )
+        .await?;
         self.sync_playlist(cx, playlist_id).await?;
         self.sync_playlist_abstracts(cx).await?;
         Ok(())
     }
 
-    pub async fn update_playlist(&self, cx: &ViewModelContext, arg: ArgUpdatePlaylist) -> EaseResult<()> {
+    pub async fn update_playlist(
+        &self,
+        cx: &ViewModelContext,
+        arg: ArgUpdatePlaylist,
+    ) -> EaseResult<()> {
         let id = arg.id;
         self.request::<UpdatePlaylistMsg>(cx, arg).await?;
         self.sync_playlist(cx, id).await?;
@@ -78,7 +100,11 @@ impl Connector {
         Ok(())
     }
 
-    pub async fn create_playlist(&self, cx: &ViewModelContext, arg: ArgCreatePlaylist) -> EaseResult<()> {
+    pub async fn create_playlist(
+        &self,
+        cx: &ViewModelContext,
+        arg: ArgCreatePlaylist,
+    ) -> EaseResult<()> {
         self.request::<CreatePlaylistMsg>(cx, arg).await?;
         self.sync_playlist_abstracts(cx).await?;
         Ok(())
@@ -90,7 +116,11 @@ impl Connector {
         Ok(())
     }
 
-    pub async fn add_musics_to_playlist(&self, cx: &ViewModelContext, arg: ArgAddMusicsToPlaylist) -> EaseResult<()> {
+    pub async fn add_musics_to_playlist(
+        &self,
+        cx: &ViewModelContext,
+        arg: ArgAddMusicsToPlaylist,
+    ) -> EaseResult<()> {
         let id = arg.id;
         self.request::<AddMusicsToPlaylistMsg>(cx, arg).await?;
         self.sync_playlist(cx, id).await?;
@@ -98,7 +128,11 @@ impl Connector {
         Ok(())
     }
 
-    pub async fn update_music_lyric(&self, cx: &ViewModelContext, arg: ArgUpdateMusicLyric) -> EaseResult<()> {
+    pub async fn update_music_lyric(
+        &self,
+        cx: &ViewModelContext,
+        arg: ArgUpdateMusicLyric,
+    ) -> EaseResult<()> {
         let id = arg.id;
         self.request::<UpdateMusicLyricMsg>(cx, arg).await?;
         self.sync_music(cx, id).await?;
@@ -106,7 +140,8 @@ impl Connector {
     }
 
     pub async fn list_storage_entry_children(
-        &self, cx: &ViewModelContext,
+        &self,
+        cx: &ViewModelContext,
         loc: StorageEntryLoc,
     ) -> EaseResult<ListStorageEntryChildrenResp> {
         let resp = self.request::<ListStorageEntryChildrenMsg>(cx, loc).await?;
@@ -121,13 +156,18 @@ impl Connector {
     }
 
     pub async fn test_storage(
-        &self, cx: &ViewModelContext,
+        &self,
+        cx: &ViewModelContext,
         arg: ArgUpsertStorage,
     ) -> EaseResult<StorageConnectionTestResult> {
         self.request::<TestStorageMsg>(cx, arg).await
     }
 
-    pub async fn upsert_storage(&self, cx: &ViewModelContext, arg: ArgUpsertStorage) -> EaseResult<()> {
+    pub async fn upsert_storage(
+        &self,
+        cx: &ViewModelContext,
+        arg: ArgUpsertStorage,
+    ) -> EaseResult<()> {
         self.request::<UpsertStorageMsg>(cx, arg).await?;
         Ok(())
     }
@@ -142,7 +182,9 @@ impl Connector {
 
     async fn sync_playlist_abstracts(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let playlists = self.request::<GetAllPlaylistAbstractsMsg>(cx, ()).await?;
-        cx.enqueue_emit(Action::Connector(ConnectorAction::PlaylistAbstracts(playlists)));
+        cx.enqueue_emit(Action::Connector(ConnectorAction::PlaylistAbstracts(
+            playlists,
+        )));
         Ok(())
     }
 
@@ -155,8 +197,8 @@ impl Connector {
     }
 
     async fn sync_storages(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        let storages= self.request::<ListStorageMsg>(cx, ()).await?;
-        cx.enqueue_emit(Action::Connector(ConnectorAction::Stroages(storages)));
+        let storages = self.request::<ListStorageMsg>(cx, ()).await?;
+        cx.enqueue_emit(Action::Connector(ConnectorAction::Storages(storages)));
         Ok(())
     }
 
@@ -180,14 +222,9 @@ impl Connector {
 impl ViewModel<Action, EaseError> for Connector {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::View(action) => {
-                match action {
-                    ViewAction::Init(arg) => {
-                        self.init(cx, arg.clone())?;
-                    },
-                    _ => {}
-                }
-            },
+            Action::Init(arg) => {
+                self.init(cx, arg.clone())?;
+            }
             _ => {}
         }
         Ok(())

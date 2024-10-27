@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 
 use ease_client_backend::{error::BResult, Backend};
 use ease_client_shared::backends::{app::ArgInitializeApp, message::MessagePayload};

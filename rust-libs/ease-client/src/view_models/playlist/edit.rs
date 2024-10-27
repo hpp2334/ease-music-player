@@ -28,14 +28,12 @@ pub enum PlaylistEditWidget {
 }
 
 pub struct PlaylistEditVM {
-    current: Model<CurrentPlaylistState>,
     form: Model<EditPlaylistState>,
 }
 
 impl PlaylistEditVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
-            current: cx.model(),
             form: cx.model(),
         }
     }

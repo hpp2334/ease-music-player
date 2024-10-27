@@ -1,12 +1,15 @@
 use std::time::Duration;
 
-use ease_client_shared::backends::{music::MusicId, playlist::PlaylistId};
+use ease_client_shared::backends::{
+    music::{Music, MusicId},
+    playlist::{Playlist, PlaylistId},
+};
 use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
-    view_models::connector::Connector,
+    view_models::connector::{Connector, ConnectorAction},
 };
 
 use super::{
@@ -33,7 +36,12 @@ impl MusicCommonVM {
         }
     }
 
-    pub(crate) fn remove(&self, cx: &ViewModelContext, id: MusicId, playlist_id: PlaylistId) -> EaseResult<()> {
+    pub(crate) fn remove(
+        &self,
+        cx: &ViewModelContext,
+        id: MusicId,
+        playlist_id: PlaylistId,
+    ) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(move |cx| async move {
             let connector = Connector::of(&cx);
             connector.remove_music(&cx, id, playlist_id).await?;
@@ -77,6 +85,33 @@ impl MusicCommonVM {
         }
         Ok(())
     }
+
+    fn sync_music(&self, cx: &ViewModelContext, music: &Music) -> EaseResult<()> {
+        let mut state = cx.model_mut(&self.current);
+        if state.id == Some(music.id()) {
+            let index_music = state.index_musics;
+
+            state.lyric = music.lyric.clone();
+
+            let r = &mut state.playlist_musics[index_music];
+            assert!(r.id() == music.id());
+            *r = music.music_abstract();
+        }
+        Ok(())
+    }
+
+    fn sync_playlist(&self, cx: &ViewModelContext, playlist: &Playlist) -> EaseResult<()> {
+        let mut state = cx.model_mut(&self.current);
+        if state.playlist_id == Some(playlist.id()) {
+            let id = state.id.unwrap();
+            let pos = playlist.musics.iter().position(|v| v.id() == id);
+
+            state.playlist_musics = playlist.musics.clone();
+            state.index_musics = pos.unwrap_or(0);
+        }
+
+        Ok(())
+    }
 }
 
 impl ViewModel<Action, EaseError> for MusicCommonVM {
@@ -86,6 +121,15 @@ impl ViewModel<Action, EaseError> for MusicCommonVM {
                 MusicCommonAction::Tick => {
                     self.tick(cx)?;
                 }
+            },
+            Action::Connector(action) => match action {
+                ConnectorAction::Music(music) => {
+                    self.sync_music(cx, music)?;
+                }
+                ConnectorAction::Playlist(playlist) => {
+                    self.sync_playlist(cx, playlist)?;
+                }
+                _ => {}
             },
             _ => {}
         }

@@ -71,6 +71,7 @@ where
     pub fn build(self) -> App {
         App {
             _app: Arc::new(AppInternal {
+                thread_id: std::thread::current().id(),
                 models: self.cx.models,
                 view_models: self.view_models_builder.build(),
                 to_hosts: self.to_hosts_builder.build(),

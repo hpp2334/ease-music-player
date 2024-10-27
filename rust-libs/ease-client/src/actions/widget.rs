@@ -4,7 +4,7 @@ use crate::view_models::{
         time_to_pause::TimeToPauseWidget,
     },
     playlist::{
-        create::PlaylistCreateWidget, detail::PlaylistDetailWidget, edit::PlaylistEditWidget,
+        create::PlaylistCreateWidget, detail::PlaylistDetailWidget, edit::PlaylistEditWidget, list::PlaylistListWidget,
     },
     storage::{import::StorageImportWidget, list::StorageListWidget, upsert::StorageUpsertWidget},
 };
@@ -24,6 +24,7 @@ pub enum Widget {
     PlaylistDetail(PlaylistDetailWidget),
     PlaylistEdit(PlaylistEditWidget),
     PlaylistCreate(PlaylistCreateWidget),
+    PlaylistList(PlaylistListWidget),
     StroageImport(StorageImportWidget),
     StorageList(StorageListWidget),
     StorageUpsert(StorageUpsertWidget),

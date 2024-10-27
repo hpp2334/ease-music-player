@@ -8,6 +8,7 @@ use super::WidgetAction;
 
 #[derive(Debug)]
 pub enum Action {
+    Init(ArgInitializeApp),
     MusicCommon(MusicCommonAction),
     Connector(ConnectorAction),
     View(ViewAction)
@@ -15,7 +16,6 @@ pub enum Action {
 
 #[derive(Debug, uniffi::Enum)]
 pub enum ViewAction {
-    Init(ArgInitializeApp),
     MusicControl(MusicControlAction),
     TimeToPause(TimeToPauseAction),
     Widget(WidgetAction),

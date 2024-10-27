@@ -9,7 +9,7 @@ use crate::{
 
 use super::{
     common::MusicCommonVM,
-    state::{CurrentMusicState, TimeToPauseState},
+    state::TimeToPauseState,
 };
 
 #[derive(Debug, Clone, uniffi::Enum)]

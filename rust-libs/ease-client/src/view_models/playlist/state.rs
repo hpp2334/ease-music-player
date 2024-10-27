@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 
 use ease_client_shared::{
     backends::{
-        playlist::{Playlist, PlaylistId},
+        playlist::{Playlist, PlaylistAbstract, PlaylistId},
         storage::StorageEntryLoc,
     },
     uis::playlist::CreatePlaylistMode,
@@ -10,12 +9,12 @@ use ease_client_shared::{
 
 #[derive(Default, Clone)]
 pub struct AllPlaylistState {
-    pub playlists: HashMap<PlaylistId, Playlist>,
+    pub playlists: Vec<PlaylistAbstract>,
 }
 
 #[derive(Default, Clone)]
 pub struct CurrentPlaylistState {
-    pub id: Option<PlaylistId>,
+    pub playlist: Option<Playlist>,
 }
 
 #[derive(Default, Clone)]

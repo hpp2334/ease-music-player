@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicBool, AtomicI32},
         Arc,
     },
+    thread::ThreadId,
     time::Duration,
 };
 
@@ -17,6 +18,7 @@ use crate::{
 };
 
 pub(crate) struct AppInternal {
+    pub thread_id: ThreadId,
     pub models: Models,
     pub view_models: Box<dyn BoxedViewModels>,
     pub to_hosts: ToHosts,

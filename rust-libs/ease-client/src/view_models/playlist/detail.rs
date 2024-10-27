@@ -1,8 +1,8 @@
-
+ 
 use ease_client_shared::{backends::{
     music::MusicId, playlist::{ArgAddMusicsToPlaylist, PlaylistId}, storage::{StorageEntry, StorageEntryLoc, StorageId}
 }, uis::storage::CurrentStorageImportType};
-use misty_vm::{AppBuilderContext, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
@@ -10,7 +10,7 @@ use crate::{
     view_models::{connector::Connector, music::{common::MusicCommonVM, control::MusicControlVM}, storage::import::StorageImportVM},
 };
 
-use super::{common::PlaylistCommonVM, edit::PlaylistEditVM};
+use super::{common::PlaylistCommonVM, edit::PlaylistEditVM, state::CurrentPlaylistState};
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum PlaylistDetailWidget {
@@ -21,11 +21,32 @@ pub enum PlaylistDetailWidget {
     Import,
 }
 
-pub struct PlaylistDetailVM {}
+pub struct PlaylistDetailVM {
+    current: Model<CurrentPlaylistState>
+}
 
 impl PlaylistDetailVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
-        Self {}
+        Self {
+            current: cx.model(),
+        }
+    }
+
+    pub(crate) fn prepare_current(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<()> {
+        let current = self.current.clone();
+        {
+            let mut state = cx.model_mut(&current);
+            state.playlist.take();
+        }
+
+        cx.spawn::<_, _, EaseError>(move |cx| async move {
+            let playlist = Connector::of(&cx).get_playlist(&cx, id).await?;
+
+            let mut state = cx.model_mut(&current);
+            state.playlist = playlist;
+            Ok(())
+        });
+        Ok(())
     }
 
     pub(crate) fn finish_import(
