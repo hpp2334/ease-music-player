@@ -4,49 +4,59 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::{atomic::AtomicU64, Arc},
+    thread::ThreadId,
     time::{Duration, Instant},
 };
 
-use misty_vm::IAsyncRuntimeAdapter;
+use misty_vm::{App, AppPod, BoxFuture, IAsyncRuntimeAdapter};
 
 use crate::timer::FakeTimers;
 
 struct AsyncRuntimeInternal {
     runtime: tokio::runtime::Runtime,
-    local: RefCell<tokio::task::LocalSet>,
     timers: FakeTimers,
-    id_alloc: AtomicU64,
+    pod: AppPod,
+    thread_id: ThreadId,
 }
 
 #[derive(Clone)]
 pub struct AsyncRuntime {
     store: Arc<AsyncRuntimeInternal>,
 }
+unsafe impl Send for AsyncRuntime {}
+unsafe impl Sync for AsyncRuntime {}
+
 impl AsyncRuntime {
     pub fn new() -> Self {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
-        let local = tokio::task::LocalSet::new();
 
         Self {
             store: Arc::new(AsyncRuntimeInternal {
                 runtime: rt,
-                local: RefCell::new(local),
                 timers: FakeTimers::new(),
-                id_alloc: AtomicU64::new(0),
+                pod: Default::default(),
+                thread_id: std::thread::current().id(),
             }),
         }
     }
 
+    pub fn bind_app(&self, app: App) {
+        self.check_same_thread();
+        self.store.pod.set(app);
+    }
+
     pub fn enter(&self) -> tokio::runtime::EnterGuard<'_> {
+        self.check_same_thread();
         self.store.runtime.enter()
     }
 
     pub fn advance(&self, duration: Duration) {
         const MILLIS: u64 = 500;
 
+        self.check_same_thread();
         self.wait_all();
 
         let step = Duration::from_millis(MILLIS);
@@ -66,51 +76,32 @@ impl AsyncRuntime {
 
     fn wait_all(&self) {
         let store = self.store.clone();
-        self.store.runtime.block_on(async move {
-            store
-                .local
-                .borrow()
-                .run_until(async move {
-                    self.store
-                        .local
-                        .borrow()
-                        .spawn_local(async move {
-                        })
-                        .await
-                        .unwrap();
-                })
-                .await;
-        });
+        let app = store.pod.get();
+        app.flush_spawned();
     }
-}
 
-impl AsyncRuntime {
-    fn allocate(&self) -> u64 {
-        let id = self
-            .store
-            .id_alloc
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        id
+    fn check_same_thread(&self) {
+        assert_eq!(
+            self.store.thread_id,
+            std::thread::current().id(),
+            "Operation must be performed on the same thread"
+        );
     }
 }
 
 impl IAsyncRuntimeAdapter for AsyncRuntime {
-    fn spawn_local(&self, future: misty_vm::LocalBoxFuture<'static, ()>) -> u64 {
-        self.store.local.borrow().spawn_local(future);
-        self.allocate()
-    }
-
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + 'static>> {
+        self.check_same_thread();
         let timer = self.store.timers.sleep(duration);
         Box::pin(timer)
     }
 
     fn get_time(&self) -> std::time::Duration {
+        self.check_same_thread();
         self.store.timers.get_current_time()
     }
-    
-    fn spawn(&self, future: misty_vm::BoxFuture<'static, ()>) -> u64 {
-        tokio::spawn(future);
-        self.allocate()
+
+    fn on_schedule(&self) {
+        // noop
     }
 }

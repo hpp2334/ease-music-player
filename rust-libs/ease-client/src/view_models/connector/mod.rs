@@ -1,5 +1,4 @@
 
-use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use ease_client_shared::backends::{
     app::ArgInitializeApp,
     message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload},
@@ -16,7 +15,7 @@ use ease_client_shared::backends::{
         StorageId, TestStorageMsg, UpsertStorageMsg,
     },
 };
-use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 use state::ConnectorState;
 
 pub mod state;
@@ -36,13 +35,15 @@ pub enum ConnectorAction {
 }
 
 pub struct Connector {
-    state: Model<ConnectorState>
+    state: Model<ConnectorState>,
+    tasks: AsyncTasks,
 }
 
 impl Connector {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             state: cx.model(),
+            tasks: Default::default(),
         }
     }
 
@@ -60,7 +61,7 @@ impl Connector {
         }
 
         let this = Self::of(cx);
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             this.sync_storages(&cx).await?;
             this.sync_playlist_abstracts(&cx).await?;
             Ok(())

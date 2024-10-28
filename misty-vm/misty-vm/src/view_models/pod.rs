@@ -54,9 +54,3 @@ where
         }
     }
 }
-
-pub(crate) struct DefaultBoxedViewModels;
-
-impl BoxedViewModels for DefaultBoxedViewModels {
-    fn handle_event(&self, _app: &Arc<AppInternal>, _e: Box<dyn Any>) {}
-}

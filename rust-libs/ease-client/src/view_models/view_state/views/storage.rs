@@ -1,14 +1,9 @@
-use std::collections::HashSet;
 
 use ease_client_shared::{
-    backends::{
-        music::MusicId,
-        playlist::PlaylistId,
-        storage::{
+    backends::storage::{
             ArgUpsertStorage, Storage, StorageConnectionTestResult, StorageEntryType, StorageId,
             StorageType,
         },
-    },
     uis::storage::*,
 };
 use serde::Serialize;
@@ -170,7 +165,7 @@ pub fn current_storage_entries_vs(
     let storage_items: Vec<VCurrentStorageEntriesStateStorageItem> = storages_state
         .storages
         .iter()
-        .map(|(id, v)| VCurrentStorageEntriesStateStorageItem {
+        .map(|(_id, v)| VCurrentStorageEntriesStateStorageItem {
             id: v.id.clone(),
             name: resolve_storage_name(v),
             subtitle: v.addr.clone(),

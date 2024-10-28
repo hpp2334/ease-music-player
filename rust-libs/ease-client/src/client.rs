@@ -30,13 +30,12 @@ use crate::{
 
 static CLIENT: Lazy<AppPod> = Lazy::new(|| AppPod::new());
 
-#[uniffi::export]
-pub fn api_build_client(
+pub fn build_client(
     player: Arc<dyn IMusicPlayerService>,
     toast: Arc<dyn IToastService>,
     vs: Arc<dyn IViewStateService>,
-) {
-    let app = App::builder::<Action, EaseError>()
+) -> App {
+    App::builder::<Action, EaseError>()
         .with_view_models(|cx, builder| {
             // Connector
             builder.add(Connector::new(cx));
@@ -67,7 +66,20 @@ pub fn api_build_client(
                 .add(ToastService::new_with_arc(toast))
                 .add(ViewStateService::new_with_arc(vs));
         })
-        .build();
+        .build()
+}
+
+#[uniffi::export]
+pub fn api_build_client(
+    player: Arc<dyn IMusicPlayerService>,
+    toast: Arc<dyn IToastService>,
+    vs: Arc<dyn IViewStateService>,
+) {
+    let app = build_client(
+        player,
+        toast,
+        vs,
+    );
     CLIENT.set(app);
 }
 

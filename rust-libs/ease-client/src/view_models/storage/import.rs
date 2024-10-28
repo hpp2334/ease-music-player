@@ -6,7 +6,7 @@ use ease_client_shared::{
     },
     uis::storage::{CurrentStorageImportType, CurrentStorageStateType},
 };
-use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
@@ -31,6 +31,7 @@ pub enum StorageImportWidget {
 pub struct StorageImportVM {
     current: Model<CurrentStorageState>,
     store: Model<AllStorageState>,
+    tasks: AsyncTasks,
 }
 
 pub(crate) fn get_entry_type(entry: &StorageEntry) -> StorageEntryType {
@@ -88,6 +89,7 @@ impl StorageImportVM {
         Self {
             current: cx.model(),
             store: cx.model(),
+            tasks: Default::default()
         }
     }
 
@@ -141,7 +143,7 @@ impl StorageImportVM {
             state.current_path = entry.path.clone();
             state.checked_entries_path.clear();
         }
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let connector = Connector::of(&cx);
             let res = connector
                 .list_storage_entry_children(&cx, StorageEntryLoc {

@@ -145,7 +145,7 @@ impl ViewStateVM {
 }
 
 impl ViewModel<Action, EaseError> for ViewStateVM {
-    fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
+    fn on_event(&self, cx: &ViewModelContext, _event: &Action) -> EaseResult<()> {
         self.notify(cx);
         Ok(())
     }

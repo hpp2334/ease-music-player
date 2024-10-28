@@ -8,7 +8,7 @@ use crate::{
 use ease_client_shared::backends::storage::{
     ArgUpsertStorage, StorageConnectionTestResult, StorageId, StorageType,
 };
-use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use super::state::{AllStorageState, EditStorageState};
 
@@ -28,6 +28,7 @@ pub enum StorageUpsertWidget {
 pub struct StorageUpsertVM {
     edit: Model<EditStorageState>,
     store: Model<AllStorageState>,
+    tasks: AsyncTasks,
 }
 
 impl StorageUpsertVM {
@@ -35,11 +36,12 @@ impl StorageUpsertVM {
         Self {
             edit: cx.model(),
             store: cx.model(),
+            tasks: Default::default()
         }
     }
 
     pub(crate) fn prepare_create(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        cx.cancel_spawned();
+        self.tasks.cancel_all();
         let mut edit = cx.model_mut(&self.edit);
         edit.info = ArgUpsertStorage {
             id: None,
@@ -60,7 +62,7 @@ impl StorageUpsertVM {
         cx: &ViewModelContext,
         storage_id: StorageId,
     ) -> EaseResult<()> {
-        cx.cancel_spawned();
+        self.tasks.cancel_all();
         let storage = {
             let model_get = cx.model_get(&self.store);
             let storage = model_get.storages.get(&storage_id);
@@ -90,7 +92,7 @@ impl StorageUpsertVM {
     fn remove(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let id = cx.model_get(&self.edit).info.id.unwrap();
 
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).remove_storage(&cx, id).await?;
             Ok(())
         });
@@ -100,7 +102,7 @@ impl StorageUpsertVM {
     fn test(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let arg = cx.model_get(&self.edit).info.clone();
         let edit_model = self.edit.clone();
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let res = Connector::of(&cx).test_storage(&cx, arg).await?;
 
             {
@@ -122,7 +124,7 @@ impl StorageUpsertVM {
 
     fn finish(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let arg = cx.model_get(&self.edit).info.clone();
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).upsert_storage(&cx, arg).await?;
             Ok(())
         });

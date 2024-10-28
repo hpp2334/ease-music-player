@@ -1,10 +1,10 @@
 use std::{any::Any, sync::Arc};
 
 use crate::{
-    async_task::{AsyncTasks, DefaultAsyncRuntimeAdapter, IAsyncRuntimeAdapter},
+    async_task::{AsyncExecutor, DefaultAsyncRuntimeAdapter, IAsyncRuntimeAdapter},
     models::Models,
     to_host::{ToHosts, ToHostsBuilder},
-    view_models::{BoxedViewModels, DefaultBoxedViewModels, ViewModelsBuilder},
+    view_models::{BoxedViewModels, ViewModelsBuilder},
     Model,
 };
 
@@ -22,7 +22,7 @@ where
     cx: AppBuilderContext,
     view_models_builder: ViewModelsBuilder<Event, E>,
     to_hosts_builder: ToHostsBuilder,
-    async_tasks: AsyncTasks,
+    async_tasks: AsyncExecutor,
 }
 
 impl AppBuilderContext {
@@ -46,7 +46,7 @@ where
             },
             view_models_builder: ViewModelsBuilder::new(),
             to_hosts_builder: ToHostsBuilder::new(),
-            async_tasks: AsyncTasks::new(DefaultAsyncRuntimeAdapter),
+            async_tasks: AsyncExecutor::new(DefaultAsyncRuntimeAdapter),
         }
     }
 
@@ -64,7 +64,7 @@ where
     }
 
     pub fn with_async_runtime_adapter(mut self, adapter: impl IAsyncRuntimeAdapter) -> Self {
-        self.async_tasks = AsyncTasks::new(adapter);
+        self.async_tasks = AsyncExecutor::new(adapter);
         self
     }
 
@@ -75,7 +75,7 @@ where
                 models: self.cx.models,
                 view_models: self.view_models_builder.build(),
                 to_hosts: self.to_hosts_builder.build(),
-                async_tasks: self.async_tasks,
+                async_executor: self.async_tasks,
             }),
         }
     }

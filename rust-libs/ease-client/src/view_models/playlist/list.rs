@@ -20,7 +20,7 @@ pub enum PlaylistListWidget {
 pub struct PlaylistListVM {}
 
 impl PlaylistListVM {
-    pub fn new(cx: &mut AppBuilderContext) -> Self {
+    pub fn new(_cx: &mut AppBuilderContext) -> Self {
         Self {}
     }
 }

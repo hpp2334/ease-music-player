@@ -1,6 +1,6 @@
 use std::{convert::Infallible, default, time::Duration};
 
-use misty_vm::{App, AppBuilderContext, IAsyncRuntimeAdapter, Model, ViewModel, ViewModelContext};
+use misty_vm::{App, AppBuilderContext, AsyncTasks, IAsyncRuntimeAdapter, Model, ViewModel, ViewModelContext};
 
 #[derive(Debug)]
 enum Event {
@@ -8,7 +8,7 @@ enum Event {
     Pause,
     Stop,
     Update { value: u32 },
-    Tick { session: u32 },
+    Tick,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -23,26 +23,23 @@ enum PlayingState {
 struct CountdownState {
     pub value: u32,
     pub state: PlayingState,
-    pub ticking_session: u32,
 }
 
 struct CountdownVM {
     value: Model<CountdownState>,
+    tasks: AsyncTasks,
 }
 
 impl CountdownVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
-        Self { value: cx.model() }
+        Self { value: cx.model(), tasks: Default::default() }
     }
 
-    fn tick(&self, cx: &ViewModelContext, session: u32) {
+    fn tick(&self, cx: &ViewModelContext) {
         let model = self.value.clone();
         {
             let mut state = cx.model_mut(&model);
             if state.state != PlayingState::Playing {
-                return;
-            }
-            if state.ticking_session != session {
                 return;
             }
             if state.value > 0 {
@@ -62,10 +59,9 @@ impl CountdownVM {
             state.state == PlayingState::Playing && state.value > 0
         };
         if emit_next_tick {
-            let session = cx.model_get(&model).ticking_session;
-            cx.spawn::<_, _, Infallible>(|cx| async move {
+            cx.spawn::<_, _, Infallible>(&self.tasks, |cx| async move {
                 cx.sleep(Duration::from_secs(1)).await;
-                cx.enqueue_emit(Event::Tick { session });
+                cx.enqueue_emit(Event::Tick);
                 Ok(())
             });
         }
@@ -90,25 +86,25 @@ impl ViewModel<Event, Infallible> for CountdownVM {
                         state.state == PlayingState::Pause || state.state == PlayingState::Pending
                     );
                     state.state = PlayingState::Playing;
-                    state.ticking_session += 1;
                 }
+                self.tasks.cancel_all();
                 self.schedule_next_tick(cx);
             }
             Event::Pause => {
                 self.assert_state(cx, PlayingState::Playing);
+                self.tasks.cancel_all();
 
                 let mut state = cx.model_mut(&self.value);
                 state.state = PlayingState::Pause;
-                state.ticking_session += 1;
             }
             Event::Stop => {
                 self.assert_state(cx, PlayingState::Playing);
+                self.tasks.cancel_all();
 
                 {
                     let mut state = cx.model_mut(&self.value);
                     state.state = PlayingState::Pending;
                     state.value = 0;
-                    state.ticking_session += 1;
                 }
             }
             Event::Update { value } => {
@@ -123,8 +119,8 @@ impl ViewModel<Event, Infallible> for CountdownVM {
                     state.value = *value;
                 }
             }
-            Event::Tick { session } => {
-                self.tick(cx, *session);
+            Event::Tick => {
+                self.tick(cx);
             }
         }
 
@@ -156,6 +152,7 @@ mod tests {
         let _guard = rt.enter();
 
         let app = build_app(rt.clone());
+        rt.bind_app(app.clone());
         app.emit(Event::Update { value: 10 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(9));
@@ -172,6 +169,7 @@ mod tests {
         let _guard = rt.enter();
 
         let app = build_app(rt.clone());
+        rt.bind_app(app.clone());
         app.emit(Event::Update { value: 5 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(2));
@@ -201,6 +199,7 @@ mod tests {
         let _guard = rt.enter();
 
         let app = build_app(rt.clone());
+        rt.bind_app(app.clone());
         app.emit(Event::Update { value: 5 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(3));

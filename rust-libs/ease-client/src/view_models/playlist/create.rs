@@ -7,7 +7,7 @@ use ease_client_shared::{
     },
     uis::{playlist::CreatePlaylistMode, storage::CurrentStorageImportType},
 };
-use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::state::{CreatePlaylistState, CurrentPlaylistState};
+use super::state::CreatePlaylistState;
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum PlaylistCreateWidget {
@@ -33,6 +33,7 @@ pub enum PlaylistCreateWidget {
 
 pub struct PlaylistCreateVM {
     form: Model<CreatePlaylistState>,
+    tasks: AsyncTasks,
 }
 
 fn build_recommend_playlist_names(entries: &Vec<StorageEntryLoc>) -> Vec<String> {
@@ -56,6 +57,7 @@ impl PlaylistCreateVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             form: cx.model(),
+            tasks: Default::default()
         }
     }
 
@@ -117,7 +119,7 @@ impl PlaylistCreateVM {
                 entries: form.entries.clone(),
             }
         };
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).create_playlist(&cx, arg).await?;
             Ok(())
         });

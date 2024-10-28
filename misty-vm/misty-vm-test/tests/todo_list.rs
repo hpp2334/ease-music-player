@@ -83,6 +83,7 @@ mod tests {
         let _guard = rt.enter();
 
         let app = build_app(rt.clone());
+        rt.bind_app(app.clone());
 
         // Add a new item
         app.emit(TodoEvent::AddButtonClicked);
@@ -131,6 +132,7 @@ mod tests {
         let _guard = rt.enter();
 
         let app = build_app(rt.clone());
+        rt.bind_app(app.clone());
 
         // Add a new item
         app.emit(TodoEvent::AddButtonClicked);
@@ -162,6 +164,7 @@ mod tests {
         let _guard = rt.enter();
 
         let app = build_app(rt.clone());
+        rt.bind_app(app.clone());
 
         // Add multiple items
         for i in 0..5 {

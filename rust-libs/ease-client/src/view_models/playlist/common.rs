@@ -1,5 +1,5 @@
 use ease_client_shared::backends::playlist::{Playlist, PlaylistAbstract, PlaylistId};
-use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::Action,
@@ -12,6 +12,7 @@ use super::state::{AllPlaylistState, CurrentPlaylistState};
 pub struct PlaylistCommonVM {
     store: Model<AllPlaylistState>,
     current: Model<CurrentPlaylistState>,
+    tasks: AsyncTasks,
 }
 
 impl PlaylistCommonVM {
@@ -19,11 +20,12 @@ impl PlaylistCommonVM {
         Self {
             store: cx.model(),
             current: cx.model(),
+            tasks: Default::default()
         }
     }
 
     pub(crate) fn remove(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<()> {
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).remove_playlist(&cx, id).await?;
             Ok(())
         });

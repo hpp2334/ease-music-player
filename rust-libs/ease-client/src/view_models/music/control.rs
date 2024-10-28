@@ -2,7 +2,7 @@ use ease_client_shared::{
     backends::{music::MusicId, playlist::PlaylistId},
     uis::{music::ArgSeekMusic, preference::PlayMode},
 };
-use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
 use super::{common::MusicCommonAction, state::CurrentMusicState};
 use crate::{
@@ -33,12 +33,14 @@ pub enum MusicControlAction {
 
 pub struct MusicControlVM {
     current: Model<CurrentMusicState>,
+    tasks: AsyncTasks,
 }
 
 impl MusicControlVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             current: cx.model(),
+            tasks: Default::default()
         }
     }
 
@@ -90,7 +92,7 @@ impl MusicControlVM {
         }
 
         let this = Self::of(cx);
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let playlist = Connector::of(&cx).get_playlist(&cx, playlist_id).await?;
             if let Some(playlist) = playlist {
                 let ordered_musics = &playlist.musics;
@@ -164,7 +166,7 @@ impl MusicControlVM {
         playlist_id: PlaylistId,
     ) -> EaseResult<()> {
         let this = Self::of(cx);
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let music = Connector::of(&cx).get_music(&cx, music_id).await?;
             let playlist = Connector::of(&cx).get_playlist(&cx, playlist_id).await?;
             if music.is_none() || playlist.is_none() {

@@ -2,7 +2,7 @@
 use ease_client_shared::{backends::{
     music::MusicId, playlist::{ArgAddMusicsToPlaylist, PlaylistId}, storage::{StorageEntry, StorageEntryLoc, StorageId}
 }, uis::storage::CurrentStorageImportType};
-use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
@@ -22,13 +22,15 @@ pub enum PlaylistDetailWidget {
 }
 
 pub struct PlaylistDetailVM {
-    current: Model<CurrentPlaylistState>
+    current: Model<CurrentPlaylistState>,
+    tasks: AsyncTasks,
 }
 
 impl PlaylistDetailVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             current: cx.model(),
+            tasks: Default::default()
         }
     }
 
@@ -39,7 +41,7 @@ impl PlaylistDetailVM {
             state.playlist.take();
         }
 
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let playlist = Connector::of(&cx).get_playlist(&cx, id).await?;
 
             let mut state = cx.model_mut(&current);
@@ -69,7 +71,7 @@ impl PlaylistDetailVM {
             })
             .collect();
             
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).add_musics_to_playlist(&cx, ArgAddMusicsToPlaylist {
                 id: playlist_id,
                 entries,

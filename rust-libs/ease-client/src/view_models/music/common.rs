@@ -4,7 +4,7 @@ use ease_client_shared::backends::{
     music::{Music, MusicId},
     playlist::{Playlist, PlaylistId},
 };
-use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::Action,
@@ -26,6 +26,7 @@ pub enum MusicCommonAction {
 pub struct MusicCommonVM {
     current: Model<CurrentMusicState>,
     time_to_pause: Model<TimeToPauseState>,
+    tasks: AsyncTasks,
 }
 
 impl MusicCommonVM {
@@ -33,6 +34,7 @@ impl MusicCommonVM {
         Self {
             current: cx.model(),
             time_to_pause: cx.model(),
+            tasks: Default::default()
         }
     }
 
@@ -42,7 +44,7 @@ impl MusicCommonVM {
         id: MusicId,
         playlist_id: PlaylistId,
     ) -> EaseResult<()> {
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let connector = Connector::of(&cx);
             connector.remove_music(&cx, id, playlist_id).await?;
             Ok(())
@@ -61,7 +63,7 @@ impl MusicCommonVM {
 
     pub(crate) fn schedule_tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let this = Self::of(cx);
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             cx.sleep(Duration::from_secs(1)).await;
             this.tick(&cx)?;
             Ok(())

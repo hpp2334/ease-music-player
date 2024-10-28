@@ -1,15 +1,17 @@
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use crate::IToHost;
 
 use super::{builder::AppBuilder, internal::AppInternal};
 
+#[derive(Clone)]
 pub struct App {
     pub(crate) _app: Arc<AppInternal>,
 }
 
+#[derive(Clone, Default)]
 pub struct AppPod {
-    _app: RefCell<Option<Arc<AppInternal>>>,
+    _app: Rc<RefCell<Option<Arc<AppInternal>>>>,
 }
 
 impl App {
@@ -25,7 +27,7 @@ impl App {
     where
         T: 'static,
     {
-        self._app.model_get()
+        self._app.models.read()
     }
 
     pub fn emit<Event>(&self, evt: Event)
@@ -39,7 +41,11 @@ impl App {
     where
         C: IToHost,
     {
-        self._app.to_host::<C>()
+        self._app.to_hosts.get::<C>()
+    }
+
+    pub fn flush_spawned(&self) {
+        self._app.async_executor.flush_runnables();
     }
 }
 
@@ -47,11 +53,9 @@ unsafe impl Send for AppPod {}
 unsafe impl Sync for AppPod {}
 impl AppPod {
     pub fn new() -> Self {
-        Self {
-            _app: RefCell::new(None)
-        }
+        Default::default()
     }
-    
+
     pub fn set(&self, app: App) {
         self.check_same_thread();
 
@@ -62,12 +66,10 @@ impl AppPod {
     pub fn get(&self) -> App {
         self.check_same_thread();
 
-        let _app = self._app.borrow().clone().unwrap();
-        App {
-            _app
-        }
+        let _app = self._app.borrow().clone().expect("pod is empty");
+        App { _app }
     }
-    
+
     fn check_same_thread(&self) {
         let app = self._app.borrow();
         if let Some(app) = app.as_ref() {

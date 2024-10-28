@@ -8,7 +8,7 @@ use ease_client_shared::{
     },
     uis::storage::CurrentStorageImportType,
 };
-use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use super::state::CurrentMusicState;
 
@@ -20,12 +20,14 @@ pub enum MusicLyricWidget {
 
 pub struct MusicLyricVM {
     current: Model<CurrentMusicState>,
+    tasks: AsyncTasks,
 }
 
 impl MusicLyricVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             current: cx.model(),
+            tasks: Default::default()
         }
     }
 
@@ -40,7 +42,7 @@ impl MusicLyricVM {
         }
         let id = id.unwrap();
 
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx)
                 .update_music_lyric(&cx, ArgUpdateMusicLyric { id, lyric_loc: loc })
                 .await?;

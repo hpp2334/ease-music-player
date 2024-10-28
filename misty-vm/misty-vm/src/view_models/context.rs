@@ -1,17 +1,12 @@
 use std::{any::Any, future::Future, rc::Rc, sync::Arc, time::Duration};
 
-use crate::{internal::AppInternal, utils::PhantomUnsend, IToHost, Model};
+use crate::{async_task::AsyncTasks, internal::AppInternal, utils::PhantomUnsend, IToHost, Model};
 
 use super::ViewModel;
 
 pub struct ViewModelContext {
     _app: Arc<AppInternal>,
     _unsend: PhantomUnsend,
-}
-
-#[derive(Clone)]
-pub struct WeakViewModelContext {
-    _app: Arc<AppInternal>,
 }
 
 impl ViewModelContext {
@@ -26,12 +21,6 @@ impl ViewModelContext {
         &self._app
     }
 
-    pub fn weak(&self) -> WeakViewModelContext {
-        WeakViewModelContext {
-            _app: self._app.clone(),
-        }
-    }
-
     pub(crate) fn vm<V, Event, E>(&self) -> Rc<V>
     where
         E: Any + 'static,
@@ -40,21 +29,21 @@ impl ViewModelContext {
         todo!()
     }
 
-    pub fn model_get<T>(&self, model: &Model<T>) -> std::cell::Ref<'_, T>
+    pub fn model_get<T>(&self, _model: &Model<T>) -> std::cell::Ref<'_, T>
     where
         T: 'static,
     {
-        self._app.model_get()
+        self._app.models.read()
     }
 
-    pub fn model_mut<T>(&self, model: &Model<T>) -> std::cell::RefMut<'_, T>
+    pub fn model_mut<T>(&self, _model: &Model<T>) -> std::cell::RefMut<'_, T>
     where
         T: 'static,
     {
-        self._app.model_mut()
+        self._app.models.read_mut()
     }
 
-    pub fn model_dirty<T>(&self, model: &Model<T>) -> bool
+    pub fn model_dirty<T>(&self, _model: &Model<T>) -> bool
     where
     T: 'static {
         todo!()
@@ -64,47 +53,36 @@ impl ViewModelContext {
     where
         C: IToHost,
     {
-        self._app.to_host::<C>()
+        self._app.to_hosts.get::<C>()
     }
 
-    pub fn spawn<F, Fut, E>(&self, f: F)
+    pub fn spawn<F, Fut, E>(&self, tasks: &AsyncTasks, f: F)
     where
         F: FnOnce(ViewModelContext) -> Fut,
         Fut: Future<Output = Result<(), E>> + 'static,
     {
         let fut = f(self.clone_internal());
-        self._app.async_tasks().spawn_local(async move {
-            let r = fut.await;
-            if let Err(e) = r {
-                tracing::error!("spawn error");
-            }
-        });
-    }
-
-    pub fn spawn_background<F, Fut, E>(&self, f: F)
-    where
-        F: FnOnce(WeakViewModelContext) -> Fut,
-        Fut: Future<Output = Result<(), E>> + Send + Sync + 'static,
-    {
-        let fut = f(self.weak());
-        self._app.async_tasks().spawn_local(async move {
-            let r = fut.await;
-            if let Err(e) = r {
-                tracing::error!("spawn error");
-            }
-        });
-    }
-
-    pub fn cancel_spawned(&self) {
-        todo!()
+        let id = tasks.allocate();
+        let (runnable, raw_task) = {
+            let tasks= tasks.clone();
+            self._app.async_executor.spawn_local(async move {
+                let r = fut.await;
+                tasks.remove(id);
+                if let Err(e) = r {
+                    tracing::error!("spawn error");
+                }
+            })
+        };
+        tasks.bind(id, raw_task);
+        runnable.schedule();
     }
 
     pub async fn sleep(&self, duration: Duration) {
-        self._app.async_tasks().sleep(duration).await
+        self._app.async_executor.sleep(duration).await
     }
 
     pub fn get_time(&self) -> Duration {
-        self._app.async_tasks().get_time()
+        self._app.async_executor.get_time()
     }
 
     pub fn enqueue_emit<Event>(&self, evt: Event)
@@ -116,15 +94,6 @@ impl ViewModelContext {
 
     fn clone_internal(&self) -> Self {
         Self {
-            _app: self._app.clone(),
-            _unsend: Default::default(),
-        }
-    }
-}
-
-impl WeakViewModelContext {
-    pub fn upgrade(&self) -> ViewModelContext {
-        ViewModelContext {
             _app: self._app.clone(),
             _unsend: Default::default(),
         }

@@ -6,7 +6,7 @@ use ease_client_shared::{
     },
     uis::storage::CurrentStorageImportType,
 };
-use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use super::state::{CurrentPlaylistState, EditPlaylistState};
+use super::state::EditPlaylistState;
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum PlaylistEditWidget {
@@ -29,12 +29,14 @@ pub enum PlaylistEditWidget {
 
 pub struct PlaylistEditVM {
     form: Model<EditPlaylistState>,
+    tasks: AsyncTasks,
 }
 
 impl PlaylistEditVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             form: cx.model(),
+            tasks: Default::default()
         }
     }
 
@@ -74,7 +76,7 @@ impl PlaylistEditVM {
                 cover: form.cover.clone(),
             }
         };
-        cx.spawn::<_, _, EaseError>(move |cx| async move {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).update_playlist(&cx, arg).await?;
             Ok(())
         });

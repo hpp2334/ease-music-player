@@ -1,6 +1,6 @@
 use ease_client_shared::{
     backends::{music::MusicId, music_duration::MusicDuration},
-    uis::{music::LyricLoadState, preference::PlayMode},
+    uis::preference::PlayMode,
 };
 use serde::Serialize;
 

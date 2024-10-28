@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    async_task::{AsyncTasks, IAsyncRuntimeAdapter},
+    async_task::{AsyncExecutor, IAsyncRuntimeAdapter},
     models::Models,
     to_host::ToHosts,
     view_models::BoxedViewModels,
@@ -22,7 +22,7 @@ pub(crate) struct AppInternal {
     pub models: Models,
     pub view_models: Box<dyn BoxedViewModels>,
     pub to_hosts: ToHosts,
-    pub async_tasks: AsyncTasks,
+    pub async_executor: AsyncExecutor,
 }
 
 impl AppInternal {
@@ -38,33 +38,10 @@ impl AppInternal {
         Event: 'static,
     {
         let app = self.clone();
-        self.async_tasks.spawn_local(async move {
+        let (runnable, task) = self.async_executor.spawn_local(async move {
             app.emit(evt);
         });
-    }
-
-    pub fn model_get<T>(&self) -> std::cell::Ref<'_, T>
-    where
-        T: 'static,
-    {
-        self.models.read()
-    }
-
-    pub fn model_mut<T>(&self) -> std::cell::RefMut<'_, T>
-    where
-        T: 'static,
-    {
-        self.models.read_mut()
-    }
-
-    pub fn to_host<C>(&self) -> Arc<C>
-    where
-        C: IToHost,
-    {
-        self.to_hosts.get::<C>()
-    }
-
-    pub fn async_tasks(&self) -> &AsyncTasks {
-        &self.async_tasks
+        runnable.schedule();
+        task.detach();
     }
 }
