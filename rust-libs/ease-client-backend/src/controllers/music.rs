@@ -1,7 +1,6 @@
 use ease_client_shared::backends::{
     music::{
-        ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, Music, MusicId,
-        MusicLyric,
+        ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, LyricLoadState, Music, MusicId, MusicLyric
     },
     storage::StorageEntryLoc,
 };
@@ -33,11 +32,11 @@ async fn load_lyric(cx: &BackendContext, loc: Option<StorageEntryLoc>) -> Option
     let data = load_storage_entry_data(&cx, &loc).await;
     if let Err(e) = &data {
         tracing::error!("fail to load entry {:?}: {}", loc, e);
-        return None;
+        return Some(MusicLyric { loc, data: Default::default(), loaded_state: LyricLoadState::Failed });
     }
     let data = data.unwrap();
     if data.is_none() {
-        return None;
+        return Some(MusicLyric { loc, data: Default::default(), loaded_state: LyricLoadState::Failed });
     }
     let data = data.unwrap();
     let data = String::from_utf8_lossy(&data).to_string();
@@ -45,11 +44,11 @@ async fn load_lyric(cx: &BackendContext, loc: Option<StorageEntryLoc>) -> Option
     if lyric.is_err() {
         let e = lyric.unwrap_err();
         tracing::error!("fail to parse lyric: {}", e);
-        return None;
+        return Some(MusicLyric { loc, data: Default::default(), loaded_state: LyricLoadState::Failed });
     }
     let lyric = lyric.unwrap();
 
-    Some(MusicLyric { loc, data: lyric })
+    Some(MusicLyric { loc, data: lyric, loaded_state: LyricLoadState::Loaded })
 }
 
 pub(crate) async fn cr_get_music(cx: BackendContext, id: MusicId) -> BResult<Option<Music>> {

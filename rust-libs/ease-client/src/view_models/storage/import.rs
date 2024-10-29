@@ -24,11 +24,11 @@ use super::state::{AllStorageState, CurrentStorageState};
 pub enum StorageImportWidget {
     StorageItem { id: StorageId },
     StorageEntry { path: String },
-    Nav { path: String },
+    FolderNav { path: String },
+    ToggleAll,
     Import,
 }
-
-pub struct StorageImportVM {
+pub(crate) struct StorageImportVM {
     current: Model<CurrentStorageState>,
     store: Model<AllStorageState>,
     tasks: AsyncTasks,
@@ -58,8 +58,8 @@ pub(crate) fn get_entry_type(entry: &StorageEntry) -> StorageEntryType {
 
 fn can_multi_select(import_type: CurrentStorageImportType) -> bool {
     match import_type {
-        CurrentStorageImportType::None |
-        CurrentStorageImportType::ImportMusics { .. }
+        CurrentStorageImportType::None
+        | CurrentStorageImportType::ImportMusics { .. }
         | CurrentStorageImportType::CreatePlaylistEntries => true,
         CurrentStorageImportType::CreatePlaylistCover
         | CurrentStorageImportType::EditPlaylistCover
@@ -71,13 +71,13 @@ pub(crate) fn entry_can_check(entry: &StorageEntry, import_type: CurrentStorageI
     let entry_type = get_entry_type(entry);
 
     match import_type {
-        CurrentStorageImportType::None |
-        CurrentStorageImportType::CreatePlaylistCover
+        CurrentStorageImportType::None
+        | CurrentStorageImportType::CreatePlaylistCover
         | CurrentStorageImportType::EditPlaylistCover => entry_type == StorageEntryType::Image,
         CurrentStorageImportType::CreatePlaylistEntries => {
             entry_type == StorageEntryType::Image || entry_type == StorageEntryType::Music
         }
-        CurrentStorageImportType::ImportMusics {..} => entry_type == StorageEntryType::Music,
+        CurrentStorageImportType::ImportMusics { .. } => entry_type == StorageEntryType::Music,
         CurrentStorageImportType::CurrentMusicLyrics { .. } => {
             entry_type == StorageEntryType::Lyric
         }
@@ -89,7 +89,7 @@ impl StorageImportVM {
         Self {
             current: cx.model(),
             store: cx.model(),
-            tasks: Default::default()
+            tasks: Default::default(),
         }
     }
 
@@ -125,6 +125,21 @@ impl StorageImportVM {
         }
     }
 
+    fn toggle_all(&self, cx: &ViewModelContext) {
+        let mut state = cx.model_mut(&self.current);
+
+        if state.checked_entries_path.is_empty() {
+            state.checked_entries_path.clear();
+        } else {
+            let entries = state.entries.clone();
+            for entry in entries.iter() {
+                if entry_can_check(entry, state.import_type) {
+                    state.checked_entries_path.insert(entry.path.clone());
+                }
+            }
+        }
+    }
+
     fn select_folder_entry_impl(
         &self,
         cx: &ViewModelContext,
@@ -146,10 +161,13 @@ impl StorageImportVM {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let connector = Connector::of(&cx);
             let res = connector
-                .list_storage_entry_children(&cx, StorageEntryLoc {
-                    path: entry.path,
-                    storage_id,
-                })
+                .list_storage_entry_children(
+                    &cx,
+                    StorageEntryLoc {
+                        path: entry.path,
+                        storage_id,
+                    },
+                )
                 .await?;
 
             let mut state = cx.model_mut(&current);
@@ -281,27 +299,26 @@ impl StorageImportVM {
 impl ViewModel<Action, EaseError> for StorageImportVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
-            Action::View(action) => {
-                match action {
-                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
-                        (Widget::StroageImport(widget), WidgetActionType::Click) => match widget {
-                            StorageImportWidget::StorageItem { id } => {
-                                self.change_storage(cx, *id)?;
-                            }
-                            StorageImportWidget::StorageEntry { path } => {
-                                self.select_entry(cx, path.clone())?;
-                            }
-                            StorageImportWidget::Nav { path } => {
-                                self.select_entry(cx, path.clone())?;
-                            }
-                            StorageImportWidget::Import => {
-                                self.handle_import(cx)?;
-                            }
-                        },
-                        _ => {}
+            Action::View(action) => match action {
+                ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                    (Widget::StorageImport(widget), WidgetActionType::Click) => match widget {
+                        StorageImportWidget::StorageItem { id } => {
+                            self.change_storage(cx, *id)?;
+                        }
+                        StorageImportWidget::StorageEntry { path } => {
+                            self.select_entry(cx, path.clone())?;
+                        }
+                        StorageImportWidget::FolderNav { path } => {
+                            self.select_entry(cx, path.clone())?;
+                        }
+                        StorageImportWidget::Import => {
+                            self.handle_import(cx)?;
+                        }
+                        StorageImportWidget::ToggleAll => self.toggle_all(cx),
                     },
                     _ => {}
-                }
+                },
+                _ => {}
             },
             _ => {}
         }

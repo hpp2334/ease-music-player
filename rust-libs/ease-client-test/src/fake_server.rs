@@ -134,4 +134,11 @@ impl FakeServerRef {
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {
         self.inner.set_inteceptor_req(v);
     }
+
+    pub async fn load_resource(&self, url: impl ToString) -> Vec<u8> {
+        let url = url.to_string();
+        let client = reqwest::Client::new();
+        let resp = client.get(&url).send().await.unwrap();
+        resp.bytes().await.unwrap().to_vec()
+    }
 }

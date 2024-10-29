@@ -7,17 +7,47 @@ use super::{
     storage::{VCurrentStorageEntriesState, VEditStorageState, VStorageListState},
 };
 
-#[derive(Debug, Default, uniffi::Record)]
-pub struct RootViewModelState {
-    pub playlist_list: Option<VPlaylistListState>,
-    pub current_playlist: Option<VCurrentPlaylistState>,
-    pub edit_playlist: Option<VEditPlaylistState>,
-    pub create_playlist: Option<VCreatePlaylistState>,
-    pub storage_list: Option<VStorageListState>,
-    pub current_storage_entries: Option<VCurrentStorageEntriesState>,
-    pub edit_storage: Option<VEditStorageState>,
-    pub current_music: Option<VCurrentMusicState>,
-    pub time_to_pause: Option<VTimeToPauseState>,
-    pub current_music_lyric: Option<VCurrentMusicLyricState>,
-    pub current_router: Option<VRootSubKeyState>,
+macro_rules! generate_vs {
+    ($struct_name:ident, $( $field_name:ident, $field_type:ty ),* ) => {
+        #[derive(Debug, Clone, Default, uniffi::Record)]
+        pub struct $struct_name {
+            $( pub $field_name: Option<$field_type>, )*
+        }
+
+        impl $struct_name {
+            pub fn merge_from(&mut self, other: $struct_name) {
+                $(
+                    if self.$field_name.is_none() && other.$field_name.is_some() {
+                        self.$field_name = other.$field_name;
+                    }
+                )*
+            }
+        }
+    };
 }
+
+generate_vs!(
+    RootViewModelState,
+    playlist_list,
+    VPlaylistListState,
+    current_playlist,
+    VCurrentPlaylistState,
+    edit_playlist,
+    VEditPlaylistState,
+    create_playlist,
+    VCreatePlaylistState,
+    storage_list,
+    VStorageListState,
+    current_storage_entries,
+    VCurrentStorageEntriesState,
+    edit_storage,
+    VEditStorageState,
+    current_music,
+    VCurrentMusicState,
+    time_to_pause,
+    VTimeToPauseState,
+    current_music_lyric,
+    VCurrentMusicLyricState,
+    current_router,
+    VRootSubKeyState
+);

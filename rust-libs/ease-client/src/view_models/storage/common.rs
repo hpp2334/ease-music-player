@@ -14,7 +14,7 @@ pub enum StorageCommonWidget {
     Item { id: StorageId },
 }
 
-pub struct StorageCommonVM {
+pub(crate) struct StorageCommonVM {
     pub store: Model<AllStorageState>,
 }
 

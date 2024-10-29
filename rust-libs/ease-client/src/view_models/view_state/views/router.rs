@@ -12,7 +12,7 @@ pub struct VRootSubKeyState {
     pub subkey: RootRouteSubKey,
 }
 
-pub fn root_subkey_vs(state: &RouterState, root: &mut RootViewModelState) {
+pub(crate) fn root_subkey_vs(state: &RouterState, root: &mut RootViewModelState) {
     root.current_router = Some(VRootSubKeyState {
         subkey: state.subkey.clone(),
     });

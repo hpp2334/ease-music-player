@@ -12,10 +12,7 @@ use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
-    view_models::{
-        connector::Connector,
-        storage::import::StorageImportVM,
-    },
+    view_models::{connector::Connector, storage::import::StorageImportVM},
 };
 
 use super::state::CreatePlaylistState;
@@ -31,7 +28,7 @@ pub enum PlaylistCreateWidget {
     Cancel,
 }
 
-pub struct PlaylistCreateVM {
+pub(crate) struct PlaylistCreateVM {
     form: Model<CreatePlaylistState>,
     tasks: AsyncTasks,
 }
@@ -57,7 +54,7 @@ impl PlaylistCreateVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             form: cx.model(),
-            tasks: Default::default()
+            tasks: Default::default(),
         }
     }
 
@@ -130,48 +127,46 @@ impl PlaylistCreateVM {
 impl ViewModel<Action, EaseError> for PlaylistCreateVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
-            Action::View(action) => {
-                match action {
-                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
-                        (Widget::PlaylistCreate(action), WidgetActionType::Click) => match action {
-                            PlaylistCreateWidget::Tab { value } => {
-                                let mut form = cx.model_mut(&self.form);
-                                form.mode = *value;
-                            }
-                            PlaylistCreateWidget::Name => {
-                                unimplemented!()
-                            }
-                            PlaylistCreateWidget::ClearCover => {
-                                let mut form = cx.model_mut(&self.form);
-                                form.cover = None;
-                            }
-                            PlaylistCreateWidget::Cover => {
-                                self.prepare_cover(cx)?;
-                            }
-                            PlaylistCreateWidget::Import => {
-                                StorageImportVM::of(cx)
-                                    .prepare(cx, CurrentStorageImportType::CreatePlaylistEntries)?;
-                            }
-                            PlaylistCreateWidget::FinishImport => {
-                                self.finish_create(cx)?;
-                            }
-                            PlaylistCreateWidget::Cancel => {
-                                self.clear(cx)?;
-                            }
-                        },
-                        (Widget::PlaylistCreate(action), WidgetActionType::ChangeText { text }) => {
-                            match action {
-                                PlaylistCreateWidget::Name => {
-                                    let mut form = cx.model_mut(&self.form);
-                                    form.playlist_name = text.to_string();
-                                }
-                                _ => {}
-                            }
+            Action::View(action) => match action {
+                ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                    (Widget::PlaylistCreate(action), WidgetActionType::Click) => match action {
+                        PlaylistCreateWidget::Tab { value } => {
+                            let mut form = cx.model_mut(&self.form);
+                            form.mode = *value;
                         }
-                        _ => {}
+                        PlaylistCreateWidget::Name => {
+                            unimplemented!()
+                        }
+                        PlaylistCreateWidget::ClearCover => {
+                            let mut form = cx.model_mut(&self.form);
+                            form.cover = None;
+                        }
+                        PlaylistCreateWidget::Cover => {
+                            self.prepare_cover(cx)?;
+                        }
+                        PlaylistCreateWidget::Import => {
+                            StorageImportVM::of(cx)
+                                .prepare(cx, CurrentStorageImportType::CreatePlaylistEntries)?;
+                        }
+                        PlaylistCreateWidget::FinishImport => {
+                            self.finish_create(cx)?;
+                        }
+                        PlaylistCreateWidget::Cancel => {
+                            self.clear(cx)?;
+                        }
                     },
+                    (Widget::PlaylistCreate(action), WidgetActionType::ChangeText { text }) => {
+                        match action {
+                            PlaylistCreateWidget::Name => {
+                                let mut form = cx.model_mut(&self.form);
+                                form.playlist_name = text.to_string();
+                            }
+                            _ => {}
+                        }
+                    }
                     _ => {}
-                }
+                },
+                _ => {}
             },
             _ => {}
         }

@@ -1,4 +1,6 @@
-use ease_client::view_models::{controller_update_music_playmode_to_next, PlayMode};
+
+use ease_client::MusicControlWidget;
+use ease_client_shared::uis::preference::PlayMode;
 use ease_client_test::{PresetDepth, TestApp};
 
 #[tokio::test]
@@ -20,7 +22,7 @@ async fn app_loaded_state_1() {
 async fn app_loaded_state_2() {
     let mut app = TestApp::new("test-dbs/app_loaded_state_2", true);
     app.setup_preset(PresetDepth::Music).await;
-    app.call_controller(controller_update_music_playmode_to_next, ());
+    app.dispatch_click(MusicControlWidget::Playmode);
 
     let app = TestApp::new("test-dbs/app_loaded_state_2", false);
     let state = app.latest_state();

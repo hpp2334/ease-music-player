@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::{
+    control::MusicControlVM,
     lyric::MusicLyricVM,
     state::{CurrentMusicState, TimeToPauseState},
     time_to_pause::TimeToPauseVM,
@@ -23,7 +24,7 @@ pub enum MusicCommonAction {
     Tick,
 }
 
-pub struct MusicCommonVM {
+pub(crate) struct MusicCommonVM {
     current: Model<CurrentMusicState>,
     time_to_pause: Model<TimeToPauseState>,
     tasks: AsyncTasks,
@@ -34,7 +35,7 @@ impl MusicCommonVM {
         Self {
             current: cx.model(),
             time_to_pause: cx.model(),
-            tasks: Default::default()
+            tasks: Default::default(),
         }
     }
 
@@ -77,6 +78,7 @@ impl MusicCommonVM {
 
         if is_playing {
             MusicLyricVM::of(cx).tick_lyric_index(cx)?;
+            MusicControlVM::of(cx).tick(cx)?;
         }
         if time_to_pause_enabled {
             TimeToPauseVM::of(cx).tick(cx)?;

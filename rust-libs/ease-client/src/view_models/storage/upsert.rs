@@ -25,7 +25,7 @@ pub enum StorageUpsertWidget {
     Finish,
 }
 
-pub struct StorageUpsertVM {
+pub(crate) struct StorageUpsertVM {
     edit: Model<EditStorageState>,
     store: Model<AllStorageState>,
     tasks: AsyncTasks,

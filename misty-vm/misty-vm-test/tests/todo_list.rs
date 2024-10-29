@@ -86,20 +86,20 @@ mod tests {
         rt.bind_app(app.clone());
 
         // Add a new item
-        app.emit(TodoEvent::AddButtonClicked);
+        app.emit::<_, Infallible>(TodoEvent::AddButtonClicked);
 
         // Change the text of the first item
-        app.emit(TodoEvent::ItemTextChanged {
+        app.emit::<_, Infallible>(TodoEvent::ItemTextChanged {
             index: 0,
             text: "Buy groceries".to_string(),
         });
 
         // Mark the first item as complete
-        app.emit(TodoEvent::MarkCompleteClicked { index: 0 });
+        app.emit::<_, Infallible>(TodoEvent::MarkCompleteClicked { index: 0 });
 
         // Add another item
-        app.emit(TodoEvent::AddButtonClicked);
-        app.emit(TodoEvent::ItemTextChanged {
+        app.emit::<_, Infallible>(TodoEvent::AddButtonClicked);
+        app.emit::<_, Infallible>(TodoEvent::ItemTextChanged {
             index: 1,
             text: "Do laundry".to_string(),
         });
@@ -115,7 +115,7 @@ mod tests {
         }
 
         // Remove the first item
-        app.emit(TodoEvent::RemoveButtonClicked { index: 0 });
+        app.emit::<_, Infallible>(TodoEvent::RemoveButtonClicked { index: 0 });
 
         // Check the state again
         {
@@ -135,14 +135,14 @@ mod tests {
         rt.bind_app(app.clone());
 
         // Add a new item
-        app.emit(TodoEvent::AddButtonClicked);
-        app.emit(TodoEvent::ItemTextChanged {
+        app.emit::<_, Infallible>(TodoEvent::AddButtonClicked);
+        app.emit::<_, Infallible>(TodoEvent::ItemTextChanged {
             index: 0,
             text: "Test item".to_string(),
         });
 
         // Mark as complete
-        app.emit(TodoEvent::MarkCompleteClicked { index: 0 });
+        app.emit::<_, Infallible>(TodoEvent::MarkCompleteClicked { index: 0 });
 
         {
             let state = app.model::<TodoListState>();
@@ -150,7 +150,7 @@ mod tests {
         }
 
         // Toggle back to incomplete
-        app.emit(TodoEvent::MarkCompleteClicked { index: 0 });
+        app.emit::<_, Infallible>(TodoEvent::MarkCompleteClicked { index: 0 });
 
         {
             let state = app.model::<TodoListState>();
@@ -168,8 +168,8 @@ mod tests {
 
         // Add multiple items
         for i in 0..5 {
-            app.emit(TodoEvent::AddButtonClicked);
-            app.emit(TodoEvent::ItemTextChanged {
+            app.emit::<_, Infallible>(TodoEvent::AddButtonClicked);
+            app.emit::<_, Infallible>(TodoEvent::ItemTextChanged {
                 index: i,
                 text: format!("Item {}", i + 1),
             });
@@ -186,7 +186,7 @@ mod tests {
         }
 
         // Remove middle item
-        app.emit(TodoEvent::RemoveButtonClicked { index: 2 });
+        app.emit::<_, Infallible>(TodoEvent::RemoveButtonClicked { index: 2 });
 
         // Check item was removed
         {

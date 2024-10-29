@@ -51,12 +51,14 @@ fn build_app() -> App {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
     use crate::{build_app, Counter, Event};
 
     #[test]
     fn incr_1() {
         let app = build_app();
-        app.emit(Event::Increase);
+        app.emit::<_, Infallible>(Event::Increase);
 
         {
             let v = app.model::<Counter>();
@@ -67,8 +69,8 @@ mod tests {
     #[test]
     fn incr_2() {
         let app = build_app();
-        app.emit(Event::Increase);
-        app.emit(Event::Increase);
+        app.emit::<_, Infallible>(Event::Increase);
+        app.emit::<_, Infallible>(Event::Increase);
 
         {
             let v = app.model::<Counter>();
@@ -79,8 +81,8 @@ mod tests {
     #[test]
     fn incr_decr() {
         let app = build_app();
-        app.emit(Event::Increase);
-        app.emit(Event::Decrease);
+        app.emit::<_, Infallible>(Event::Increase);
+        app.emit::<_, Infallible>(Event::Decrease);
 
         {
             let v = app.model::<Counter>();

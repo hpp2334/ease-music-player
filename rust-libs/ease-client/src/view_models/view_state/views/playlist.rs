@@ -62,7 +62,7 @@ pub struct VCreatePlaylistState {
     pub full_imported: bool,
 }
 
-pub fn playlist_list_vs(
+pub(crate) fn playlist_list_vs(
     (state, connector_state): (&AllPlaylistState, &ConnectorState),
     root: &mut RootViewModelState,
 ) {
@@ -91,7 +91,7 @@ pub fn playlist_list_vs(
     root.playlist_list = Some(playlist_list_state);
 }
 
-pub fn current_playlist_vs(
+pub(crate) fn current_playlist_vs(
     (current_playlist, connector_state): (&CurrentPlaylistState, &ConnectorState),
     root: &mut RootViewModelState,
 ) {
@@ -126,7 +126,7 @@ pub fn current_playlist_vs(
     root.current_playlist = Some(current_playlist_state);
 }
 
-pub fn edit_playlist_vs(
+pub(crate) fn edit_playlist_vs(
     (edit_playlist, connector_state): (&EditPlaylistState, &ConnectorState),
     root: &mut RootViewModelState,
 ) {
@@ -136,7 +136,7 @@ pub fn edit_playlist_vs(
     });
 }
 
-pub fn create_playlist_vs(
+pub(crate) fn create_playlist_vs(
     (create_playlist, connector_state): (&CreatePlaylistState, &ConnectorState),
     root: &mut RootViewModelState,
 ) {

@@ -2,7 +2,7 @@
 use ease_client_shared::backends::{
     app::ArgInitializeApp,
     message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload},
-    music::{ArgUpdateMusicLyric, GetMusicMsg, Music, MusicId, UpdateMusicLyricMsg},
+    music::{ArgUpdateMusicDuration, ArgUpdateMusicLyric, GetMusicMsg, Music, MusicId, UpdateMusicDurationMsg, UpdateMusicLyricMsg},
     playlist::{
         AddMusicsToPlaylistMsg, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
         ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist, CreatePlaylistMsg,
@@ -151,6 +151,17 @@ impl Connector {
         Ok(())
     }
 
+    pub async fn update_music_total_duration(
+        &self,
+        cx: &ViewModelContext,
+        arg: ArgUpdateMusicDuration,
+    ) -> EaseResult<()> {
+        let id = arg.id;
+        self.request::<UpdateMusicDurationMsg>(cx, arg).await?;
+        self.sync_music(cx, id).await?;
+        Ok(())
+    }
+
     pub async fn list_storage_entry_children(
         &self,
         cx: &ViewModelContext,
@@ -187,14 +198,14 @@ impl Connector {
     async fn sync_music(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
         let music = self.get_music(cx, id).await?;
         if let Some(music) = music {
-            cx.enqueue_emit(Action::Connector(ConnectorAction::Music(music)));
+            cx.enqueue_emit::<_, EaseError>(Action::Connector(ConnectorAction::Music(music)));
         }
         Ok(())
     }
 
     async fn sync_playlist_abstracts(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let playlists = self.request::<GetAllPlaylistAbstractsMsg>(cx, ()).await?;
-        cx.enqueue_emit(Action::Connector(ConnectorAction::PlaylistAbstracts(
+        cx.enqueue_emit::<_, EaseError>(Action::Connector(ConnectorAction::PlaylistAbstracts(
             playlists,
         )));
         Ok(())
@@ -203,14 +214,14 @@ impl Connector {
     async fn sync_playlist(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<()> {
         let playlist = self.request::<GetPlaylistMsg>(cx, id).await?;
         if let Some(playlist) = playlist {
-            cx.enqueue_emit(Action::Connector(ConnectorAction::Playlist(playlist)));
+            cx.enqueue_emit::<_, EaseError>(Action::Connector(ConnectorAction::Playlist(playlist)));
         }
         Ok(())
     }
 
     async fn sync_storages(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let storages = self.request::<ListStorageMsg>(cx, ()).await?;
-        cx.enqueue_emit(Action::Connector(ConnectorAction::Storages(storages)));
+        cx.enqueue_emit::<_, EaseError>(Action::Connector(ConnectorAction::Storages(storages)));
         Ok(())
     }
 

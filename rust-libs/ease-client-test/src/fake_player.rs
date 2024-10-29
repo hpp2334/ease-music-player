@@ -1,10 +1,11 @@
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use ease_client::{view_models::*, RootViewModelState};
+use ease_client::{Action, EaseError, IMusicPlayerService, PlayerEvent, ViewAction};
 use hyper::StatusCode;
 use lofty::AudioFile;
-use misty_vm_test::TestAppContainer;
+use misty_vm::AppPod;
 
 use crate::rt::ASYNC_RT;
 
@@ -16,7 +17,8 @@ struct FakeMusicPlayerInner {
     playing: Arc<AtomicBool>,
     current_duration: Arc<AtomicU64>,
     total_duration: Arc<AtomicU64>,
-    app_handle: TestAppContainer<RootViewModelState>,
+    should_sync_total_duration: Arc<AtomicBool>,
+    pod: AppPod,
 }
 
 #[derive(Clone)]
@@ -25,7 +27,7 @@ pub struct FakeMusicPlayerRef {
 }
 
 impl FakeMusicPlayerInner {
-    fn new(app_handle: TestAppContainer<RootViewModelState>) -> Self {
+    fn new(pod: AppPod) -> Self {
         Self {
             url: Default::default(),
             req_handle: Default::default(),
@@ -33,7 +35,8 @@ impl FakeMusicPlayerInner {
             playing: Default::default(),
             current_duration: Default::default(),
             total_duration: Default::default(),
-            app_handle,
+            should_sync_total_duration: Default::default(),
+            pod,
         }
     }
 
@@ -44,24 +47,10 @@ impl FakeMusicPlayerInner {
         if !prev_playing {
             return;
         }
-        self.app_handle.call_controller(
-            controller_update_current_music_playing_for_player_internal,
-            false,
-        );
     }
 
     fn stop(&self) {
         self.pause();
-        self.sync_current_music_position(0);
-    }
-
-    fn sync_current_music_position(&self, duration: u64) {
-        self.current_duration
-            .store(duration, std::sync::atomic::Ordering::SeqCst);
-        self.app_handle.call_controller(
-            controller_set_current_music_position_for_player_internal,
-            duration,
-        );
     }
 
     fn advance_1sec(&self) {
@@ -75,24 +64,22 @@ impl FakeMusicPlayerInner {
         let current_duration = self
             .current_duration
             .load(std::sync::atomic::Ordering::SeqCst);
-        self.sync_current_music_position(current_duration);
+        self.current_duration
+            .store(current_duration, std::sync::atomic::Ordering::SeqCst);
 
         let total_duration = self
             .total_duration
             .load(std::sync::atomic::Ordering::SeqCst);
         if total_duration > 0 && current_duration >= total_duration / 1000 * 1000 {
-            self.app_handle.call_controller(
-                controller_handle_play_music_event_for_player_internal,
-                PlayMusicEventType::Complete,
-            );
+            self.pod.get().emit::<_, EaseError>(Action::View(ViewAction::Player(PlayerEvent::Complete)));
         }
     }
 }
 
 impl FakeMusicPlayerRef {
-    pub fn new(app_handle: TestAppContainer<RootViewModelState>) -> Self {
+    pub fn new(pod: AppPod) -> Self {
         FakeMusicPlayerRef {
-            inner: Arc::new(FakeMusicPlayerInner::new(app_handle)),
+            inner: Arc::new(FakeMusicPlayerInner::new(pod)),
         }
     }
 
@@ -102,9 +89,23 @@ impl FakeMusicPlayerRef {
     pub fn advance_1sec(&self) {
         self.inner.advance_1sec();
     }
+
+    pub fn sync_total_duration(&self) {
+        let should_sync = self.inner.should_sync_total_duration.swap(false, std::sync::atomic::Ordering::SeqCst);
+        if should_sync {
+            let v = self.inner.total_duration.load(std::sync::atomic::Ordering::SeqCst);
+            self.inner.pod.get().emit::<_, EaseError>(Action::View(ViewAction::Player(PlayerEvent::Total { duration_ms: v })));
+        }
+    }
 }
 
 impl IMusicPlayerService for FakeMusicPlayerRef {
+    fn get_current_duration_s(&self) -> u64 {
+        let v = self.inner
+            .current_duration.load(std::sync::atomic::Ordering::SeqCst);
+        Duration::from_millis(v).as_secs()
+    }
+
     fn resume(&self) {
         let prev_playing = self
             .inner
@@ -113,11 +114,6 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
         if prev_playing {
             return;
         }
-
-        self.inner.app_handle.call_controller(
-            controller_update_current_music_playing_for_player_internal,
-            true,
-        );
     }
 
     fn pause(&self) {
@@ -132,7 +128,6 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
         self.inner
             .current_duration
             .store(duration, std::sync::atomic::Ordering::SeqCst);
-        self.inner.sync_current_music_position(duration);
     }
 
     fn set_music_url(&self, url: String) {
@@ -149,7 +144,8 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
             }
         }
         self.inner.pause();
-        self.inner.sync_current_music_position(0);
+        self.inner.current_duration
+            .store(0, std::sync::atomic::Ordering::SeqCst);
         let cloned_inner = inner.clone();
         let _guard = ASYNC_RT.enter();
         let handle = ASYNC_RT.spawn(async move {
@@ -168,12 +164,8 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
             cloned_inner
                 .total_duration
                 .store(total_duration, std::sync::atomic::Ordering::SeqCst);
-            if total_duration > 0 {
-                cloned_inner.app_handle.call_controller(
-                    controller_update_current_music_total_duration_for_player_internal,
-                    total_duration,
-                );
-            }
+
+            cloned_inner.should_sync_total_duration.store(true, std::sync::atomic::Ordering::SeqCst);
 
             let mut last_bytes = cloned_inner.last_bytes.lock().unwrap();
             *last_bytes = bytes.to_vec();
@@ -183,7 +175,6 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
             *req_handle = Some(handle);
         }
 
-        self.inner.sync_current_music_position(0);
         self.resume();
     }
 }

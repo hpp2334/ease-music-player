@@ -1,12 +1,12 @@
 use ease_client_shared::{
-    backends::{music::MusicId, music_duration::MusicDuration},
+    backends::{music::{LyricLoadState, MusicId}, music_duration::MusicDuration},
     uis::preference::PlayMode,
 };
 use serde::Serialize;
 
 use crate::{
     utils::common::get_display_duration,
-    view_models::music::state::{CurrentMusicState, TimeToPauseState},
+    view_models::music::{state::{CurrentMusicState, TimeToPauseState}},
 };
 
 use super::models::RootViewModelState;
@@ -40,6 +40,7 @@ pub struct VLyricLine {
 #[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
 pub struct VCurrentMusicLyricState {
     pub lyric_lines: Vec<VLyricLine>,
+    pub load_state: LyricLoadState
 }
 
 #[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
@@ -49,7 +50,7 @@ pub struct VTimeToPauseState {
     pub left_minute: u64,
 }
 
-pub fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewModelState) {
+pub(crate) fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewModelState) {
     let id = {
         let id = state.id;
         if let Some(id) = id {
@@ -87,7 +88,7 @@ pub fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewModelState
     root.current_music = Some(view_model_state);
 }
 
-pub fn time_to_pause_vs(state: &TimeToPauseState, root: &mut RootViewModelState) {
+pub(crate) fn time_to_pause_vs(state: &TimeToPauseState, root: &mut RootViewModelState) {
     let state = state.clone();
     let enabled = state.enabled;
     let left_hour = (state.left.as_millis() / 3600_000) as u64;
@@ -100,7 +101,7 @@ pub fn time_to_pause_vs(state: &TimeToPauseState, root: &mut RootViewModelState)
     });
 }
 
-pub fn current_music_lyric_vs(state: &CurrentMusicState, root: &mut RootViewModelState) {
+pub(crate) fn current_music_lyric_vs(state: &CurrentMusicState, root: &mut RootViewModelState) {
     let lyric_lines = state.lyric.as_ref().map(|lyrics| {
         let lines: Vec<_> = lyrics
             .data
@@ -121,5 +122,10 @@ pub fn current_music_lyric_vs(state: &CurrentMusicState, root: &mut RootViewMode
                 text,
             })
             .collect(),
+        load_state: if state.lyric.is_some() {
+            state.lyric.as_ref().unwrap().loaded_state
+        } else {
+            LyricLoadState::Missing
+        }
     });
 }

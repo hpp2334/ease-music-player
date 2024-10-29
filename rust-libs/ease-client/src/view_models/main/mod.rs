@@ -18,7 +18,7 @@ pub enum MainBodyWidget {
     }
 }
 
-pub struct MainBodyVM {
+pub(crate) struct MainBodyVM {
     router_sub: Model<RouterState>,
 }
 

@@ -61,7 +61,7 @@ impl CountdownVM {
         if emit_next_tick {
             cx.spawn::<_, _, Infallible>(&self.tasks, |cx| async move {
                 cx.sleep(Duration::from_secs(1)).await;
-                cx.enqueue_emit(Event::Tick);
+                cx.enqueue_emit::<_, Infallible>(Event::Tick);
                 Ok(())
             });
         }
@@ -140,7 +140,7 @@ fn build_app(adapter: impl IAsyncRuntimeAdapter) -> App {
 #[cfg(test)]
 mod tests {
 
-    use std::time::Duration;
+    use std::{convert::Infallible, time::Duration};
 
     use misty_vm_test::AsyncRuntime;
 
@@ -153,8 +153,8 @@ mod tests {
 
         let app = build_app(rt.clone());
         rt.bind_app(app.clone());
-        app.emit(Event::Update { value: 10 });
-        app.emit(Event::Start);
+        app.emit::<_, Infallible>(Event::Update { value: 10 });
+        app.emit::<_, Infallible>(Event::Start);
         rt.advance(Duration::from_secs(9));
 
         {
@@ -170,11 +170,11 @@ mod tests {
 
         let app = build_app(rt.clone());
         rt.bind_app(app.clone());
-        app.emit(Event::Update { value: 5 });
-        app.emit(Event::Start);
+        app.emit::<_, Infallible>(Event::Update { value: 5 });
+        app.emit::<_, Infallible>(Event::Start);
         rt.advance(Duration::from_secs(2));
 
-        app.emit(Event::Pause);
+        app.emit::<_, Infallible>(Event::Pause);
         rt.advance(Duration::from_secs(2));
 
         {
@@ -183,7 +183,7 @@ mod tests {
             assert_eq!(v.state, PlayingState::Pause);
         }
 
-        app.emit(Event::Start);
+        app.emit::<_, Infallible>(Event::Start);
         rt.advance(Duration::from_secs(2));
 
         {
@@ -200,19 +200,19 @@ mod tests {
 
         let app = build_app(rt.clone());
         rt.bind_app(app.clone());
-        app.emit(Event::Update { value: 5 });
-        app.emit(Event::Start);
+        app.emit::<_, Infallible>(Event::Update { value: 5 });
+        app.emit::<_, Infallible>(Event::Start);
         rt.advance(Duration::from_secs(3));
 
-        app.emit(Event::Stop);
-        app.emit(Event::Update { value: 8 });
+        app.emit::<_, Infallible>(Event::Stop);
+        app.emit::<_, Infallible>(Event::Update { value: 8 });
         {
             let v = app.model::<CountdownState>();
             assert_eq!(v.value, 8);
             assert_eq!(v.state, PlayingState::Pending);
         }
 
-        app.emit(Event::Start);
+        app.emit::<_, Infallible>(Event::Start);
         rt.advance(Duration::from_secs(4));
 
         {

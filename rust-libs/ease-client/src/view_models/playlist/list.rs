@@ -6,10 +6,7 @@ use crate::{
     error::EaseError,
 };
 
-use super::{
-    create::PlaylistCreateVM,
-    detail::PlaylistDetailVM,
-};
+use super::{create::PlaylistCreateVM, detail::PlaylistDetailVM};
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum PlaylistListWidget {
@@ -17,7 +14,7 @@ pub enum PlaylistListWidget {
     Item { id: PlaylistId },
 }
 
-pub struct PlaylistListVM {}
+pub(crate) struct PlaylistListVM {}
 
 impl PlaylistListVM {
     pub fn new(_cx: &mut AppBuilderContext) -> Self {

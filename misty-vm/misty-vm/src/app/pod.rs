@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
 
 use crate::IToHost;
 
@@ -30,11 +30,12 @@ impl App {
         self._app.models.read()
     }
 
-    pub fn emit<Event>(&self, evt: Event)
+    pub fn emit<Event, E>(&self, evt: Event)
     where
-        Event: 'static,
+        Event: Any + 'static,
+        E: Any + 'static,
     {
-        self._app.emit(evt);
+        self._app.emit::<Event, E>(evt);
     }
 
     pub fn to_host<C>(&self) -> Arc<C>

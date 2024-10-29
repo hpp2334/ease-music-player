@@ -16,7 +16,7 @@ pub enum StorageListWidget {
     Item { id: StorageId },
 }
 
-pub struct StorageListVM {
+pub(crate) struct StorageListVM {
     pub store: Model<AllStorageState>,
     pub current: Model<CurrentStorageState>,
 }

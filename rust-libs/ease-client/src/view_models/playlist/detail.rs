@@ -1,13 +1,21 @@
- 
-use ease_client_shared::{backends::{
-    music::MusicId, playlist::{ArgAddMusicsToPlaylist, PlaylistId}, storage::{StorageEntry, StorageEntryLoc, StorageId}
-}, uis::storage::CurrentStorageImportType};
+use ease_client_shared::{
+    backends::{
+        music::MusicId,
+        playlist::{ArgAddMusicsToPlaylist, PlaylistId},
+        storage::{StorageEntry, StorageEntryLoc, StorageId},
+    },
+    uis::storage::CurrentStorageImportType,
+};
 use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
-    view_models::{connector::Connector, music::{common::MusicCommonVM, control::MusicControlVM}, storage::import::StorageImportVM},
+    view_models::{
+        connector::Connector,
+        music::{common::MusicCommonVM, control::MusicControlVM},
+        storage::import::StorageImportVM,
+    },
 };
 
 use super::{common::PlaylistCommonVM, edit::PlaylistEditVM, state::CurrentPlaylistState};
@@ -17,11 +25,12 @@ pub enum PlaylistDetailWidget {
     Remove,
     Edit,
     Music { id: MusicId },
-    RemoveMusic { id: MusicId, playlist_id: PlaylistId },
+    RemoveMusic { id: MusicId },
     Import,
+    PlayAll,
 }
 
-pub struct PlaylistDetailVM {
+pub(crate) struct PlaylistDetailVM {
     current: Model<CurrentPlaylistState>,
     tasks: AsyncTasks,
 }
@@ -30,8 +39,17 @@ impl PlaylistDetailVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             current: cx.model(),
-            tasks: Default::default()
+            tasks: Default::default(),
         }
+    }
+
+    fn play_all(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        if let Some(playlist) = cx.model_get(&self.current).playlist.as_ref() {
+            if let Some(music_id) = playlist.musics.first().map(|m| m.id()) {
+                MusicControlVM::of(cx).play(cx, music_id)?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn prepare_current(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<()> {
@@ -61,7 +79,13 @@ impl PlaylistDetailVM {
         let entries = entries
             .into_iter()
             .map(|v| {
-                let name = v.path.clone().split("/").last().expect("path is empty").to_string();
+                let name = v
+                    .path
+                    .clone()
+                    .split("/")
+                    .last()
+                    .expect("path is empty")
+                    .to_string();
                 let loc = StorageEntryLoc {
                     storage_id,
                     path: v.path,
@@ -70,12 +94,17 @@ impl PlaylistDetailVM {
                 (loc, name)
             })
             .collect();
-            
+
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).add_musics_to_playlist(&cx, ArgAddMusicsToPlaylist {
-                id: playlist_id,
-                entries,
-            }).await?;
+            Connector::of(&cx)
+                .add_musics_to_playlist(
+                    &cx,
+                    ArgAddMusicsToPlaylist {
+                        id: playlist_id,
+                        entries,
+                    },
+                )
+                .await?;
             Ok(())
         });
 
@@ -86,37 +115,46 @@ impl PlaylistDetailVM {
 impl ViewModel<Action, EaseError> for PlaylistDetailVM {
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
-            Action::View(action) => {
-                match action {
-                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
-                        (Widget::PlaylistDetail(action), WidgetActionType::Click) => match action {
-                            PlaylistDetailWidget::Remove => {
-                                PlaylistCommonVM::of(cx).remove_current(cx)?;
+            Action::View(action) => match action {
+                ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                    (Widget::PlaylistDetail(action), WidgetActionType::Click) => match action {
+                        PlaylistDetailWidget::Remove => {
+                            PlaylistCommonVM::of(cx).remove_current(cx)?;
+                        }
+                        PlaylistDetailWidget::Edit => {
+                            let playlist = PlaylistCommonVM::of(cx)
+                                .get_current(cx)?
+                                .expect("edit playlist but current playlist is None");
+                            PlaylistEditVM::of(cx).prepare_edit(cx, &playlist)?;
+                        }
+                        PlaylistDetailWidget::Music { id } => {
+                            MusicControlVM::of(cx).play(cx, *id)?;
+                        }
+                        PlaylistDetailWidget::RemoveMusic { id } => {
+                            let playlist_id = cx
+                                .model_get(&self.current)
+                                .playlist
+                                .as_ref()
+                                .map(|p| p.id());
+                            if let Some(playlist_id) = playlist_id {
+                                MusicCommonVM::of(cx).remove(cx, *id, playlist_id)?;
                             }
-                            PlaylistDetailWidget::Edit => {
-                                let playlist = PlaylistCommonVM::of(cx)
-                                    .get_current(cx)?
-                                    .expect("edit playlist but current playlist is None");
-                                PlaylistEditVM::of(cx).prepare_edit(cx, &playlist)?;
+                        }
+                        PlaylistDetailWidget::Import => {
+                            let current = PlaylistCommonVM::of(cx).get_current(cx)?;
+                            if let Some(current) = current {
+                                StorageImportVM::of(cx).prepare(
+                                    cx,
+                                    CurrentStorageImportType::ImportMusics { id: current.id() },
+                                )?;
                             }
-                            PlaylistDetailWidget::Music { id } => {
-                                MusicControlVM::of(cx).play(cx, *id)?;
-                            }
-                            PlaylistDetailWidget::RemoveMusic { id, playlist_id } => {
-                                MusicCommonVM::of(cx).remove(cx, *id, *playlist_id)?;
-                            }
-                            PlaylistDetailWidget::Import => {
-                                let current = PlaylistCommonVM::of(cx).get_current(cx)?;
-                                if let Some(current) = current {
-                                    StorageImportVM::of(cx).prepare(cx, CurrentStorageImportType::ImportMusics { id: current.id(), })?;
-                                }
-                            }
-                        },
-                        _ => {}
+                        }
+                        PlaylistDetailWidget::PlayAll => self.play_all(cx)?,
                     },
                     _ => {}
-                }
-            }
+                },
+                _ => {}
+            },
             _ => {}
         }
         Ok(())

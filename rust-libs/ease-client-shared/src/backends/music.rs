@@ -21,10 +21,21 @@ pub struct MusicAbstract {
     pub cover_url: String,
 }
 
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
+pub enum LyricLoadState {
+    Loading,
+    #[default]
+    Missing,
+    Failed,
+    Loaded,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MusicLyric {
     pub loc: StorageEntryLoc,
     pub data: Lyrics,
+    pub loaded_state: LyricLoadState,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

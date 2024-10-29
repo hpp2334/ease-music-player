@@ -4,5 +4,5 @@ pub(self) mod pod;
 
 pub use builder::ViewModelsBuilder;
 pub use context::ViewModelContext;
-pub use pod::ViewModel;
-pub(crate) use pod::{BoxedViewModels};
+pub use pod::{ViewModel};
+pub(crate) use pod::{BoxedViewModels, BoxedViewModel};

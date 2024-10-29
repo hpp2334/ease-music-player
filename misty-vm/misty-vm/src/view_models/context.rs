@@ -85,11 +85,12 @@ impl ViewModelContext {
         self._app.async_executor.get_time()
     }
 
-    pub fn enqueue_emit<Event>(&self, evt: Event)
+    pub fn enqueue_emit<Event, E>(&self, evt: Event)
     where
-        Event: 'static,
+        Event: Any + 'static,
+        E: Any + 'static,
     {
-        self._app.enqueue_emit(evt);
+        self._app.enqueue_emit::<Event, E>(evt);
     }
 
     fn clone_internal(&self) -> Self {

@@ -541,7 +541,7 @@ dependencies = [
  "ease-client-backend",
  "ease-client-shared",
  "getset",
- "misty-vm 0.2.0",
+ "misty-vm",
  "num-derive",
  "num-traits",
  "once_cell",
@@ -618,8 +618,10 @@ dependencies = [
  "async-trait",
  "dav-server",
  "ease-client",
+ "ease-client-shared",
  "hyper",
  "lofty 0.15.0",
+ "misty-vm",
  "misty-vm-test",
  "once_cell",
  "reqwest",
@@ -1271,41 +1273,16 @@ dependencies = [
 
 [[package]]
 name = "misty-vm"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ad10f367035acec279dceb220025fd5e6c058802c398ff8f17351c3d4252ec2"
-dependencies = [
- "futures",
- "misty-vm-macro 0.1.4",
- "once_cell",
- "serde",
- "thread_local",
- "tracing",
-]
-
-[[package]]
-name = "misty-vm"
 version = "0.2.0"
 dependencies = [
  "async-task",
  "flume",
  "futures",
- "misty-vm-macro 0.2.0",
+ "misty-vm-macro",
  "once_cell",
  "serde",
  "thread_local",
  "tracing",
-]
-
-[[package]]
-name = "misty-vm-macro"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21f76a5778d3953894451a8a18f722e912838a8e7cc48e0d9a45f043a7ed0250"
-dependencies = [
- "proc-macro2 1.0.86",
- "quote 1.0.37",
- "syn 2.0.77",
 ]
 
 [[package]]
@@ -1319,12 +1296,11 @@ dependencies = [
 
 [[package]]
 name = "misty-vm-test"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dd70cdb4b0bbdb54c20241d49ddc9948ffdefd85369511fd4367ee9bb2abc80"
+version = "0.2.0"
 dependencies = [
  "futures",
- "misty-vm 0.1.6",
+ "misty-vm",
+ "serde",
  "tokio",
  "tracing",
 ]

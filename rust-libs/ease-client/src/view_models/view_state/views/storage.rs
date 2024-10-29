@@ -87,7 +87,7 @@ fn resolve_storage_name(storage: &Storage) -> String {
     }
 }
 
-pub fn storage_list_vs(state: &AllStorageState, root: &mut RootViewModelState) {
+pub(crate) fn storage_list_vs(state: &AllStorageState, root: &mut RootViewModelState) {
     let items: Vec<VStorageListItem> = {
         state
             .storages
@@ -104,7 +104,7 @@ pub fn storage_list_vs(state: &AllStorageState, root: &mut RootViewModelState) {
     root.storage_list = Some(list);
 }
 
-pub fn current_storage_entries_vs(
+pub(crate) fn current_storage_entries_vs(
     (state, storages_state): (&CurrentStorageState, &AllStorageState),
     root: &mut RootViewModelState,
 ) {
@@ -194,7 +194,7 @@ pub fn current_storage_entries_vs(
     root.current_storage_entries = Some(current_storage_entries);
 }
 
-pub fn edit_storage_vs(state: &EditStorageState, root: &mut RootViewModelState) {
+pub(crate) fn edit_storage_vs(state: &EditStorageState, root: &mut RootViewModelState) {
     root.edit_storage = Some(VEditStorageState {
         is_created: state.is_create,
         title: state.title.clone(),

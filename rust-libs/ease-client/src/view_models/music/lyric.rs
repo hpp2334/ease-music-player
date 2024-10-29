@@ -9,6 +9,7 @@ use ease_client_shared::{
     uis::storage::CurrentStorageImportType,
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
+use serde::Serialize;
 
 use super::state::CurrentMusicState;
 
@@ -18,10 +19,13 @@ pub enum MusicLyricWidget {
     Remove,
 }
 
-pub struct MusicLyricVM {
+pub(crate) struct MusicLyricVM {
     current: Model<CurrentMusicState>,
     tasks: AsyncTasks,
 }
+
+
+
 
 impl MusicLyricVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {

@@ -12,7 +12,7 @@ pub enum MusicDetailWidget {
     Remove,
 }
 
-pub struct MusicDetailVM {}
+pub(crate) struct MusicDetailVM {}
 
 impl MusicDetailVM {
     pub fn new(_cx: &mut AppBuilderContext) -> Self {

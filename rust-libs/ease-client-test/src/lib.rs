@@ -1,29 +1,34 @@
 use std::sync::atomic::AtomicBool;
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use ease_client::view_models::timer::to_host::TimerService;
 use ease_client::{
-    build_state_manager, build_view_manager, view_models::*, MistyController, MistyResourceId,
-    MistyServiceManager, RootViewModelState,
+    build_client, Action, EaseError, IToastService, PlaylistCreateWidget, PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, StorageImportWidget, StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType
 };
-
+use ease_client_shared::backends::app::ArgInitializeApp;
+use ease_client_shared::backends::music::MusicId;
+use ease_client_shared::backends::playlist::PlaylistId;
+use ease_client_shared::backends::storage::{StorageId, StorageType};
+use ease_client_shared::uis::playlist::CreatePlaylistMode;
 use fake_player::*;
 pub use fake_server::ReqInteceptor;
 use fake_server::*;
-use fake_timer::*;
-use misty_vm_test::TestAppContainer;
+use misty_vm::AppPod;
+use misty_vm_test::AsyncRuntime;
+use view_state::ViewStateServiceRef;
 
 mod fake_player;
 mod fake_server;
-mod fake_timer;
 mod rt;
+mod view_state;
 
 pub struct TestApp {
-    app: misty_vm_test::TestApp<RootViewModelState>,
+    app: AppPod,
     server: FakeServerRef,
     player: FakeMusicPlayerRef,
-    timer: FakeTimerServiceRef,
+    view_state: ViewStateServiceRef,
+    async_runtime: AsyncRuntime,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -45,7 +50,7 @@ static SETUP_SUBCRIBER_ONCE: AtomicBool = AtomicBool::new(false);
 static SCHEMA_VERSION: u32 = 1;
 
 fn setup_subscriber() {
-    let has_setup = SETUP_SUBCRIBER_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst);
+    let has_setup = SETUP_SUBCRIBER_ONCE.swap(true, std::sync::atomic::Ordering::Relaxed);
     if has_setup {
         return;
     }
@@ -81,25 +86,17 @@ impl TestApp {
             std::fs::create_dir_all(&test_dir).unwrap();
         }
 
-        let app_container = TestAppContainer::<RootViewModelState>::new(|changed, state| {
-            state.merge_from(&changed);
-        });
-        let mut timer = FakeTimerServiceRef::new();
-        let player = FakeMusicPlayerRef::new(app_container.clone());
-        timer.bind_music_player(player.clone());
-        let service_manager = MistyServiceManager::builder()
-            .add(MusicPlayerService::new(player.clone()))
-            .add(ToastService::new(FakeToastServiceImpl))
-            .add(TimerService::new(timer.clone()))
-            .build();
-        let state_manager = build_state_manager();
-        let view_manager = build_view_manager();
-        let inner = misty_vm_test::TestApp::new(
-            view_manager,
-            service_manager,
-            state_manager,
-            app_container,
+        let pod = AppPod::new();
+        let player = FakeMusicPlayerRef::new(pod.clone());
+        let async_runtime = AsyncRuntime::new();
+        let view_state = ViewStateServiceRef::new();
+        let app = build_client(
+            Arc::new(player.clone()),
+            Arc::new(FakeToastServiceImpl),
+            Arc::new(view_state.clone()),
+            async_runtime.clone(),
         );
+        pod.set(app.clone());
 
         let storage_path = {
             let dir = std::env::current_dir().unwrap();
@@ -111,54 +108,70 @@ impl TestApp {
             }
         };
 
-        inner.app().call_controller(
-            controller_initialize_app,
-            ArgInitializeApp {
-                app_document_dir: test_dir.to_string(),
-                schema_version: SCHEMA_VERSION,
-                storage_path,
-            },
-        );
+        app.emit::<_, EaseError>(Action::Init(ArgInitializeApp {
+            app_document_dir: test_dir.to_string(),
+            schema_version: SCHEMA_VERSION,
+            storage_path,
+        }));
 
-        TestApp {
-            app: inner,
+        Self {
+            app: pod,
             server: FakeServerRef::setup("test-files"),
             player,
-            timer,
+            async_runtime,
+            view_state,
         }
     }
 
+    pub fn emit(&self, action: Action) {
+        self.app.get().emit::<_, EaseError>(action);
+        self.player.sync_total_duration();
+    }
+
+    pub fn dispatch_click(&self, widget: impl Into<Widget>) {
+        self.emit(Action::View(ViewAction::Widget(WidgetAction {
+            widget: widget.into(),
+            typ: WidgetActionType::Click,
+        })));
+    }
+
+    pub fn dispatch_change_text(&self, widget: impl Into<Widget>, text: impl ToString) {
+        self.emit(Action::View(ViewAction::Widget(WidgetAction {
+            widget: widget.into(),
+            typ: WidgetActionType::ChangeText {
+                text: text.to_string(),
+            },
+        })));
+    }
+
     fn create_empty_playlist(&self) {
-        self.call_controller(controller_prepare_create_playlist, ());
-        self.call_controller(
-            controller_update_create_playlist_name,
-            "Default Playlist".to_string(),
-        );
-        self.call_controller(controller_finish_create_playlist, ());
+        self.dispatch_click(PlaylistListWidget::Add);
+        self.dispatch_click(PlaylistCreateWidget::Tab {
+            value: CreatePlaylistMode::Empty,
+        });
+        self.dispatch_change_text(PlaylistCreateWidget::Name, "Default Playlist");
+        self.dispatch_click(PlaylistCreateWidget::FinishImport);
     }
 
     pub async fn setup_preset(&mut self, depth: PresetDepth) {
-        self.call_controller(
-            controller_upsert_storage,
-            ArgUpsertStorage {
-                id: None,
-                addr: self.server.addr(),
-                alias: Some("Temp".to_string()),
-                username: Default::default(),
-                password: Default::default(),
-                is_anonymous: true,
-                typ: StorageType::Webdav,
-            },
-        );
+        self.dispatch_click(StorageListWidget::Create);
+        self.dispatch_change_text(StorageUpsertWidget::Address, self.server.addr());
+        self.dispatch_change_text(StorageUpsertWidget::Alias, "Temp");
+        self.dispatch_click(StorageUpsertWidget::IsAnonymous);
+        self.dispatch_click(StorageUpsertWidget::Type {
+            value: StorageType::Webdav,
+        });
+        self.dispatch_click(StorageUpsertWidget::Finish);
+
         if depth as i32 >= PresetDepth::Playlist as i32 {
             self.create_empty_playlist();
         }
         if depth as i32 >= PresetDepth::Music as i32 {
             let playlist_id = self.get_first_playlist_id_from_latest_state();
-            self.call_controller(controller_change_current_playlist, playlist_id);
+            self.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
             let storage_id = self.get_first_storage_id_from_latest_state();
-            self.call_controller(controller_prepare_import_entries_in_current_playlist, ());
-            self.call_controller(controller_select_storage_in_import, storage_id);
+            self.dispatch_click(PlaylistDetailWidget::Import);
+            self.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
             for _ in 0..10 {
                 self.wait_network().await;
                 let state = self.latest_state();
@@ -170,15 +183,19 @@ impl TestApp {
             }
             let state = self.latest_state();
             let entries = state.current_storage_entries.unwrap();
-            self.call_controller(controller_select_entry, entries.entries[4].path.clone());
-            self.call_controller(controller_select_entry, entries.entries[5].path.clone());
-            self.call_controller(controller_finish_selected_entries_in_import, ());
+            self.dispatch_click(StorageImportWidget::StorageEntry {
+                path: entries.entries[4].path.clone(),
+            });
+            self.dispatch_click(StorageImportWidget::StorageEntry {
+                path: entries.entries[5].path.clone(),
+            });
+            self.dispatch_click(StorageImportWidget::Import);
             self.wait_network().await;
         }
     }
 
     pub fn latest_state(&self) -> RootViewModelState {
-        self.app.state()
+        self.view_state.state()
     }
 
     pub fn get_first_storage_id_from_latest_state(&self) -> StorageId {
@@ -225,16 +242,8 @@ impl TestApp {
         self.player.last_bytes()
     }
 
-    pub fn call_controller<Arg, E: std::fmt::Debug>(
-        &self,
-        controller: impl MistyController<Arg, E>,
-        arg: Arg,
-    ) {
-        self.app.app().call_controller(controller, arg);
-    }
-
-    pub async fn advance_timer(&self, duration_s: u64) {
-        self.timer.advance_timer(duration_s).await;
+    pub fn advance_timer(&self, duration_s: u64) {
+        self.async_runtime.advance(Duration::from_secs(duration_s));
     }
 
     pub async fn wait_network(&self) {
@@ -245,11 +254,8 @@ impl TestApp {
         self.server.set_inteceptor_req(v);
     }
 
-    pub fn load_resource(&self, id: u64) -> Vec<u8> {
-        self.app
-            .app()
-            .get_resource(MistyResourceId::wrap(id))
-            .unwrap()
+    pub async fn load_resource(&self, url: impl ToString) -> Vec<u8> {
+        self.server.load_resource(url).await
     }
 
     async fn wait(&self, ms: u64) {

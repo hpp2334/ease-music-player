@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use ease_client_shared::{
-    backends::{music::MusicId, playlist::PlaylistId},
-    uis::{music::ArgSeekMusic, preference::PlayMode},
+    backends::{music::{ArgUpdateMusicDuration, MusicId}, music_duration::MusicDuration, playlist::PlaylistId},
+    uis::preference::PlayMode,
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
@@ -28,10 +30,20 @@ pub enum MusicControlWidget {
 
 #[derive(Debug, uniffi::Enum)]
 pub enum MusicControlAction {
-    Seek(ArgSeekMusic),
+    Seek { duration_ms: u64 },
 }
 
-pub struct MusicControlVM {
+#[derive(Debug, Clone, Copy, uniffi::Enum)]
+pub enum PlayerEvent {
+    Complete,
+    Loading,
+    Loaded,
+    Total {
+        duration_ms: u64
+    }
+}
+
+pub(crate) struct MusicControlVM {
     current: Model<CurrentMusicState>,
     tasks: AsyncTasks,
 }
@@ -40,7 +52,7 @@ impl MusicControlVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             current: cx.model(),
-            tasks: Default::default()
+            tasks: Default::default(),
         }
     }
 
@@ -53,11 +65,17 @@ impl MusicControlVM {
         Ok(())
     }
 
-    pub(crate) fn replay(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    fn replay(&self, cx: &ViewModelContext) -> EaseResult<()> {
         if let Some(current_id) = cx.model_get(&self.current).id {
             self.stop(cx)?;
             self.play(cx, current_id)?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        let mut current = cx.model_mut(&self.current);
+        current.current_duration = Duration::from_secs(MusicPlayerService::of(cx).get_current_duration_s());
         Ok(())
     }
 
@@ -124,7 +142,7 @@ impl MusicControlVM {
 
     fn resume(&self, cx: &ViewModelContext) -> EaseResult<()> {
         MusicPlayerService::of(cx).resume();
-        cx.enqueue_emit(Action::MusicCommon(MusicCommonAction::Tick));
+        cx.enqueue_emit::<_, EaseError>(Action::MusicCommon(MusicCommonAction::Tick));
         Ok(())
     }
 
@@ -143,8 +161,8 @@ impl MusicControlVM {
         Ok(())
     }
 
-    fn seek(&self, cx: &ViewModelContext, arg: &ArgSeekMusic) -> EaseResult<()> {
-        MusicPlayerService::of(cx).seek(arg.duration);
+    fn seek(&self, cx: &ViewModelContext, arg: u64) -> EaseResult<()> {
+        MusicPlayerService::of(cx).seek(arg);
         Ok(())
     }
 
@@ -225,6 +243,34 @@ impl MusicControlVM {
         }
         Ok(())
     }
+
+    fn on_complete(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        let play_mode = cx.model_get(&self.current).play_mode;
+        match play_mode {
+            PlayMode::Single => self.stop(cx)?,
+            PlayMode::SingleLoop => self.replay(cx)?,
+            PlayMode::List | PlayMode::ListLoop => self.play_next(cx)?,
+        }
+        Ok(())
+    }
+
+    fn on_sync_total_duration(&self, cx: &ViewModelContext, duration: Duration) -> EaseResult<()> {
+        let id = {
+            let state = cx.model_get(&self.current);
+            match state.id {
+                Some(id) => id,
+                None => return Ok(())
+            }
+        };
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+            Connector::of(&cx).update_music_total_duration(&cx, ArgUpdateMusicDuration {
+                id,
+                duration: MusicDuration::new(duration)
+            }).await?;
+            Ok(())
+        });
+        Ok(())
+    }
 }
 
 impl ViewModel<Action, EaseError> for MusicControlVM {
@@ -232,7 +278,7 @@ impl ViewModel<Action, EaseError> for MusicControlVM {
         match event {
             Action::View(action) => match action {
                 ViewAction::MusicControl(action) => match action {
-                    MusicControlAction::Seek(arg) => self.seek(cx, arg)?,
+                    MusicControlAction::Seek { duration_ms } => self.seek(cx, *duration_ms)?,
                 },
                 ViewAction::Widget(action) => match (&action.widget, &action.typ) {
                     (Widget::MusicControl(widget), WidgetActionType::Click) => match widget {
@@ -256,6 +302,12 @@ impl ViewModel<Action, EaseError> for MusicControlVM {
                         }
                     },
                     _ => {}
+                },
+                ViewAction::Player(event) => match event {
+                    PlayerEvent::Complete => self.on_complete(cx)?,
+                    PlayerEvent::Loading => {}
+                    PlayerEvent::Loaded => {},
+                    PlayerEvent::Total { duration_ms } => self.on_sync_total_duration(cx, Duration::from_millis(*duration_ms))?,
                 },
                 _ => {}
             },

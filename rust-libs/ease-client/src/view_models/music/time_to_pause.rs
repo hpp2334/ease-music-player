@@ -22,7 +22,7 @@ pub enum TimeToPauseAction {
     Finish { hour: u8, minute: u8 },
 }
 
-pub struct TimeToPauseVM {
+pub(crate) struct TimeToPauseVM {
     timer: Model<TimeToPauseState>,
 }
 

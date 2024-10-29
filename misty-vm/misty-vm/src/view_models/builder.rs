@@ -1,14 +1,17 @@
-use std::{any::{Any, TypeId}, collections::HashSet};
+use std::{any::{Any, TypeId}, collections::{HashMap, HashSet}, marker::PhantomData};
 
-use super::pod::{BoxedViewModels, ViewModel, ViewModels};
+use super::{pod::{BoxedViewModel, BoxedViewModels}, ViewModel};
+
 
 pub struct ViewModelsBuilder<Event, E>
 where
     Event: Any + 'static,
     E: Any + 'static,
 {
-    vms: Vec<Box<dyn ViewModel<Event, E>>>,
-    vm_ids: HashSet<TypeId>
+    vms: HashMap<TypeId, BoxedViewModel>,
+    vm_ids: HashSet<TypeId>,
+    marker_event: PhantomData<Event>,
+    marker_error: PhantomData<E>,
 }
 
 impl<Event, E> ViewModelsBuilder<Event, E>
@@ -20,6 +23,8 @@ where
         Self {
             vms: Default::default(),
             vm_ids: Default::default(),
+            marker_event: Default::default(),
+            marker_error: Default::default()
         }
     }
 
@@ -31,13 +36,13 @@ where
             panic!("ViewModel {} already added", name);
         }
         self.vm_ids.insert(type_id);
-        self.vms.push(Box::new(vm));
+        self.vms.insert(std::any::TypeId::of::<VM>(), BoxedViewModel::new(vm));
         self
     }
 
-    pub(crate) fn build(self) -> Box<dyn BoxedViewModels> {
-        let vms = ViewModels::new(self.vms);
+    pub(crate) fn build(self) -> BoxedViewModels {
+        let vms = BoxedViewModels::new(self.vms);
 
-        Box::new(vms)
+        vms
     }
 }

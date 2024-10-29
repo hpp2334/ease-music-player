@@ -7,5 +7,6 @@ pub trait IMusicPlayerService: Send + Sync + 'static {
     fn stop(&self);
     fn seek(&self, arg: u64);
     fn set_music_url(&self, url: String);
+    fn get_current_duration_s(&self) -> u64;
 }
 misty_to_host!(MusicPlayerService, IMusicPlayerService);

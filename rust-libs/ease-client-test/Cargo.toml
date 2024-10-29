@@ -8,7 +8,9 @@ publish = false
 
 [dependencies]
 ease-client = { path = "../ease-client" }
-misty-vm-test = { version = "0.1.4" }
+ease-client-shared = { path = "../ease-client-shared" }
+misty-vm = { path = "../../misty-vm/misty-vm" }
+misty-vm-test = { path = "../../misty-vm/misty-vm-test" }
 tokio = { version = "1", features = ["full"] }
 dav-server = { version = "0.5.7", features = ["memfs"] }
 hyper = { version = "0.14", features = ["full"] }
