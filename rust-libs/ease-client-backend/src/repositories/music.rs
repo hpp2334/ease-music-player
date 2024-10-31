@@ -14,9 +14,9 @@ pub fn db_load_music_metas_by_playlist_id(
 ) -> BResult<Vec<MusicModel>> {
     let models = conn.query::<MusicModel>(
         r#"
-    SELECT id, title, duration
+    SELECT id, path, storage_id, title, duration, lyric_default
     FROM music
-    WHERE id IN (SELECT music_id IN playlist_music WHERE playlist_id = ?1)
+    WHERE id IN (SELECT music_id FROM playlist_music WHERE playlist_id = ?1)
     "#,
         [playlist_id],
     )?;
@@ -67,8 +67,8 @@ pub fn db_add_music(conn: DbConnectionRef, arg: ArgDBAddMusic) -> BResult<MusicI
     let inserted_id = conn
         .query::<MusicId>(
             r#"
-        INSERT INTO music (storage_id, path, title)
-        VALUES (?1, ?2, ?3, ?4, ?5) RETURNING id"#,
+        INSERT INTO music (storage_id, path, title, lyric_default)
+        VALUES (?1, ?2, ?3, true) RETURNING id"#,
             params![arg.storage_id.as_ref(), arg.path, arg.title,],
         )?
         .pop()
@@ -109,8 +109,25 @@ pub fn db_update_music_lyric(
     lyric_loc: StorageEntryLocModel,
 ) -> BResult<()> {
     conn.execute(
-        "UPDATE music set lyric_storage_id = ?2, lyric_path = ?3 WHERE id = ?1",
+        "UPDATE music set lyric_storage_id = ?2, lyric_path = ?3, lyric_default = false WHERE id = ?1",
         params![id, lyric_loc.1, lyric_loc.0],
     )?;
     Ok(())
+}
+
+pub fn db_get_playlists_count_by_storage(
+    conn: DbConnectionRef,
+    storage_id: StorageId,
+) -> BResult<u32> {
+    let mut list = conn.query::<u32>(
+        r#"
+        SELECT COUNT(DISTINCT p.id) AS playlist_count
+FROM playlist p
+JOIN playlist_music pm ON p.id = pm.playlist_id
+JOIN music m ON pm.music_id = m.id
+WHERE m.storage_id = ?;
+    "#,
+        [storage_id],
+    )?;
+    Ok(list.pop().unwrap())
 }

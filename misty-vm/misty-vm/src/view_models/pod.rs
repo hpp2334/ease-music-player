@@ -1,78 +1,132 @@
-use std::{any::{Any, TypeId}, collections::HashMap, rc::Rc, sync::Arc};
+use std::{
+    any::{Any, TypeId},
+    fmt::Debug,
+    rc::Rc,
+    sync::Arc,
+};
 
-use crate::internal::AppInternal;
+use tracing::instrument;
 
-use super::ViewModelContext;
+use crate::{internal::AppInternal, utils::OMap, IntoVMError};
 
-pub trait ViewModel<Event, E>: 'static
+use super::context::ViewModelContext;
+
+pub trait ViewModel
 where
-    E: Any + 'static,
+    Self: Any + 'static,
 {
+    type Event: Any + 'static;
+    type Error: IntoVMError + 'static;
+
     fn of(cx: &ViewModelContext) -> Rc<Self>
     where
         Self: Sized,
     {
-        cx.vm::<Self, _, _>()
+        cx.app().view_models.vm::<Self>()
     }
 
-    fn on_event(&self, cx: &ViewModelContext, event: &Event) -> Result<(), E>;
+    fn on_flush(&self, cx: &ViewModelContext) -> Result<(), Self::Error> {
+        let _ = cx;
+        Ok(())
+    }
+
+    fn on_event(&self, cx: &ViewModelContext, event: &Self::Event) -> Result<(), Self::Error>;
 }
 
-#[derive(Clone)]
-pub(crate) struct BoxedViewModel {
-    internal: Rc<dyn Any>
+pub(crate) trait IAnyViewModel
+where
+    Self: 'static,
+{
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any>;
+    fn handle_flush(&self, cx: &ViewModelContext) -> Result<(), Box<dyn std::error::Error>>;
+    fn handle_event(
+        &self,
+        cx: &ViewModelContext,
+        event: &dyn Any,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-
-pub(crate) struct BoxedViewModels {
-    vms: HashMap<TypeId, BoxedViewModel>
-}
-
-impl BoxedViewModel {
-    pub fn new<VM, Event, E>(vm: VM) -> Self
-    where VM: ViewModel<Event, E>,
-    Event: Any + 'static,
-    E: Any + 'static, {
-        Self {
-            internal: Rc::new(vm)
-        }
+impl<VM> IAnyViewModel for VM
+where
+    VM: ViewModel,
+{
+    fn as_any(self: Rc<Self>) -> Rc<dyn Any> {
+        self
     }
 
-    pub fn on_event<Event, E>(&self, cx: &ViewModelContext, event: &Event) -> Result<(), E>
-    where Event: Any + 'static,
-    E: Any + 'static, {
-        todo!()
+    fn handle_flush(&self, cx: &ViewModelContext) -> Result<(), Box<dyn std::error::Error>> {
+        self.on_flush(cx).map_err(|e| e.cast())
     }
 
-    pub fn to<VM, Event, E>(&self) -> Rc<VM>
-    where VM: ViewModel<Event, E>,
-    Event: Any + 'static,
-    E: Any + 'static, {
-        let internal = self.internal.clone().downcast::<VM>().unwrap();
-        internal
+    fn handle_event(
+        &self,
+        cx: &ViewModelContext,
+        event: &dyn Any,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let event = event.downcast_ref::<VM::Event>().unwrap();
+        self.on_event(cx, event).map_err(|e| e.cast())
     }
 }
 
+pub(crate) struct ViewModels {
+    vms: OMap<TypeId, Rc<dyn IAnyViewModel>>,
+}
+impl std::fmt::Debug for ViewModels {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ViewModels").finish()
+    }
+}
 
-impl BoxedViewModels {
-    pub fn new(vms: HashMap<TypeId, BoxedViewModel>) -> Self {
-        Self {
-            vms
-        }
+impl ViewModels {
+    pub fn new(vms: OMap<TypeId, Rc<dyn IAnyViewModel>>) -> Self {
+        Self { vms }
     }
 
-    pub fn handle_event<Event, E>(&self, app: &Arc<AppInternal>, evt: Event)
+    #[instrument]
+    pub fn handle_event<Event>(&self, app: &Arc<AppInternal>, evt: Event)
     where
-        Event: Any + 'static,
-        E: Any + 'static, {
+        Event: Any + Debug + 'static,
+    {
+        tracing::trace!("start {:?}", evt);
+
         let cx = ViewModelContext::new(app.clone());
 
         for (_, vm) in self.vms.iter() {
-            let res = vm.on_event::<Event, E>(&cx, &evt);
-            if let Err(_) = res {
-                // TODO: error handler
-                panic!("ViewModel on event error");
+            let res = vm.handle_event(&cx, &evt);
+            if let Err(e) = res {
+                panic!("ViewModel on event error: {}", e);
             }
+        }
+
+        tracing::trace!("end");
+    }
+
+    #[instrument]
+    pub fn handle_flush(&self, app: &Arc<AppInternal>) {
+        tracing::trace!("start");
+
+        let cx = ViewModelContext::new(app.clone());
+        for (_, vm) in self.vms.iter() {
+            let res = vm.handle_flush(&cx);
+            if let Err(e) = res {
+                panic!("ViewModel on flush error: {}", e);
+            }
+        }
+
+        tracing::trace!("end");
+    }
+
+    pub fn vm<VM>(&self) -> Rc<VM>
+    where
+        VM: ViewModel,
+    {
+        let vm = self.vms.get(&TypeId::of::<VM>());
+
+        if let Some(vm) = vm {
+            vm.clone().as_any().downcast::<VM>().unwrap()
+        } else {
+            let name = std::any::type_name::<VM>();
+            panic!("ViewModel {} not found", name)
         }
     }
 }

@@ -1,10 +1,12 @@
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use ease_client::{
-    build_client, Action, EaseError, IToastService, PlaylistCreateWidget, PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, StorageImportWidget, StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType
+    build_client, Action, IToastService, PlaylistCreateWidget, PlaylistDetailWidget,
+    PlaylistListWidget, RootViewModelState, StorageImportWidget, StorageListWidget,
+    StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
 };
 use ease_client_shared::backends::app::ArgInitializeApp;
 use ease_client_shared::backends::music::MusicId;
@@ -20,7 +22,6 @@ use view_state::ViewStateServiceRef;
 
 mod fake_player;
 mod fake_server;
-mod rt;
 mod view_state;
 
 pub struct TestApp {
@@ -29,6 +30,7 @@ pub struct TestApp {
     player: FakeMusicPlayerRef,
     view_state: ViewStateServiceRef,
     async_runtime: AsyncRuntime,
+    last_wait_req_session: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,13 +64,13 @@ fn setup_subscriber() {
 }
 
 impl TestApp {
-    pub fn new(test_dir: &str, cleanup: bool) -> Self {
+    pub async fn new(test_dir: &str, cleanup: bool) -> Self {
         let test_dir = if test_dir.ends_with("/") {
             test_dir.to_string()
         } else {
             test_dir.to_string() + "/"
         };
-        // std::env::set_var("RUST_BACKTRACE", "1");
+        std::env::set_var("RUST_BACKTRACE", "1");
         setup_subscriber();
 
         let mut cwd = std::env::current_dir().unwrap();
@@ -96,6 +98,7 @@ impl TestApp {
             Arc::new(view_state.clone()),
             async_runtime.clone(),
         );
+        async_runtime.bind_app(app.clone());
         pod.set(app.clone());
 
         let storage_path = {
@@ -108,24 +111,27 @@ impl TestApp {
             }
         };
 
-        app.emit::<_, EaseError>(Action::Init(ArgInitializeApp {
+        app.emit(Action::Init(ArgInitializeApp {
             app_document_dir: test_dir.to_string(),
             schema_version: SCHEMA_VERSION,
             storage_path,
         }));
 
-        Self {
+        let ret = Self {
             app: pod,
             server: FakeServerRef::setup("test-files"),
             player,
             async_runtime,
             view_state,
-        }
+            last_wait_req_session: Default::default(),
+        };
+        ret.wait_network().await;
+        ret
     }
 
     pub fn emit(&self, action: Action) {
-        self.app.get().emit::<_, EaseError>(action);
-        self.player.sync_total_duration();
+        self.app.get().emit(action);
+        self.player.flush_player_events();
     }
 
     pub fn dispatch_click(&self, widget: impl Into<Widget>) {
@@ -144,13 +150,14 @@ impl TestApp {
         })));
     }
 
-    fn create_empty_playlist(&self) {
+    async fn create_empty_playlist(&self) {
         self.dispatch_click(PlaylistListWidget::Add);
         self.dispatch_click(PlaylistCreateWidget::Tab {
             value: CreatePlaylistMode::Empty,
         });
         self.dispatch_change_text(PlaylistCreateWidget::Name, "Default Playlist");
-        self.dispatch_click(PlaylistCreateWidget::FinishImport);
+        self.dispatch_click(PlaylistCreateWidget::FinishCreate);
+        self.wait_network().await;
     }
 
     pub async fn setup_preset(&mut self, depth: PresetDepth) {
@@ -162,14 +169,16 @@ impl TestApp {
             value: StorageType::Webdav,
         });
         self.dispatch_click(StorageUpsertWidget::Finish);
+        self.wait_network().await;
 
         if depth as i32 >= PresetDepth::Playlist as i32 {
-            self.create_empty_playlist();
+            self.create_empty_playlist().await;
         }
         if depth as i32 >= PresetDepth::Music as i32 {
             let playlist_id = self.get_first_playlist_id_from_latest_state();
             self.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
             let storage_id = self.get_first_storage_id_from_latest_state();
+            self.wait_network().await;
             self.dispatch_click(PlaylistDetailWidget::Import);
             self.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
             for _ in 0..10 {
@@ -242,12 +251,31 @@ impl TestApp {
         self.player.last_bytes()
     }
 
-    pub fn advance_timer(&self, duration_s: u64) {
-        self.async_runtime.advance(Duration::from_secs(duration_s));
+    pub async fn advance_timer(&self, mut duration_s: u64) {
+        self.wait_network().await;
+        loop {
+            let t = duration_s.min(1);
+            duration_s -= t;
+
+            if t == 0 {
+                break;
+            }
+
+            self.advance_timer_impl(t);
+            self.wait_network().await;
+        }
+    }
+
+    fn advance_timer_impl(&self, duration_s: u64) {
+        let duration = Duration::from_secs(duration_s);
+        self.player.advance(duration);
+        self.async_runtime.advance(duration);
     }
 
     pub async fn wait_network(&self) {
-        self.wait(200).await
+        for _ in 0..3 {
+            self.wait(20).await;
+        }
     }
 
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {
@@ -258,8 +286,19 @@ impl TestApp {
         self.server.load_resource(url).await
     }
 
-    async fn wait(&self, ms: u64) {
-        tokio::time::sleep(Duration::from_millis(ms)).await;
+    async fn wait(&self, mut ms: u64) {
+        tokio::time::sleep(Duration::from_millis(0)).await;
+        loop {
+            let t = ms.min(4);
+            ms -= t;
+
+            if t == 0 {
+                break;
+            }
+            self.advance_timer_impl(0);
+            self.player.flush_player_events();
+            tokio::time::sleep(Duration::from_millis(t)).await;
+        }
     }
 }
 

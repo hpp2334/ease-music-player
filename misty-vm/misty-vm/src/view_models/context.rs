@@ -1,8 +1,17 @@
-use std::{any::Any, future::Future, rc::Rc, sync::Arc, time::Duration};
+use std::{
+    any::Any,
+    fmt::Debug,
+    future::Future,
+    sync::Arc,
+    time::Duration,
+};
 
-use crate::{async_task::AsyncTasks, internal::AppInternal, utils::PhantomUnsend, IToHost, Model};
-
-use super::ViewModel;
+use crate::{
+    async_task::{AsyncTaskId, AsyncTasks},
+    internal::AppInternal,
+    utils::PhantomUnsend,
+    IToHost, IntoVMError, Model,
+};
 
 pub struct ViewModelContext {
     _app: Arc<AppInternal>,
@@ -21,14 +30,6 @@ impl ViewModelContext {
         &self._app
     }
 
-    pub(crate) fn vm<V, Event, E>(&self) -> Rc<V>
-    where
-        E: Any + 'static,
-        V: ViewModel<Event, E>,
-    {
-        todo!()
-    }
-
     pub fn model_get<T>(&self, _model: &Model<T>) -> std::cell::Ref<'_, T>
     where
         T: 'static,
@@ -45,8 +46,9 @@ impl ViewModelContext {
 
     pub fn model_dirty<T>(&self, _model: &Model<T>) -> bool
     where
-    T: 'static {
-        todo!()
+        T: 'static,
+    {
+        self._app.models.is_dirty::<T>()
     }
 
     pub fn to_host<C>(&self) -> Arc<C>
@@ -56,25 +58,27 @@ impl ViewModelContext {
         self._app.to_hosts.get::<C>()
     }
 
-    pub fn spawn<F, Fut, E>(&self, tasks: &AsyncTasks, f: F)
+    pub fn spawn<F, Fut, E>(&self, tasks: &AsyncTasks, f: F) -> AsyncTaskId
     where
         F: FnOnce(ViewModelContext) -> Fut,
         Fut: Future<Output = Result<(), E>> + 'static,
+        E: IntoVMError,
     {
         let fut = f(self.clone_internal());
         let id = tasks.allocate();
         let (runnable, raw_task) = {
-            let tasks= tasks.clone();
+            let tasks = tasks.clone();
             self._app.async_executor.spawn_local(async move {
                 let r = fut.await;
                 tasks.remove(id);
                 if let Err(e) = r {
-                    tracing::error!("spawn error");
+                    panic!("spawn error: {}", e.cast());
                 }
             })
         };
         tasks.bind(id, raw_task);
         runnable.schedule();
+        id
     }
 
     pub async fn sleep(&self, duration: Duration) {
@@ -85,12 +89,11 @@ impl ViewModelContext {
         self._app.async_executor.get_time()
     }
 
-    pub fn enqueue_emit<Event, E>(&self, evt: Event)
+    pub fn enqueue_emit<Event>(&self, evt: Event)
     where
-        Event: Any + 'static,
-        E: Any + 'static,
+        Event: Any + Debug + 'static,
     {
-        self._app.enqueue_emit::<Event, E>(evt);
+        self._app.enqueue_emit(evt);
     }
 
     fn clone_internal(&self) -> Self {

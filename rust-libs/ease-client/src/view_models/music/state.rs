@@ -43,6 +43,7 @@ impl CurrentMusicState {
             _ => self.index_musics > 0,
         }
     }
+
     pub fn cover(&self) -> String {
         if let Some(id) = self.id {
             if let Some(music) = self.playlist_musics.iter().find(|&m| m.id() == id) {

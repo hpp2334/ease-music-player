@@ -272,6 +272,7 @@ impl Webdav {
     fn build_client(&self) -> StorageBackendResult<reqwest::Client> {
         let client = reqwest::Client::builder()
             .connect_timeout(self.connect_timeout)
+            .no_proxy()
             .build()?;
         Ok(client)
     }

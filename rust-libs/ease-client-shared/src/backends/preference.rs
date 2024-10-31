@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 
 use crate::{define_message, uis::preference::PlayMode};
@@ -11,9 +10,10 @@ pub struct PreferenceData {
 }
 
 define_message!(GetPreferenceMsg, Code::GetPreference, (), PreferenceData);
+
 define_message!(
-    UpdatePreferenceMsg,
-    Code::UpdatePreference,
-    PreferenceData,
+    UpdatePreferencePlaymodeMsg,
+    Code::UpdatePreferencePlaymode,
+    PlayMode,
     ()
 );

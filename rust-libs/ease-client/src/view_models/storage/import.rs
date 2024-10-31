@@ -99,8 +99,9 @@ impl StorageImportVM {
             let mut state = cx.model_mut(&self.current);
             state.current_storage_id = Some(id);
             state.checked_entries_path.clear();
-            state.current_path = Default::default();
+            state.current_path = self.get_current_path(cx)?;
         }
+        self.reload(cx)?;
         Ok(())
     }
 
@@ -128,7 +129,7 @@ impl StorageImportVM {
     fn toggle_all(&self, cx: &ViewModelContext) {
         let mut state = cx.model_mut(&self.current);
 
-        if state.checked_entries_path.is_empty() {
+        if !state.checked_entries_path.is_empty() {
             state.checked_entries_path.clear();
         } else {
             let entries = state.entries.clone();
@@ -145,9 +146,8 @@ impl StorageImportVM {
         cx: &ViewModelContext,
         entry: StorageEntry,
     ) -> EaseResult<()> {
-        let current = self.current.clone();
         let storage_id = cx.model_get(&self.current).current_storage_id;
-        let storage_id = match storage_id {
+        let _ = match storage_id {
             Some(storage_id) => storage_id,
             None => return Ok(()),
         };
@@ -158,13 +158,26 @@ impl StorageImportVM {
             state.current_path = entry.path.clone();
             state.checked_entries_path.clear();
         }
+        self.reload(cx)?;
+
+        Ok(())
+    }
+
+    fn reload(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.check_can_mutate(cx);
+        let current = self.current.clone();
+        let (storage_id, current_path) = {
+            let m = cx.model_get(&self.current);
+
+            (m.current_storage_id.unwrap(), m.current_path.clone())
+        };
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let connector = Connector::of(&cx);
             let res = connector
                 .list_storage_entry_children(
                     &cx,
                     StorageEntryLoc {
-                        path: entry.path,
+                        path: current_path,
                         storage_id,
                     },
                 )
@@ -194,7 +207,6 @@ impl StorageImportVM {
 
             Ok(())
         });
-
         Ok(())
     }
 
@@ -222,8 +234,9 @@ impl StorageImportVM {
     }
 
     fn handle_import(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.check_can_mutate(cx);
         let current_state = cx.model_get(&self.current).clone();
-        let mut entries: Vec<StorageEntry> = current_state.entries.into_iter().collect();
+        let mut entries: Vec<StorageEntry> = current_state.checked_entries();
         let storage_id = current_state.current_storage_id;
         let storage_id = match storage_id {
             Some(id) => id,
@@ -232,7 +245,7 @@ impl StorageImportVM {
 
         match current_state.import_type {
             CurrentStorageImportType::None => {
-                panic!("CurrentStorageImportType is None");
+                unreachable!()
             }
             CurrentStorageImportType::ImportMusics { id } => {
                 PlaylistDetailVM::of(cx).finish_import(cx, id, storage_id, entries)?;
@@ -287,16 +300,43 @@ impl StorageImportVM {
         typ: CurrentStorageImportType,
     ) -> EaseResult<()> {
         {
+            let store = cx.model_get(&self.store);
             let mut state = cx.model_mut(&self.current);
             state.import_type = typ;
             state.entries.clear();
+
+            if state.current_storage_id.is_none() {
+                state.current_storage_id = Some(store.storage_ids[0]);
+            }
         }
+        self.reload(cx)?;
 
         Ok(())
     }
+
+    fn get_current_path(&self, _cx: &ViewModelContext) -> EaseResult<String> {
+        Ok("/".to_string())
+    }
+
+    fn check_can_mutate(&self, cx: &ViewModelContext) {
+        let (storage_id, import_type) = {
+            let m = cx.model_get(&self.current);
+
+            (m.current_storage_id, m.import_type)
+        };
+
+        if storage_id.is_none() {
+            panic!("storage_id is None");
+        }
+        if import_type == CurrentStorageImportType::None {
+            panic!("import_type is None");
+        }
+    }
 }
 
-impl ViewModel<Action, EaseError> for StorageImportVM {
+impl ViewModel for StorageImportVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
             Action::View(action) => match action {

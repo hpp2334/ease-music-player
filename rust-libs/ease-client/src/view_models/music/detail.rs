@@ -20,7 +20,9 @@ impl MusicDetailVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for MusicDetailVM {
+impl ViewModel for MusicDetailVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
             Action::View(action) => match action {

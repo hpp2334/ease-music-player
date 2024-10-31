@@ -12,7 +12,8 @@ use crate::{
     models::storage::StorageEntryLocModel,
     repositories::{
         core::get_conn,
-        playlist::db_remove_musics_in_playlists_by_storage,
+        music::db_get_playlists_count_by_storage,
+        playlist::{db_get_musics_count_by_storage, db_remove_musics_in_playlists_by_storage},
         storage::{db_load_storage, db_load_storages, db_remove_storage, db_upsert_storage},
     },
     services::storage::{build_storage, get_storage_backend, get_storage_backend_by_arg},
@@ -68,7 +69,14 @@ pub async fn ccu_upsert_storage(cx: BackendContext, arg: ArgUpsertStorage) -> BR
 pub async fn cr_list_storage(cx: BackendContext, _arg: ()) -> BResult<Vec<Storage>> {
     let conn = get_conn(&cx)?;
     let models = db_load_storages(conn.get_ref())?;
-    let storages = models.into_iter().map(|m| build_storage(m)).collect();
+
+    let mut storages: Vec<Storage> = Default::default();
+    for m in models.into_iter() {
+        let music_count = db_get_musics_count_by_storage(conn.get_ref(), m.id)?;
+        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), m.id)?;
+
+        storages.push(build_storage(m, music_count, playlist_count));
+    }
 
     Ok(storages)
 }
@@ -77,7 +85,9 @@ pub async fn cr_get_storage(cx: BackendContext, id: StorageId) -> BResult<Option
     let conn = get_conn(&cx)?;
     let model = db_load_storage(conn.get_ref(), id)?;
     let storage = if let Some(model) = model {
-        Some(build_storage(model))
+        let music_count = db_get_musics_count_by_storage(conn.get_ref(), id)?;
+        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), id)?;
+        Some(build_storage(model, music_count, playlist_count))
     } else {
         None
     };
@@ -138,6 +148,7 @@ pub async fn cr_list_storage_entry_children(
             Ok(ListStorageEntryChildrenResp::Ok(entries))
         }
         Err(e) => {
+            tracing::error!("{}", e);
             if e.is_unauthorized() {
                 Ok(ListStorageEntryChildrenResp::AuthenticationFailed)
             } else if e.is_timeout() {

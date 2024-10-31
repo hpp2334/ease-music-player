@@ -23,7 +23,6 @@ use super::{
     storage::state::{AllStorageState, CurrentStorageState, EditStorageState},
 };
 
-mod builder;
 pub mod views;
 
 macro_rules! vsb {
@@ -144,8 +143,16 @@ impl ViewStateVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for ViewStateVM {
+impl ViewModel for ViewStateVM {
+    type Event = Action;
+    type Error = EaseError;
+
     fn on_event(&self, cx: &ViewModelContext, _event: &Action) -> EaseResult<()> {
+        self.notify(cx);
+        Ok(())
+    }
+
+    fn on_flush(&self, cx: &ViewModelContext) -> Result<(), Self::Error> {
         self.notify(cx);
         Ok(())
     }

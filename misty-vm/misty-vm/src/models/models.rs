@@ -1,10 +1,8 @@
 use std::{
-    any::{Any, TypeId},
+    any::TypeId,
     cell::{Ref, RefCell, RefMut},
-    collections::{HashMap, HashSet},
-    fmt::Debug,
+    collections::HashSet,
     marker::PhantomData,
-    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak},
 };
 
 use super::model::RawModels;
@@ -15,6 +13,7 @@ pub struct Model<T> {
 
 pub(crate) struct Models {
     raw: RawModels,
+    dirties: RefCell<HashSet<TypeId>>,
 }
 
 impl<T> Model<T> {
@@ -37,6 +36,7 @@ impl Models {
     pub fn new() -> Self {
         Self {
             raw: RawModels::new(),
+            dirties: Default::default(),
         }
     }
 
@@ -61,7 +61,26 @@ impl Models {
     where
         T: 'static,
     {
+        self.mark_dirty::<T>();
         let model = self.raw.read::<T>();
         model.read_mut::<T>()
+    }
+
+    pub fn is_dirty<T>(&self) -> bool
+    where
+        T: 'static,
+    {
+        self.dirties.borrow().contains(&TypeId::of::<T>())
+    }
+
+    pub fn clear_dirties(&self) {
+        self.dirties.borrow_mut().clear();
+    }
+
+    fn mark_dirty<T>(&self)
+    where
+        T: 'static,
+    {
+        self.dirties.borrow_mut().insert(TypeId::of::<T>());
     }
 }

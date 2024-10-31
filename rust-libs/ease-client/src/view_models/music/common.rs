@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::atomic::AtomicBool, time::Duration};
 
 use ease_client_shared::backends::{
     music::{Music, MusicId},
@@ -28,6 +28,7 @@ pub(crate) struct MusicCommonVM {
     current: Model<CurrentMusicState>,
     time_to_pause: Model<TimeToPauseState>,
     tasks: AsyncTasks,
+    ticking: AtomicBool,
 }
 
 impl MusicCommonVM {
@@ -36,6 +37,7 @@ impl MusicCommonVM {
             current: cx.model(),
             time_to_pause: cx.model(),
             tasks: Default::default(),
+            ticking: Default::default(),
         }
     }
 
@@ -62,10 +64,32 @@ impl MusicCommonVM {
         }
     }
 
-    pub(crate) fn schedule_tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    pub(crate) fn schedule_tick<const Im: bool>(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        if self.ticking.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        if Im {
+            self.tick(cx)?;
+        }
+        self.schedule_tick_impl(cx)?;
+        Ok(())
+    }
+
+    pub(crate) fn schedule_tick_impl(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let this = Self::of(cx);
+
+        if self
+            .ticking
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(());
+        }
+
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             cx.sleep(Duration::from_secs(1)).await;
+            this.ticking
+                .store(false, std::sync::atomic::Ordering::Relaxed);
             this.tick(&cx)?;
             Ok(())
         });
@@ -77,15 +101,15 @@ impl MusicCommonVM {
         let time_to_pause_enabled = cx.model_get(&self.time_to_pause).enabled;
 
         if is_playing {
-            MusicLyricVM::of(cx).tick_lyric_index(cx)?;
             MusicControlVM::of(cx).tick(cx)?;
+            MusicLyricVM::of(cx).tick_lyric_index(cx)?;
         }
         if time_to_pause_enabled {
             TimeToPauseVM::of(cx).tick(cx)?;
         }
 
         if is_playing || time_to_pause_enabled {
-            self.schedule_tick(&cx)?;
+            self.schedule_tick_impl(&cx)?;
         }
         Ok(())
     }
@@ -118,7 +142,9 @@ impl MusicCommonVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for MusicCommonVM {
+impl ViewModel for MusicCommonVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
             Action::MusicCommon(action) => match action {

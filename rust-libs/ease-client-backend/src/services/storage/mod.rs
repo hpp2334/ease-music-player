@@ -4,13 +4,16 @@ use crate::{
     ctx::BackendContext,
     error::BResult,
     models::storage::StorageModel,
-    repositories::{core::get_conn, storage::db_load_storage},
+    repositories::{
+        core::get_conn, music::db_get_playlists_count_by_storage,
+        playlist::db_get_musics_count_by_storage, storage::db_load_storage,
+    },
 };
 use ease_client_shared::backends::storage::{ArgUpsertStorage, Storage, StorageId, StorageType};
 use ease_remote_storage::{BuildWebdavArg, StorageBackend, Webdav};
 use num_traits::FromPrimitive;
 
-pub fn build_storage(model: StorageModel) -> Storage {
+pub fn build_storage(model: StorageModel, music_count: u32, playlist_count: u32) -> Storage {
     Storage {
         id: model.id,
         addr: model.addr,
@@ -19,8 +22,8 @@ pub fn build_storage(model: StorageModel) -> Storage {
         password: model.password,
         is_anonymous: model.is_anonymous,
         typ: StorageType::from_i32(model.typ).unwrap(),
-        music_count: 0,
-        playlist_count: 0,
+        music_count,
+        playlist_count,
     }
 }
 
@@ -54,13 +57,20 @@ pub fn get_storage_backend(
 ) -> BResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
     let conn = get_conn(&cx)?;
     let model = db_load_storage(conn.get_ref(), storage_id)?;
+    let (music_count, playlist_count) = if let Some(model) = model.as_ref() {
+        let music_count = db_get_musics_count_by_storage(conn.get_ref(), model.id)?;
+        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), model.id)?;
+        (music_count, playlist_count)
+    } else {
+        (0, 0)
+    };
     drop(conn);
 
     if model.is_none() {
         return Ok(None);
     }
     let storage = model.unwrap();
-    let storage = build_storage(storage);
+    let storage = build_storage(storage, music_count, playlist_count);
     let backend = get_storage_backend_by_arg(
         &cx,
         ArgUpsertStorage {

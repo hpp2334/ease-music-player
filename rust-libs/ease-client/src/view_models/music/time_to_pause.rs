@@ -7,10 +7,7 @@ use crate::{
     error::{EaseError, EaseResult},
 };
 
-use super::{
-    common::MusicCommonVM,
-    state::TimeToPauseState,
-};
+use super::{common::MusicCommonVM, control::MusicControlVM, state::TimeToPauseState};
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum TimeToPauseWidget {
@@ -19,7 +16,7 @@ pub enum TimeToPauseWidget {
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum TimeToPauseAction {
-    Finish { hour: u8, minute: u8 },
+    Finish { hour: u8, minute: u8, second: u8 },
 }
 
 pub(crate) struct TimeToPauseVM {
@@ -41,13 +38,20 @@ impl TimeToPauseVM {
         Ok(())
     }
 
-    fn start_timer(&self, cx: &ViewModelContext, hour: u8, minute: u8) -> EaseResult<()> {
+    fn start_timer(
+        &self,
+        cx: &ViewModelContext,
+        hour: u8,
+        minute: u8,
+        second: u8,
+    ) -> EaseResult<()> {
         {
             let mut state = cx.model_mut(&self.timer);
             let s_time = cx.get_time();
             let t_time = s_time
                 + Duration::from_secs(hour as u64 * 3600)
-                + Duration::from_secs(minute as u64 * 60);
+                + Duration::from_secs(minute as u64 * 60)
+                + Duration::from_secs(second as u64);
             state.expired_time = t_time;
             state.enabled = true;
         }
@@ -57,39 +61,45 @@ impl TimeToPauseVM {
 
     fn update_timer(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let mut state = cx.model_mut(&self.timer);
-        let s_time = cx.get_time().max(state.expired_time);
+        let s_time = cx.get_time().min(state.expired_time);
         state.left = state.expired_time - s_time;
 
         if state.left.is_zero() {
             state.enabled = false;
+            MusicControlVM::of(cx).request_pause(cx)?;
         } else {
-            MusicCommonVM::of(cx).schedule_tick(cx)?;
+            drop(state);
+            MusicCommonVM::of(cx).schedule_tick::<false>(cx)?;
         }
         Ok(())
     }
 }
 
-impl ViewModel<Action, EaseError> for TimeToPauseVM {
+impl ViewModel for TimeToPauseVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::View(action) => {
-                match action {
-                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
-                        (Widget::TimeToPause(action), WidgetActionType::Click) => match action {
-                            TimeToPauseWidget::Delete => {
-                                self.pause(cx)?;
-                            }
-                        },
-                        _ => {}
-                    },
-                    ViewAction::TimeToPause(action) => match action {
-                        TimeToPauseAction::Finish { hour, minute } => {
-                            self.start_timer(cx, *hour, *minute)?;
+            Action::View(action) => match action {
+                ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                    (Widget::TimeToPause(action), WidgetActionType::Click) => match action {
+                        TimeToPauseWidget::Delete => {
+                            self.pause(cx)?;
                         }
                     },
                     _ => {}
-                }
-            }
+                },
+                ViewAction::TimeToPause(action) => match action {
+                    TimeToPauseAction::Finish {
+                        hour,
+                        minute,
+                        second,
+                    } => {
+                        self.start_timer(cx, *hour, *minute, *second)?;
+                    }
+                },
+                _ => {}
+            },
             _ => {}
         }
         Ok(())

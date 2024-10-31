@@ -1,14 +1,11 @@
 use std::{
     convert::Infallible,
     net::SocketAddr,
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::{atomic::AtomicUsize, Arc, Mutex},
 };
 
 use dav_server::{fakels::FakeLs, localfs::LocalFs, DavHandler};
 use hyper::{Response, StatusCode};
-
-use crate::rt::ASYNC_RT;
 
 #[derive(Debug, Clone)]
 pub enum ReqInteceptor {
@@ -20,6 +17,7 @@ pub struct FakeServerInner {
     addr: String,
     tx: Option<tokio::sync::oneshot::Sender<()>>,
     req_inteceptor: Arc<Mutex<Option<ReqInteceptor>>>,
+    req_session: Arc<AtomicUsize>,
 }
 
 pub struct FakeServerRef {
@@ -43,14 +41,18 @@ impl FakeServerInner {
             .build_handler();
         let req_inteceptor: Arc<Mutex<Option<ReqInteceptor>>> = Default::default();
         let cloned_req_inteceptor = req_inteceptor.clone();
+        let req_session: Arc<AtomicUsize> = Default::default();
+        let cloned_req_session = req_session.clone();
         let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
         let make_service = hyper::service::make_service_fn(move |_| {
             let dav_server = dav_server.clone();
             let req_inteceptor = req_inteceptor.clone();
+            let cloned_req_session = cloned_req_session.clone();
             async move {
                 let func = move |req| {
                     let dav_server = dav_server.clone();
                     let req_inteceptor = req_inteceptor.clone();
+                    let cloned_req_session = cloned_req_session.clone();
                     async move {
                         {
                             let req_inteceptor = {
@@ -76,7 +78,9 @@ impl FakeServerInner {
                                 }
                             }
                         }
-                        return Ok::<_, Infallible>(dav_server.handle(req).await);
+                        let resp = dav_server.handle(req).await;
+                        cloned_req_session.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        return Ok::<_, Infallible>(resp);
                     }
                 };
                 Ok::<_, Infallible>(hyper::service::service_fn(func))
@@ -84,26 +88,23 @@ impl FakeServerInner {
         });
 
         let (tx_abort_server, rx_abort_server) = tokio::sync::oneshot::channel::<()>();
-        let (tx_port, rx_port) = std::sync::mpsc::channel::<u16>();
+        let server = hyper::Server::bind(&addr).serve(make_service);
+        let port = server.local_addr().port();
 
-        let _async_guard = ASYNC_RT.enter();
-        ASYNC_RT.spawn(async move {
-            let server = hyper::Server::bind(&addr).serve(make_service);
-            let port = server.local_addr().port();
-            tx_port.send(port).unwrap();
+        tokio::spawn(async move {
             let server = server.with_graceful_shutdown(async {
                 rx_abort_server.await.ok();
             });
             server.await.unwrap();
         });
 
-        let port = rx_port.recv_timeout(Duration::from_secs(4)).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
+        // std::thread::sleep(Duration::from_millis(200));
 
         FakeServerInner {
             addr: format!("http://127.0.0.1:{}", port),
             tx: Some(tx_abort_server),
             req_inteceptor: cloned_req_inteceptor,
+            req_session,
         }
     }
 
@@ -120,10 +121,10 @@ impl FakeServerInner {
 
 impl Drop for FakeServerInner {
     fn drop(&mut self) {
-        std::thread::sleep(Duration::from_secs(1));
+        // std::thread::sleep(Duration::from_secs(1));
         let tx = self.tx.take().unwrap();
         let _ = tx.send(());
-        println!("drop server");
+        tracing::info!("drop server");
     }
 }
 
@@ -134,10 +135,15 @@ impl FakeServerRef {
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {
         self.inner.set_inteceptor_req(v);
     }
+    pub fn req_session(&self) -> usize {
+        self.inner
+            .req_session
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
 
     pub async fn load_resource(&self, url: impl ToString) -> Vec<u8> {
         let url = url.to_string();
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let resp = client.get(&url).send().await.unwrap();
         resp.bytes().await.unwrap().to_vec()
     }

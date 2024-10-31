@@ -1,15 +1,13 @@
 use crate::{
-    actions::{event::ViewAction, Action, Widget, WidgetActionType}, error::{EaseError, EaseResult}, view_models::{connector::Connector, storage::import::StorageImportVM}
+    actions::{event::ViewAction, Action, Widget, WidgetActionType},
+    error::{EaseError, EaseResult},
+    view_models::{connector::Connector, storage::import::StorageImportVM},
 };
 use ease_client_shared::{
-    backends::{
-        music::ArgUpdateMusicLyric,
-        storage::StorageEntryLoc,
-    },
+    backends::{music::ArgUpdateMusicLyric, storage::StorageEntryLoc},
     uis::storage::CurrentStorageImportType,
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
-use serde::Serialize;
 
 use super::state::CurrentMusicState;
 
@@ -24,14 +22,11 @@ pub(crate) struct MusicLyricVM {
     tasks: AsyncTasks,
 }
 
-
-
-
 impl MusicLyricVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             current: cx.model(),
-            tasks: Default::default()
+            tasks: Default::default(),
         }
     }
 
@@ -97,25 +92,25 @@ impl MusicLyricVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for MusicLyricVM {
+impl ViewModel for MusicLyricVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::View(action) => {
-                match action {
-                    ViewAction::Widget(action) => match (&action.widget, &action.typ) {
-                        (Widget::MusicLyric(action), WidgetActionType::Click) => match action {
-                            MusicLyricWidget::Add => {
-                                self.prepare_storage(cx)?;
-                            }
-                            MusicLyricWidget::Remove => {
-                                self.remove(cx)?;
-                            }
-                        },
-                        _ => {}
+            Action::View(action) => match action {
+                ViewAction::Widget(action) => match (&action.widget, &action.typ) {
+                    (Widget::MusicLyric(action), WidgetActionType::Click) => match action {
+                        MusicLyricWidget::Add => {
+                            self.prepare_storage(cx)?;
+                        }
+                        MusicLyricWidget::Remove => {
+                            self.remove(cx)?;
+                        }
                     },
                     _ => {}
-                }
-            }
+                },
+                _ => {}
+            },
             _ => {}
         }
         Ok(())

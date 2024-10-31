@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Code {
     // Playlist
     GetAllPlaylistMetas,
@@ -24,5 +24,5 @@ pub enum Code {
     ListStorageEntryChildren,
     // Preference
     GetPreference,
-    UpdatePreference,
+    UpdatePreferencePlaymode,
 }

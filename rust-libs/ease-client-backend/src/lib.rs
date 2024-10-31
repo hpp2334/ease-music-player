@@ -1,3 +1,4 @@
+
 use ctx::BackendContext;
 
 pub(crate) mod controllers;
@@ -9,7 +10,7 @@ pub(crate) mod services;
 pub(crate) mod utils;
 
 pub use controllers::*;
-use ease_client_shared::backends::{app::ArgInitializeApp, message::{IMessage, MessagePayload}};
+use ease_client_shared::backends::{app::ArgInitializeApp, message::MessagePayload};
 use error::BResult;
 use services::app::app_bootstrap;
 
@@ -30,7 +31,11 @@ impl Backend {
     }
 
     pub async fn request(&self, arg: MessagePayload) -> BResult<MessagePayload> {
-        dispatch_message(self.cx.clone(), arg).await
+        let res = dispatch_message(self.cx.clone(), arg).await;
+        if let Err(ref e) = &res {
+            tracing::error!("Backend request fail: {:?}", e);
+        }
+        res
     }
 
     pub fn port(&self) -> u16 {

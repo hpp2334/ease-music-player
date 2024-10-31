@@ -31,7 +31,7 @@ pub fn db_upsert_playlist(
         Ok(id)
     } else {
         let id = conn.query::<PlaylistId>(
-            "INSERT INTO playlist (title, picture_storage_id, picture_path, created_time) VALUES (?1, ?2, ?3) RETURNING id",
+            "INSERT INTO playlist (title, picture_storage_id, picture_path, created_time) VALUES (?1, ?2, ?3, ?4) RETURNING id",
             params![arg.title, picture_storage_id, picture_path, current_time_ms],
         )?.pop().unwrap();
         Ok(id)
@@ -79,7 +79,7 @@ pub fn db_batch_add_music_to_playlist(
 pub fn db_load_playlists(conn: DbConnectionRef) -> BResult<Vec<PlaylistModel>> {
     let playlist_models = conn.query::<PlaylistModel>(
         r#"
-        SELECT id, title, picture, created_time FROM playlist;
+        SELECT id, title, picture_storage_id, picture_path, created_time FROM playlist;
     "#,
         [],
     )?;
@@ -126,4 +126,17 @@ pub fn db_remove_musics_in_playlists_by_storage(
         params![storage_id],
     )?;
     Ok(())
+}
+
+pub fn db_get_musics_count_by_storage(
+    conn: DbConnectionRef,
+    storage_id: StorageId,
+) -> BResult<u32> {
+    let mut list = conn.query::<u32>(
+        r#"
+        SELECT COUNT(*) FROM music WHERE storage_id = ?;
+    "#,
+        [storage_id],
+    )?;
+    Ok(list.pop().unwrap())
 }

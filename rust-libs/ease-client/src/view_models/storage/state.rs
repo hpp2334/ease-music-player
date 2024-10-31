@@ -32,3 +32,13 @@ pub struct CurrentStorageState {
     pub current_storage_id: Option<StorageId>,
     pub current_path: String,
 }
+
+impl CurrentStorageState {
+    pub fn checked_entries(&self) -> Vec<StorageEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| self.checked_entries_path.contains(&entry.path))
+            .cloned()
+            .collect()
+    }
+}

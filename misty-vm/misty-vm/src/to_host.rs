@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::ViewModelContext;
+use crate::view_models::context::ViewModelContext;
 
 pub trait IToHost: Any + Send + Sync + Sized + 'static {
     fn of(cx: &ViewModelContext) -> Arc<Self> {

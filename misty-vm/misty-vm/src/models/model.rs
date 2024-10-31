@@ -2,9 +2,7 @@ use std::{
     any::{Any, TypeId},
     cell::{Ref, RefCell, RefMut},
     collections::HashMap,
-    marker::PhantomData,
     rc::Rc,
-    sync::{Arc, RwLock},
 };
 
 pub(crate) struct AnyModel {

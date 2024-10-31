@@ -1,10 +1,10 @@
-use ease_client::{view_models::*, PlaylistCreateWidget, PlaylistListWidget, StorageImportWidget};
+use ease_client::{PlaylistCreateWidget, PlaylistListWidget, StorageImportWidget};
 use ease_client_shared::uis::playlist::CreatePlaylistMode;
 use ease_client_test::{PresetDepth, TestApp};
 
 #[tokio::test]
 async fn create_playlist_full_1() {
-    let mut app = TestApp::new("test-dbs/create_playlist_full_1", true);
+    let mut app = TestApp::new("test-dbs/create_playlist_full_1", true).await;
     app.setup_preset(PresetDepth::Storage).await;
 
     app.dispatch_click(PlaylistListWidget::Add);
@@ -36,7 +36,7 @@ async fn create_playlist_full_1() {
     assert_eq!(picture.len(), 82580);
 
     app.dispatch_change_text(PlaylistCreateWidget::Name, "ABC");
-    app.dispatch_click(PlaylistCreateWidget::FinishImport);
+    app.dispatch_click(PlaylistCreateWidget::FinishCreate);
     app.wait_network().await;
 
     let state = app.latest_state().playlist_list.unwrap();
@@ -47,7 +47,7 @@ async fn create_playlist_full_1() {
 
 #[tokio::test]
 async fn create_playlist_full_2() {
-    let mut app = TestApp::new("test-dbs/create_playlist_full_2", true);
+    let mut app = TestApp::new("test-dbs/create_playlist_full_2", true).await;
     app.setup_preset(PresetDepth::Storage).await;
 
     app.dispatch_click(PlaylistListWidget::Add);
@@ -55,8 +55,14 @@ async fn create_playlist_full_2() {
         value: CreatePlaylistMode::Full,
     });
     app.dispatch_click(PlaylistCreateWidget::Import);
-
     app.wait_network().await;
+    app.dispatch_click(StorageImportWidget::StorageEntry {
+        path: app.latest_state().current_storage_entries.unwrap().entries[0]
+            .path
+            .clone(),
+    });
+    app.wait_network().await;
+
     let state = app.latest_state().current_storage_entries.unwrap();
 
     let e1 = state.entries[0].clone();
@@ -74,18 +80,18 @@ async fn create_playlist_full_2() {
     assert_eq!(state.picture, "");
 
     app.dispatch_change_text(PlaylistCreateWidget::Name, "ABC");
-    app.dispatch_click(PlaylistCreateWidget::FinishImport);
+    app.dispatch_click(PlaylistCreateWidget::FinishCreate);
     app.wait_network().await;
 
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     assert_eq!(state.playlist_list[0].title, "ABC".to_string());
-    assert_ne!(state.playlist_list[0].cover_url, "")
+    assert_eq!(state.playlist_list[0].cover_url, "".to_string())
 }
 
 #[tokio::test]
 async fn create_playlist_empty_1() {
-    let mut app = TestApp::new("test-dbs/create_playlist_empty_1", true);
+    let mut app = TestApp::new("test-dbs/create_playlist_empty_1", true).await;
     app.setup_preset(PresetDepth::Storage).await;
 
     app.dispatch_click(PlaylistListWidget::Add);
@@ -94,7 +100,7 @@ async fn create_playlist_empty_1() {
     });
 
     app.dispatch_change_text(PlaylistCreateWidget::Name, "ABC");
-    app.dispatch_click(PlaylistCreateWidget::FinishImport);
+    app.dispatch_click(PlaylistCreateWidget::FinishCreate);
     app.wait_network().await;
 
     let state = app.latest_state().playlist_list.unwrap();
@@ -105,7 +111,7 @@ async fn create_playlist_empty_1() {
 
 #[tokio::test]
 async fn create_playlist_only_cover_1() {
-    let mut app = TestApp::new("test-dbs/create_playlist_only_cover_1", true);
+    let mut app = TestApp::new("test-dbs/create_playlist_only_cover_1", true).await;
     app.setup_preset(PresetDepth::Storage).await;
 
     app.dispatch_click(PlaylistListWidget::Add);

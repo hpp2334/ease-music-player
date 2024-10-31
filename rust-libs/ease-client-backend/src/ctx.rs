@@ -6,11 +6,7 @@ use std::{
     time::Duration,
 };
 
-use tokio::sync::mpsc;
-
-use crate::error::{BError, BResult};
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BackendContext {
     storage_path: Arc<RwLock<String>>,
     app_document_dir: Arc<RwLock<String>>,

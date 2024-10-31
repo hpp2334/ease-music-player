@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{backends::code::Code, define_id, define_message};
 
 use super::{
-    music::{MusicAbstract, MusicId, MusicMeta},
+    music::{MusicAbstract, MusicId},
     music_duration::MusicDuration,
     storage::StorageEntryLoc,
 };

@@ -1,6 +1,7 @@
 use ease_client_shared::backends::{
     music::{
-        ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, LyricLoadState, Music, MusicId, MusicLyric
+        ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, LyricLoadState, Music,
+        MusicId, MusicLyric,
     },
     storage::StorageEntryLoc,
 };
@@ -24,19 +25,41 @@ use crate::{
 
 use super::storage::{from_opt_storage_entry, load_storage_entry_data, to_opt_storage_entry};
 
-async fn load_lyric(cx: &BackendContext, loc: Option<StorageEntryLoc>) -> Option<MusicLyric> {
-    if loc.is_none() {
-        return None;
-    }
-    let loc = loc.unwrap();
+async fn load_lyric(
+    cx: &BackendContext,
+    loc: Option<StorageEntryLoc>,
+    is_fallback: bool,
+) -> Option<MusicLyric> {
+    let loc = match loc {
+        Some(loc) => loc,
+        None => {
+            return None;
+        }
+    };
     let data = load_storage_entry_data(&cx, &loc).await;
     if let Err(e) = &data {
         tracing::error!("fail to load entry {:?}: {}", loc, e);
-        return Some(MusicLyric { loc, data: Default::default(), loaded_state: LyricLoadState::Failed });
+        return Some(MusicLyric {
+            loc,
+            data: Default::default(),
+            loaded_state: if is_fallback {
+                LyricLoadState::Missing
+            } else {
+                LyricLoadState::Failed
+            },
+        });
     }
     let data = data.unwrap();
     if data.is_none() {
-        return Some(MusicLyric { loc, data: Default::default(), loaded_state: LyricLoadState::Failed });
+        return Some(MusicLyric {
+            loc,
+            data: Default::default(),
+            loaded_state: if is_fallback {
+                LyricLoadState::Missing
+            } else {
+                LyricLoadState::Failed
+            },
+        });
     }
     let data = data.unwrap();
     let data = String::from_utf8_lossy(&data).to_string();
@@ -44,11 +67,19 @@ async fn load_lyric(cx: &BackendContext, loc: Option<StorageEntryLoc>) -> Option
     if lyric.is_err() {
         let e = lyric.unwrap_err();
         tracing::error!("fail to parse lyric: {}", e);
-        return Some(MusicLyric { loc, data: Default::default(), loaded_state: LyricLoadState::Failed });
+        return Some(MusicLyric {
+            loc,
+            data: Default::default(),
+            loaded_state: LyricLoadState::Failed,
+        });
     }
     let lyric = lyric.unwrap();
 
-    Some(MusicLyric { loc, data: lyric, loaded_state: LyricLoadState::Loaded })
+    Some(MusicLyric {
+        loc,
+        data: lyric,
+        loaded_state: LyricLoadState::Loaded,
+    })
 }
 
 pub(crate) async fn cr_get_music(cx: BackendContext, id: MusicId) -> BResult<Option<Music>> {
@@ -61,17 +92,34 @@ pub(crate) async fn cr_get_music(cx: BackendContext, id: MusicId) -> BResult<Opt
     let model = model.unwrap();
     let meta = build_music_meta(model.clone());
     let url = get_serve_url_from_music_id(&cx, meta.id);
-    let lyric_loc = to_opt_storage_entry(model.lyric_path, model.lyric_storage_id);
-    let lyric: Option<MusicLyric> = load_lyric(&cx, lyric_loc).await;
+    let loc = StorageEntryLoc {
+        storage_id: model.storage_id,
+        path: model.path,
+    };
+    let mut lyric_loc = to_opt_storage_entry(model.lyric_path, model.lyric_storage_id);
+    let using_fallback = lyric_loc.is_none() && model.lyric_default;
+    if using_fallback {
+        lyric_loc = Some(StorageEntryLoc {
+            path: {
+                let mut path = loc.path.clone();
+                let new_extension = ".lrc";
+                if let Some(pos) = path.rfind('.') {
+                    path.truncate(pos);
+                }
+                path.push_str(new_extension);
+                path
+            },
+            storage_id: loc.storage_id,
+        });
+    }
+
+    let lyric: Option<MusicLyric> = load_lyric(&cx, lyric_loc, using_fallback).await;
     let cover_loc = to_opt_storage_entry(model.picture_path, model.picture_storage_id);
     let cover_url = get_serve_url_from_opt_loc(&cx, cover_loc.clone());
 
     let music: Music = Music {
         meta,
-        loc: StorageEntryLoc {
-            storage_id: model.storage_id,
-            path: model.path,
-        },
+        loc,
         url,
         cover_loc,
         cover_url,

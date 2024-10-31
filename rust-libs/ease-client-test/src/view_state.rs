@@ -16,6 +16,7 @@ impl ViewStateServiceRef {
 
     pub fn state(&self) -> RootViewModelState {
         let state = self.state.lock().unwrap();
+        tracing::trace!("{state:?}");
         state.clone()
     }
 }

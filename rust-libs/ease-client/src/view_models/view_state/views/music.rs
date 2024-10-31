@@ -1,12 +1,15 @@
 use ease_client_shared::{
-    backends::{music::{LyricLoadState, MusicId}, music_duration::MusicDuration},
+    backends::{
+        music::{LyricLoadState, MusicId},
+        music_duration::MusicDuration,
+    },
     uis::preference::PlayMode,
 };
 use serde::Serialize;
 
 use crate::{
     utils::common::get_display_duration,
-    view_models::music::{state::{CurrentMusicState, TimeToPauseState}},
+    view_models::music::state::{CurrentMusicState, TimeToPauseState},
 };
 
 use super::models::RootViewModelState;
@@ -40,7 +43,7 @@ pub struct VLyricLine {
 #[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
 pub struct VCurrentMusicLyricState {
     pub lyric_lines: Vec<VLyricLine>,
-    pub load_state: LyricLoadState
+    pub load_state: LyricLoadState,
 }
 
 #[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
@@ -56,7 +59,9 @@ pub(crate) fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewMod
         if let Some(id) = id {
             id
         } else {
-            root.current_music = Some(Default::default());
+            let mut view_model_state: VCurrentMusicState = Default::default();
+            view_model_state.play_mode = state.play_mode;
+            root.current_music = Some(view_model_state);
             return;
         }
     };
@@ -126,6 +131,6 @@ pub(crate) fn current_music_lyric_vs(state: &CurrentMusicState, root: &mut RootV
             state.lyric.as_ref().unwrap().loaded_state
         } else {
             LyricLoadState::Missing
-        }
+        },
     });
 }

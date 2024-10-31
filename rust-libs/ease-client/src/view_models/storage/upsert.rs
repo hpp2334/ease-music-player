@@ -132,7 +132,9 @@ impl StorageUpsertVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for StorageUpsertVM {
+   impl ViewModel for StorageUpsertVM {
+     type Event = Action;
+     type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
             Action::View(action) => {

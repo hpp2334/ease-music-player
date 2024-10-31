@@ -82,7 +82,7 @@ pub(crate) fn playlist_list_vs(
             title: playlist.title().to_string(),
             count: playlist.music_count as i32,
             duration: get_display_duration(&duration),
-            cover_url: connector_state.serve_url_opt(playlist.cover().clone()),
+            cover_url: connector_state.serve_asset_url_opt(playlist.cover().clone()),
         });
     }
 
@@ -120,7 +120,7 @@ pub(crate) fn current_playlist_vs(
         items,
         title: playlist.title().to_string(),
         duration: get_display_duration(&playlist.duration()),
-        cover_url: connector_state.serve_url_opt(playlist.cover().clone()),
+        cover_url: connector_state.serve_asset_url_opt(playlist.cover().clone()),
     };
 
     root.current_playlist = Some(current_playlist_state);
@@ -131,7 +131,7 @@ pub(crate) fn edit_playlist_vs(
     root: &mut RootViewModelState,
 ) {
     root.edit_playlist = Some(VEditPlaylistState {
-        picture: connector_state.serve_url_opt(edit_playlist.cover.clone()),
+        picture: connector_state.serve_asset_url_opt(edit_playlist.cover.clone()),
         name: edit_playlist.playlist_name.clone(),
     });
 }
@@ -141,7 +141,7 @@ pub(crate) fn create_playlist_vs(
     root: &mut RootViewModelState,
 ) {
     let mode = create_playlist.mode;
-    let cover = connector_state.serve_url_opt(create_playlist.cover.clone().clone());
+    let cover = connector_state.serve_asset_url_opt(create_playlist.cover.clone().clone());
     let music_count = create_playlist.entries.len();
 
     root.create_playlist = Some(VCreatePlaylistState {

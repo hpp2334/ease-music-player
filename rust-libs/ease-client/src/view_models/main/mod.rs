@@ -30,7 +30,9 @@ impl MainBodyVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for MainBodyVM {
+   impl ViewModel for MainBodyVM {
+     type Event = Action;
+     type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
             Action::View(action) => {

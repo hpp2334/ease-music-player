@@ -51,7 +51,7 @@ impl IConnectorHost for ConnectorHostImpl {
         let (tx, rx) = oneshot::channel();
         let sender = self.sender.clone();
         Box::pin(async move {
-            let _ = sender.send((msg, tx));
+            sender.send((msg, tx)).await.unwrap();
             let ret = rx
                 .await
                 .unwrap()

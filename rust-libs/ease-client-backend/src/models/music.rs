@@ -14,4 +14,5 @@ pub struct MusicModel {
     pub picture_path: Option<String>,
     pub lyric_storage_id: Option<StorageId>,
     pub lyric_path: Option<String>,
+    pub lyric_default: bool,
 }

@@ -1,12 +1,19 @@
 use std::time::Duration;
 
 use ease_client_shared::{
-    backends::{music::{ArgUpdateMusicDuration, MusicId}, music_duration::MusicDuration, playlist::PlaylistId},
+    backends::{
+        music::{ArgUpdateMusicDuration, MusicId},
+        music_duration::MusicDuration,
+        playlist::PlaylistId,
+    },
     uis::preference::PlayMode,
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
-use super::{common::MusicCommonAction, state::CurrentMusicState};
+use super::{
+    common::MusicCommonVM,
+    state::CurrentMusicState,
+};
 use crate::{
     actions::{event::ViewAction, Widget},
     to_host::player::MusicPlayerService,
@@ -38,9 +45,10 @@ pub enum PlayerEvent {
     Complete,
     Loading,
     Loaded,
-    Total {
-        duration_ms: u64
-    }
+    Play,
+    Pause,
+    Stop,
+    Total { duration_ms: u64 },
 }
 
 pub(crate) struct MusicControlVM {
@@ -56,38 +64,47 @@ impl MusicControlVM {
         }
     }
 
-    pub(crate) fn play(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
-        let current_playlist_id = cx.model_get(&self.current).playlist_id;
+    pub(crate) fn request_play(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
+        let current_playlist = PlaylistCommonVM::of(cx).get_current(cx)?;
 
-        if let Some(playlist_id) = current_playlist_id {
-            self.play_impl(cx, id, playlist_id)?;
+        if let Some(current_playlist) = current_playlist {
+            self.request_play_impl(cx, id, current_playlist.id())?;
+        } else {
+            tracing::warn!("current playlist empty");
         }
         Ok(())
     }
 
-    fn replay(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        if let Some(current_id) = cx.model_get(&self.current).id {
-            self.stop(cx)?;
-            self.play(cx, current_id)?;
+    fn request_replay(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        let id = cx.model_get(&self.current).id;
+        if let Some(current_id) = id {
+            self.request_stop(cx)?;
+            self.request_play(cx, current_id)?;
         }
         Ok(())
     }
 
     pub(crate) fn tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        let mut current = cx.model_mut(&self.current);
-        current.current_duration = Duration::from_secs(MusicPlayerService::of(cx).get_current_duration_s());
+        self.sync_current_duration(cx)?;
         Ok(())
     }
 
-    fn play_next(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        self.play_adjacent::<true>(cx)
+    fn sync_current_duration(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        let mut current = cx.model_mut(&self.current);
+        current.current_duration =
+            Duration::from_secs(MusicPlayerService::of(cx).get_current_duration_s());
+        Ok(())
     }
 
-    fn play_previous(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        self.play_adjacent::<false>(cx)
+    fn request_play_next(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.request_play_adjacent::<true>(cx)
     }
 
-    fn play_adjacent<const IS_NEXT: bool>(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    fn request_play_previous(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.request_play_adjacent::<false>(cx)
+    }
+
+    fn request_play_adjacent<const IS_NEXT: bool>(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let (current_music_id, playlist_id, can_play) = {
             let state = cx.model_get(&self.current);
             (
@@ -132,7 +149,7 @@ impl MusicControlVM {
                     }
                 };
                 if let Some(adjacent_music) = ordered_musics.get(adjacent_index) {
-                    this.play_impl(&cx, adjacent_music.id(), playlist_id)?;
+                    this.request_play_impl(&cx, adjacent_music.id(), playlist_id)?;
                 }
             }
             Ok(())
@@ -140,44 +157,58 @@ impl MusicControlVM {
         Ok(())
     }
 
-    fn resume(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    fn request_resume(&self, cx: &ViewModelContext) -> EaseResult<()> {
         MusicPlayerService::of(cx).resume();
-        cx.enqueue_emit::<_, EaseError>(Action::MusicCommon(MusicCommonAction::Tick));
+        MusicCommonVM::of(cx).schedule_tick::<true>(cx)?;
         Ok(())
     }
 
-    fn pause(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    pub(crate) fn request_pause(&self, cx: &ViewModelContext) -> EaseResult<()> {
         MusicPlayerService::of(cx).pause();
         Ok(())
     }
 
-    fn stop(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        {
-            let mut state = cx.model_mut(&self.current);
-            state.id = None;
-            state.playlist_id = None;
-        }
+    fn request_stop(&self, cx: &ViewModelContext) -> EaseResult<()> {
         MusicPlayerService::of(cx).stop();
         Ok(())
     }
 
-    fn seek(&self, cx: &ViewModelContext, arg: u64) -> EaseResult<()> {
+    fn stop_impl(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        {
+            let mut state = cx.model_mut(&self.current);
+            let playmode = state.play_mode;
+            *state = Default::default();
+            state.play_mode = playmode;
+        }
+        self.update_playing(cx, false)?;
+        Ok(())
+    }
+
+    fn request_seek(&self, cx: &ViewModelContext, arg: u64) -> EaseResult<()> {
         MusicPlayerService::of(cx).seek(arg);
+        self.sync_current_duration(cx)?;
         Ok(())
     }
 
     fn update_playmode_to_next(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let mut state = cx.model_mut(&self.current);
-        state.play_mode = match state.play_mode {
+        let play_mode = match state.play_mode {
             PlayMode::Single => PlayMode::SingleLoop,
             PlayMode::SingleLoop => PlayMode::List,
             PlayMode::List => PlayMode::ListLoop,
             PlayMode::ListLoop => PlayMode::Single,
         };
+        state.play_mode = play_mode;
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+            Connector::of(&cx)
+                .update_preference_playmode(&cx, play_mode)
+                .await?;
+            Ok(())
+        });
         Ok(())
     }
 
-    fn play_impl(
+    fn request_play_impl(
         &self,
         cx: &ViewModelContext,
         music_id: MusicId,
@@ -215,8 +246,14 @@ impl MusicControlVM {
                 state.playlist_musics = playlist.musics.clone();
                 state.index_musics = index_musics;
                 state.lyric = music.lyric;
+                state.lyric_line_index = -1;
             }
-            this.resume(&cx)?;
+            {
+                let url = Connector::of(&cx).serve_music_url(&cx, music_id);
+                MusicPlayerService::of(&cx).set_music_url(url);
+            }
+            this.sync_current_duration(&cx)?;
+            this.request_resume(&cx)?;
 
             Ok(())
         });
@@ -229,7 +266,9 @@ impl MusicControlVM {
             if let (Some(id), Some(playlist_id)) = (state.id, state.playlist_id) {
                 if !PlaylistCommonVM::of(cx).has_playlist(cx, playlist_id) {
                     false
-                } else if !state.playlist_musics.iter().any(|v| v.id() == id) {
+                } else if !state.playlist_musics.is_empty()
+                    && !state.playlist_musics.iter().any(|v| v.id() == id)
+                {
                     false
                 } else {
                     true
@@ -239,63 +278,102 @@ impl MusicControlVM {
             }
         };
         if !is_valid {
-            self.stop(cx)?;
+            self.request_stop(cx)?;
         }
+        Ok(())
+    }
+
+    fn update_playing(&self, cx: &ViewModelContext, value: bool) -> EaseResult<()> {
+        let mut state = cx.model_mut(&self.current);
+        state.playing = value;
+
+        if value {
+            MusicCommonVM::of(cx).schedule_tick::<true>(cx)?;
+        }
+        Ok(())
+    }
+
+    fn on_player_event(&self, cx: &ViewModelContext, event: &PlayerEvent) -> EaseResult<()> {
+        match event {
+            PlayerEvent::Complete => self.on_complete(cx)?,
+            PlayerEvent::Loading => {}
+            PlayerEvent::Loaded => {}
+            PlayerEvent::Play => self.update_playing(cx, true)?,
+            PlayerEvent::Pause => self.update_playing(cx, false)?,
+            PlayerEvent::Stop => self.stop_impl(cx)?,
+            PlayerEvent::Total { duration_ms } => {
+                self.on_sync_total_duration(cx, Duration::from_millis(*duration_ms))?
+            }
+        };
         Ok(())
     }
 
     fn on_complete(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let play_mode = cx.model_get(&self.current).play_mode;
         match play_mode {
-            PlayMode::Single => self.stop(cx)?,
-            PlayMode::SingleLoop => self.replay(cx)?,
-            PlayMode::List | PlayMode::ListLoop => self.play_next(cx)?,
+            PlayMode::Single => {
+                self.update_playing(cx, false)?;
+                self.request_pause(cx)?;
+                self.request_seek(cx, 0)?
+            }
+            PlayMode::SingleLoop => self.request_replay(cx)?,
+            PlayMode::List | PlayMode::ListLoop => self.request_play_next(cx)?,
         }
         Ok(())
     }
 
     fn on_sync_total_duration(&self, cx: &ViewModelContext, duration: Duration) -> EaseResult<()> {
-        let id = {
+        let (id, playlist_id) = {
             let state = cx.model_get(&self.current);
-            match state.id {
-                Some(id) => id,
-                None => return Ok(())
+            match (state.id, state.playlist_id) {
+                (Some(id), Some(playlist_id)) => (id, playlist_id),
+                _ => return Ok(()),
             }
         };
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).update_music_total_duration(&cx, ArgUpdateMusicDuration {
-                id,
-                duration: MusicDuration::new(duration)
-            }).await?;
+            Connector::of(&cx)
+                .update_music_total_duration(
+                    &cx,
+                    playlist_id,
+                    ArgUpdateMusicDuration {
+                        id,
+                        duration: MusicDuration::new(duration),
+                    },
+                )
+                .await?;
             Ok(())
         });
         Ok(())
     }
 }
 
-impl ViewModel<Action, EaseError> for MusicControlVM {
+impl ViewModel for MusicControlVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
             Action::View(action) => match action {
                 ViewAction::MusicControl(action) => match action {
-                    MusicControlAction::Seek { duration_ms } => self.seek(cx, *duration_ms)?,
+                    MusicControlAction::Seek { duration_ms } => {
+                        self.request_seek(cx, *duration_ms)?
+                    }
                 },
                 ViewAction::Widget(action) => match (&action.widget, &action.typ) {
                     (Widget::MusicControl(widget), WidgetActionType::Click) => match widget {
                         MusicControlWidget::Pause => {
-                            self.pause(cx)?;
+                            self.request_pause(cx)?;
                         }
                         MusicControlWidget::Play => {
-                            self.resume(cx)?;
+                            self.request_resume(cx)?;
                         }
                         MusicControlWidget::PlayNext => {
-                            self.play_next(cx)?;
+                            self.request_play_next(cx)?;
                         }
                         MusicControlWidget::PlayPrevious => {
-                            self.play_previous(cx)?;
+                            self.request_play_previous(cx)?;
                         }
                         MusicControlWidget::Stop => {
-                            self.stop(cx)?;
+                            self.request_stop(cx)?;
                         }
                         MusicControlWidget::Playmode => {
                             self.update_playmode_to_next(cx)?;
@@ -303,17 +381,16 @@ impl ViewModel<Action, EaseError> for MusicControlVM {
                     },
                     _ => {}
                 },
-                ViewAction::Player(event) => match event {
-                    PlayerEvent::Complete => self.on_complete(cx)?,
-                    PlayerEvent::Loading => {}
-                    PlayerEvent::Loaded => {},
-                    PlayerEvent::Total { duration_ms } => self.on_sync_total_duration(cx, Duration::from_millis(*duration_ms))?,
-                },
+                ViewAction::Player(event) => self.on_player_event(cx, event)?,
                 _ => {}
             },
             Action::Connector(action) => match action {
                 ConnectorAction::Playlist(_) | ConnectorAction::PlaylistAbstracts(_) => {
                     self.stop_if_invalid(cx)?;
+                }
+                ConnectorAction::Preference(preference) => {
+                    let mut current = cx.model_mut(&self.current);
+                    current.play_mode = preference.playmode;
                 }
                 _ => {}
             },

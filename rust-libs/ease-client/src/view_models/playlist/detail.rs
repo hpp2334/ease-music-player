@@ -35,6 +35,12 @@ pub(crate) struct PlaylistDetailVM {
     tasks: AsyncTasks,
 }
 
+fn trim_extension_name(name: impl ToString) -> String {
+    name.to_string()
+        .rsplit_once('.')
+        .map_or(name.to_string(), |(base, _)| base.to_string())
+}
+
 impl PlaylistDetailVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
@@ -46,7 +52,7 @@ impl PlaylistDetailVM {
     fn play_all(&self, cx: &ViewModelContext) -> EaseResult<()> {
         if let Some(playlist) = cx.model_get(&self.current).playlist.as_ref() {
             if let Some(music_id) = playlist.musics.first().map(|m| m.id()) {
-                MusicControlVM::of(cx).play(cx, music_id)?;
+                MusicControlVM::of(cx).request_play(cx, music_id)?;
             }
         }
         Ok(())
@@ -79,13 +85,7 @@ impl PlaylistDetailVM {
         let entries = entries
             .into_iter()
             .map(|v| {
-                let name = v
-                    .path
-                    .clone()
-                    .split("/")
-                    .last()
-                    .expect("path is empty")
-                    .to_string();
+                let name = trim_extension_name(v.name);
                 let loc = StorageEntryLoc {
                     storage_id,
                     path: v.path,
@@ -112,7 +112,9 @@ impl PlaylistDetailVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for PlaylistDetailVM {
+impl ViewModel for PlaylistDetailVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
             Action::View(action) => match action {
@@ -128,7 +130,7 @@ impl ViewModel<Action, EaseError> for PlaylistDetailVM {
                             PlaylistEditVM::of(cx).prepare_edit(cx, &playlist)?;
                         }
                         PlaylistDetailWidget::Music { id } => {
-                            MusicControlVM::of(cx).play(cx, *id)?;
+                            MusicControlVM::of(cx).request_play(cx, *id)?;
                         }
                         PlaylistDetailWidget::RemoveMusic { id } => {
                             let playlist_id = cx
@@ -141,13 +143,11 @@ impl ViewModel<Action, EaseError> for PlaylistDetailVM {
                             }
                         }
                         PlaylistDetailWidget::Import => {
-                            let current = PlaylistCommonVM::of(cx).get_current(cx)?;
-                            if let Some(current) = current {
-                                StorageImportVM::of(cx).prepare(
-                                    cx,
-                                    CurrentStorageImportType::ImportMusics { id: current.id() },
-                                )?;
-                            }
+                            let current = PlaylistCommonVM::of(cx).get_current(cx)?.unwrap();
+                            StorageImportVM::of(cx).prepare(
+                                cx,
+                                CurrentStorageImportType::ImportMusics { id: current.id() },
+                            )?;
                         }
                         PlaylistDetailWidget::PlayAll => self.play_all(cx)?,
                     },

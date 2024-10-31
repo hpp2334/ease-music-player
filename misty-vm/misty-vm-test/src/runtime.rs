@@ -1,14 +1,12 @@
 use std::{
-    cell::RefCell,
     future::Future,
     pin::Pin,
-    rc::Rc,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{atomic::AtomicBool, Arc},
     thread::ThreadId,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
-use misty_vm::{App, AppPod, BoxFuture, IAsyncRuntimeAdapter};
+use misty_vm::{App, AppPod, IAsyncRuntimeAdapter};
 
 use crate::timer::FakeTimers;
 
@@ -17,6 +15,7 @@ struct AsyncRuntimeInternal {
     timers: FakeTimers,
     pod: AppPod,
     thread_id: ThreadId,
+    notified: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -39,6 +38,7 @@ impl AsyncRuntime {
                 timers: FakeTimers::new(),
                 pod: Default::default(),
                 thread_id: std::thread::current().id(),
+                notified: Default::default(),
             }),
         }
     }
@@ -77,7 +77,23 @@ impl AsyncRuntime {
     fn wait_all(&self) {
         let store = self.store.clone();
         let app = store.pod.get();
-        app.flush_spawned();
+        let mut count = 0;
+
+        loop {
+            let notified = self
+                .store
+                .notified
+                .swap(false, std::sync::atomic::Ordering::Relaxed);
+            if !notified {
+                break;
+            }
+            if count == 100 {
+                panic!("too many flush")
+            }
+
+            app.flush_spawned();
+            count += 1;
+        }
     }
 
     fn check_same_thread(&self) {
@@ -102,6 +118,8 @@ impl IAsyncRuntimeAdapter for AsyncRuntime {
     }
 
     fn on_schedule(&self) {
-        // noop
+        self.store
+            .notified
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }

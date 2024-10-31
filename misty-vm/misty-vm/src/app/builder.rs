@@ -3,8 +3,8 @@ use std::{any::Any, sync::Arc};
 use crate::{
     async_task::{AsyncExecutor, DefaultAsyncRuntimeAdapter, IAsyncRuntimeAdapter},
     models::Models,
-    to_host::{ToHosts, ToHostsBuilder},
-    view_models::{ ViewModelsBuilder},
+    to_host::ToHostsBuilder,
+    view_models::builder::ViewModelsBuilder,
     Model,
 };
 
@@ -14,13 +14,12 @@ pub struct AppBuilderContext {
     models: Models,
 }
 
-pub struct AppBuilder<Event, E>
+pub struct AppBuilder<Event>
 where
     Event: 'static,
-    E: 'static,
 {
     cx: AppBuilderContext,
-    view_models_builder: ViewModelsBuilder<Event, E>,
+    view_models_builder: ViewModelsBuilder<Event>,
     to_hosts_builder: ToHostsBuilder,
     async_tasks: AsyncExecutor,
 }
@@ -34,10 +33,9 @@ impl AppBuilderContext {
     }
 }
 
-impl<Event, E> AppBuilder<Event, E>
+impl<Event> AppBuilder<Event>
 where
     Event: Any + 'static,
-    E: Any + 'static,
 {
     pub(crate) fn new() -> Self {
         Self {
@@ -52,7 +50,7 @@ where
 
     pub fn with_view_models(
         mut self,
-        build: impl FnOnce(&mut AppBuilderContext, &mut ViewModelsBuilder<Event, E>),
+        build: impl FnOnce(&mut AppBuilderContext, &mut ViewModelsBuilder<Event>),
     ) -> Self {
         build(&mut self.cx, &mut self.view_models_builder);
         self
@@ -76,6 +74,7 @@ where
                 view_models: self.view_models_builder.build(),
                 to_hosts: self.to_hosts_builder.build(),
                 async_executor: self.async_tasks,
+                during_flush: Default::default(),
             }),
         }
     }

@@ -1,15 +1,18 @@
+use std::fmt::Debug;
+
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use super::code::Code;
 
 pub trait IMessage {
-    const CODE: u32;
-    type Argument: Serialize + DeserializeOwned + Send + 'static;
-    type Return: Serialize + DeserializeOwned + Send + 'static;
+    const CODE: Code;
+    type Argument: Debug + Serialize + DeserializeOwned + Send + 'static;
+    type Return: Debug + Serialize + DeserializeOwned + Send + 'static;
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct MessagePayload {
-    pub code: u32,
+    pub code: Code,
     #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
 }
@@ -19,13 +22,12 @@ macro_rules! define_message {
     ($msg: ident, $code: expr, $arg: ty, $ret: ty) => {
         pub struct $msg {}
         impl crate::backends::message::IMessage for $msg {
-            const CODE: u32 = $code as u32;
+            const CODE: Code = $code;
             type Argument = $arg;
             type Return = $ret;
         }
     };
 }
-
 
 pub fn decode_message_payload<T>(arg: Vec<u8>) -> T
 where

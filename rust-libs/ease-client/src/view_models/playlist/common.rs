@@ -20,7 +20,7 @@ impl PlaylistCommonVM {
         Self {
             store: cx.model(),
             current: cx.model(),
-            tasks: Default::default()
+            tasks: Default::default(),
         }
     }
 
@@ -54,8 +54,9 @@ impl PlaylistCommonVM {
     }
 
     fn sync_playlists(&self, cx: &ViewModelContext, playlists: Vec<PlaylistAbstract>) {
-        let mut state = cx.model_mut(&self.store);
-        state.playlists = playlists;
+        tracing::trace!("sync_playlists: {:?}", playlists);
+        let mut store = cx.model_mut(&self.store);
+        store.playlists = playlists;
     }
 
     fn sync_playlist(&self, cx: &ViewModelContext, playlist: Playlist) {
@@ -64,7 +65,9 @@ impl PlaylistCommonVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for PlaylistCommonVM {
+impl ViewModel for PlaylistCommonVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
             Action::Connector(action) => match action {

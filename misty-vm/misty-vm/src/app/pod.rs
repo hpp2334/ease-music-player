@@ -1,4 +1,4 @@
-use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
+use std::{any::Any, cell::RefCell, fmt::Debug, rc::Rc, sync::Arc};
 
 use crate::IToHost;
 
@@ -15,10 +15,9 @@ pub struct AppPod {
 }
 
 impl App {
-    pub fn builder<Event, E>() -> AppBuilder<Event, E>
+    pub fn builder<Event>() -> AppBuilder<Event>
     where
         Event: 'static,
-        E: 'static,
     {
         AppBuilder::new()
     }
@@ -30,12 +29,11 @@ impl App {
         self._app.models.read()
     }
 
-    pub fn emit<Event, E>(&self, evt: Event)
+    pub fn emit<Event>(&self, evt: Event)
     where
-        Event: Any + 'static,
-        E: Any + 'static,
+        Event: Any + Debug + 'static,
     {
-        self._app.emit::<Event, E>(evt);
+        self._app.emit(evt);
     }
 
     pub fn to_host<C>(&self) -> Arc<C>
@@ -46,7 +44,7 @@ impl App {
     }
 
     pub fn flush_spawned(&self) {
-        self._app.async_executor.flush_runnables();
+        self._app.flush_spawned();
     }
 }
 
@@ -74,10 +72,7 @@ impl AppPod {
     fn check_same_thread(&self) {
         let app = self._app.borrow();
         if let Some(app) = app.as_ref() {
-            let thread_id = std::thread::current().id();
-            if app.thread_id != thread_id {
-                panic!("cannot operate app in other thread")
-            }
+            app.check_same_thread();
         }
     }
 }

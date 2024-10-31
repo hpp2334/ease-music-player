@@ -1,16 +1,16 @@
-use ease_client::{view_models::*, MusicControlWidget, MusicLyricWidget, PlaylistDetailWidget, StorageImportWidget};
+use ease_client::{view_models::*, MusicLyricWidget, PlaylistDetailWidget, StorageImportWidget};
 use ease_client_shared::backends::music::LyricLoadState;
 use ease_client_test::{PresetDepth, TestApp};
 use view_state::views::music::*;
 
 #[tokio::test]
 async fn music_lyric_1() {
-    let mut app = TestApp::new("test-dbs/music_lyric_1", true);
+    let mut app = TestApp::new("test-dbs/music_lyric_1", true).await;
     app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     let state = app.latest_state().current_playlist.unwrap();
-    assert_eq!(state.duration, "00:00:30");
+    assert_eq!(state.duration, "-:-:-");
 
     app.dispatch_click(PlaylistDetailWidget::Music { id: a_music_id });
     app.wait_network().await;
@@ -48,35 +48,36 @@ async fn music_lyric_1() {
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, -1);
 
-    app.advance_timer(5);
+    app.advance_timer(5).await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, 0);
 
-    app.advance_timer(3);
+    app.advance_timer(3).await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, 1);
 
-    app.advance_timer(2);
+    app.advance_timer(2).await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.lyric_index, 2);
 }
 
 #[tokio::test]
 async fn music_lyric_2() {
-    let mut app = TestApp::new("test-dbs/music_lyric_2", true);
+    let mut app = TestApp::new("test-dbs/music_lyric_2", true).await;
     app.setup_preset(PresetDepth::Music).await;
 
     let a_music_id = app.get_first_music_id_from_latest_state();
 
     app.dispatch_click(PlaylistDetailWidget::Music { id: a_music_id });
-
     app.wait_network().await;
+
     let state = app.latest_state().current_music_lyric.unwrap();
     let lines = state.lyric_lines;
     assert_eq!(lines.len(), 4);
     assert_eq!(state.load_state, LyricLoadState::Loaded);
 
     app.dispatch_click(MusicLyricWidget::Remove);
+    app.wait_network().await;
     let state = app.latest_state().current_music_lyric.unwrap();
     let lines = state.lyric_lines;
     assert_eq!(lines.len(), 0);

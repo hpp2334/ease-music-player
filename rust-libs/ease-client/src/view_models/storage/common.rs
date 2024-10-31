@@ -31,7 +31,9 @@ impl StorageCommonVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for StorageCommonVM {
+impl ViewModel for StorageCommonVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
             Action::Connector(action) => match action {

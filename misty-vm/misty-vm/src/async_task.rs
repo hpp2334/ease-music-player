@@ -1,6 +1,6 @@
 use std::{
-    cell::{Ref, RefCell, RefMut},
-    collections::{HashMap, HashSet},
+    cell::RefCell,
+    collections::HashMap,
     future::Future,
     hash::Hash,
     ops::DerefMut,
@@ -10,7 +10,7 @@ use std::{
 };
 
 use async_task::{Runnable, Task};
-use futures::future::{BoxFuture, LocalBoxFuture};
+use futures::future::LocalBoxFuture;
 
 pub trait IAsyncRuntimeAdapter: Send + Sync + 'static {
     fn on_schedule(&self);
@@ -18,9 +18,8 @@ pub trait IAsyncRuntimeAdapter: Send + Sync + 'static {
     fn get_time(&self) -> Duration;
 }
 
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub(crate) struct AsyncTaskId(u64);
+pub struct AsyncTaskId(u64);
 
 #[derive(Default, Clone)]
 pub struct AsyncTasks {
@@ -50,6 +49,10 @@ impl AsyncTasks {
 
     pub fn cancel_all(&self) {
         std::mem::swap(self.tasks.borrow_mut().deref_mut(), &mut HashMap::new());
+    }
+
+    pub fn cancel(&self, id: AsyncTaskId) {
+        self.tasks.borrow_mut().remove(&id);
     }
 
     pub(crate) fn remove(&self, id: AsyncTaskId) {
@@ -90,10 +93,15 @@ impl AsyncExecutor {
         self.adapter.get_time()
     }
 
-    pub(crate) fn flush_runnables(&self) {
+    pub(crate) fn flush_runnables(&self) -> bool {
+        if self.runnable_receiver.is_empty() {
+            return false;
+        }
+
         while let Ok(runnable) = self.runnable_receiver.try_recv() {
             runnable.run();
         }
+        return true;
     }
 }
 

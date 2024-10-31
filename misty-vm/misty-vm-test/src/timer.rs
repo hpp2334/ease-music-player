@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
-use tokio::task::LocalSet;
 
 #[derive(Clone)]
 pub struct FakeTimers {

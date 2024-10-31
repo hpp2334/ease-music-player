@@ -2,6 +2,7 @@ use std::convert::Infallible;
 
 use misty_vm::{App, AppBuilderContext, Model, ViewModel, ViewModelContext};
 
+#[derive(Debug)]
 enum Event {
     Increase,
     Decrease,
@@ -24,7 +25,10 @@ impl CounterVM {
     }
 }
 
-impl ViewModel<Event, Infallible> for CounterVM {
+impl ViewModel for CounterVM {
+    type Event = Event;
+    type Error = Infallible;
+
     fn on_event(&self, cx: &ViewModelContext, e: &Event) -> Result<(), Infallible> {
         match e {
             Event::Increase => {
@@ -42,7 +46,7 @@ impl ViewModel<Event, Infallible> for CounterVM {
 }
 
 fn build_app() -> App {
-    App::builder()
+    App::builder::<Event>()
         .with_view_models(|cx, builder| {
             builder.add(CounterVM::new(cx));
         })
@@ -51,14 +55,12 @@ fn build_app() -> App {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
-
     use crate::{build_app, Counter, Event};
 
     #[test]
     fn incr_1() {
         let app = build_app();
-        app.emit::<_, Infallible>(Event::Increase);
+        app.emit(Event::Increase);
 
         {
             let v = app.model::<Counter>();
@@ -69,8 +71,8 @@ mod tests {
     #[test]
     fn incr_2() {
         let app = build_app();
-        app.emit::<_, Infallible>(Event::Increase);
-        app.emit::<_, Infallible>(Event::Increase);
+        app.emit(Event::Increase);
+        app.emit(Event::Increase);
 
         {
             let v = app.model::<Counter>();
@@ -81,8 +83,8 @@ mod tests {
     #[test]
     fn incr_decr() {
         let app = build_app();
-        app.emit::<_, Infallible>(Event::Increase);
-        app.emit::<_, Infallible>(Event::Decrease);
+        app.emit(Event::Increase);
+        app.emit(Event::Decrease);
 
         {
             let v = app.model::<Counter>();

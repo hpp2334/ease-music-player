@@ -2,12 +2,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ease_client::{Action, EaseError, IMusicPlayerService, PlayerEvent, ViewAction};
+use ease_client::{Action, IMusicPlayerService, PlayerEvent, ViewAction};
 use hyper::StatusCode;
 use lofty::AudioFile;
 use misty_vm::AppPod;
-
-use crate::rt::ASYNC_RT;
 
 #[derive(Clone)]
 struct FakeMusicPlayerInner {
@@ -18,6 +16,7 @@ struct FakeMusicPlayerInner {
     current_duration: Arc<AtomicU64>,
     total_duration: Arc<AtomicU64>,
     should_sync_total_duration: Arc<AtomicBool>,
+    pending_events: Arc<Mutex<Vec<PlayerEvent>>>,
     pod: AppPod,
 }
 
@@ -36,6 +35,7 @@ impl FakeMusicPlayerInner {
             current_duration: Default::default(),
             total_duration: Default::default(),
             should_sync_total_duration: Default::default(),
+            pending_events: Default::default(),
             pod,
         }
     }
@@ -53,25 +53,64 @@ impl FakeMusicPlayerInner {
         self.pause();
     }
 
-    fn advance_1sec(&self) {
+    fn advance(&self, duration: Duration) {
         let playing = self.playing.load(std::sync::atomic::Ordering::SeqCst);
         if !playing {
             return;
         }
 
-        self.current_duration
-            .fetch_add(1000, std::sync::atomic::Ordering::SeqCst);
+        self.current_duration.fetch_add(
+            duration.as_millis() as u64,
+            std::sync::atomic::Ordering::SeqCst,
+        );
         let current_duration = self
             .current_duration
             .load(std::sync::atomic::Ordering::SeqCst);
-        self.current_duration
-            .store(current_duration, std::sync::atomic::Ordering::SeqCst);
 
         let total_duration = self
             .total_duration
             .load(std::sync::atomic::Ordering::SeqCst);
         if total_duration > 0 && current_duration >= total_duration / 1000 * 1000 {
-            self.pod.get().emit::<_, EaseError>(Action::View(ViewAction::Player(PlayerEvent::Complete)));
+            self.playing
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            self.current_duration
+                .store(0, std::sync::atomic::Ordering::SeqCst);
+
+            self.push_player_event(PlayerEvent::Complete);
+        }
+    }
+
+    fn push_player_event(&self, evt: PlayerEvent) {
+        let mut w = self.pending_events.lock().unwrap();
+        w.push(evt);
+    }
+
+    fn flush_player_events(&self) {
+        let should_sync = self
+            .should_sync_total_duration
+            .swap(false, std::sync::atomic::Ordering::SeqCst);
+        if should_sync {
+            let v = self
+                .total_duration
+                .load(std::sync::atomic::Ordering::SeqCst);
+            self.push_player_event(PlayerEvent::Total { duration_ms: v });
+        }
+
+        loop {
+            let mut events: Vec<PlayerEvent> = Default::default();
+
+            {
+                let mut w = self.pending_events.lock().unwrap();
+                std::mem::swap(&mut *w, &mut events);
+            }
+
+            if events.is_empty() {
+                break;
+            }
+
+            for evt in events {
+                self.pod.get().emit(Action::View(ViewAction::Player(evt)));
+            }
         }
     }
 }
@@ -86,23 +125,21 @@ impl FakeMusicPlayerRef {
     pub fn last_bytes(&self) -> Vec<u8> {
         self.inner.last_bytes.lock().unwrap().clone()
     }
-    pub fn advance_1sec(&self) {
-        self.inner.advance_1sec();
+    pub fn advance(&self, duration: Duration) {
+        self.inner.advance(duration);
     }
 
-    pub fn sync_total_duration(&self) {
-        let should_sync = self.inner.should_sync_total_duration.swap(false, std::sync::atomic::Ordering::SeqCst);
-        if should_sync {
-            let v = self.inner.total_duration.load(std::sync::atomic::Ordering::SeqCst);
-            self.inner.pod.get().emit::<_, EaseError>(Action::View(ViewAction::Player(PlayerEvent::Total { duration_ms: v })));
-        }
+    pub fn flush_player_events(&self) {
+        self.inner.flush_player_events();
     }
 }
 
 impl IMusicPlayerService for FakeMusicPlayerRef {
     fn get_current_duration_s(&self) -> u64 {
-        let v = self.inner
-            .current_duration.load(std::sync::atomic::Ordering::SeqCst);
+        let v = self
+            .inner
+            .current_duration
+            .load(std::sync::atomic::Ordering::SeqCst);
         Duration::from_millis(v).as_secs()
     }
 
@@ -114,14 +151,17 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
         if prev_playing {
             return;
         }
+        self.inner.push_player_event(PlayerEvent::Play);
     }
 
     fn pause(&self) {
         self.inner.pause();
+        self.inner.push_player_event(PlayerEvent::Pause);
     }
 
     fn stop(&self) {
         self.inner.stop();
+        self.inner.push_player_event(PlayerEvent::Stop);
     }
 
     fn seek(&self, duration: u64) {
@@ -144,11 +184,11 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
             }
         }
         self.inner.pause();
-        self.inner.current_duration
+        self.inner
+            .current_duration
             .store(0, std::sync::atomic::Ordering::SeqCst);
         let cloned_inner = inner.clone();
-        let _guard = ASYNC_RT.enter();
-        let handle = ASYNC_RT.spawn(async move {
+        let handle = tokio::spawn(async move {
             let resp = reqwest::get(&url).await.unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let bytes = resp.bytes().await.unwrap();
@@ -165,7 +205,9 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
                 .total_duration
                 .store(total_duration, std::sync::atomic::Ordering::SeqCst);
 
-            cloned_inner.should_sync_total_duration.store(true, std::sync::atomic::Ordering::SeqCst);
+            cloned_inner
+                .should_sync_total_duration
+                .store(true, std::sync::atomic::Ordering::SeqCst);
 
             let mut last_bytes = cloned_inner.last_bytes.lock().unwrap();
             *last_bytes = bytes.to_vec();

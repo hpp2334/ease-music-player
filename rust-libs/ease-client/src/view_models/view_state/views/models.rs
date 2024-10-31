@@ -17,7 +17,7 @@ macro_rules! generate_vs {
         impl $struct_name {
             pub fn merge_from(&mut self, other: $struct_name) {
                 $(
-                    if self.$field_name.is_none() && other.$field_name.is_some() {
+                    if other.$field_name.is_some() {
                         self.$field_name = other.$field_name;
                     }
                 )*

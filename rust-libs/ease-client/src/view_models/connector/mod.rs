@@ -1,19 +1,25 @@
-
-use ease_client_shared::backends::{
-    app::ArgInitializeApp,
-    message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload},
-    music::{ArgUpdateMusicDuration, ArgUpdateMusicLyric, GetMusicMsg, Music, MusicId, UpdateMusicDurationMsg, UpdateMusicLyricMsg},
-    playlist::{
-        AddMusicsToPlaylistMsg, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
-        ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist, CreatePlaylistMsg,
-        GetAllPlaylistAbstractsMsg, GetPlaylistMsg, Playlist, PlaylistAbstract, PlaylistId,
-        RemoveMusicsFromPlaylistMsg, RemovePlaylistMsg, UpdatePlaylistMsg,
+use ease_client_shared::{
+    backends::{
+        app::ArgInitializeApp,
+        message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload},
+        music::{
+            ArgUpdateMusicDuration, ArgUpdateMusicLyric, GetMusicMsg, Music, MusicId,
+            UpdateMusicDurationMsg, UpdateMusicLyricMsg,
+        },
+        playlist::{
+            AddMusicsToPlaylistMsg, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
+            ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist, CreatePlaylistMsg,
+            GetAllPlaylistAbstractsMsg, GetPlaylistMsg, Playlist, PlaylistAbstract, PlaylistId,
+            RemoveMusicsFromPlaylistMsg, RemovePlaylistMsg, UpdatePlaylistMsg,
+        },
+        preference::{GetPreferenceMsg, PreferenceData, UpdatePreferencePlaymodeMsg},
+        storage::{
+            ArgUpsertStorage, ListStorageEntryChildrenMsg, ListStorageEntryChildrenResp,
+            ListStorageMsg, RemoveStorageMsg, Storage, StorageConnectionTestResult,
+            StorageEntryLoc, StorageId, TestStorageMsg, UpsertStorageMsg,
+        },
     },
-    storage::{
-        ArgUpsertStorage, ListStorageEntryChildrenMsg, ListStorageEntryChildrenResp,
-        ListStorageMsg, RemoveStorageMsg, Storage, StorageConnectionTestResult, StorageEntryLoc,
-        StorageId, TestStorageMsg, UpsertStorageMsg,
-    },
+    uis::preference::PlayMode,
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 use state::ConnectorState;
@@ -26,16 +32,20 @@ use crate::{
     to_host::connector::ConnectorHostService,
 };
 
+use super::playlist::state::CurrentPlaylistState;
+
 #[derive(Debug)]
 pub enum ConnectorAction {
     PlaylistAbstracts(Vec<PlaylistAbstract>),
     Playlist(Playlist),
     Music(Music),
     Storages(Vec<Storage>),
+    Preference(PreferenceData),
 }
 
 pub struct Connector {
     state: Model<ConnectorState>,
+    current_playlist: Model<CurrentPlaylistState>,
     tasks: AsyncTasks,
 }
 
@@ -43,17 +53,23 @@ impl Connector {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
             state: cx.model(),
+            current_playlist: cx.model(),
             tasks: Default::default(),
         }
     }
 
-    pub fn serve_url(&self, cx: &ViewModelContext, loc: StorageEntryLoc) -> String {
-        let state= cx.model_get(&self.state);
-        state.serve_url(loc)
+    pub fn serve_asset_url(&self, cx: &ViewModelContext, loc: StorageEntryLoc) -> String {
+        let state = cx.model_get(&self.state);
+        state.serve_asset_url(loc)
+    }
+
+    pub fn serve_music_url(&self, cx: &ViewModelContext, id: MusicId) -> String {
+        let state = cx.model_get(&self.state);
+        state.serve_music_url(id)
     }
 
     fn init(&self, cx: &ViewModelContext, arg: ArgInitializeApp) -> EaseResult<()> {
-        let host= ConnectorHostService::of(cx);
+        let host = ConnectorHostService::of(cx);
         host.init(arg)?;
         {
             let mut state = cx.model_mut(&self.state);
@@ -64,6 +80,7 @@ impl Connector {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             this.sync_storages(&cx).await?;
             this.sync_playlist_abstracts(&cx).await?;
+            this.sync_preference_data(&cx).await?;
             Ok(())
         });
         Ok(())
@@ -97,6 +114,7 @@ impl Connector {
         .await?;
         self.sync_playlist(cx, playlist_id).await?;
         self.sync_playlist_abstracts(cx).await?;
+        self.sync_storages(cx).await?;
         Ok(())
     }
 
@@ -137,6 +155,7 @@ impl Connector {
         self.request::<AddMusicsToPlaylistMsg>(cx, arg).await?;
         self.sync_playlist(cx, id).await?;
         self.sync_playlist_abstracts(cx).await?;
+        self.sync_storages(cx).await?;
         Ok(())
     }
 
@@ -154,11 +173,14 @@ impl Connector {
     pub async fn update_music_total_duration(
         &self,
         cx: &ViewModelContext,
+        playlist_id: PlaylistId,
         arg: ArgUpdateMusicDuration,
     ) -> EaseResult<()> {
         let id = arg.id;
         self.request::<UpdateMusicDurationMsg>(cx, arg).await?;
         self.sync_music(cx, id).await?;
+        self.sync_playlist(cx, playlist_id).await?;
+        self.sync_playlist_abstracts(cx).await?;
         Ok(())
     }
 
@@ -173,8 +195,15 @@ impl Connector {
 
     pub async fn remove_storage(&self, cx: &ViewModelContext, id: StorageId) -> EaseResult<()> {
         self.request::<RemoveStorageMsg>(cx, id).await?;
-        self.sync_playlist_abstracts(cx).await?;
         self.sync_storages(cx).await?;
+        self.sync_playlist_abstracts(cx).await?;
+
+        if let Some(current_playlist_id) = {
+            let state = cx.model_get(&self.current_playlist);
+            state.playlist.as_ref().map(|v| v.id())
+        } {
+            self.sync_playlist(cx, current_playlist_id).await?;
+        }
         Ok(())
     }
 
@@ -192,20 +221,30 @@ impl Connector {
         arg: ArgUpsertStorage,
     ) -> EaseResult<()> {
         self.request::<UpsertStorageMsg>(cx, arg).await?;
+        self.sync_storages(cx).await?;
+        Ok(())
+    }
+
+    pub async fn update_preference_playmode(
+        &self,
+        cx: &ViewModelContext,
+        arg: PlayMode,
+    ) -> EaseResult<()> {
+        self.request::<UpdatePreferencePlaymodeMsg>(cx, arg).await?;
         Ok(())
     }
 
     async fn sync_music(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
         let music = self.get_music(cx, id).await?;
         if let Some(music) = music {
-            cx.enqueue_emit::<_, EaseError>(Action::Connector(ConnectorAction::Music(music)));
+            cx.enqueue_emit(Action::Connector(ConnectorAction::Music(music)));
         }
         Ok(())
     }
 
     async fn sync_playlist_abstracts(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let playlists = self.request::<GetAllPlaylistAbstractsMsg>(cx, ()).await?;
-        cx.enqueue_emit::<_, EaseError>(Action::Connector(ConnectorAction::PlaylistAbstracts(
+        cx.enqueue_emit(Action::Connector(ConnectorAction::PlaylistAbstracts(
             playlists,
         )));
         Ok(())
@@ -214,14 +253,20 @@ impl Connector {
     async fn sync_playlist(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<()> {
         let playlist = self.request::<GetPlaylistMsg>(cx, id).await?;
         if let Some(playlist) = playlist {
-            cx.enqueue_emit::<_, EaseError>(Action::Connector(ConnectorAction::Playlist(playlist)));
+            cx.enqueue_emit(Action::Connector(ConnectorAction::Playlist(playlist)));
         }
         Ok(())
     }
 
     async fn sync_storages(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let storages = self.request::<ListStorageMsg>(cx, ()).await?;
-        cx.enqueue_emit::<_, EaseError>(Action::Connector(ConnectorAction::Storages(storages)));
+        cx.enqueue_emit(Action::Connector(ConnectorAction::Storages(storages)));
+        Ok(())
+    }
+
+    async fn sync_preference_data(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        let data = self.request::<GetPreferenceMsg>(cx, ()).await?;
+        cx.enqueue_emit(Action::Connector(ConnectorAction::Preference(data)));
         Ok(())
     }
 
@@ -242,7 +287,9 @@ impl Connector {
     }
 }
 
-impl ViewModel<Action, EaseError> for Connector {
+impl ViewModel for Connector {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
             Action::Init(arg) => {

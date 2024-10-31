@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use ease_client_shared::{
     backends::{
         playlist::ArgCreatePlaylist,
-        storage::{StorageEntry, StorageEntryLoc, StorageId},
+        storage::{StorageEntry, StorageEntryLoc, StorageEntryType, StorageId},
     },
     uis::{playlist::CreatePlaylistMode, storage::CurrentStorageImportType},
 };
@@ -12,7 +12,10 @@ use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
-    view_models::{connector::Connector, storage::import::StorageImportVM},
+    view_models::{
+        connector::Connector,
+        storage::import::{get_entry_type, StorageImportVM},
+    },
 };
 
 use super::state::CreatePlaylistState;
@@ -24,7 +27,7 @@ pub enum PlaylistCreateWidget {
     ClearCover,
     Cover,
     Import,
-    FinishImport,
+    FinishCreate,
     Cancel,
 }
 
@@ -83,8 +86,17 @@ impl PlaylistCreateVM {
         storage_id: StorageId,
         entries: Vec<StorageEntry>,
     ) -> EaseResult<()> {
+        let cover: Option<StorageEntryLoc> = entries
+            .iter()
+            .filter(|v| get_entry_type(v) == StorageEntryType::Image)
+            .map(|v| StorageEntryLoc {
+                storage_id,
+                path: v.path.clone(),
+            })
+            .next();
         let entries = entries
             .into_iter()
+            .filter(|v| get_entry_type(v) == StorageEntryType::Music)
             .map(|v| StorageEntryLoc {
                 storage_id,
                 path: v.path,
@@ -93,7 +105,9 @@ impl PlaylistCreateVM {
 
         let mut form = cx.model_mut(&self.form);
         form.recommend_playlist_names = build_recommend_playlist_names(&entries);
+        form.cover = cover;
         form.entries = entries;
+
         Ok(())
     }
 
@@ -124,7 +138,9 @@ impl PlaylistCreateVM {
     }
 }
 
-impl ViewModel<Action, EaseError> for PlaylistCreateVM {
+impl ViewModel for PlaylistCreateVM {
+    type Event = Action;
+    type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> Result<(), EaseError> {
         match event {
             Action::View(action) => match action {
@@ -148,7 +164,7 @@ impl ViewModel<Action, EaseError> for PlaylistCreateVM {
                             StorageImportVM::of(cx)
                                 .prepare(cx, CurrentStorageImportType::CreatePlaylistEntries)?;
                         }
-                        PlaylistCreateWidget::FinishImport => {
+                        PlaylistCreateWidget::FinishCreate => {
                             self.finish_create(cx)?;
                         }
                         PlaylistCreateWidget::Cancel => {

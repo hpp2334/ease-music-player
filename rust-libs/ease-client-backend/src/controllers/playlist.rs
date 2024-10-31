@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use ease_client_shared::backends::{
-    music::{MusicAbstract, MusicId, MusicMeta},
+    music::{MusicAbstract, MusicId},
     music_duration::MusicDuration,
     playlist::{
-        ArgAddMusicsToPlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist, Playlist,
-        PlaylistAbstract, PlaylistId, PlaylistMeta,
+        ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
+        Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta,
     },
 };
 use ease_database::DbConnectionRef;
@@ -18,15 +18,12 @@ use crate::{
         core::get_conn,
         music::{db_add_music, db_load_music_metas_by_playlist_id, ArgDBAddMusic},
         playlist::{
-            db_batch_add_music_to_playlist, db_load_first_music_covers,
-            db_load_playlist_music_count, db_load_playlists, db_remove_music_from_playlist,
-            db_remove_playlist, db_upsert_playlist, ArgDBUpsertPlaylist, FirstMusicCovers,
+            db_batch_add_music_to_playlist, db_load_first_music_covers, db_load_playlists,
+            db_remove_all_musics_in_playlist, db_remove_music_from_playlist, db_remove_playlist,
+            db_upsert_playlist, ArgDBUpsertPlaylist, FirstMusicCovers,
         },
     },
-    services::{
-        music::{build_music_abstract, build_music_meta},
-        server::loc::get_serve_url_from_opt_loc,
-    },
+    services::music::build_music_abstract,
 };
 
 use super::storage::to_opt_storage_entry;
@@ -125,11 +122,23 @@ pub(crate) async fn cr_get_playlist(
     Ok(Some(Playlist { abstr, musics }))
 }
 
-pub(crate) async fn ccu_upsert_playlist(cx: BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
+pub(crate) async fn cu_update_playlist(cx: BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
     let conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
     let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
         id: Some(arg.id),
+        title: arg.title,
+        picture: arg.cover.map(|v| (v.storage_id, v.path)),
+    };
+    db_upsert_playlist(conn.get_ref(), arg, current_time_ms)?;
+    Ok(())
+}
+
+pub(crate) async fn cc_create_playlist(cx: BackendContext, arg: ArgCreatePlaylist) -> BResult<()> {
+    let conn = get_conn(&cx)?;
+    let current_time_ms = cx.current_time().as_millis() as i64;
+    let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
+        id: None,
         title: arg.title,
         picture: arg.cover.map(|v| (v.storage_id, v.path)),
     };
@@ -172,11 +181,8 @@ pub(crate) async fn cd_remove_music_from_playlist(
 
 pub(crate) async fn cd_remove_playlist(cx: BackendContext, arg: PlaylistId) -> BResult<()> {
     let conn = get_conn(&cx)?;
-    let musics = db_load_music_metas_by_playlist_id(conn.get_ref(), arg)?;
 
-    for music in musics {
-        db_remove_music_from_playlist(conn.get_ref(), arg, music.id)?;
-    }
+    db_remove_all_musics_in_playlist(conn.get_ref(), arg)?;
     db_remove_playlist(conn.get_ref(), arg)?;
 
     Ok(())
