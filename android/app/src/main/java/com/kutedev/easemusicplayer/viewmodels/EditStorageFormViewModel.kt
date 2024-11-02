@@ -6,11 +6,11 @@ import com.kutedev.easemusicplayer.components.FormTextFieldState
 import com.kutedev.easemusicplayer.components.IFormTextFieldState
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import kotlinx.coroutines.flow.MutableStateFlow
-import uniffi.ease_client.ArgUpsertStorage
 import uniffi.ease_client.RootViewModelState
-import uniffi.ease_client.StorageConnectionTestResult
-import uniffi.ease_client.StorageId
-import uniffi.ease_client.StorageType
+import uniffi.ease_client_shared.ArgUpsertStorage
+import uniffi.ease_client_shared.StorageConnectionTestResult
+import uniffi.ease_client_shared.StorageId
+import uniffi.ease_client_shared.StorageType
 
 class EditStorageFormViewModel(): ViewModel(), IOnNotifyView {
     private var _lastUpdateSignal: UShort = 0u
@@ -103,17 +103,13 @@ class EditStorageFormViewModel(): ViewModel(), IOnNotifyView {
 
         val state = v.editStorage!!.copy()
         _testing.value = state.test
-        if (state.updateSignal != _lastUpdateSignal) {
-            _lastUpdateSignal = state.updateSignal
-
-            _storageId = state.info.id
-            _isCreated.value = state.isCreated
-            _isAnonymous.value = state.info.isAnonymous
-            _storageType.value = state.info.typ
-            _alias.update(state.info.alias ?: "")
-            _address.update(state.info.addr)
-            _username.update(state.info.username)
-            _password.update(state.info.password)
-        }
+        _storageId = state.info.id
+        _isCreated.value = state.isCreated
+        _isAnonymous.value = state.info.isAnonymous
+        _storageType.value = state.info.typ
+        _alias.update(state.info.alias ?: "")
+        _address.update(state.info.addr)
+        _username.update(state.info.username)
+        _password.update(state.info.password)
     }
 }

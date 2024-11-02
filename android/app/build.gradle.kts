@@ -72,6 +72,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("io.coil-kt.coil3:coil-compose:3.0.0-rc02")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.0-rc02")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

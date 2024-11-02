@@ -50,17 +50,12 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentStorageEntriesViewModel
-import uniffi.ease_client.CurrentStorageStateType
-import uniffi.ease_client.StorageEntryType
+import uniffi.ease_client.StorageImportWidget
 import uniffi.ease_client.VCurrentStorageEntriesStateStorageItem
 import uniffi.ease_client.VCurrentStorageEntry
 import uniffi.ease_client.VSplitPathItem
-import uniffi.ease_client.finishSelectedEntriesInImport
-import uniffi.ease_client.locateEntry
-import uniffi.ease_client.refreshCurrentStorageInImport
-import uniffi.ease_client.selectEntry
-import uniffi.ease_client.selectStorageInImport
-import uniffi.ease_client.toggleAllCheckedEntries
+import uniffi.ease_client_shared.CurrentStorageStateType
+import uniffi.ease_client_shared.StorageEntryType
 
 @Composable
 private fun ImportEntriesSkeleton() {
@@ -324,9 +319,7 @@ private fun ImportStorages(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .clickable {
-                        Bridge.invoke {
-                            selectStorageInImport(item.id)
-                        }
+                        Bridge.dispatchClick(StorageImportWidget.StorageItem(item.id))
                     }
                     .background(bgColor)
                     .width(142.dp)
@@ -521,9 +514,7 @@ fun ImportMusicsPage(
                     painter = painterResource(id = R.drawable.icon_toggle_all),
                     disabled = state.disabledToggleAll,
                     onClick = {
-                        Bridge.invoke {
-                            toggleAllCheckedEntries()
-                        }
+                        Bridge.dispatchClick(StorageImportWidget.ToggleAll)
                     }
                 )
             }

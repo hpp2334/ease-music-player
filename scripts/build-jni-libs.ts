@@ -1,7 +1,6 @@
-const { execSync } = require('child_process')
-const { mkdirSync, rmSync, cpSync } = require('fs')
-const path = require('path')
-const { ROOT, CLIENT_ROOT, RUST_LIBS_ROOTS } = require('./base')
+import { execSync } from "node:child_process"
+import { ROOT, RUST_LIBS_ROOTS } from "./base";
+import path from "node:path";
 
 const TARGETS = [
     // 'x86_64',
@@ -26,7 +25,7 @@ for (const buildTarget of TARGETS) {
         cwd: RUST_LIBS_ROOTS,
         env: {
             ...process.env,
-            RUST_BACKTRACE: 1,
+            RUST_BACKTRACE: '1',
         }
     })
 
@@ -36,7 +35,7 @@ for (const buildTarget of TARGETS) {
         cwd: RUST_LIBS_ROOTS,
         env: {
             ...process.env,
-            RUST_BACKTRACE: 1,
+            RUST_BACKTRACE: '1',
         }
     })
 }

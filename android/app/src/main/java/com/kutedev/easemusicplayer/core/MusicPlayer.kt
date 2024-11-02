@@ -1,27 +1,8 @@
 package com.kutedev.easemusicplayer.core
 
 import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
 import uniffi.ease_client.IMusicPlayerService
-import uniffi.ease_client.updateCurrentMusicPlayingForPlayerInternal
-import kotlin.time.Duration
-import kotlin.time.Duration.Companion.seconds
-import kotlin.time.DurationUnit
-import kotlin.time.toDuration
-
-fun Player.currentPositionFlow(
-    updateFrequency: Duration = 1.seconds,
-) = flow {
-    while (true) {
-        if (isPlaying) emit(Unit)
-        delay(updateFrequency)
-    }
-}.flowOn(Dispatchers.Main)
 
 class MusicPlayer : IMusicPlayerService {
     private var _internal: ExoPlayer? = null
@@ -62,5 +43,10 @@ class MusicPlayer : IMusicPlayerService {
         val mediaItem = MediaItem.fromUri(url)
         player.setMediaItem(mediaItem)
         player.prepare()
+    }
+
+    override fun getCurrentDurationS(): ULong {
+        val player = getInternal()
+        return player.currentPosition.toULong()
     }
 }

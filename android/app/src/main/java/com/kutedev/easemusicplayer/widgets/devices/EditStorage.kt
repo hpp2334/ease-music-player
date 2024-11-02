@@ -50,10 +50,10 @@ import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
-import uniffi.ease_client.StorageConnectionTestResult
-import uniffi.ease_client.StorageType
-import uniffi.ease_client.testConnection
-import uniffi.ease_client.upsertStorage
+import uniffi.ease_client.StorageUpsertWidget
+import uniffi.ease_client.Widget
+import uniffi.ease_client_shared.StorageConnectionTestResult
+import uniffi.ease_client_shared.StorageType
 
 
 @Composable
@@ -186,11 +186,8 @@ fun EditStoragesPage(
                     overrideColors = testingColors,
                     onClick = {
                         val value = formVM.validateAndGetSubmit()
-                        println(value)
                         if (value != null) {
-                            Bridge.invoke {
-                                testConnection(value)
-                            }
+                            Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Test));
                         }
                     }
                 )
@@ -201,9 +198,7 @@ fun EditStoragesPage(
                     onClick = {
                         val value = formVM.validateAndGetSubmit()
                         if (value != null) {
-                            Bridge.invoke {
-                                upsertStorage(value)
-                            }
+                            Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Test));
                             navController.popBackStack()
                         }
                     }

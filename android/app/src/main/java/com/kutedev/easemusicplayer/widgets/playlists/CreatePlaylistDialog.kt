@@ -31,10 +31,8 @@ import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.SimpleFormText
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
-import uniffi.ease_client.CreatePlaylistMode
-import uniffi.ease_client.finishCreatePlaylist
-import uniffi.ease_client.updateCreatePlaylistMode
-import uniffi.ease_client.updateCreatePlaylistName
+import uniffi.ease_client.PlaylistCreateWidget
+import uniffi.ease_client_shared.CreatePlaylistMode
 
 @Composable
 private fun Tab(
@@ -83,12 +81,6 @@ fun PlaylistsDialog(
     val onDismissRequest = {
         vm.closeDialog()
     }
-    val onChangeTab = fun (mode: CreatePlaylistMode) {
-        Bridge.invoke {
-            updateCreatePlaylistMode(mode)
-        }
-    }
-
     if (!isOpen) {
         return
     }
@@ -107,14 +99,14 @@ fun PlaylistsDialog(
                     stringId = R.string.playlists_dialog_tab_full,
                     isActive = mode == CreatePlaylistMode.FULL,
                     onClick = {
-                        onChangeTab(CreatePlaylistMode.FULL)
+                        Bridge.dispatchClick(PlaylistCreateWidget.Tab(CreatePlaylistMode.FULL));
                     }
                 )
                 Tab(
                     stringId = R.string.playlists_dialog_tab_empty,
                     isActive = mode == CreatePlaylistMode.EMPTY,
                     onClick = {
-                        onChangeTab(CreatePlaylistMode.EMPTY)
+                        Bridge.dispatchClick(PlaylistCreateWidget.Tab(CreatePlaylistMode.EMPTY));
                     }
                 )
             }
@@ -122,7 +114,9 @@ fun PlaylistsDialog(
             SimpleFormText(
                 label = stringResource(R.string.playlists_dialog_playlist_name),
                 value = state.name,
-                onChange = {value -> Bridge.invoke { updateCreatePlaylistName(value) } }
+                onChange = {value ->
+                    Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
+                }
             )
             Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -151,9 +145,7 @@ fun PlaylistsDialog(
                         type = EaseTextButtonType.Primary,
                         size = EaseTextButtonSize.Medium,
                         onClick = {
-                            Bridge.invoke {
-                                finishCreatePlaylist()
-                            }
+                            Bridge.dispatchClick(PlaylistCreateWidget.FinishCreate);
                             onDismissRequest()
                         }
                     )

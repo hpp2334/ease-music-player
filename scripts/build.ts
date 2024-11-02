@@ -1,7 +1,8 @@
-const { execSync } = require('child_process')
-const { mkdirSync, rmSync, cpSync, writeFileSync } = require('fs')
-const { ROOT, CLIENT_ROOT } = require('./base')
-const path = require('path')
+import { execSync } from "child_process"
+import { writeFileSync, rmSync, mkdirSync, cpSync } from "fs"
+import path from "path"
+import { ROOT } from "./base"
+
 
 const androidDir = path.resolve(ROOT, './android')
 const jksPath = path.resolve(androidDir, 'ease_music_player.jks')
@@ -16,7 +17,7 @@ keyAlias=key0
 storeFile=ease_music_player.jks`)
 console.log(`${keyPropertiesPath} written`)
 
-const jks = Buffer.from(process.env.ANDROID_SIGN_JKS, 'base64')
+const jks = Buffer.from(process.env.ANDROID_SIGN_JKS!, 'base64')
 writeFileSync(jksPath, jks);
 console.log(`${jksPath} written`)
 

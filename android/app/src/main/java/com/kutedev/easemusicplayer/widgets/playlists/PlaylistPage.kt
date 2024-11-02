@@ -10,11 +10,8 @@ import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.animateTo
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,7 +33,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -47,9 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -58,7 +51,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.navigation.NavController
 import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.Routes
@@ -72,18 +64,13 @@ import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
-import kotlinx.coroutines.flow.collect
-import uniffi.ease_client.PlaylistId
+import uniffi.ease_client.PlaylistDetailWidget
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.VPlaylistMusicItem
-import uniffi.ease_client.playAllMusics
-import uniffi.ease_client.playMusic
-import uniffi.ease_client.prepareImportEntriesInCurrentPlaylist
-import uniffi.ease_client.removeMusicFromCurrentPlaylist
-import uniffi.ease_client.removePlaylist
+import uniffi.ease_client_shared.MusicId
+import uniffi.ease_client_shared.PlaylistId
 import java.util.Timer
 import kotlin.concurrent.schedule
-import kotlin.math.roundToInt
 
 @Composable
 private fun RemovePlaylistDialog(
@@ -100,9 +87,7 @@ private fun RemovePlaylistDialog(
             onClose()
             navController.popBackStack()
             Timer("Remove playlist", false).schedule(0) {
-                Bridge.invoke {
-                    removePlaylist(id)
-                }
+                Bridge.dispatchClick(PlaylistDetailWidget.Remove);
             }
         },
         onCancel = onClose
@@ -173,9 +158,7 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
-                                    Bridge.invoke {
-                                        prepareImportEntriesInCurrentPlaylist()
-                                    }
+                                    Bridge.dispatchClick(PlaylistDetailWidget.Import);
                                     navController.navigate(Routes.IMPORT_MUSICS)
                                 }
                             ),
@@ -249,7 +232,7 @@ private fun EmptyPlaylist() {
 private fun PlaylistItem(
     item: VPlaylistMusicItem,
     playing: Boolean,
-    currentSwipingPlaylistId: PlaylistId?,
+    currentSwipingMusicId: MusicId?,
     onSwipe: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -258,23 +241,8 @@ private fun PlaylistItem(
     val density = LocalDensity.current
     val navController = LocalNavController.current
 
-    val anchors = remember {
-        DraggableAnchors {
-            0 at 0f
-            1 at -panelWidth
-        }
-    }
-    val anchoredDraggableState = remember {
-        AnchoredDraggableState(
-            initialValue = 0,
-            anchors = anchors,
-            positionalThreshold = { distance: Float -> distance * 0.5f },
-            velocityThreshold = { with(density) { 100.dp.toPx() } },
-            animationSpec = tween(),
-        )
-    }
+
     val interactionSource = remember { MutableInteractionSource() }
-    val swipeOffsetX = anchoredDraggableState.offset.dp
 
     LaunchedEffect(Unit) {
         interactionSource.interactions.collect {interaction ->
@@ -283,13 +251,6 @@ private fun PlaylistItem(
                     onSwipe()
                 }
             }
-        }
-    }
-
-    LaunchedEffect(currentSwipingPlaylistId) {
-        val isSwiping = currentSwipingPlaylistId == item.id
-        if (!isSwiping && swipeOffsetX != 0.dp) {
-            anchoredDraggableState.animateTo(0)
         }
     }
 
@@ -321,17 +282,9 @@ private fun PlaylistItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .offset(swipeOffsetX, 0.dp)
-                .anchoredDraggable(
-                    state = anchoredDraggableState,
-                    orientation = Orientation.Horizontal,
-                    interactionSource = interactionSource,
-                )
                 .clip(RoundedCornerShape(14.dp))
                 .clickable {
-                    Bridge.invoke {
-                        playMusic(item.id)
-                    }
+                    Bridge.dispatchClick(PlaylistDetailWidget.Music(item.id));
                     navController.navigate(Routes.MUSIC_PLAYER)
                     onSwipe()
                 }
@@ -374,7 +327,7 @@ private fun PlaylistItem(
                 .fillMaxHeight()
                 .width(panelWidth.dp)
                 .clipToBounds()
-                .offset(x = panelWidth.dp + swipeOffsetX)
+                .offset(x = panelWidth.dp)
                 .align(alignment = Alignment.CenterEnd)
         ) {
             Box(modifier = Modifier.width(8.dp))
@@ -384,9 +337,6 @@ private fun PlaylistItem(
                 painter = painterResource(id = R.drawable.icon_deleteseep),
                 onClick = {
                     onRemove()
-                    Bridge.invoke {
-                        removeMusicFromCurrentPlaylist(item.id)
-                    }
                 }
             )
         }
@@ -398,8 +348,8 @@ private fun PlaylistItemsBlock(
     items: List<VPlaylistMusicItem>,
     currentMusicState: VCurrentMusicState,
 ) {
-    var swipingPlaylistId by remember {
-        mutableStateOf<PlaylistId?>(null)
+    var swipingMusicId by remember {
+        mutableStateOf<MusicId?>(null)
     }
 
     Column(
@@ -415,12 +365,13 @@ private fun PlaylistItemsBlock(
                 PlaylistItem(
                     item = item,
                     playing = playing,
-                    currentSwipingPlaylistId = swipingPlaylistId,
-                    onSwipe = {swipingPlaylistId = item.id},
+                    currentSwipingMusicId = swipingMusicId,
+                    onSwipe = {swipingMusicId = item.id},
                     onRemove = {
-                        if (swipingPlaylistId == item.id) {
-                            swipingPlaylistId = null
+                        if (swipingMusicId == item.id) {
+                            swipingMusicId = null
                         }
+                        Bridge.dispatchClick(PlaylistDetailWidget.RemoveMusic(item.id));
                     }
                 )
             }
@@ -479,9 +430,7 @@ fun PlaylistPage(
                 painter = painterResource(id = R.drawable.icon_play),
                 disabled = items.isEmpty(),
                 onClick = {
-                    Bridge.invoke {
-                        playAllMusics()
-                    }
+                    Bridge.dispatchClick(PlaylistDetailWidget.PlayAll);
                 }
             )
         }

@@ -36,7 +36,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
-import uniffi.ease_client.changeCurrentPlaylist
+import uniffi.ease_client.PlaylistListWidget
 
 @Composable
 fun PlaylistsSubpage(
@@ -111,9 +111,7 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
     Box(Modifier
         .clickable(
             onClick = {
-                Bridge.invoke {
-                    changeCurrentPlaylist(playlist.id)
-                }
+                Bridge.dispatchClick(PlaylistListWidget.Item(playlist.id));
                 navController.navigate(Routes.PLAYLIST)
             },
         )

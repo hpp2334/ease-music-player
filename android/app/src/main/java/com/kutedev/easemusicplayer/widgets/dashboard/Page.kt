@@ -38,15 +38,20 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
-import uniffi.ease_client.StorageId
-import uniffi.ease_client.StorageType
+import uniffi.ease_client.StorageListWidget
 import uniffi.ease_client.VStorageListItem
-import uniffi.ease_client.prepareEditStorage
+import uniffi.ease_client.Widget
+import uniffi.ease_client_shared.StorageId
+import uniffi.ease_client_shared.StorageType
 
 private val paddingX = 24.dp
 
 private fun toEditStorage(navController: NavHostController, arg: StorageId?) {
-    Bridge.invoke { prepareEditStorage(arg) }
+    if (arg != null) {
+        Bridge.dispatchClick(StorageListWidget.Item(arg))
+    } else {
+        Bridge.dispatchClick(StorageListWidget.Create)
+    }
     navController.navigate(Routes.ADD_DEVICES)
 }
 

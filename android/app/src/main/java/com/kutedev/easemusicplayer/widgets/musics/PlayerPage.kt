@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseContextMenu
@@ -48,23 +49,17 @@ import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.core.BitmapResources
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.widgets.dashboard.DashboardSubpage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsSubpage
 import com.kutedev.easemusicplayer.widgets.settings.SettingSubpage
-import uniffi.ease_client.ArgSeekMusic
-import uniffi.ease_client.PlayMode
+import uniffi.ease_client.MusicControlAction
+import uniffi.ease_client.MusicControlWidget
+import uniffi.ease_client.PlayerEvent
 import uniffi.ease_client.VCurrentMusicState
-import uniffi.ease_client.pauseMusic
-import uniffi.ease_client.playMusic
-import uniffi.ease_client.playNextMusic
-import uniffi.ease_client.playPreviousMusic
-import uniffi.ease_client.resumeMusic
-import uniffi.ease_client.seekMusic
-import uniffi.ease_client.setCurrentMusicPositionForPlayerInternal
-import uniffi.ease_client.updateMusicPlaymodeToNext
+import uniffi.ease_client.ViewAction
+import uniffi.ease_client_shared.PlayMode
 
 @Composable
 private fun MusicPlayerHeader(
@@ -207,16 +202,14 @@ private fun MusicSlider(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MusicPlayerCover(
-    resources: BitmapResources,
     onLeft: () -> Unit,
     onRight: () -> Unit,
-    cover: ULong,
-    prevCover: ULong,
-    nextCover: ULong
+    cover: String,
+    prevCover: String,
+    nextCover: String
 ) {
     @Composable
-    fun CoverImage(id: ULong) {
-        val bitmap = resources.get(id)
+    fun CoverImage(url: String) {
 
         Box(
             contentAlignment = Alignment.Center,
@@ -232,19 +225,22 @@ private fun MusicPlayerCover(
                     )
                     .clip(RoundedCornerShape(20.dp))
             ) {
-                if (bitmap == null) {
+                if (url.isEmpty()) {
                     Image(
                         painter = painterResource(id = R.drawable.cover_default_image),
                         contentDescription = null
                     )
                 } else {
-                    Image(bitmap = bitmap, contentDescription = null)
+                    AsyncImage(
+                        model = url,
+                        contentDescription = null,
+                    )
                 }
             }
         }
     }
 
-    CoverImage(id = cover)
+    CoverImage(url = cover)
 }
 
 @Composable
@@ -275,9 +271,7 @@ fun MusicPanel(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_play_previous),
             onClick = {
-                Bridge.invoke {
-                    playPreviousMusic();
-                }
+                Bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
             }
         )
         if (!state.playing) {
@@ -286,9 +280,7 @@ fun MusicPanel(
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
                 onClick = {
-                    Bridge.invoke {
-                        resumeMusic();
-                    }
+                    Bridge.dispatchClick(MusicControlWidget.PLAY)
                 }
             )
         }
@@ -298,9 +290,7 @@ fun MusicPanel(
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_pause),
                 onClick = {
-                    Bridge.invoke {
-                        pauseMusic();
-                    }
+                    Bridge.dispatchClick(MusicControlWidget.PAUSE)
                 }
             )
         }
@@ -309,9 +299,7 @@ fun MusicPanel(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_play_next),
             onClick = {
-                Bridge.invoke {
-                    playNextMusic();
-                }
+                Bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
             }
         )
         EaseIconButton(
@@ -319,9 +307,7 @@ fun MusicPanel(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = modeDrawable),
             onClick = {
-                Bridge.invoke {
-                    updateMusicPlaymodeToNext()
-                }
+                Bridge.dispatchClick(MusicControlWidget.PLAYMODE)
             }
         )
     }
@@ -351,16 +337,11 @@ fun MusicPlayerPage(
                     .weight(1.0F)
             ) {
                 MusicPlayerCover(
-                    resources = Bridge.getResources(),
                     onLeft = {
-                        Bridge.invoke {
-                            playPreviousMusic()
-                        }
+                        Bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
                     },
                     onRight = {
-                        Bridge.invoke {
-                            playNextMusic()
-                        }
+                        Bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
                     },
                     cover = state.cover,
                     prevCover = state.previousCover,
@@ -383,9 +364,7 @@ fun MusicPlayerPage(
                     totalDuration = state.totalDuration,
                     totalDurationMS = state.totalDurationMs,
                     onChangeMusicPosition = { nextMS ->
-                        Bridge.invoke {
-                            seekMusic(ArgSeekMusic(nextMS))
-                        }
+                        Bridge.dispatchAction(ViewAction.MusicControl(MusicControlAction.Seek(nextMS)))
                     }
                 )
             }
@@ -449,8 +428,6 @@ private fun MusicSliderPreview() {
 )
 @Composable
 private fun MusicCoverPreview() {
-    val resources = BitmapResources()
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -464,16 +441,15 @@ private fun MusicCoverPreview() {
             modifier = Modifier.weight(1f)
         ) {
             MusicPlayerCover(
-                resources = resources,
                 onLeft = {
                     println("onLeft")
                 },
                 onRight = {
                     println("onRight")
                 },
-                cover = 0uL,
-                prevCover = 0uL,
-                nextCover = 0uL
+                cover = "",
+                prevCover = "",
+                nextCover = ""
             )
         }
         Box(modifier = Modifier

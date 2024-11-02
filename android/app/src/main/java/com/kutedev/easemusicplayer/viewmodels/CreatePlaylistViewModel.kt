@@ -5,10 +5,11 @@ import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import uniffi.ease_client.CreatePlaylistMode
+import uniffi.ease_client.PlaylistListWidget
 import uniffi.ease_client.RootViewModelState
 import uniffi.ease_client.VCreatePlaylistState
-import uniffi.ease_client.prepareCreatePlaylist
+import uniffi.ease_client.Widget
+import uniffi.ease_client_shared.CreatePlaylistMode
 
 
 class CreatePlaylistViewModel : ViewModel(), IOnNotifyView {
@@ -16,10 +17,9 @@ class CreatePlaylistViewModel : ViewModel(), IOnNotifyView {
         VCreatePlaylistState(
             mode = CreatePlaylistMode.FULL,
             name = "",
-            picture = null,
+            picture = "",
             musicCount = 0u,
             recommendPlaylistNames = emptyList(),
-            preparedSignal = 0u,
             fullImported = false,
         )
     })
@@ -33,9 +33,7 @@ class CreatePlaylistViewModel : ViewModel(), IOnNotifyView {
     }
 
     fun openDialog() {
-        Bridge.invoke {
-            prepareCreatePlaylist()
-        }
+        Bridge.dispatchClick(PlaylistListWidget.Add)
         _isOpen.value = true
     }
 

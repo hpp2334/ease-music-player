@@ -4,15 +4,8 @@ import androidx.lifecycle.ViewModel
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import uniffi.ease_client.ArgUpsertStorage
-import uniffi.ease_client.CreatePlaylistMode
-import uniffi.ease_client.CurrentStorageImportType
-import uniffi.ease_client.CurrentStorageStateType
-import uniffi.ease_client.PlayMode
 import uniffi.ease_client.RootRouteSubKey
 import uniffi.ease_client.RootViewModelState
-import uniffi.ease_client.StorageConnectionTestResult
-import uniffi.ease_client.StorageType
 import uniffi.ease_client.VCreatePlaylistState
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.VCurrentPlaylistState
@@ -22,6 +15,9 @@ import uniffi.ease_client.VPlaylistListState
 import uniffi.ease_client.VRootSubKeyState
 import uniffi.ease_client.VStorageListState
 import uniffi.ease_client.VTimeToPauseState
+import uniffi.ease_client_shared.CurrentStorageImportType
+import uniffi.ease_client_shared.CurrentStorageStateType
+import uniffi.ease_client_shared.PlayMode
 
 class PlaylistsViewModel : ViewModel(), IOnNotifyView {
     private val _state = MutableStateFlow(run {
@@ -91,8 +87,7 @@ class CurrentPlaylistViewModel : ViewModel(), IOnNotifyView {
             items = emptyList(),
             title = "",
             duration = "",
-            picture = null,
-            firstPictureInMusics = null,
+            coverUrl = "",
         )
     })
     val state = _state.asStateFlow()
@@ -118,9 +113,9 @@ class CurrentMusicViewModel : ViewModel(), IOnNotifyView {
             canChangePosition = false,
             canPlayNext = false,
             canPlayPrevious = false,
-            previousCover = 0UL,
-            nextCover = 0UL,
-            cover = 0UL,
+            previousCover = "",
+            nextCover = "",
+            cover = "",
             playMode = PlayMode.SINGLE,
             playing = false,
             lyricIndex = 0,
@@ -140,7 +135,7 @@ class CurrentMusicViewModel : ViewModel(), IOnNotifyView {
 class CurrentStorageEntriesViewModel : ViewModel(), IOnNotifyView {
     private val _state = MutableStateFlow(run {
         VCurrentStorageEntriesState(
-            importType = CurrentStorageImportType.MUSICS,
+            importType = CurrentStorageImportType.None,
             stateType = CurrentStorageStateType.LOADING,
             currentStorageId = null,
             storageItems = emptyList(),

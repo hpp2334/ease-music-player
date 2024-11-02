@@ -4,14 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build:apk": "node ./scripts/build.js",
-    "generate": "node ./scripts/update_api.js",
+    "generate:jni": "bun run ./scripts/build-jni-libs.ts",
+    "build:apk": "bun run ./scripts/build.ts",
     "test": "cd ./rust-libs && cargo test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@types/node": "^20.10.6"
+    "@types/node": "^20.10.6",
+    "typescript": "^5.6.3"
   }
 }
