@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "generate:jni": "bun run ./scripts/build-jni-libs.ts",
+    "build:jni": "bun run ./scripts/build-jni-libs.ts",
     "build:apk": "bun run ./scripts/build.ts",
     "test": "cd ./rust-libs && cargo test"
   },

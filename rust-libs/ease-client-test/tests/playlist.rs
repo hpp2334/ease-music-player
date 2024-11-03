@@ -1,6 +1,5 @@
 use ease_client::{
-    PlaylistCreateWidget, PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget,
-    StorageImportWidget,
+    view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget, PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget, ViewAction
 };
 use ease_client_shared::uis::{playlist::CreatePlaylistMode, storage::CurrentStorageStateType};
 use ease_client_test::{PresetDepth, ReqInteceptor, TestApp};
@@ -75,6 +74,7 @@ async fn playlist_import_select_non_music_1() {
     app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
+    assert!(!entries.can_undo);
     assert_eq!(entries.entries.len(), 7);
     let item = &entries.entries[2];
     assert_eq!(item.path, "/README.md");
@@ -84,13 +84,22 @@ async fn playlist_import_select_non_music_1() {
     app.dispatch_click(StorageImportWidget::StorageEntry {
         path: entries.entries[2].path.clone(),
     });
+    app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
+    assert!(!entries.can_undo);
     let item = &entries.entries[2];
     assert_eq!(item.path, "/README.md");
     assert_eq!(item.can_check, false);
     assert_eq!(item.checked, false);
     assert_eq!(entries.selected_count, 0);
+
+    app.emit(Action::View(ViewAction::StorageImport(StorageImportAction::Undo)));
+    app.wait_network().await;
+    let state = app.latest_state();
+    let entries = state.current_storage_entries.unwrap();
+    assert!(!entries.can_undo);
+    assert_eq!(entries.entries.len(), 7);
 }
 
 #[tokio::test]

@@ -1,18 +1,12 @@
 use std::{
     any::Any,
     fmt::Debug,
-    sync::{
-        atomic::AtomicBool,
-        Arc,
-    },
+    sync::{atomic::AtomicBool, Arc},
     thread::ThreadId,
 };
 
 use crate::{
-    async_task::AsyncExecutor,
-    models::Models,
-    to_host::ToHosts,
-    view_models::pod::ViewModels,
+    async_task::AsyncExecutor, models::Models, to_host::ToHosts, view_models::pod::ViewModels,
 };
 
 pub(crate) struct AppInternal {
@@ -35,7 +29,7 @@ impl AppInternal {
         Event: Any + Debug + 'static,
     {
         self.check_same_thread();
-        self.before_flush();
+        self.before_flush_emit(&evt);
         self.view_models.handle_event(self, evt);
         self.after_flush();
     }
@@ -44,7 +38,7 @@ impl AppInternal {
         self.check_same_thread();
         let should_flush = self.async_executor.flush_runnables();
         if should_flush {
-            self.before_flush();
+            self.before_flush_flush_spawned();
             self.view_models.handle_flush(self);
             self.after_flush();
         }
@@ -70,12 +64,27 @@ impl AppInternal {
         }
     }
 
-    fn before_flush(&self) {
+    fn before_flush_emit<Event>(&self, e: &Event)
+    where
+        Event: Debug,
+    {
         let lock = self
             .during_flush
             .swap(true, std::sync::atomic::Ordering::Relaxed);
         if lock {
-            panic!("ViewModels are during on_event or on_flush")
+            panic!(
+                "emit Event {:?}, but ViewModels are during on_event or on_flush",
+                e
+            )
+        }
+    }
+
+    fn before_flush_flush_spawned(&self) {
+        let lock = self
+            .during_flush
+            .swap(true, std::sync::atomic::Ordering::Relaxed);
+        if lock {
+            panic!("flush_spawned, but ViewModels are during on_event or on_flush")
         }
     }
 

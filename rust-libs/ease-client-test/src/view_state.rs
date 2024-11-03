@@ -22,7 +22,7 @@ impl ViewStateServiceRef {
 }
 
 impl IViewStateService for ViewStateServiceRef {
-    fn notify(&self, v: RootViewModelState) {
+    fn handle_notify(&self, v: RootViewModelState) {
         let mut state = self.state.lock().unwrap();
         state.merge_from(v);
     }

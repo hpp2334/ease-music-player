@@ -12,6 +12,8 @@ const TARGETS = [
 
 // sys env "ANDROID_NDK_HOME"
 
+const isProduction = Boolean(process.env.PRODUCTION)
+
 console.log("Build ease-client in debug mode")
 execSync(`cargo build -p ease-client`, {
     stdio: 'inherit',

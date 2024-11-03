@@ -1,9 +1,8 @@
-
 use ease_client_shared::{
     backends::storage::{
-            ArgUpsertStorage, Storage, StorageConnectionTestResult, StorageEntryType, StorageId,
-            StorageType,
-        },
+        ArgUpsertStorage, Storage, StorageConnectionTestResult, StorageEntryType, StorageId,
+        StorageType,
+    },
     uis::storage::*,
 };
 use serde::Serialize;
@@ -12,7 +11,7 @@ use crate::{
     utils::{cmp_name_smartly::cmp_name_smartly, common::decode_component_or_origin},
     view_models::storage::{
         import::{entry_can_check, get_entry_type},
-        state::{AllStorageState, CurrentStorageState, EditStorageState},
+        state::{AllStorageState, CurrentStorageState, EditStorageFormValidated, EditStorageState},
     },
 };
 
@@ -67,6 +66,7 @@ pub struct VCurrentStorageEntriesState {
     pub split_paths: Vec<VSplitPathItem>,
     pub current_path: String,
     pub disabled_toggle_all: bool,
+    pub can_undo: bool,
 }
 
 #[derive(Debug, Clone, Serialize, uniffi::Record)]
@@ -74,6 +74,7 @@ pub struct VEditStorageState {
     pub is_created: bool,
     pub title: String,
     pub info: ArgUpsertStorage,
+    pub validated: EditStorageFormValidated,
     pub test: StorageConnectionTestResult,
     pub music_count: u32,
     pub playlist_count: u32,
@@ -88,7 +89,7 @@ fn resolve_storage_name(storage: &Storage) -> String {
 }
 
 pub(crate) fn storage_list_vs(state: &AllStorageState, root: &mut RootViewModelState) {
-    let items: Vec<VStorageListItem> = {
+    let mut items: Vec<VStorageListItem> = {
         state
             .storages
             .iter()
@@ -100,6 +101,8 @@ pub(crate) fn storage_list_vs(state: &AllStorageState, root: &mut RootViewModelS
             })
             .collect()
     };
+    items.sort_by(|lhs, rhs| lhs.storage_id.cmp(&rhs.storage_id));
+
     let list = VStorageListState { items };
     root.storage_list = Some(list);
 }
@@ -190,6 +193,7 @@ pub(crate) fn current_storage_entries_vs(
         state_type: state.state_type.clone(),
         storage_items,
         disabled_toggle_all,
+        can_undo: !state.undo_stack.is_empty(),
     };
     root.current_storage_entries = Some(current_storage_entries);
 }
@@ -199,6 +203,7 @@ pub(crate) fn edit_storage_vs(state: &EditStorageState, root: &mut RootViewModel
         is_created: state.is_create,
         title: state.title.clone(),
         info: state.info.clone(),
+        validated: state.validated.clone(),
         test: state.test,
         music_count: state.music_count,
         playlist_count: state.playlist_count,

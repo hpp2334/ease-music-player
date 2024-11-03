@@ -3,13 +3,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ease_client::{Action, IMusicPlayerService, PlayerEvent, ViewAction};
+use ease_client_shared::backends::music::MusicId;
 use hyper::StatusCode;
 use lofty::AudioFile;
 use misty_vm::AppPod;
 
 #[derive(Clone)]
 struct FakeMusicPlayerInner {
-    url: Arc<Mutex<String>>,
+    url: Arc<Mutex<Option<(MusicId, String)>>>,
     req_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     last_bytes: Arc<Mutex<Vec<u8>>>,
     playing: Arc<AtomicBool>,
@@ -93,7 +94,10 @@ impl FakeMusicPlayerInner {
             let v = self
                 .total_duration
                 .load(std::sync::atomic::Ordering::SeqCst);
-            self.push_player_event(PlayerEvent::Total { duration_ms: v });
+            let curr = self.url.lock().unwrap().clone();
+            if let Some((id, url)) = curr {
+                self.push_player_event(PlayerEvent::Total { id, duration_ms: v });
+            }
         }
 
         loop {
@@ -170,11 +174,11 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
             .store(duration, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn set_music_url(&self, url: String) {
+    fn set_music_url(&self, id: MusicId, url: String) {
         let inner = self.inner.clone();
         {
             let mut url_v = inner.url.lock().unwrap();
-            *url_v = url.clone();
+            *url_v = Some((id, url.clone()));
         }
         {
             let handle = inner.req_handle.clone();

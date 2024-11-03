@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 
 use ease_client_shared::backends::app::ArgInitializeApp;
 use misty_vm::{App, AppPod, IAsyncRuntimeAdapter};
@@ -32,15 +32,69 @@ use crate::{
         view_state::ViewStateVM,
     },
 };
+use tracing::subscriber::set_global_default;
 
 static CLIENT: Lazy<AppPod> = Lazy::new(|| AppPod::new());
 static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(2)
+        .worker_threads(4)
         .build()
         .unwrap()
 });
+
+fn create_log(dir: &str) -> std::fs::File {
+    let p = std::path::Path::new(dir).join("latest.log");
+    let _r = std::fs::remove_file(&p);
+    let file = std::fs::File::create(&p).unwrap();
+    file
+}
+
+#[cfg(target_os = "android")]
+fn setup_subscriber(dir: &str) {
+    use tracing_subscriber::layer::SubscriberExt;
+    let log_file = create_log(dir);
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(log_file)
+        .with_ansi(false)
+        .finish();
+    let subscriber = subscriber.with(tracing_android::layer("com.ease_music_player").unwrap());
+    set_global_default(subscriber).unwrap();
+}
+
+#[cfg(not(target_os = "android"))]
+fn setup_subscriber(dir: &str) {
+    let log_file = create_log(dir);
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(log_file)
+        .with_ansi(false)
+        .finish();
+
+    set_global_default(subscriber).unwrap();
+}
+
+fn setup_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let stacktrace = std::backtrace::Backtrace::force_capture();
+
+        tracing::error!("panic info: {}", info);
+        tracing::error!("panic stacktrace: {}", stacktrace);
+
+        std::process::abort()
+    }));
+}
+
+fn init_tracers(dir: &str) {
+    static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
+    let is_init = IS_INITIALIZED.swap(true, std::sync::atomic::Ordering::SeqCst);
+    std::env::set_var("RUST_BACKTRACE", "1");
+    if !is_init {
+        setup_subscriber(dir);
+        setup_panic_hook();
+    }
+}
 
 pub fn build_client(
     player: Arc<dyn IMusicPlayerService>,
@@ -92,6 +146,7 @@ pub fn api_build_client(
     vs: Arc<dyn IViewStateService>,
     notifier: Arc<dyn IFlushNotifier>,
 ) {
+    let _guard = ASYNC_RT.enter();
     let app = build_client(player, toast, vs, AsyncAdapter::new(notifier));
     CLIENT.set(app);
 }
@@ -99,13 +154,14 @@ pub fn api_build_client(
 #[uniffi::export]
 pub fn api_start_client(arg: ArgInitializeApp) {
     let _guard = ASYNC_RT.enter();
+    init_tracers(&arg.app_document_dir);
     CLIENT.get().emit(Action::Init(arg));
 }
 
 #[uniffi::export]
 pub fn api_emit_view_action(action: ViewAction) {
     let _guard = ASYNC_RT.enter();
-    CLIENT.get().emit(action);
+    CLIENT.get().emit(Action::View(action));
 }
 
 #[uniffi::export]

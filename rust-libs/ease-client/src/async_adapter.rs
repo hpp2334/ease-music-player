@@ -16,7 +16,7 @@ impl AsyncAdapter {
 
 impl IAsyncRuntimeAdapter for AsyncAdapter {
     fn on_schedule(&self) {
-        self.notifier.notify();
+        self.notifier.handle_notify();
     }
 
     fn sleep(&self, duration: Duration) -> LocalBoxFuture<'static, ()> {

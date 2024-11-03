@@ -144,6 +144,7 @@ class CurrentStorageEntriesViewModel : ViewModel(), IOnNotifyView {
             splitPaths = emptyList(),
             currentPath = "",
             disabledToggleAll = false,
+            canUndo = false,
         )
     })
     val state = _state.asStateFlow()

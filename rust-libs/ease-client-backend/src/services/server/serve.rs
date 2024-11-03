@@ -69,24 +69,26 @@ async fn handle_got_stream_file(res: BResult<Option<StreamFile>>) -> Response {
     let file_name = stream_file.url().to_string();
     let file_name = file_name.split('/').last().unwrap();
 
+    let content_type = stream_file
+        .content_type()
+        .clone()
+        .unwrap_or("application/octet-stream");
+
     let mut headers = HeaderMap::new();
     headers.append(
         header::CONTENT_TYPE,
-        HeaderValue::from_str(
-            stream_file
-                .content_type()
-                .clone()
-                .unwrap_or("application/octet-stream"),
-        )
-        .unwrap(),
+        HeaderValue::from_str(content_type).unwrap(),
     );
+    if content_type == "application/octet-stream" {
+        headers.append(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_str(&format!("attachment; filename=\"{}\"", file_name)).unwrap(),
+        );
+    }
+
     if let Some(size) = stream_file.size() {
         headers.append(header::CONTENT_LENGTH, HeaderValue::from(size));
     }
-    headers.append(
-        header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&format!("attachment; filename=\"{}\"", file_name)).unwrap(),
-    );
 
     let body = axum::body::StreamBody::new(stream_file.into_stream());
     return (headers, body).into_response();

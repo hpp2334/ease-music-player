@@ -35,7 +35,6 @@ import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
-import com.kutedev.easemusicplayer.viewmodels.MusicPlayerViewModel
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
 import com.kutedev.easemusicplayer.widgets.musics.ImportMusicsPage
@@ -55,14 +54,12 @@ where T : ViewModel, T : IOnNotifyView {
 class MainActivity : ComponentActivity() {
     val vmDestroyers = mutableListOf<() -> Unit>()
 
-    @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         registerViewModels()
         Bridge.initApp(applicationContext)
-        registerMusicPlayerViewModel()
 
         setContent {
             val bottomBarPageState = rememberPagerState(pageCount = {
@@ -140,7 +137,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
             composable(Routes.IMPORT_MUSICS) {
-                ImportMusicsPage(currentStorageEntriesVM = currentStorageEntriesVM)
+                ImportMusicsPage(vm = currentStorageEntriesVM)
             }
             composable(Routes.MUSIC_PLAYER) {
                 MusicPlayerPage(vm = currentMusicVM)
@@ -165,15 +162,6 @@ class MainActivity : ComponentActivity() {
         registerViewModel<CurrentPlaylistViewModel>()
         registerViewModel<CurrentStorageEntriesViewModel>()
         registerViewModel<CurrentMusicViewModel>()
-    }
-
-    private fun registerMusicPlayerViewModel() {
-        val vm: MusicPlayerViewModel by viewModels()
-        vm.initialize()
-
-        vmDestroyers.add {
-            vm.destroy()
-        }
     }
 }
 

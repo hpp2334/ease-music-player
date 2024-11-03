@@ -27,10 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,10 +47,13 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentStorageEntriesViewModel
+import uniffi.ease_client.StorageImportAction
 import uniffi.ease_client.StorageImportWidget
+import uniffi.ease_client.StorageUpsertWidget
 import uniffi.ease_client.VCurrentStorageEntriesStateStorageItem
 import uniffi.ease_client.VCurrentStorageEntry
 import uniffi.ease_client.VSplitPathItem
+import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.CurrentStorageStateType
 import uniffi.ease_client_shared.StorageEntryType
 
@@ -136,13 +136,7 @@ private fun ImportEntry(
         else -> painterResource(id = R.drawable.icon_file)
     }
     val onClick = {
-        if (entry.isFolder) {
-            onLocateEntry(entry.path)
-        } else if (entry.canCheck) {
-            Bridge.invoke {
-                selectEntry(entry.path)
-            }
-        }
+        onLocateEntry(entry.path);
     }
 
     Row(
@@ -195,7 +189,6 @@ private fun ImportEntries(
     selectedCount: Int,
     splitPaths: List<VSplitPathItem>,
     entries: List<VCurrentStorageEntry>,
-    onLocateEntry: (path: String) -> Unit,
     onPopRoute: () -> Unit,
 ) {
     @Composable
@@ -219,7 +212,7 @@ private fun ImportEntries(
                 .clickable(
                     enabled = !disabled,
                     onClick = {
-                        onLocateEntry(path)
+                        Bridge.dispatchClick(StorageImportWidget.FolderNav(path))
                     }
                 )
                 .clip(RoundedCornerShape(2.dp))
@@ -264,7 +257,7 @@ private fun ImportEntries(
                 for (entry in entries) {
                     ImportEntry(
                         entry = entry,
-                        onLocateEntry = { path -> onLocateEntry(path) },
+                        onLocateEntry = { path -> Bridge.dispatchClick(StorageImportWidget.StorageEntry(path)) },
                     )
                 }
                 Box(modifier = Modifier.height(12.dp))
@@ -275,9 +268,7 @@ private fun ImportEntries(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.surface,
                 onClick = {
-                    Bridge.invoke {
-                        finishSelectedEntriesInImport()
-                    }
+                    Bridge.dispatchClick(StorageImportWidget.Import);
                     onPopRoute()
                 },
                 modifier = Modifier
@@ -434,51 +425,36 @@ private fun ImportMusicsError(
         color = MaterialTheme.colorScheme.error,
         iconPainter = painterResource(id = R.drawable.icon_warning),
         onClick = {
-            Bridge.invoke {
-                refreshCurrentStorageInImport()
-            }
+            Bridge.dispatchAction(ViewAction.StorageImport(StorageImportAction.RELOAD))
         }
     )
 }
 
 @Composable
 fun ImportMusicsPage(
-    currentStorageEntriesVM: CurrentStorageEntriesViewModel
+    vm: CurrentStorageEntriesViewModel
 ) {
     val navController = LocalNavController.current
-    val state = currentStorageEntriesVM.state.collectAsState().value
+    val state = vm.state.collectAsState().value
     val storageItems = state.storageItems.filter { item -> !item.isLocal }
     val titleText = when (state.selectedCount) {
         0 -> stringResource(id = R.string.import_musics_title_default)
         1 -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_single_suffix)}"
         else -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_multi_suffix)}"
     }
-    val undoStack = remember {
-        mutableStateListOf<String>()
-    }
-    fun locateEntryImpl(path: String) {
-        undoStack.add(state.currentPath)
-        Bridge.invoke {
-            locateEntry(path)
-        }
-    }
     fun doUndo() {
-        if (undoStack.isEmpty()) {
+        if (!state.canUndo) {
             navController.popBackStack()
             return
         }
 
-        val path = undoStack.removeLast()
-        Bridge.invoke {
-            locateEntry(path)
-        }
+        Bridge.dispatchAction(ViewAction.StorageImport(StorageImportAction.UNDO));
     }
     fun popRoute() {
-        undoStack.clear()
         navController.popBackStack()
     }
 
-    BackHandler(enabled = undoStack.isNotEmpty()) {
+    BackHandler(enabled = state.canUndo) {
         doUndo()
     }
     Column(
@@ -532,7 +508,6 @@ fun ImportMusicsPage(
                     selectedCount = state.selectedCount,
                     splitPaths = state.splitPaths,
                     entries = state.entries,
-                    onLocateEntry = {path -> locateEntryImpl(path) },
                     onPopRoute = { popRoute() }
                 )
             }

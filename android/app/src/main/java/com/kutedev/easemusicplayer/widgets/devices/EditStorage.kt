@@ -1,5 +1,7 @@
 package com.kutedev.easemusicplayer.widgets.devices
 
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -50,6 +52,7 @@ import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
+import uniffi.ease_client.FormFieldStatus
 import uniffi.ease_client.StorageUpsertWidget
 import uniffi.ease_client.Widget
 import uniffi.ease_client_shared.StorageConnectionTestResult
@@ -102,11 +105,14 @@ fun EditStoragesPage(
     val toast = remember {
         Toast.makeText(context, "", Toast.LENGTH_SHORT)
     }
+    val state = formVM.state.collectAsState().value;
+    val form = state.info;
+    val validated = state.validated;
 
-    val isCreated = formVM.isCreated.collectAsState().value
-    val isAnonymous = formVM.isAnonymous.collectAsState().value
-    val storageType = formVM.storageType.collectAsState().value
-    val testing = formVM.testing.collectAsState().value
+    val isCreated = state.isCreated;
+    val isAnonymous = form.isAnonymous;
+    val storageType = form.typ;
+    val testing = state.test;
 
     val testingColors = when (testing) {
         StorageConnectionTestResult.NONE -> null
@@ -185,10 +191,7 @@ fun EditStoragesPage(
                     painter = painterResource(id = R.drawable.icon_wifitethering),
                     overrideColors = testingColors,
                     onClick = {
-                        val value = formVM.validateAndGetSubmit()
-                        if (value != null) {
-                            Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Test));
-                        }
+                        Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Test));
                     }
                 )
                 EaseIconButton(
@@ -196,11 +199,8 @@ fun EditStoragesPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_ok),
                     onClick = {
-                        val value = formVM.validateAndGetSubmit()
-                        if (value != null) {
-                            Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Test));
-                            navController.popBackStack()
-                        }
+                        Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Finish));
+                        navController.popBackStack()
                     }
                 )
             }
@@ -217,7 +217,7 @@ fun EditStoragesPage(
                     title = "WebDAV",
                     isActive = storageType == StorageType.WEBDAV,
                     onSelect = {
-                        formVM.updateStorageType(StorageType.WEBDAV)
+                        Bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.WEBDAV))
                     }
                 )
             }
@@ -225,25 +225,44 @@ fun EditStoragesPage(
             FormSwitch(
                 label = stringResource(id = R.string.storage_edit_anonymous),
                 value = isAnonymous,
-                onChange = { value -> formVM.updateIsAnonymous(value) }
+                onChange = { Bridge.dispatchClick(StorageUpsertWidget.IsAnonymous); }
             )
             FormText(
                 label = stringResource(id = R.string.storage_edit_alias),
-                field = formVM.alias,
+                value = form.alias,
+                onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
             )
             FormText(
                 label = stringResource(id = R.string.storage_edit_addr),
-                field = formVM.address,
+                value = form.addr,
+                onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Address, value) },
+                error = if (validated.address == FormFieldStatus.CANNOT_BE_EMPTY) {
+                    R.string.storage_edit_form_address
+                } else {
+                    null
+                }
             )
             if (!isAnonymous) {
                 FormText(
                     label = stringResource(id = R.string.storage_edit_username),
-                    field = formVM.username,
+                    value = form.username,
+                    onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Username, value) },
+                    error = if (validated.username == FormFieldStatus.CANNOT_BE_EMPTY) {
+                        R.string.storage_edit_form_username
+                    } else {
+                        null
+                    }
                 )
                 FormText(
                     label = stringResource(id = R.string.storage_edit_password),
-                    field = formVM.password,
+                    value = form.password,
                     isPassword = true,
+                    onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Password, value) },
+                    error = if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
+                        R.string.storage_edit_form_password
+                    } else {
+                        null
+                    }
                 )
             }
         }

@@ -164,7 +164,6 @@ impl TestApp {
         self.dispatch_click(StorageListWidget::Create);
         self.dispatch_change_text(StorageUpsertWidget::Address, self.server.addr());
         self.dispatch_change_text(StorageUpsertWidget::Alias, "Temp");
-        self.dispatch_click(StorageUpsertWidget::IsAnonymous);
         self.dispatch_click(StorageUpsertWidget::Type {
             value: StorageType::Webdav,
         });

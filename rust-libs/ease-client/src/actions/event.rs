@@ -2,7 +2,7 @@ use ease_client_shared::backends::app::ArgInitializeApp;
 
 use crate::view_models::{connector::ConnectorAction, music::{
     common::MusicCommonAction, control::{MusicControlAction, PlayerEvent}, time_to_pause::TimeToPauseAction,
-}};
+}, storage::import::StorageImportAction};
 
 use super::WidgetAction;
 
@@ -17,6 +17,7 @@ pub enum Action {
 #[derive(Debug, uniffi::Enum)]
 pub enum ViewAction {
     MusicControl(MusicControlAction),
+    StorageImport(StorageImportAction),
     TimeToPause(TimeToPauseAction),
     Player(PlayerEvent),
     Widget(WidgetAction),

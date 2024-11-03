@@ -114,7 +114,6 @@ private fun MusicPlayerHeader(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MusicSlider(
     currentDuration: String,
@@ -144,7 +143,7 @@ private fun MusicSlider(
                 .onSizeChanged { size ->
                     sliderWidth = size.width;
                 }
-                .pointerInput(Unit) {
+                .pointerInput(sliderWidth, totalDurationMS) {
                     awaitPointerEventScope {
                         while (true) {
                             val event = awaitPointerEvent()
@@ -199,7 +198,6 @@ private fun MusicSlider(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MusicPlayerCover(
     onLeft: () -> Unit,

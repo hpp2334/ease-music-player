@@ -63,7 +63,9 @@ where
         cx: &ViewModelContext,
         event: &dyn Any,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let event = event.downcast_ref::<VM::Event>().unwrap();
+        let vm_name = std::any::type_name::<VM>();
+        let event_name = std::any::type_name::<VM::Event>();
+        let event = event.downcast_ref::<VM::Event>().expect(format!("failed to downcast event {} for VM {}", event_name, vm_name).as_str());
         self.on_event(cx, event).map_err(|e| e.cast())
     }
 }
@@ -123,7 +125,8 @@ impl ViewModels {
         let vm = self.vms.get(&TypeId::of::<VM>());
 
         if let Some(vm) = vm {
-            vm.clone().as_any().downcast::<VM>().unwrap()
+            let name = std::any::type_name::<VM>();
+            vm.clone().as_any().downcast::<VM>().expect(format!("failed to downcast {}", name).as_str())
         } else {
             let name = std::any::type_name::<VM>();
             panic!("ViewModel {} not found", name)

@@ -67,7 +67,7 @@ impl PlaylistCreateVM {
 
     fn clear(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let mut form = cx.model_mut(&self.form);
-        form.mode = CreatePlaylistMode::Empty;
+        form.mode = CreatePlaylistMode::Full;
         form.cover = None;
         form.playlist_name = Default::default();
         form.entries.clear();

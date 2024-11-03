@@ -64,12 +64,12 @@ impl MusicCommonVM {
         }
     }
 
-    pub(crate) fn schedule_tick<const Im: bool>(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    pub(crate) fn schedule_tick<const IM: bool>(&self, cx: &ViewModelContext) -> EaseResult<()> {
         if self.ticking.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(());
         }
 
-        if Im {
+        if IM {
             self.tick(cx)?;
         }
         self.schedule_tick_impl(cx)?;

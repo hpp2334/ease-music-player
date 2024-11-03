@@ -26,8 +26,6 @@ import uniffi.ease_client.apiEmitViewAction
 import uniffi.ease_client.apiFlushSpawned
 import uniffi.ease_client.apiStartClient
 import uniffi.ease_client_shared.ArgInitializeApp
-import java.util.Timer
-import kotlin.concurrent.schedule
 
 typealias OnNotifyView = (view: RootViewModelState) -> Unit;
 
@@ -36,13 +34,12 @@ interface IOnNotifyView {
 }
 
 private class FlushNotifier : IFlushNotifier {
-    private var _isNotified = false;
+    private val _isNotified = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    override fun notify() {
-        if (!_isNotified) {
-            _isNotified = true;
-            Timer().schedule(0) {
-                _isNotified = false
+    override fun handleNotify() {
+        if (_isNotified.compareAndSet(false, true)) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                _isNotified.set(false)
                 apiFlushSpawned()
             }
         }
@@ -52,7 +49,7 @@ private class FlushNotifier : IFlushNotifier {
 private class ViewStates : IViewStateService {
     private val _store: HashSet<IOnNotifyView> = HashSet();
 
-    override fun notify(v: RootViewModelState) {
+    override fun handleNotify(v: RootViewModelState) {
         for (view in this._store) {
             view.onNotifyView(v)
         }
@@ -81,6 +78,7 @@ private class ToastService : IToastService {
 }
 
 object Bridge {
+    @SuppressLint("StaticFieldLeak")
     private val _player = MusicPlayer()
     private val _viewStates = ViewStates()
     private val _flushNotifier = FlushNotifier()
@@ -88,10 +86,6 @@ object Bridge {
     private val _toastService = ToastService()
     private const val SCHEMA_VERSION = 1u
     private const val STORAGE_PATH = "/"
-
-    fun getPlayer(): MusicPlayer {
-        return _player
-    }
 
     fun initApp(context: android.content.Context) {
         _player.install(context)

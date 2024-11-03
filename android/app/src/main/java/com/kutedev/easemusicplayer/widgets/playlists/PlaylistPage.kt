@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.widgets.playlists
 
+import android.os.Handler
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -62,6 +63,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
 import uniffi.ease_client.PlaylistDetailWidget
@@ -69,8 +71,6 @@ import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.VPlaylistMusicItem
 import uniffi.ease_client_shared.MusicId
 import uniffi.ease_client_shared.PlaylistId
-import java.util.Timer
-import kotlin.concurrent.schedule
 
 @Composable
 private fun RemovePlaylistDialog(
@@ -86,7 +86,7 @@ private fun RemovePlaylistDialog(
         onConfirm = {
             onClose()
             navController.popBackStack()
-            Timer("Remove playlist", false).schedule(0) {
+            nextTickOnMain {
                 Bridge.dispatchClick(PlaylistDetailWidget.Remove);
             }
         },

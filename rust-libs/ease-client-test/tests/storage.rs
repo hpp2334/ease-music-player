@@ -11,7 +11,6 @@ async fn storage_crud_1() {
         value: StorageType::Webdav,
     });
     app.dispatch_change_text(StorageUpsertWidget::Address, "http://fake");
-    app.dispatch_click(StorageUpsertWidget::IsAnonymous);
     app.dispatch_click(StorageUpsertWidget::Finish);
     app.wait_network().await;
 
@@ -25,7 +24,6 @@ async fn storage_crud_1() {
     app.dispatch_click(StorageListWidget::Item { id });
     app.dispatch_change_text(StorageUpsertWidget::Address, "http://fake");
     app.dispatch_change_text(StorageUpsertWidget::Alias, "Demo");
-    app.dispatch_click(StorageUpsertWidget::IsAnonymous);
     app.dispatch_click(StorageUpsertWidget::Finish);
     app.wait_network().await;
 
@@ -46,7 +44,6 @@ async fn storage_crud_2() {
         value: StorageType::Webdav,
     });
     app.dispatch_change_text(StorageUpsertWidget::Address, "http://1");
-    app.dispatch_click(StorageUpsertWidget::IsAnonymous);
     app.dispatch_click(StorageUpsertWidget::Finish);
     app.wait_network().await;
 
@@ -55,7 +52,6 @@ async fn storage_crud_2() {
         value: StorageType::Webdav,
     });
     app.dispatch_change_text(StorageUpsertWidget::Address, "http://2");
-    app.dispatch_click(StorageUpsertWidget::IsAnonymous);
     app.dispatch_click(StorageUpsertWidget::Finish);
     app.wait_network().await;
 

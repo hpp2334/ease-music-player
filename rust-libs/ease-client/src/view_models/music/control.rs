@@ -10,10 +10,7 @@ use ease_client_shared::{
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
-use super::{
-    common::MusicCommonVM,
-    state::CurrentMusicState,
-};
+use super::{common::MusicCommonVM, state::CurrentMusicState};
 use crate::{
     actions::{event::ViewAction, Widget},
     to_host::player::MusicPlayerService,
@@ -40,7 +37,7 @@ pub enum MusicControlAction {
     Seek { duration_ms: u64 },
 }
 
-#[derive(Debug, Clone, Copy, uniffi::Enum)]
+#[derive(Debug, Clone, uniffi::Enum)]
 pub enum PlayerEvent {
     Complete,
     Loading,
@@ -48,7 +45,7 @@ pub enum PlayerEvent {
     Play,
     Pause,
     Stop,
-    Total { duration_ms: u64 },
+    Total { id: MusicId, duration_ms: u64 },
 }
 
 pub(crate) struct MusicControlVM {
@@ -250,7 +247,7 @@ impl MusicControlVM {
             }
             {
                 let url = Connector::of(&cx).serve_music_url(&cx, music_id);
-                MusicPlayerService::of(&cx).set_music_url(url);
+                MusicPlayerService::of(&cx).set_music_url(music_id, url);
             }
             this.sync_current_duration(&cx)?;
             this.request_resume(&cx)?;
@@ -284,8 +281,10 @@ impl MusicControlVM {
     }
 
     fn update_playing(&self, cx: &ViewModelContext, value: bool) -> EaseResult<()> {
-        let mut state = cx.model_mut(&self.current);
-        state.playing = value;
+        {
+            let mut state = cx.model_mut(&self.current);
+            state.playing = value;
+        }
 
         if value {
             MusicCommonVM::of(cx).schedule_tick::<true>(cx)?;
@@ -301,8 +300,8 @@ impl MusicControlVM {
             PlayerEvent::Play => self.update_playing(cx, true)?,
             PlayerEvent::Pause => self.update_playing(cx, false)?,
             PlayerEvent::Stop => self.stop_impl(cx)?,
-            PlayerEvent::Total { duration_ms } => {
-                self.on_sync_total_duration(cx, Duration::from_millis(*duration_ms))?
+            PlayerEvent::Total { id, duration_ms } => {
+                self.on_sync_total_duration(cx, *id, Duration::from_millis(*duration_ms))?
             }
         };
         Ok(())
@@ -322,19 +321,16 @@ impl MusicControlVM {
         Ok(())
     }
 
-    fn on_sync_total_duration(&self, cx: &ViewModelContext, duration: Duration) -> EaseResult<()> {
-        let (id, playlist_id) = {
-            let state = cx.model_get(&self.current);
-            match (state.id, state.playlist_id) {
-                (Some(id), Some(playlist_id)) => (id, playlist_id),
-                _ => return Ok(()),
-            }
-        };
+    fn on_sync_total_duration(
+        &self,
+        cx: &ViewModelContext,
+        id: MusicId,
+        duration: Duration,
+    ) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx)
                 .update_music_total_duration(
                     &cx,
-                    playlist_id,
                     ArgUpdateMusicDuration {
                         id,
                         duration: MusicDuration::new(duration),

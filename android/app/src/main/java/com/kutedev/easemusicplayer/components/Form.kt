@@ -10,7 +10,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -21,43 +20,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.R
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-
-
-interface IFormTextFieldState {
-    val error: StateFlow<Int?>
-    val value: StateFlow<String>
-    fun update(value: String): Unit
-}
-
-class FormTextFieldState(
-    private val initValue: String,
-    private val validator: ((value: String) -> Int?)?
-): IFormTextFieldState {
-    private val _error = MutableStateFlow<Int?>(null)
-    private val _value = MutableStateFlow(initValue)
-
-    override val error = _error.asStateFlow()
-    override val value = _value.asStateFlow()
-
-    override fun update(value: String) {
-        _value.value = value
-
-        if (validator != null) {
-            _error.value = null
-        }
-    }
-
-    fun validate(): Boolean {
-        if (validator != null) {
-            _error.value = validator!!(_value.value)
-        }
-        return _error.value == null
-    }
-}
-
 
 @Composable
 fun SimpleFormText(
@@ -86,13 +48,13 @@ fun SimpleFormText(
 @Composable
 fun FormText(
     label: String,
-    field: IFormTextFieldState,
+    value: String,
+    onChange: (value: String) -> Unit,
+    error: Int? = null,
     isPassword: Boolean = false
 ) {
     var passwordVisibleState = remember { mutableStateOf(false) }
     val passwordVisible = passwordVisibleState.value
-    val value = field.value.collectAsState().value
-    val error = field.error.collectAsState().value
 
     Column(
         modifier = Modifier
@@ -108,7 +70,7 @@ fun FormText(
                 modifier = Modifier
                     .fillMaxWidth(),
                 value = value,
-                onValueChange = {value -> field.update(value)},
+                onValueChange = onChange,
                 isError = error != null,
             )
         } else {
@@ -116,7 +78,7 @@ fun FormText(
                 modifier = Modifier
                     .fillMaxWidth(),
                 value = value,
-                onValueChange = {value -> field.update(value)},
+                onValueChange = onChange,
                 isError = error != null,
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -137,7 +99,7 @@ fun FormText(
         }
         if (error != null) {
             Text(
-                text =  stringResource(id = error),
+                text = stringResource(id = error),
                 color = MaterialTheme.colorScheme.error,
                 fontSize = 10.sp,
             )

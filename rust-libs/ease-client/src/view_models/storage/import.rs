@@ -28,6 +28,13 @@ pub enum StorageImportWidget {
     ToggleAll,
     Import,
 }
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum StorageImportAction {
+    Reload,
+    Undo,
+}
+
 pub(crate) struct StorageImportVM {
     current: Model<CurrentStorageState>,
     store: Model<AllStorageState>,
@@ -97,9 +104,14 @@ impl StorageImportVM {
         let exist = cx.model_get(&self.store).storages.contains_key(&id);
         if exist {
             let mut state = cx.model_mut(&self.current);
-            state.current_storage_id = Some(id);
-            state.checked_entries_path.clear();
-            state.current_path = self.get_current_path(cx)?;
+            let prev_storage_id = state.current_storage_id;
+
+            if prev_storage_id != Some(id) {
+                state.current_storage_id = Some(id);
+                state.checked_entries_path.clear();
+                state.current_path = self.get_current_path(cx)?;
+                state.undo_stack.clear();
+            }
         }
         self.reload(cx)?;
         Ok(())
@@ -141,10 +153,10 @@ impl StorageImportVM {
         }
     }
 
-    fn select_folder_entry_impl(
+    fn select_folder_entry<const PUSH_UNDO: bool>(
         &self,
         cx: &ViewModelContext,
-        entry: StorageEntry,
+        path: String,
     ) -> EaseResult<()> {
         let storage_id = cx.model_get(&self.current).current_storage_id;
         let _ = match storage_id {
@@ -154,8 +166,13 @@ impl StorageImportVM {
 
         {
             let mut state = cx.model_mut(&self.current);
+
+            if PUSH_UNDO {
+                let path = state.current_path.clone();
+                state.undo_stack.push(path);
+            }
             state.state_type = CurrentStorageStateType::Loading;
-            state.current_path = entry.path.clone();
+            state.current_path = path.clone();
             state.checked_entries_path.clear();
         }
         self.reload(cx)?;
@@ -226,11 +243,24 @@ impl StorageImportVM {
         };
 
         if entry.is_dir {
-            self.select_folder_entry_impl(cx, entry)
+            self.select_folder_entry::<true>(cx, entry.path)
         } else {
             self.select_file_entry_impl(cx, entry);
             Ok(())
         }
+    }
+
+    fn undo(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        let entry = {
+            let mut state = cx.model_mut(&self.current);
+            let entry = state.undo_stack.pop();
+            entry
+        };
+
+        if let Some(entry) = entry {
+            self.select_folder_entry::<false>(cx, entry)?;
+        }
+        Ok(())
     }
 
     fn handle_import(&self, cx: &ViewModelContext) -> EaseResult<()> {
@@ -304,6 +334,8 @@ impl StorageImportVM {
             let mut state = cx.model_mut(&self.current);
             state.import_type = typ;
             state.entries.clear();
+            state.current_path = self.get_current_path(cx)?;
+            state.checked_entries_path.clear();
 
             if state.current_storage_id.is_none() {
                 state.current_storage_id = Some(store.storage_ids[0]);
@@ -349,7 +381,7 @@ impl ViewModel for StorageImportVM {
                             self.select_entry(cx, path.clone())?;
                         }
                         StorageImportWidget::FolderNav { path } => {
-                            self.select_entry(cx, path.clone())?;
+                            self.select_folder_entry::<true>(cx, path.clone())?;
                         }
                         StorageImportWidget::Import => {
                             self.handle_import(cx)?;
@@ -357,6 +389,10 @@ impl ViewModel for StorageImportVM {
                         StorageImportWidget::ToggleAll => self.toggle_all(cx),
                     },
                     _ => {}
+                },
+                ViewAction::StorageImport(action) => match action {
+                    StorageImportAction::Reload => self.reload(cx)?,
+                    StorageImportAction::Undo => self.undo(cx)?,
                 },
                 _ => {}
             },

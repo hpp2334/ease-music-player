@@ -82,7 +82,7 @@ impl ViewStateVM {
     fn notify(&self, cx: &ViewModelContext) {
         let mut root: RootViewModelState = Default::default();
         self.notify_view_state_builders_impl(cx, &mut root);
-        ViewStateService::of(cx).notify(root);
+        ViewStateService::of(cx).handle_notify(root);
     }
 
     fn notify_view_state_builders_impl(

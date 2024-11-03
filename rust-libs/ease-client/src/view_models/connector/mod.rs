@@ -173,13 +173,12 @@ impl Connector {
     pub async fn update_music_total_duration(
         &self,
         cx: &ViewModelContext,
-        playlist_id: PlaylistId,
         arg: ArgUpdateMusicDuration,
     ) -> EaseResult<()> {
         let id = arg.id;
         self.request::<UpdateMusicDurationMsg>(cx, arg).await?;
         self.sync_music(cx, id).await?;
-        self.sync_playlist(cx, playlist_id).await?;
+        self.sync_current_playlist(cx).await?;
         self.sync_playlist_abstracts(cx).await?;
         Ok(())
     }
@@ -247,6 +246,16 @@ impl Connector {
         cx.enqueue_emit(Action::Connector(ConnectorAction::PlaylistAbstracts(
             playlists,
         )));
+        Ok(())
+    }
+
+    async fn sync_current_playlist(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        if let Some(current_playlist_id) = {
+            let state = cx.model_get(&self.current_playlist);
+            state.playlist.as_ref().map(|v| v.id())
+        } {
+            self.sync_playlist(cx, current_playlist_id).await?;
+        }
         Ok(())
     }
 
