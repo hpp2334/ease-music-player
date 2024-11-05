@@ -49,4 +49,9 @@
     <string name="import_musics_error_timeout_title">连接超时</string>
     <string name="import_musics_error_unknown_title">未知错误</string>
     <string name="music_player_context_menu_remove">删除</string>
+    <string name="time_to_pause_delete">删除</string>
+    <string name="time_to_pause_cancel">取消</string>
+    <string name="time_to_pause_ok">确定</string>
+    <string name="time_to_pause_hour">时</string>
+    <string name="time_to_pause_minute">分</string>
 </resources>

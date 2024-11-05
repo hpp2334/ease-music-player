@@ -20,6 +20,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +44,6 @@ import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
 import uniffi.ease_client.StorageListWidget
 import uniffi.ease_client.VStorageListItem
-import uniffi.ease_client.Widget
 import uniffi.ease_client_shared.StorageId
 import uniffi.ease_client_shared.StorageType
 
@@ -64,8 +67,9 @@ private fun Title(title: String) {
 }
 
 @Composable
-private fun SleepModeBlock(timeToPauseViewModel: TimeToPauseViewModel) {
-    val state = timeToPauseViewModel.state.collectAsState().value
+private fun SleepModeBlock(vm: TimeToPauseViewModel) {
+    var isOpen by remember { mutableStateOf(false) }
+    val state = vm.state.collectAsState().value
     val blockBg = if (state.enabled) {
         MaterialTheme.colorScheme.secondary
     } else {
@@ -77,12 +81,22 @@ private fun SleepModeBlock(timeToPauseViewModel: TimeToPauseViewModel) {
         MaterialTheme.colorScheme.onSurface
     }
 
+    TimeToPauseModal(
+        vm = vm,
+        isOpen = isOpen,
+        onClose = {
+            isOpen = false;
+        }
+    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(90.dp)
             .padding(paddingX, 0.dp)
-            .clip(RoundedCornerShape(16.dp)),
+            .clip(RoundedCornerShape(16.dp))
+            .clickable {
+                isOpen = true;
+            },
     ) {
         Row(
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -198,7 +212,7 @@ fun DashboardSubpage(
         ) {
             Title(title = stringResource(id = R.string.dashboard_sleep_mode))
         }
-        SleepModeBlock(timeToPauseViewModel = timeToPauseVM)
+        SleepModeBlock(vm = timeToPauseVM)
         Box(modifier = Modifier.height(48.dp))
         Row(
             modifier = Modifier

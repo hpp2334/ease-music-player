@@ -89,7 +89,7 @@ fun EaseIconButton(
     val iconTint = run {
         if (disabled) {
             if (!isVariant) {
-                MaterialTheme.colorScheme.onSurfaceVariant
+                MaterialTheme.colorScheme.surfaceVariant
             } else {
                 MaterialTheme.colorScheme.surface
             }

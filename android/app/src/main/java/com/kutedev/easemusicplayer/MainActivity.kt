@@ -54,6 +54,12 @@ where T : ViewModel, T : IOnNotifyView {
 class MainActivity : ComponentActivity() {
     val vmDestroyers = mutableListOf<() -> Unit>()
 
+    override fun onStop() {
+        super.onStop()
+
+        Bridge.destroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -97,7 +103,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @OptIn(ExperimentalFoundationApi::class)
     @Composable
     fun RouteBlock(
         bottomBarPageState: PagerState,
@@ -140,7 +145,10 @@ class MainActivity : ComponentActivity() {
                 ImportMusicsPage(vm = currentStorageEntriesVM)
             }
             composable(Routes.MUSIC_PLAYER) {
-                MusicPlayerPage(vm = currentMusicVM)
+                MusicPlayerPage(
+                    vm = currentMusicVM,
+                    timeToPauseVM = timeToPauseVM,
+                )
             }
         }
     }
@@ -162,6 +170,7 @@ class MainActivity : ComponentActivity() {
         registerViewModel<CurrentPlaylistViewModel>()
         registerViewModel<CurrentStorageEntriesViewModel>()
         registerViewModel<CurrentMusicViewModel>()
+        registerViewModel<TimeToPauseViewModel>()
     }
 }
 

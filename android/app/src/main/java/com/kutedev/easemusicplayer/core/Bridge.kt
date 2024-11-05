@@ -79,7 +79,7 @@ private class ToastService : IToastService {
 
 object Bridge {
     @SuppressLint("StaticFieldLeak")
-    private val _player = MusicPlayer()
+    private var _player: MusicPlayer? = null
     private val _viewStates = ViewStates()
     private val _flushNotifier = FlushNotifier()
     @SuppressLint("StaticFieldLeak")
@@ -87,12 +87,21 @@ object Bridge {
     private const val SCHEMA_VERSION = 1u
     private const val STORAGE_PATH = "/"
 
+    fun destroy() {
+        if (_player != null) {
+            _player!!.destroy()
+        }
+        _player = null
+    }
+
     fun initApp(context: android.content.Context) {
-        _player.install(context)
+        val player = MusicPlayer()
+        player.install(context)
+
         _toastService.setContext(context)
 
         apiBuildClient(
-            _player,
+            player,
             _toastService,
             _viewStates,
             _flushNotifier
@@ -102,6 +111,8 @@ object Bridge {
             SCHEMA_VERSION,
             STORAGE_PATH
         ))
+
+        _player = player
     }
 
     fun dispatchClick(widget: Widget) {

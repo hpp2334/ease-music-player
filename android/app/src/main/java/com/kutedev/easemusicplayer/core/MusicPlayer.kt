@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.core
 
+import android.media.AudioAttributes
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
@@ -23,6 +24,11 @@ class MusicPlayer : IMusicPlayerService {
 
     fun install(context: android.content.Context) {
         _context = context
+    }
+
+    fun destroy() {
+        _internal.release()
+        _context = null
     }
 
     override fun resume() {
@@ -63,6 +69,12 @@ class MusicPlayer : IMusicPlayerService {
     override fun setMusicUrl(id: MusicId, url: String) {
         val player = getInternal()
         player.reset()
+        player.setAudioAttributes(
+            AudioAttributes.Builder()
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .build()
+        )
         player.setDataSource(_context!!, Uri.parse(url))
         player.setOnCompletionListener {}
         player.setOnPreparedListener {

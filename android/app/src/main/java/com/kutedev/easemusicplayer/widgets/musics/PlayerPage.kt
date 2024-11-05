@@ -1,12 +1,10 @@
 package com.kutedev.easemusicplayer.widgets.musics
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,13 +13,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -37,7 +32,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,16 +41,15 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
+import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
-import com.kutedev.easemusicplayer.widgets.dashboard.DashboardSubpage
-import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsSubpage
-import com.kutedev.easemusicplayer.widgets.settings.SettingSubpage
+import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
+import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
 import uniffi.ease_client.MusicControlAction
 import uniffi.ease_client.MusicControlWidget
-import uniffi.ease_client.PlayerEvent
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.PlayMode
@@ -170,7 +163,6 @@ private fun MusicSlider(
                     .background(MaterialTheme.colorScheme.primary)
                 )
             }
-            // Offset
             Box(modifier = Modifier
                 .offset(
                     -handleSize / 2 + (sliderWidthDp * durationRate),
@@ -242,9 +234,11 @@ private fun MusicPlayerCover(
 }
 
 @Composable
-fun MusicPanel(
-    state: VCurrentMusicState
+private fun MusicPanel(
+    state: VCurrentMusicState,
+    timeToPauseVM: TimeToPauseViewModel
 ) {
+    var isOpen by remember { mutableStateOf(false) }
     val modeDrawable = when (state.playMode) {
         PlayMode.SINGLE -> R.drawable.icon_mode_one
         PlayMode.SINGLE_LOOP -> R.drawable.icon_mode_repeatone
@@ -252,22 +246,38 @@ fun MusicPanel(
         PlayMode.LIST_LOOP -> R.drawable.icon_mode_repeat
     }
 
+    TimeToPauseModal(
+        vm = timeToPauseVM,
+        isOpen = isOpen,
+        onClose = {
+            isOpen = false;
+        }
+    )
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         EaseIconButton(
             sizeType = EaseIconButtonSize.Medium,
-            buttonType = EaseIconButtonType.Default,
+            buttonType = if (isOpen) { EaseIconButtonType.Primary } else { EaseIconButtonType.Default },
+            overrideColors = EaseIconButtonColors(
+                iconTint = if (isOpen) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                buttonBg = Color.Transparent,
+            ),
             painter = painterResource(id = R.drawable.icon_timelapse),
             onClick = {
-                // TODO: impl
+                isOpen = true;
             }
         )
         EaseIconButton(
             sizeType = EaseIconButtonSize.Medium,
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_play_previous),
+            disabled = !state.canPlayPrevious,
             onClick = {
                 Bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
             }
@@ -296,6 +306,7 @@ fun MusicPanel(
             sizeType = EaseIconButtonSize.Medium,
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_play_next),
+            disabled = !state.canPlayNext,
             onClick = {
                 Bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
             }
@@ -313,7 +324,8 @@ fun MusicPanel(
 
 @Composable
 fun MusicPlayerPage(
-    vm: CurrentMusicViewModel
+    vm: CurrentMusicViewModel,
+    timeToPauseVM: TimeToPauseViewModel
 ) {
     val state = vm.state.collectAsState().value
     var removeDialogOpen by remember {
@@ -373,6 +385,7 @@ fun MusicPlayerPage(
             ) {
                 MusicPanel(
                     state = state,
+                    timeToPauseVM = timeToPauseVM,
                 )
             }
         }

@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.sp
 
 enum class EaseTextButtonType {
     Primary,
+    Error,
     Default,
 }
 
@@ -35,6 +36,11 @@ fun EaseTextButton(
         EaseTextButtonType.Primary -> {
             ButtonDefaults.textButtonColors().copy(
                 contentColor = MaterialTheme.colorScheme.primary
+            )
+        }
+        EaseTextButtonType.Error -> {
+            ButtonDefaults.textButtonColors().copy(
+                contentColor = MaterialTheme.colorScheme.error
             )
         }
     }

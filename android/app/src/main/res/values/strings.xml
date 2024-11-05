@@ -49,4 +49,9 @@
     <string name="import_musics_error_timeout_title">CONNECTION TIMEOUT</string>
     <string name="import_musics_error_unknown_title">UNKNOWN ERROR</string>
     <string name="music_player_context_menu_remove">Remove</string>
+    <string name="time_to_pause_delete">DELETE</string>
+    <string name="time_to_pause_cancel">CANCEL</string>
+    <string name="time_to_pause_ok">OK</string>
+    <string name="time_to_pause_hour">HOUR</string>
+    <string name="time_to_pause_minute">MINUTE</string>
 </resources>

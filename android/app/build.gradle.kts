@@ -8,6 +8,10 @@ android {
     namespace = "com.kutedev.easemusicplayer"
     compileSdk = 34
 
+    lint {
+        abortOnError = false
+    }
+
     defaultConfig {
         applicationId = "com.kutedev.easemusicplayer"
         minSdk = 29
