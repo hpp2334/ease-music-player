@@ -27,9 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
-import com.kutedev.easemusicplayer.Routes
 import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
@@ -91,7 +89,6 @@ private fun FullImportBlock(
     vm: CreatePlaylistViewModel
 ) {
     val state = vm.state.collectAsState().value
-    val navController = LocalNavController.current
 
     if (!state.fullImported) {
         Column(
@@ -100,7 +97,6 @@ private fun FullImportBlock(
                 .clip(RoundedCornerShape(6.dp))
                 .clickable {
                     Bridge.dispatchClick(PlaylistCreateWidget.Import)
-                    navController.navigate(Routes.IMPORT_MUSICS)
                 }
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(0.dp, 32.dp),
@@ -179,11 +175,11 @@ fun PlaylistsDialog(
     vm: CreatePlaylistViewModel
 ) {
     val state = vm.state.collectAsState().value
-    val isOpen = vm.isOpen.collectAsState().value
+    val isOpen = state.modalOpen
     val mode = state.mode
 
     val onDismissRequest = {
-        vm.closeDialog()
+        Bridge.dispatchClick(PlaylistCreateWidget.CloseModal)
     }
     if (!isOpen) {
         return
@@ -256,6 +252,7 @@ fun PlaylistsDialog(
                         text = stringResource(id = R.string.playlists_dialog_button_ok),
                         type = EaseTextButtonType.Primary,
                         size = EaseTextButtonSize.Medium,
+                        disabled = !state.canSubmit,
                         onClick = {
                             Bridge.dispatchClick(PlaylistCreateWidget.FinishCreate);
                             onDismissRequest()

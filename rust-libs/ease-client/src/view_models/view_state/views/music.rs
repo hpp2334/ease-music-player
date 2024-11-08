@@ -51,6 +51,7 @@ pub struct VTimeToPauseState {
     pub enabled: bool,
     pub left_hour: u64,
     pub left_minute: u64,
+    pub modal_open: bool,
 }
 
 pub(crate) fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewModelState) {
@@ -103,6 +104,7 @@ pub(crate) fn time_to_pause_vs(state: &TimeToPauseState, root: &mut RootViewMode
         enabled,
         left_hour,
         left_minute,
+        modal_open: state.modal_open,
     });
 }
 

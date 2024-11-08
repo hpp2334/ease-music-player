@@ -14,7 +14,10 @@ use super::{common::MusicCommonVM, state::CurrentMusicState};
 use crate::{
     actions::{event::ViewAction, Widget},
     to_host::player::MusicPlayerService,
-    view_models::{connector::ConnectorAction, playlist::common::PlaylistCommonVM},
+    view_models::{
+        connector::ConnectorAction, main::router::RouterVM, playlist::common::PlaylistCommonVM,
+    },
+    RoutesKey,
 };
 use crate::{
     actions::{Action, WidgetActionType},
@@ -61,7 +64,13 @@ impl MusicControlVM {
         }
     }
 
-    pub(crate) fn request_play(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
+    pub(crate) fn prepare(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
+        self.request_play(cx, id)?;
+        RouterVM::of(cx).navigate(cx, RoutesKey::MusicPlayer);
+        Ok(())
+    }
+
+    fn request_play(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
         let current_playlist = PlaylistCommonVM::of(cx).get_current(cx)?;
 
         if let Some(current_playlist) = current_playlist {

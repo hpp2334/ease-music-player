@@ -33,29 +33,29 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
-import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
-import com.kutedev.easemusicplayer.Routes
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
+import uniffi.ease_client.MainBodyWidget
 import uniffi.ease_client.StorageListWidget
+import uniffi.ease_client.TimeToPauseAction
 import uniffi.ease_client.VStorageListItem
+import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.StorageId
 import uniffi.ease_client_shared.StorageType
 
 private val paddingX = 24.dp
 
-private fun toEditStorage(navController: NavHostController, arg: StorageId?) {
+private fun toEditStorage(arg: StorageId?) {
     if (arg != null) {
         Bridge.dispatchClick(StorageListWidget.Item(arg))
     } else {
         Bridge.dispatchClick(StorageListWidget.Create)
     }
-    navController.navigate(Routes.ADD_DEVICES)
 }
 
 @Composable
@@ -68,7 +68,6 @@ private fun Title(title: String) {
 
 @Composable
 private fun SleepModeBlock(vm: TimeToPauseViewModel) {
-    var isOpen by remember { mutableStateOf(false) }
     val state = vm.state.collectAsState().value
     val blockBg = if (state.enabled) {
         MaterialTheme.colorScheme.secondary
@@ -81,13 +80,6 @@ private fun SleepModeBlock(vm: TimeToPauseViewModel) {
         MaterialTheme.colorScheme.onSurface
     }
 
-    TimeToPauseModal(
-        vm = vm,
-        isOpen = isOpen,
-        onClose = {
-            isOpen = false;
-        }
-    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -95,7 +87,7 @@ private fun SleepModeBlock(vm: TimeToPauseViewModel) {
             .padding(paddingX, 0.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable {
-                isOpen = true;
+                Bridge.dispatchClick(MainBodyWidget.TimeToPause)
             },
     ) {
         Row(
@@ -122,8 +114,6 @@ private fun SleepModeBlock(vm: TimeToPauseViewModel) {
 
 @Composable
 private fun DevicesBlock(storageItems: List<VStorageListItem>) {
-    val navController = LocalNavController.current
-
     Column(
         modifier = Modifier
             .padding(paddingX, 0.dp)
@@ -135,7 +125,7 @@ private fun DevicesBlock(storageItems: List<VStorageListItem>) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable {
-                    toEditStorage(navController, null)
+                    toEditStorage(null)
                 }
             ) {
                 Row(
@@ -162,7 +152,7 @@ private fun DevicesBlock(storageItems: List<VStorageListItem>) {
                     .fillMaxWidth()
                     .padding(0.dp, 4.dp)
                     .clickable {
-                        toEditStorage(navController, item.storageId)
+                        toEditStorage(item.storageId)
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -197,7 +187,6 @@ fun DashboardSubpage(
 ) {
     val storageState = storageListVM.state.collectAsState().value
     val storageItems = storageState.items.filter { v -> v.typ != StorageType.LOCAL }
-    val navController = LocalNavController.current
 
     Column(
         modifier = Modifier
@@ -227,7 +216,7 @@ fun DashboardSubpage(
                     buttonType = EaseIconButtonType.Primary,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        toEditStorage(navController, null)
+                        toEditStorage(null)
                     }
                 )
             }

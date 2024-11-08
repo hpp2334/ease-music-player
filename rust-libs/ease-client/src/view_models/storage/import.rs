@@ -13,9 +13,11 @@ use crate::{
     error::{EaseError, EaseResult},
     view_models::{
         connector::Connector,
+        main::router::RouterVM,
         music::lyric::MusicLyricVM,
         playlist::{create::PlaylistCreateVM, detail::PlaylistDetailVM, edit::PlaylistEditVM},
     },
+    RoutesKey,
 };
 
 use super::state::{AllStorageState, CurrentStorageState};
@@ -259,6 +261,8 @@ impl StorageImportVM {
 
         if let Some(entry) = entry {
             self.select_folder_entry::<false>(cx, entry)?;
+        } else {
+            RouterVM::of(cx).pop(cx);
         }
         Ok(())
     }
@@ -314,6 +318,7 @@ impl StorageImportVM {
                 }
             }
         }
+        RouterVM::of(cx).pop(cx);
 
         Ok(())
     }
@@ -336,6 +341,7 @@ impl StorageImportVM {
             }
         }
         self.reload(cx)?;
+        RouterVM::of(cx).navigate(cx, RoutesKey::ImportMusics);
 
         Ok(())
     }

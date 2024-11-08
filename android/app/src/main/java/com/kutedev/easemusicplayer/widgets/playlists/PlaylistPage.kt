@@ -52,9 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
-import com.kutedev.easemusicplayer.Routes
 import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
@@ -67,6 +65,7 @@ import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
 import uniffi.ease_client.PlaylistDetailWidget
+import uniffi.ease_client.RoutesKey
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.VPlaylistMusicItem
 import uniffi.ease_client_shared.MusicId
@@ -79,13 +78,11 @@ private fun RemovePlaylistDialog(
     open: Boolean,
     onClose: () -> Unit
 ) {
-    val navController = LocalNavController.current
-
     ConfirmDialog(
         open = open,
         onConfirm = {
             onClose()
-            navController.popBackStack()
+            Bridge.popRoute()
             nextTickOnMain {
                 Bridge.dispatchClick(PlaylistDetailWidget.Remove);
             }
@@ -105,7 +102,6 @@ private fun PlaylistHeader(
     items: List<VPlaylistMusicItem>,
     onRemoveDialogOpen: () -> Unit,
 ) {
-    val navController = LocalNavController.current
     var moreMenuExpanded by remember { mutableStateOf(false) }
     val countSuffixStringId = if (items.size <= 1) {
         R.string.playlist_list_count_suffix
@@ -136,7 +132,7 @@ private fun PlaylistHeader(
                 buttonType = EaseIconButtonType.Surface,
                 painter = painterResource(id = R.drawable.icon_back),
                 onClick = {
-                    navController.popBackStack()
+                    Bridge.popRoute()
                 }
             )
             Box {
@@ -159,7 +155,6 @@ private fun PlaylistHeader(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
                                     Bridge.dispatchClick(PlaylistDetailWidget.Import);
-                                    navController.navigate(Routes.IMPORT_MUSICS)
                                 }
                             ),
                             EaseContextMenuItem(
@@ -239,9 +234,6 @@ private fun PlaylistItem(
     val panelWidth = 48f
 
     val density = LocalDensity.current
-    val navController = LocalNavController.current
-
-
     val interactionSource = remember { MutableInteractionSource() }
 
     LaunchedEffect(Unit) {
@@ -285,7 +277,6 @@ private fun PlaylistItem(
                 .clip(RoundedCornerShape(14.dp))
                 .clickable {
                     Bridge.dispatchClick(PlaylistDetailWidget.Music(item.id));
-                    navController.navigate(Routes.MUSIC_PLAYER)
                     onSwipe()
                 }
                 .background(bgColor)
@@ -385,7 +376,6 @@ fun PlaylistPage(
     vm: CurrentPlaylistViewModel,
     currentMusicVM: CurrentMusicViewModel,
 ) {
-    val navController = LocalNavController.current
     val state = vm.state.collectAsState().value
     val currentMusicState = currentMusicVM.state.collectAsState().value
     var removeDialogOpen by remember { mutableStateOf(false) }

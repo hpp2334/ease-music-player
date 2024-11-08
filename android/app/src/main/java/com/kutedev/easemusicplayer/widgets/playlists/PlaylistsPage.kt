@@ -29,8 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import com.kutedev.easemusicplayer.LocalNavController
-import com.kutedev.easemusicplayer.Routes
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
@@ -41,7 +39,6 @@ import uniffi.ease_client.PlaylistListWidget
 @Composable
 fun PlaylistsSubpage(
     playlistsVM: PlaylistsViewModel,
-    createPlaylistVM: CreatePlaylistViewModel
 ) {
     val state = playlistsVM.state.collectAsState().value
 
@@ -54,7 +51,7 @@ fun PlaylistsSubpage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .clickable {
-                        createPlaylistVM.openDialog()
+                        Bridge.dispatchClick(PlaylistListWidget.Add)
                     }
                     .clip(RoundedCornerShape(16.dp))
                     .padding(24.dp, 24.dp),
@@ -82,14 +79,13 @@ fun PlaylistsSubpage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        createPlaylistVM.openDialog()
+                        Bridge.dispatchClick(PlaylistListWidget.Add)
                     }
                 )
             }
             GridPlaylists(playlists = state.playlistList)
         }
     }
-    PlaylistsDialog(vm = createPlaylistVM)
 }
 
 @Composable
@@ -106,13 +102,10 @@ private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
 
 @Composable
 private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
-    val navController = LocalNavController.current
-
     Box(Modifier
         .clickable(
             onClick = {
                 Bridge.dispatchClick(PlaylistListWidget.Item(playlist.id));
-                navController.navigate(Routes.PLAYLIST)
             },
         )
     ) {

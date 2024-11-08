@@ -11,12 +11,13 @@ use crate::{
         connector::{ConnectorHostImpl, ConnectorHostService},
         flush_notifier::IFlushNotifier,
         player::{IMusicPlayerService, MusicPlayerService},
+        router::{IRouterService, RouterService},
         toast::{IToastService, ToastService},
         view_state::{IViewStateService, ViewStateService},
     },
     view_models::{
         connector::Connector,
-        main::MainBodyVM,
+        main::{router::RouterVM, MainBodyVM},
         music::{
             common::MusicCommonVM, control::MusicControlVM, detail::MusicDetailVM,
             lyric::MusicLyricVM, time_to_pause::TimeToPauseVM,
@@ -97,6 +98,7 @@ fn init_tracers(dir: &str) {
 }
 
 pub fn build_client(
+    router: Arc<dyn IRouterService>,
     player: Arc<dyn IMusicPlayerService>,
     toast: Arc<dyn IToastService>,
     vs: Arc<dyn IViewStateService>,
@@ -124,12 +126,14 @@ pub fn build_client(
             builder.add(MusicLyricVM::new(cx));
             builder.add(TimeToPauseVM::new(cx));
             // Main
+            builder.add(RouterVM::new(cx));
             builder.add(MainBodyVM::new(cx));
             // View State
             builder.add(ViewStateVM::new(cx));
         })
         .with_to_hosts(|builder| {
             builder
+                .add(RouterService::new_with_arc(router))
                 .add(ConnectorHostService::new(ConnectorHostImpl::new()))
                 .add(MusicPlayerService::new_with_arc(player))
                 .add(ToastService::new_with_arc(toast))
@@ -141,13 +145,14 @@ pub fn build_client(
 
 #[uniffi::export]
 pub fn api_build_client(
+    router: Arc<dyn IRouterService>,
     player: Arc<dyn IMusicPlayerService>,
     toast: Arc<dyn IToastService>,
     vs: Arc<dyn IViewStateService>,
     notifier: Arc<dyn IFlushNotifier>,
 ) {
     let _guard = ASYNC_RT.enter();
-    let app = build_client(player, toast, vs, AsyncAdapter::new(notifier));
+    let app = build_client(router, player, toast, vs, AsyncAdapter::new(notifier));
     CLIENT.set(app);
 }
 

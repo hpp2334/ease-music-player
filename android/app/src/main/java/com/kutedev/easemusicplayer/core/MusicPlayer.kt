@@ -27,9 +27,13 @@ class MusicPlayer : IMusicPlayerService {
         _context = context
     }
 
-    fun destroy() {
+    fun onActivityStop() {
         _internal.release()
         _context = null
+    }
+
+    fun destroy() {
+        onActivityStop()
     }
 
     override fun resume() {

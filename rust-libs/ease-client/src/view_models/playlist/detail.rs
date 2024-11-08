@@ -14,9 +14,11 @@ use crate::{
     utils::common::trim_extension_name,
     view_models::{
         connector::Connector,
+        main::router::RouterVM,
         music::{common::MusicCommonVM, control::MusicControlVM},
         storage::import::StorageImportVM,
     },
+    RoutesKey,
 };
 
 use super::{common::PlaylistCommonVM, edit::PlaylistEditVM, state::CurrentPlaylistState};
@@ -46,7 +48,7 @@ impl PlaylistDetailVM {
     fn play_all(&self, cx: &ViewModelContext) -> EaseResult<()> {
         if let Some(playlist) = cx.model_get(&self.current).playlist.as_ref() {
             if let Some(music_id) = playlist.musics.first().map(|m| m.id()) {
-                MusicControlVM::of(cx).request_play(cx, music_id)?;
+                MusicControlVM::of(cx).prepare(cx, music_id)?;
             }
         }
         Ok(())
@@ -59,6 +61,7 @@ impl PlaylistDetailVM {
             state.playlist.take();
         }
 
+        RouterVM::of(cx).navigate(cx, RoutesKey::Playlist);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let playlist = Connector::of(&cx).get_playlist(&cx, id).await?;
 
@@ -114,7 +117,7 @@ impl ViewModel for PlaylistDetailVM {
                             PlaylistEditVM::of(cx).prepare_edit(cx, &playlist)?;
                         }
                         PlaylistDetailWidget::Music { id } => {
-                            MusicControlVM::of(cx).request_play(cx, *id)?;
+                            MusicControlVM::of(cx).prepare(cx, *id)?;
                         }
                         PlaylistDetailWidget::RemoveMusic { id } => {
                             let playlist_id = cx

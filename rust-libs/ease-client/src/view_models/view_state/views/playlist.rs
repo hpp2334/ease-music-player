@@ -60,6 +60,8 @@ pub struct VCreatePlaylistState {
     pub music_count: u32,
     pub recommend_playlist_names: Vec<String>,
     pub full_imported: bool,
+    pub modal_open: bool,
+    pub can_submit: bool,
 }
 
 pub(crate) fn playlist_list_vs(
@@ -152,5 +154,7 @@ pub(crate) fn create_playlist_vs(
         name: decode_component_or_origin(create_playlist.playlist_name.clone()),
         full_imported: create_playlist.mode == CreatePlaylistMode::Full
             && (!create_playlist.entries.is_empty() || create_playlist.cover.is_some()),
+        modal_open: create_playlist.modal_open,
+        can_submit: !create_playlist.playlist_name.is_empty(),
     });
 }

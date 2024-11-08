@@ -3,7 +3,8 @@ use std::time::Duration;
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
-    view_models::connector::Connector,
+    view_models::{connector::Connector, main::router::RouterVM},
+    RoutesKey,
 };
 use ease_client_shared::backends::storage::{
     ArgUpsertStorage, StorageConnectionTestResult, StorageId, StorageType,
@@ -55,6 +56,8 @@ impl StorageUpsertVM {
         edit.validated = Default::default();
         edit.test = StorageConnectionTestResult::None;
         edit.is_create = true;
+
+        RouterVM::of(cx).navigate(cx, RoutesKey::AddDevices);
         Ok(())
     }
 
@@ -88,6 +91,8 @@ impl StorageUpsertVM {
         edit.playlist_count = storage.playlist_count;
         edit.validated = Default::default();
         edit.is_create = false;
+
+        RouterVM::of(cx).navigate(cx, RoutesKey::AddDevices);
         Ok(())
     }
 
@@ -137,6 +142,7 @@ impl StorageUpsertVM {
         } else {
             return Ok(());
         };
+        RouterVM::of(cx).pop(cx);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).upsert_storage(&cx, arg).await?;
             Ok(())

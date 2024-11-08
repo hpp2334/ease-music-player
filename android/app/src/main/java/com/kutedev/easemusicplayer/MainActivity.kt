@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -35,11 +36,15 @@ import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
+import com.kutedev.easemusicplayer.widgets.RoutesProvider
+import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
 import com.kutedev.easemusicplayer.widgets.musics.ImportMusicsPage
 import com.kutedev.easemusicplayer.widgets.musics.MusicPlayerPage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
+import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsDialog
+import uniffi.ease_client.RoutesKey
 
 inline fun <reified T> MainActivity.registerViewModel()
 where T : ViewModel, T : IOnNotifyView {
@@ -54,12 +59,6 @@ where T : ViewModel, T : IOnNotifyView {
 class MainActivity : ComponentActivity() {
     val vmDestroyers = mutableListOf<() -> Unit>()
 
-    override fun onStop() {
-        super.onStop()
-
-        Bridge.destroy()
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -68,24 +67,37 @@ class MainActivity : ComponentActivity() {
         Bridge.initApp(applicationContext)
 
         setContent {
-            val bottomBarPageState = rememberPagerState(pageCount = {
-                3
-            })
+            Root()
+        }
+    }
 
+    override fun onRestart() {
+        super.onRestart()
+        Bridge.initApp(applicationContext)
+    }
+
+    @Composable
+    fun Root() {
+
+        RoutesProvider { controller ->
             EaseMusicPlayerTheme {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                 ) { innerPadding ->
-                    CompositionLocalProvider(LocalNavController provides rememberNavController()) {
                         Column(
                             modifier = Modifier
                                 .padding(innerPadding)
                                 .fillMaxSize()
                         ) {
+                            val bottomBarPageState = rememberPagerState(pageCount = {
+                                3
+                            })
+
                             Box(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 RouteBlock(
+                                    controller = controller,
                                     bottomBarPageState = bottomBarPageState,
                                 )
                             }
@@ -97,7 +109,6 @@ class MainActivity : ComponentActivity() {
                                 BottomBar(bottomBarPageState)
                             }
                         }
-                    }
                 }
             }
         }
@@ -105,6 +116,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun RouteBlock(
+        controller: NavHostController,
         bottomBarPageState: PagerState,
     ) {
         val playlistsVM: PlaylistsViewModel by viewModels()
@@ -117,44 +129,52 @@ class MainActivity : ComponentActivity() {
         val currentMusicVM: CurrentMusicViewModel by viewModels()
 
         NavHost(
-            navController = LocalNavController.current,
-            startDestination = Routes.HOME
+            navController = controller,
+            startDestination = RoutesKey.HOME.toString(),
         ) {
-            composable(Routes.HOME) {
+            composable(RoutesKey.HOME.toString()) {
                 HomePage(
                     ctx = applicationContext,
                     pagerState = bottomBarPageState,
                     playlistsVM = playlistsVM,
-                    createPlaylistVM = createPlaylistVM,
                     timeToPauseVM = timeToPauseVM,
                     storageListVM = storageListVM,
                 )
+                PlaylistsDialog(vm = createPlaylistVM)
             }
-            composable(Routes.ADD_DEVICES) {
+            composable(RoutesKey.ADD_DEVICES.toString()) {
                 EditStoragesPage(
                     formVM = editStorageVM,
                 )
             }
-            composable(Routes.PLAYLIST) {
+            composable(RoutesKey.PLAYLIST.toString()) {
                 PlaylistPage(
                     vm = currentPlaylistVM,
                     currentMusicVM = currentMusicVM,
                 )
             }
-            composable(Routes.IMPORT_MUSICS) {
+            composable(RoutesKey.IMPORT_MUSICS.toString()) {
                 ImportMusicsPage(vm = currentStorageEntriesVM)
             }
-            composable(Routes.MUSIC_PLAYER) {
+            composable(RoutesKey.MUSIC_PLAYER.toString()) {
                 MusicPlayerPage(
                     vm = currentMusicVM,
                     timeToPauseVM = timeToPauseVM,
                 )
             }
         }
+        TimeToPauseModal(vm = timeToPauseVM)
+    }
+
+
+    override fun onStop() {
+        super.onStop()
+        Bridge.onStop()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        Bridge.onDestroy()
 
         for (destroy in vmDestroyers) {
             destroy()

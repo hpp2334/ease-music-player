@@ -30,4 +30,5 @@ pub struct CreatePlaylistState {
     pub entries: Vec<StorageEntry>,
     pub mode: CreatePlaylistMode,
     pub recommend_playlist_names: Vec<String>,
+    pub modal_open: bool,
 }

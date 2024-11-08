@@ -37,12 +37,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonColors
@@ -99,7 +95,6 @@ private fun StorageBlock(
 fun EditStoragesPage(
     formVM: EditStorageFormViewModel,
 ) {
-    val navController = LocalNavController.current
     val context = LocalContext.current
 
     val toast = remember {
@@ -172,7 +167,7 @@ fun EditStoragesPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_back),
                     onClick = {
-                        navController.popBackStack()
+                        Bridge.popRoute()
                     }
                 )
             }
@@ -200,7 +195,6 @@ fun EditStoragesPage(
                     painter = painterResource(id = R.drawable.icon_ok),
                     onClick = {
                         Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Finish));
-                        navController.popBackStack()
                     }
                 )
             }

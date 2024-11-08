@@ -12,16 +12,17 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.currentBackStackEntryAsState
-import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
-import com.kutedev.easemusicplayer.Routes
+import com.kutedev.easemusicplayer.widgets.getCurrentRoute
 import kotlinx.coroutines.launch
+import uniffi.ease_client.RoutesKey
 
 private interface IBottomItem {
     val painterId: Int;
@@ -49,7 +50,6 @@ private object BSetting: IBottomItem {
         get() = 2;
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BottomBar(bottomBarPageState: PagerState) {
     val items = listOf(
@@ -58,9 +58,9 @@ fun BottomBar(bottomBarPageState: PagerState) {
         BSetting
     )
     val animationScope = rememberCoroutineScope()
-    val currentRouteState = LocalNavController.current.currentBackStackEntryAsState().value;
 
-    if (currentRouteState?.destination?.route != Routes.HOME) {
+    val currentRoute = getCurrentRoute().collectAsState(null).value
+    if (currentRoute != RoutesKey.HOME.toString()) {
         return;
     }
 

@@ -21,21 +21,12 @@ class CreatePlaylistViewModel : ViewModel(), IOnNotifyView {
             musicCount = 0u,
             recommendPlaylistNames = emptyList(),
             fullImported = false,
+            modalOpen = false,
+            canSubmit = false,
         )
     })
-    private val _isOpen = MutableStateFlow(false)
 
     val state = _state.asStateFlow()
-    val isOpen = _isOpen.asStateFlow()
-
-    fun closeDialog() {
-        _isOpen.value = false
-    }
-
-    fun openDialog() {
-        Bridge.dispatchClick(PlaylistListWidget.Add)
-        _isOpen.value = true
-    }
 
     override fun onNotifyView(v: RootViewModelState): Unit {
         if (v.createPlaylist != null) {

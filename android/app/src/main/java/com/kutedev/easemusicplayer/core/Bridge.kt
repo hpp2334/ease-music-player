@@ -1,7 +1,10 @@
 package com.kutedev.easemusicplayer.core
 
 import android.annotation.SuppressLint
+import androidx.navigation.NavHostController
+import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import uniffi.ease_client.IFlushNotifier
+import uniffi.ease_client.IRouterService
 import uniffi.ease_client.IToastService
 import uniffi.ease_client.IViewStateService
 import uniffi.ease_client.MainBodyWidget
@@ -13,6 +16,8 @@ import uniffi.ease_client.PlaylistDetailWidget
 import uniffi.ease_client.PlaylistEditWidget
 import uniffi.ease_client.PlaylistListWidget
 import uniffi.ease_client.RootViewModelState
+import uniffi.ease_client.RouterAction
+import uniffi.ease_client.RoutesKey
 import uniffi.ease_client.StorageImportWidget
 import uniffi.ease_client.StorageListWidget
 import uniffi.ease_client.StorageUpsertWidget
@@ -77,6 +82,33 @@ private class ToastService : IToastService {
     }
 }
 
+class RouterService : IRouterService {
+    private var _navigatorController: NavHostController? = null;
+
+    fun install(controller: NavHostController) {
+        _navigatorController = controller
+    }
+    fun destroy() {
+        _navigatorController = null
+    }
+
+    override fun naviagate(key: RoutesKey) {
+        nextTickOnMain {
+            if (_navigatorController != null) {
+                _navigatorController!!.navigate(key.toString())
+            }
+        }
+    }
+
+    override fun pop() {
+        nextTickOnMain {
+            if (_navigatorController != null) {
+                _navigatorController!!.popBackStack()
+            }
+        }
+    }
+}
+
 object Bridge {
     @SuppressLint("StaticFieldLeak")
     private var _player: MusicPlayer? = null
@@ -84,14 +116,26 @@ object Bridge {
     private val _flushNotifier = FlushNotifier()
     @SuppressLint("StaticFieldLeak")
     private val _toastService = ToastService()
+    val routerInternal = RouterService()
     private const val SCHEMA_VERSION = 1u
     private const val STORAGE_PATH = "/"
 
-    fun destroy() {
+    fun onStop() {
         if (_player != null) {
             _player!!.destroy()
         }
         _player = null
+        routerInternal.destroy()
+    }
+
+    fun onDestroy() {
+        onStop()
+    }
+
+    fun onRestart(context: android.content.Context) {
+        val player = MusicPlayer()
+        player.install(context)
+        _player = player
     }
 
     fun initApp(context: android.content.Context) {
@@ -101,6 +145,7 @@ object Bridge {
         _toastService.setContext(context)
 
         apiBuildClient(
+            routerInternal,
             player,
             _toastService,
             _viewStates,
@@ -125,6 +170,10 @@ object Bridge {
 
     fun dispatchAction(action: ViewAction) {
         apiEmitViewAction(action)
+    }
+
+    fun popRoute() {
+        dispatchAction(ViewAction.Router(RouterAction.POP))
     }
 
     fun dispatchClick(widget: MainBodyWidget) {

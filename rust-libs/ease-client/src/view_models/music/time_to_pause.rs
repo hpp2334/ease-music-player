@@ -17,6 +17,7 @@ pub enum TimeToPauseWidget {
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum TimeToPauseAction {
     Finish { hour: u8, minute: u8, second: u8 },
+    CloseModal,
 }
 
 pub(crate) struct TimeToPauseVM {
@@ -36,6 +37,15 @@ impl TimeToPauseVM {
         let mut edit = cx.model_mut(&self.timer);
         edit.enabled = false;
         Ok(())
+    }
+
+    pub(crate) fn open(&self, cx: &ViewModelContext) {
+        self.update_modal_open(cx, true);
+    }
+
+    fn update_modal_open(&self, cx: &ViewModelContext, value: bool) {
+        let mut form = cx.model_mut(&self.timer);
+        form.modal_open = value;
     }
 
     fn start_timer(
@@ -96,6 +106,9 @@ impl ViewModel for TimeToPauseVM {
                         second,
                     } => {
                         self.start_timer(cx, *hour, *minute, *second)?;
+                    }
+                    TimeToPauseAction::CloseModal => {
+                        self.update_modal_open(cx, false);
                     }
                 },
                 _ => {}

@@ -36,7 +36,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
@@ -58,7 +57,6 @@ import uniffi.ease_client_shared.PlayMode
 private fun MusicPlayerHeader(
     onRemoveDialogOpen: () -> Unit,
 ) {
-    val navController = LocalNavController.current
     var moreMenuExpanded by remember {
         mutableStateOf(false)
     }
@@ -74,7 +72,7 @@ private fun MusicPlayerHeader(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_back),
             onClick = {
-                navController.popBackStack()
+                Bridge.popRoute()
             }
         )
         Box {
@@ -246,13 +244,6 @@ private fun MusicPanel(
         PlayMode.LIST_LOOP -> R.drawable.icon_mode_repeat
     }
 
-    TimeToPauseModal(
-        vm = timeToPauseVM,
-        isOpen = isOpen,
-        onClose = {
-            isOpen = false;
-        }
-    )
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)

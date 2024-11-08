@@ -31,6 +31,7 @@ pub enum PlaylistCreateWidget {
     FinishCreate,
     Cancel,
     Reset,
+    CloseModal,
 }
 
 pub(crate) struct PlaylistCreateVM {
@@ -64,7 +65,14 @@ impl PlaylistCreateVM {
     }
 
     pub(crate) fn prepare(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        self.reset(cx)
+        self.reset(cx)?;
+        self.update_modal_open(cx, true);
+        Ok(())
+    }
+
+    fn update_modal_open(&self, cx: &ViewModelContext, value: bool) {
+        let mut form = cx.model_mut(&self.form);
+        form.modal_open = value;
     }
 
     fn reset(&self, cx: &ViewModelContext) -> EaseResult<()> {
@@ -173,6 +181,9 @@ impl ViewModel for PlaylistCreateVM {
                         }
                         PlaylistCreateWidget::Reset => {
                             self.reset(cx)?;
+                        }
+                        PlaylistCreateWidget::CloseModal => {
+                            self.update_modal_open(cx, false);
                         }
                     },
                     (Widget::PlaylistCreate(action), WidgetActionType::ChangeText { text }) => {

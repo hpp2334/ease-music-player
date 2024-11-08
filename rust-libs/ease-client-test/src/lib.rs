@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ease_client::{
-    build_client, Action, IToastService, PlaylistCreateWidget, PlaylistDetailWidget,
-    PlaylistListWidget, RootViewModelState, StorageImportWidget, StorageListWidget,
-    StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
+    build_client, Action, IRouterService, IToastService, PlaylistCreateWidget,
+    PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey, StorageImportWidget,
+    StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
 };
 use ease_client_shared::backends::app::ArgInitializeApp;
 use ease_client_shared::backends::music::MusicId;
@@ -63,6 +63,12 @@ fn setup_subscriber() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 }
 
+struct FakeRouterService;
+impl IRouterService for FakeRouterService {
+    fn naviagate(&self, _key: RoutesKey) {}
+    fn pop(&self) {}
+}
+
 impl TestApp {
     pub async fn new(test_dir: &str, cleanup: bool) -> Self {
         let test_dir = if test_dir.ends_with("/") {
@@ -93,6 +99,7 @@ impl TestApp {
         let async_runtime = AsyncRuntime::new();
         let view_state = ViewStateServiceRef::new();
         let app = build_client(
+            Arc::new(FakeRouterService),
             Arc::new(player.clone()),
             Arc::new(FakeToastServiceImpl),
             Arc::new(view_state.clone()),

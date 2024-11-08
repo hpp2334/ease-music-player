@@ -20,13 +20,11 @@ fun HomePage(
     playlistsVM: PlaylistsViewModel,
     timeToPauseVM: TimeToPauseViewModel,
     storageListVM: StorageListViewModel,
-    createPlaylistVM: CreatePlaylistViewModel,
 ) {
     HorizontalPager(state = pagerState) { page ->
         if (page == 0) {
             PlaylistsSubpage(
                 playlistsVM = playlistsVM,
-                createPlaylistVM = createPlaylistVM,
             )
         }
         if (page == 1) {

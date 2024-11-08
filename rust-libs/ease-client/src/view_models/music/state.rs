@@ -27,6 +27,7 @@ pub struct TimeToPauseState {
     pub enabled: bool,
     pub expired_time: Duration,
     pub left: Duration,
+    pub modal_open: bool,
 }
 
 impl CurrentMusicState {

@@ -93,9 +93,9 @@ private fun Block(
             val next = next(-gap);
 
             if (isFloor) {
-                dragOffsetInDp = dragOffsetInDp - gapFloor * STRIDE;
+                dragOffsetInDp -= gapFloor * STRIDE;
             } else {
-                dragOffsetInDp = dragOffsetInDp - gapCeil * STRIDE;
+                dragOffsetInDp -= gapCeil * STRIDE;
             }
             onChange(next)
         }
@@ -261,7 +261,7 @@ private fun TimeToPauseModalCore(
                         text = stringResource(id = R.string.playlists_dialog_button_ok),
                         type = EaseTextButtonType.Primary,
                         size = EaseTextButtonSize.Medium,
-                        disabled = minutes == 0,
+                        disabled = minutes == 0 && hours == 0,
                         onClick = {
                             onConfirm(hours, minutes)
                         }
@@ -275,13 +275,14 @@ private fun TimeToPauseModalCore(
 @Composable
 fun TimeToPauseModal(
     vm: TimeToPauseViewModel,
-    isOpen: Boolean,
-    onClose: () -> Unit,
 ) {
     val state = vm.state.collectAsState().value
+    val onClose = {
+        Bridge.dispatchAction(ViewAction.TimeToPause(TimeToPauseAction.CloseModal));
+    }
 
     TimeToPauseModalCore(
-        isOpen = isOpen,
+        isOpen = state.modalOpen,
         initHours = state.leftHour.toInt(),
         initMinutes = state.leftMinute.toInt(),
         deleteEnabled = state.enabled,

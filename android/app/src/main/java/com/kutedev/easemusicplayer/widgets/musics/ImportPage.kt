@@ -39,7 +39,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseCheckbox
 import com.kutedev.easemusicplayer.components.EaseIconButton
@@ -189,7 +188,6 @@ private fun ImportEntries(
     selectedCount: Int,
     splitPaths: List<VSplitPathItem>,
     entries: List<VCurrentStorageEntry>,
-    onPopRoute: () -> Unit,
 ) {
     @Composable
     fun PathTab(
@@ -269,7 +267,6 @@ private fun ImportEntries(
                 contentColor = MaterialTheme.colorScheme.surface,
                 onClick = {
                     Bridge.dispatchClick(StorageImportWidget.Import);
-                    onPopRoute()
                 },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -434,7 +431,6 @@ private fun ImportMusicsError(
 fun ImportMusicsPage(
     vm: CurrentStorageEntriesViewModel
 ) {
-    val navController = LocalNavController.current
     val state = vm.state.collectAsState().value
     val storageItems = state.storageItems.filter { item -> !item.isLocal }
     val titleText = when (state.selectedCount) {
@@ -443,15 +439,7 @@ fun ImportMusicsPage(
         else -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_multi_suffix)}"
     }
     fun doUndo() {
-        if (!state.canUndo) {
-            navController.popBackStack()
-            return
-        }
-
         Bridge.dispatchAction(ViewAction.StorageImport(StorageImportAction.UNDO));
-    }
-    fun popRoute() {
-        navController.popBackStack()
     }
 
     BackHandler(enabled = state.canUndo) {
@@ -508,7 +496,6 @@ fun ImportMusicsPage(
                     selectedCount = state.selectedCount,
                     splitPaths = state.splitPaths,
                     entries = state.entries,
-                    onPopRoute = { popRoute() }
                 )
             }
         }

@@ -53,6 +53,7 @@ class TimeToPauseViewModel : ViewModel(), IOnNotifyView {
             enabled = false,
             leftHour = 0u,
             leftMinute = 0u,
+            modalOpen = false,
         )
     })
     val state = _state.asStateFlow()
