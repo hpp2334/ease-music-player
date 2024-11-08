@@ -24,7 +24,13 @@ impl DbConnection {
         })
     }
 
-    pub fn transaction(&mut self, f: impl FnOnce(DbConnectionRef) -> Result<()>) -> Result<()> {
+    pub fn transaction<E>(
+        &mut self,
+        f: impl FnOnce(DbConnectionRef) -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E>
+    where
+        E: From<Error>,
+    {
         let transaction = self.conn.transaction()?;
 
         let conn = DbConnectionRef { conn: &transaction };

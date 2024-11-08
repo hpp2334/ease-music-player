@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="playlist_count_unit">首</string>
+    <string name="music_count_unit">首</string>
     <string name="app_name">Ease Music Player</string>
     <string name="dashboard_sleep_mode">睡眠模式</string>
     <string name="dashboard_devices">设备</string>
@@ -25,6 +25,9 @@
     <string name="playlists_dialog_tab_full">完整列表</string>
     <string name="playlists_dialog_tab_empty">空列表</string>
     <string name="playlists_dialog_playlist_name">列表名称</string>
+    <string name="playlists_dialog_playlist_full_import_desc">导入曲目与封面</string>
+    <string name="playlists_dialog_import_info">导入概览</string>
+    <string name="playlists_dialog_cover">封面（可选）</string>
     <string name="playlists_dialog_button_reset">重置</string>
     <string name="playlists_dialog_button_cancel">取消</string>
     <string name="playlists_dialog_button_ok">确认</string>

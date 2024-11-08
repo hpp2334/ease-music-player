@@ -23,7 +23,7 @@ import com.kutedev.easemusicplayer.R
 
 @Composable
 fun SimpleFormText(
-    label: String,
+    label: String?,
     value: String,
     onChange: (value: String) -> Unit
 ) {
@@ -31,11 +31,13 @@ fun SimpleFormText(
         modifier = Modifier
             .fillMaxWidth()
     ) {
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            letterSpacing = 1.sp,
-        )
+        if (label != null) {
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                letterSpacing = 1.sp,
+            )
+        }
         TextField(
             modifier = Modifier
                 .fillMaxWidth(),

@@ -15,6 +15,7 @@ import uniffi.ease_client_shared.MusicId
 
 class MusicPlayer : IMusicPlayerService {
     private var _internal: MediaPlayer = MediaPlayer()
+    private var _isPrepared = false
     private var _context: android.content.Context? = null
     val customScope = CoroutineScope(Dispatchers.IO)
 
@@ -39,6 +40,10 @@ class MusicPlayer : IMusicPlayerService {
     }
 
     override fun pause() {
+        if (!_isPrepared) {
+            return
+        }
+
         val player = getInternal()
         player.setOnPreparedListener {}
         player.pause()
@@ -68,6 +73,7 @@ class MusicPlayer : IMusicPlayerService {
 
     override fun setMusicUrl(id: MusicId, url: String) {
         val player = getInternal()
+        _isPrepared = false;
         player.reset()
         player.setAudioAttributes(
             AudioAttributes.Builder()
@@ -84,6 +90,7 @@ class MusicPlayer : IMusicPlayerService {
                     Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Complete))
                 }
             }
+            _isPrepared = true;
             this.resume()
             syncPlayingState()
         }

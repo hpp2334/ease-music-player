@@ -12,7 +12,7 @@ use ease_database::DbConnectionRef;
 
 use crate::{
     ctx::BackendContext,
-    error::BResult,
+    error::{BError, BResult},
     models::playlist::PlaylistModel,
     repositories::{
         core::get_conn,
@@ -128,21 +128,46 @@ pub(crate) async fn cu_update_playlist(cx: BackendContext, arg: ArgUpdatePlaylis
     let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
         id: Some(arg.id),
         title: arg.title,
-        picture: arg.cover.map(|v| (v.storage_id, v.path)),
+        picture: arg.cover.clone(),
     };
     db_upsert_playlist(conn.get_ref(), arg, current_time_ms)?;
     Ok(())
 }
 
 pub(crate) async fn cc_create_playlist(cx: BackendContext, arg: ArgCreatePlaylist) -> BResult<()> {
-    let conn = get_conn(&cx)?;
+    let mut conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
-    let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
-        id: None,
-        title: arg.title,
-        picture: arg.cover.map(|v| (v.storage_id, v.path)),
+
+    let (arg, entries) = {
+        let entries = arg.entries;
+        let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
+            id: None,
+            title: arg.title,
+            picture: arg.cover.clone(),
+        };
+
+        (arg, entries)
     };
-    db_upsert_playlist(conn.get_ref(), arg, current_time_ms)?;
+
+    let mut musics: Vec<(MusicId, PlaylistId)> = Default::default();
+    conn.transaction::<BError>(|conn| {
+        let playlist_id = db_upsert_playlist(conn, arg, current_time_ms)?;
+
+        for (entry, name) in entries {
+            let music_id = db_add_music(
+                conn,
+                ArgDBAddMusic {
+                    storage_id: entry.storage_id,
+                    path: entry.path,
+                    title: name,
+                },
+            )?;
+            musics.push((music_id, playlist_id));
+        }
+        db_batch_add_music_to_playlist(conn, musics)?;
+        Ok(())
+    })?;
+
     Ok(())
 }
 
@@ -150,22 +175,25 @@ pub(crate) async fn cu_add_musics_to_playlist(
     cx: BackendContext,
     arg: ArgAddMusicsToPlaylist,
 ) -> BResult<()> {
-    let conn = get_conn(&cx)?;
+    let mut conn = get_conn(&cx)?;
     let playlist_id = arg.id;
     let mut musics: Vec<(MusicId, PlaylistId)> = Default::default();
 
-    for entry in arg.entries {
-        let music_id = db_add_music(
-            conn.get_ref(),
-            ArgDBAddMusic {
-                storage_id: entry.0.storage_id,
-                path: entry.0.path,
-                title: entry.1,
-            },
-        )?;
-        musics.push((music_id, playlist_id));
-    }
-    db_batch_add_music_to_playlist(conn.get_ref(), musics)?;
+    conn.transaction::<BError>(move |conn| {
+        for (entry, name) in arg.entries {
+            let music_id = db_add_music(
+                conn,
+                ArgDBAddMusic {
+                    storage_id: entry.storage_id,
+                    path: entry.path,
+                    title: name,
+                },
+            )?;
+            musics.push((music_id, playlist_id));
+        }
+        db_batch_add_music_to_playlist(conn, musics)?;
+        Ok(())
+    })?;
 
     Ok(())
 }

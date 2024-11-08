@@ -293,18 +293,12 @@ impl StorageImportVM {
                 }
             }
             CurrentStorageImportType::CreatePlaylistEntries => {
-                PlaylistCreateVM::of(cx).finish_import(cx, storage_id, entries)?;
+                PlaylistCreateVM::of(cx).finish_import(cx, entries)?;
             }
             CurrentStorageImportType::CreatePlaylistCover => {
                 let entry = entries.pop();
                 if let Some(entry) = entry {
-                    PlaylistCreateVM::of(cx).finish_cover(
-                        cx,
-                        StorageEntryLoc {
-                            storage_id,
-                            path: entry.path,
-                        },
-                    )?;
+                    PlaylistCreateVM::of(cx).finish_cover(cx, entry)?;
                 }
             }
             CurrentStorageImportType::CurrentMusicLyrics { id: _id } => {

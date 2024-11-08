@@ -141,20 +141,16 @@ pub(crate) fn create_playlist_vs(
     root: &mut RootViewModelState,
 ) {
     let mode = create_playlist.mode;
-    let cover = connector_state.serve_asset_url_opt(create_playlist.cover.clone().clone());
+    let cover = connector_state.serve_asset_url_opt(create_playlist.cover.clone());
     let music_count = create_playlist.entries.len();
 
     root.create_playlist = Some(VCreatePlaylistState {
         mode,
         music_count: music_count as u32,
         picture: cover,
-        recommend_playlist_names: create_playlist
-            .recommend_playlist_names
-            .clone()
-            .into_iter()
-            .map(decode_component_or_origin)
-            .collect(),
+        recommend_playlist_names: create_playlist.recommend_playlist_names.clone(),
         name: decode_component_or_origin(create_playlist.playlist_name.clone()),
-        full_imported: create_playlist.mode == CreatePlaylistMode::Full,
+        full_imported: create_playlist.mode == CreatePlaylistMode::Full
+            && (!create_playlist.entries.is_empty() || create_playlist.cover.is_some()),
     });
 }

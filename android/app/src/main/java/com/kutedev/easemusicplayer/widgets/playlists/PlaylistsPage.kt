@@ -133,7 +133,7 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
             )
             Text(
                 text = buildAnnotatedString {
-                    append("${playlist.count} ${stringResource(id = R.string.playlist_count_unit)}")
+                    append("${playlist.count} ${stringResource(id = R.string.music_count_unit)}")
                     append("  ·  ")
                     append(playlist.duration)
                 },

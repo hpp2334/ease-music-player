@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,14 +21,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.kutedev.easemusicplayer.LocalNavController
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.Routes
 import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
+import com.kutedev.easemusicplayer.components.ImportCover
 import com.kutedev.easemusicplayer.components.SimpleFormText
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
@@ -65,6 +71,104 @@ private fun Tab(
                     .height(1.dp)
                     .offset(0.dp, (-4).dp)
                     .background(activeColor)
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullImportHeader(
+    text: String,
+) {
+    Text(
+        text = text,
+        fontSize = 10.sp,
+    )
+}
+
+@Composable
+private fun FullImportBlock(
+    vm: CreatePlaylistViewModel
+) {
+    val state = vm.state.collectAsState().value
+    val navController = LocalNavController.current
+
+    if (!state.fullImported) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable {
+                    Bridge.dispatchClick(PlaylistCreateWidget.Import)
+                    navController.navigate(Routes.IMPORT_MUSICS)
+                }
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(0.dp, 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_download),
+                contentDescription = null,
+            )
+            Box(
+                modifier = Modifier.height(10.dp)
+            )
+            Text(
+                text = stringResource(R.string.playlists_dialog_playlist_full_import_desc),
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    } else {
+        val musicCount = state.musicCount
+        val musicCountSuffix = stringResource(R.string.music_count_unit)
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+        ) {
+            FullImportHeader(
+                text = stringResource(R.string.playlists_dialog_import_info),
+            )
+            Text(
+                text = "$musicCount $musicCountSuffix"
+            )
+            Box(modifier = Modifier.height(12.dp))
+            FullImportHeader(
+                text = stringResource(R.string.playlists_dialog_playlist_name),
+            )
+            SimpleFormText(
+                label = null,
+                value = state.name,
+                onChange = {value ->
+                    Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
+                }
+            )
+            Row {
+                for (name in state.recommendPlaylistNames) {
+                    EaseTextButton(
+                        text = name,
+                        type = EaseTextButtonType.Default,
+                        size = EaseTextButtonSize.Small,
+                        disabled = false,
+                        onClick = {
+                            Bridge.dispatchChangeText(PlaylistCreateWidget.Name, name)
+                        },
+                    )
+                }
+            }
+            Box(modifier = Modifier.height(12.dp))
+            FullImportHeader(
+                text = stringResource(R.string.playlists_dialog_cover),
+            )
+            ImportCover(
+                url = state.picture,
+                onAdd = {
+                    Bridge.dispatchClick(PlaylistCreateWidget.Cover);
+                },
+                onRemove = {
+                    Bridge.dispatchClick(PlaylistCreateWidget.ClearCover);
+                }
             )
         }
     }
@@ -111,13 +215,19 @@ fun PlaylistsDialog(
                 )
             }
             Box(modifier = Modifier.height(8.dp))
-            SimpleFormText(
-                label = stringResource(R.string.playlists_dialog_playlist_name),
-                value = state.name,
-                onChange = {value ->
-                    Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
-                }
-            )
+            if (state.mode == CreatePlaylistMode.FULL) {
+                FullImportBlock(
+                    vm = vm,
+                )
+            } else {
+                SimpleFormText(
+                    label = stringResource(R.string.playlists_dialog_playlist_name),
+                    value = state.name,
+                    onChange = {value ->
+                        Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
+                    }
+                )
+            }
             Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
@@ -129,7 +239,9 @@ fun PlaylistsDialog(
                             text = stringResource(id = R.string.playlists_dialog_button_reset),
                             type = EaseTextButtonType.Primary,
                             size = EaseTextButtonSize.Medium,
-                            onClick = {}
+                            onClick = {
+                                Bridge.dispatchClick(PlaylistCreateWidget.Reset);
+                            }
                         )
                     }
                 }

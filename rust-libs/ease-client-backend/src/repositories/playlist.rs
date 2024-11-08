@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use ease_client_shared::backends::{music::MusicId, playlist::PlaylistId, storage::StorageId};
+use ease_client_shared::backends::{
+    music::MusicId,
+    playlist::PlaylistId,
+    storage::{StorageEntry, StorageEntryLoc, StorageId},
+};
 use ease_database::{params, DbConnectionRef};
 
 use crate::{
@@ -11,7 +15,7 @@ use crate::{
 pub struct ArgDBUpsertPlaylist {
     pub id: Option<PlaylistId>,
     pub title: String,
-    pub picture: Option<(StorageId, String)>,
+    pub picture: Option<StorageEntryLoc>,
 }
 pub fn db_upsert_playlist(
     conn: DbConnectionRef,
@@ -19,7 +23,7 @@ pub fn db_upsert_playlist(
     current_time_ms: i64,
 ) -> BResult<PlaylistId> {
     let (picture_storage_id, picture_path) = if let Some(picture) = arg.picture {
-        (Some(picture.0), Some(picture.1))
+        (Some(picture.storage_id), Some(picture.path))
     } else {
         (None, None)
     };

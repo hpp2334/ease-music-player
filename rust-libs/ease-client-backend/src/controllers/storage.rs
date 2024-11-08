@@ -139,6 +139,7 @@ pub async fn cr_list_storage_entry_children(
             let entries = entries
                 .into_iter()
                 .map(|entry| StorageEntry {
+                    storage_id: arg.storage_id,
                     name: entry.name,
                     path: entry.path,
                     size: entry.size,

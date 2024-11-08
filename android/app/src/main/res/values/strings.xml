@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="playlist_count_unit">Musics</string>
+    <string name="music_count_unit">Musics</string>
     <string name="app_name">Ease Music Player</string>
     <string name="dashboard_sleep_mode">SLEEP MODE</string>
     <string name="dashboard_devices">DEVICES</string>
@@ -25,6 +25,9 @@
     <string name="playlists_dialog_tab_full">FULL</string>
     <string name="playlists_dialog_tab_empty">EMPTY</string>
     <string name="playlists_dialog_playlist_name">PLAYLIST NAME</string>
+    <string name="playlists_dialog_playlist_full_import_desc">Import musics and cover from storage</string>
+    <string name="playlists_dialog_import_info">IMPORT INFO</string>
+    <string name="playlists_dialog_cover">COVER (OPTIONAL)</string>
     <string name="playlists_dialog_button_reset">RESET</string>
     <string name="playlists_dialog_button_cancel">CANCEL</string>
     <string name="playlists_dialog_button_ok">OK</string>

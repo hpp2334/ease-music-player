@@ -32,6 +32,7 @@ pub enum StorageType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageEntry {
+    pub storage_id: StorageId,
     pub name: String,
     pub path: String,
     pub size: Option<usize>,
@@ -80,6 +81,15 @@ pub struct Storage {
     pub typ: StorageType,
     pub music_count: u32,
     pub playlist_count: u32,
+}
+
+impl StorageEntry {
+    pub fn loc(&self) -> StorageEntryLoc {
+        StorageEntryLoc {
+            path: self.path.clone(),
+            storage_id: self.storage_id,
+        }
+    }
 }
 
 define_message!(UpsertStorageMsg, Code::UpsertStorage, ArgUpsertStorage, ());

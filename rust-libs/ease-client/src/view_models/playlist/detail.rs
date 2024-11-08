@@ -11,6 +11,7 @@ use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
+    utils::common::trim_extension_name,
     view_models::{
         connector::Connector,
         music::{common::MusicCommonVM, control::MusicControlVM},
@@ -34,13 +35,6 @@ pub(crate) struct PlaylistDetailVM {
     current: Model<CurrentPlaylistState>,
     tasks: AsyncTasks,
 }
-
-fn trim_extension_name(name: impl ToString) -> String {
-    name.to_string()
-        .rsplit_once('.')
-        .map_or(name.to_string(), |(base, _)| base.to_string())
-}
-
 impl PlaylistDetailVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
@@ -82,26 +76,16 @@ impl PlaylistDetailVM {
         storage_id: StorageId,
         entries: Vec<StorageEntry>,
     ) -> EaseResult<()> {
-        let entries = entries
-            .into_iter()
-            .map(|v| {
-                let name = trim_extension_name(v.name);
-                let loc = StorageEntryLoc {
-                    storage_id,
-                    path: v.path,
-                };
-
-                (loc, name)
-            })
-            .collect();
-
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx)
                 .add_musics_to_playlist(
                     &cx,
                     ArgAddMusicsToPlaylist {
                         id: playlist_id,
-                        entries,
+                        entries: entries
+                            .iter()
+                            .map(|e| (e.clone(), trim_extension_name(&e.name)))
+                            .collect(),
                     },
                 )
                 .await?;

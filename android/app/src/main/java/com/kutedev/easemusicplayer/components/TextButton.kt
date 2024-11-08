@@ -32,7 +32,9 @@ fun EaseTextButton(
         EaseTextButtonSize.Medium -> 14.sp
     }
     val buttonColors = when(type) {
-        EaseTextButtonType.Default -> ButtonDefaults.textButtonColors()
+        EaseTextButtonType.Default -> ButtonDefaults.textButtonColors().copy(
+            contentColor = MaterialTheme.colorScheme.onSurface
+        )
         EaseTextButtonType.Primary -> {
             ButtonDefaults.textButtonColors().copy(
                 contentColor = MaterialTheme.colorScheme.primary

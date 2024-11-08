@@ -7,7 +7,7 @@ use crate::{backends::code::Code, define_id, define_message};
 use super::{
     music::{MusicAbstract, MusicId},
     music_duration::MusicDuration,
-    storage::StorageEntryLoc,
+    storage::{StorageEntry, StorageEntryLoc, StorageId},
 };
 
 define_id!(PlaylistId);
@@ -97,7 +97,7 @@ define_message!(
 pub struct ArgCreatePlaylist {
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
-    pub entries: Vec<StorageEntryLoc>,
+    pub entries: Vec<(StorageEntry, String)>,
 }
 define_message!(
     CreatePlaylistMsg,
@@ -109,7 +109,7 @@ define_message!(
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgAddMusicsToPlaylist {
     pub id: PlaylistId,
-    pub entries: Vec<(StorageEntryLoc, String)>,
+    pub entries: Vec<(StorageEntry, String)>,
 }
 define_message!(
     AddMusicsToPlaylistMsg,

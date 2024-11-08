@@ -12,6 +12,7 @@ use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
+    utils::common::{decode_component_or_origin, trim_extension_name},
     view_models::{
         connector::Connector,
         storage::import::{get_entry_type, StorageImportVM},
@@ -29,6 +30,7 @@ pub enum PlaylistCreateWidget {
     Import,
     FinishCreate,
     Cancel,
+    Reset,
 }
 
 pub(crate) struct PlaylistCreateVM {
@@ -36,14 +38,14 @@ pub(crate) struct PlaylistCreateVM {
     tasks: AsyncTasks,
 }
 
-fn build_recommend_playlist_names(entries: &Vec<StorageEntryLoc>) -> Vec<String> {
+fn build_recommend_playlist_names(entries: &Vec<StorageEntry>) -> Vec<String> {
     let mut recommend_playlist_names: HashSet<String> = Default::default();
     for entry in entries.iter() {
         let split: Vec<&str> = entry.path.split("/").collect();
         for i in 0..(split.len() - 1) {
             let p = split[i];
             if !p.is_empty() {
-                recommend_playlist_names.insert(p.to_string());
+                recommend_playlist_names.insert(decode_component_or_origin(p.to_string()));
             }
         }
     }
@@ -62,10 +64,10 @@ impl PlaylistCreateVM {
     }
 
     pub(crate) fn prepare(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        self.clear(cx)
+        self.reset(cx)
     }
 
-    fn clear(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    fn reset(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let mut form = cx.model_mut(&self.form);
         form.mode = CreatePlaylistMode::Full;
         form.cover = None;
@@ -83,29 +85,24 @@ impl PlaylistCreateVM {
     pub(crate) fn finish_import(
         &self,
         cx: &ViewModelContext,
-        storage_id: StorageId,
         entries: Vec<StorageEntry>,
     ) -> EaseResult<()> {
-        let cover: Option<StorageEntryLoc> = entries
+        let cover = entries
             .iter()
             .filter(|v| get_entry_type(v) == StorageEntryType::Image)
-            .map(|v| StorageEntryLoc {
-                storage_id,
-                path: v.path.clone(),
-            })
+            .map(|v| v.clone())
             .next();
-        let entries = entries
+        let entries: Vec<StorageEntry> = entries
             .into_iter()
             .filter(|v| get_entry_type(v) == StorageEntryType::Music)
-            .map(|v| StorageEntryLoc {
-                storage_id,
-                path: v.path,
-            })
             .collect();
 
         let mut form = cx.model_mut(&self.form);
         form.recommend_playlist_names = build_recommend_playlist_names(&entries);
-        form.cover = cover;
+        if form.playlist_name.is_empty() && !form.recommend_playlist_names.is_empty() {
+            form.playlist_name = form.recommend_playlist_names[0].clone();
+        }
+        form.cover = cover.map(|v| v.loc());
         form.entries = entries;
 
         Ok(())
@@ -114,10 +111,10 @@ impl PlaylistCreateVM {
     pub(crate) fn finish_cover(
         &self,
         cx: &ViewModelContext,
-        loc: StorageEntryLoc,
+        entry: StorageEntry,
     ) -> EaseResult<()> {
         let mut form = cx.model_mut(&self.form);
-        form.cover = Some(loc);
+        form.cover = Some(entry.loc());
         Ok(())
     }
 
@@ -127,7 +124,11 @@ impl PlaylistCreateVM {
             ArgCreatePlaylist {
                 title: form.playlist_name.to_string(),
                 cover: form.cover.clone(),
-                entries: form.entries.clone(),
+                entries: form
+                    .entries
+                    .iter()
+                    .map(|e| (e.clone(), trim_extension_name(&e.name)))
+                    .collect(),
             }
         };
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
@@ -168,7 +169,10 @@ impl ViewModel for PlaylistCreateVM {
                             self.finish_create(cx)?;
                         }
                         PlaylistCreateWidget::Cancel => {
-                            self.clear(cx)?;
+                            self.reset(cx)?;
+                        }
+                        PlaylistCreateWidget::Reset => {
+                            self.reset(cx)?;
                         }
                     },
                     (Widget::PlaylistCreate(action), WidgetActionType::ChangeText { text }) => {

@@ -1,8 +1,7 @@
-
 use ease_client_shared::{
     backends::{
         playlist::{Playlist, PlaylistAbstract, PlaylistId},
-        storage::StorageEntryLoc,
+        storage::{StorageEntry, StorageEntryLoc, StorageId},
     },
     uis::playlist::CreatePlaylistMode,
 };
@@ -28,7 +27,7 @@ pub struct EditPlaylistState {
 pub struct CreatePlaylistState {
     pub cover: Option<StorageEntryLoc>,
     pub playlist_name: String,
-    pub entries: Vec<StorageEntryLoc>,
+    pub entries: Vec<StorageEntry>,
     pub mode: CreatePlaylistMode,
     pub recommend_playlist_names: Vec<String>,
 }

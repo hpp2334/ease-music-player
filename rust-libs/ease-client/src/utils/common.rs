@@ -21,3 +21,9 @@ pub fn decode_component_or_origin(s: String) -> String {
         s
     }
 }
+
+pub fn trim_extension_name(name: impl ToString) -> String {
+    name.to_string()
+        .rsplit_once('.')
+        .map_or(name.to_string(), |(base, _)| base.to_string())
+}
