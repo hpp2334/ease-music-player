@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build:jni": "bun run ./scripts/build-jni-libs.ts",
-    "build:apk": "bun run ./scripts/build.ts",
+    "build:apk": "EBUILD=1 bun run build:jni && bun run ./scripts/build-apk.ts",
     "test": "cd ./rust-libs && cargo test"
   },
   "keywords": [],

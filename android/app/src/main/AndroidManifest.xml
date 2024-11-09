@@ -12,10 +12,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.EaseMusicPlayer"
         android:usesCleartextTraffic="true"
-        tools:targetApi="31"
-        tools:replace="android:extractNativeLibs"
-        android:extractNativeLibs="true">
-        <!-- 'extractNativeLibs' options make stacktrace available-->
+        tools:targetApi="31">
         <activity
             android:name=".MainActivity"
             android:exported="true"

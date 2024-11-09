@@ -5,24 +5,24 @@ import { ROOT } from "./base"
 
 
 const androidDir = path.resolve(ROOT, './android')
-const jksPath = path.resolve(androidDir, 'ease_music_player.jks')
+const jksPath = path.resolve(androidDir, 'root.jks')
 const keyPropertiesPath = path.resolve(androidDir, 'key.properties')
-const srcDir = path.resolve(ROOT, './build/app/outputs/flutter-apk')
+const srcDir = path.resolve(androidDir, './app/build/outputs/apk/release')
 const dstDir = path.resolve(ROOT, './artifacts/apk')
 
 // Signing
 writeFileSync(keyPropertiesPath, `storePassword=${process.env.ANDROID_SIGN_PASSWORD}
-keyPassword=${process.env.ANDROID_SIGN_PASSWORD}
-keyAlias=key0
-storeFile=ease_music_player.jks`)
+    keyPassword=${process.env.ANDROID_SIGN_PASSWORD}
+    keyAlias=key0
+    storeFile=root.jks`)
 console.log(`${keyPropertiesPath} written`)
 
-const jks = Buffer.from(process.env.ANDROID_SIGN_JKS!, 'base64')
-writeFileSync(jksPath, jks);
-console.log(`${jksPath} written`)
-
-execSync('flutter build apk --release --split-per-abi', { stdio: 'inherit', cwd: ROOT })
+execSync("./gradlew assembleRelease", {
+    stdio: 'inherit',
+    cwd: androidDir
+})
 
 rmSync(dstDir, { recursive: true, force: true })
 mkdirSync(srcDir, { recursive: true })
+console.log(srcDir)
 cpSync(srcDir, dstDir, { recursive: true })

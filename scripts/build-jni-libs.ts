@@ -1,12 +1,19 @@
 import { execSync } from "node:child_process"
-import { ROOT, RUST_LIBS_ROOTS } from "./base";
+import { ENVS, ROOT, RUST_LIBS_ROOTS } from "./base";
 import path from "node:path";
 
-const TARGETS = [
-    // 'x86_64',
+// [
+//     'x86_64',
+//     'x86',
+//     'arm64-v8a',
+//     'armeabi-v7a'
+// ]
+
+const TARGETS = ENVS.Build ? [
     'x86',
-    // 'arm64-v8a',
-    // 'armeabi-v7a'
+    'arm64-v8a',
+] : [
+    'x86',
 ]
 
 
