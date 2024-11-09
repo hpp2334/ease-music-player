@@ -57,4 +57,6 @@
     <string name="time_to_pause_ok">OK</string>
     <string name="time_to_pause_hour">HOUR</string>
     <string name="time_to_pause_minute">MINUTE</string>
+    <string name="storage_remove_desc_main">Are you sure to remove storage “$$B__E_TITLE$$”?</string>
+    <string name="storage_remove_desc_count">$$B__E_MCNT$$ musics will be removed in $$B__E_PCNT$$ playlists.</string>
 </resources>

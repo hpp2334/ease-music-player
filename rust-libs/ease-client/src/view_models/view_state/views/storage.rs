@@ -88,6 +88,14 @@ fn resolve_storage_name(storage: &Storage) -> String {
     }
 }
 
+fn resolve_upsert_storage_name(storage: &ArgUpsertStorage) -> String {
+    if !storage.alias.is_empty() {
+        storage.alias.clone()
+    } else {
+        storage.addr.clone()
+    }
+}
+
 pub(crate) fn storage_list_vs(state: &AllStorageState, root: &mut RootViewModelState) {
     let mut items: Vec<VStorageListItem> = {
         state
@@ -201,7 +209,7 @@ pub(crate) fn current_storage_entries_vs(
 pub(crate) fn edit_storage_vs(state: &EditStorageState, root: &mut RootViewModelState) {
     root.edit_storage = Some(VEditStorageState {
         is_created: state.is_create,
-        title: state.title.clone(),
+        title: resolve_upsert_storage_name(&state.info),
         info: state.info.clone(),
         validated: state.validated.clone(),
         test: state.test,

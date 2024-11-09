@@ -31,7 +31,6 @@ pub struct AllStorageState {
 #[derive(Default, Clone)]
 pub struct EditStorageState {
     pub is_create: bool,
-    pub title: String,
     pub info: ArgUpsertStorage,
     pub validated: EditStorageFormValidated,
     pub test: StorageConnectionTestResult,

@@ -1,7 +1,5 @@
 package com.kutedev.easemusicplayer.widgets.devices
 
-import android.os.Handler
-import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,20 +14,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,9 +32,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
@@ -54,6 +55,63 @@ import uniffi.ease_client.Widget
 import uniffi.ease_client_shared.StorageConnectionTestResult
 import uniffi.ease_client_shared.StorageType
 
+
+private fun buildStr(s: String): AnnotatedString {
+    val spans = s.split("$$")
+
+    return buildAnnotatedString {
+        for (s in spans) {
+            if (s.startsWith("B__")) {
+                val s = s.slice("B__".length until s.length)
+
+                withStyle(style = SpanStyle(
+                    fontWeight = FontWeight(700)
+                )) {
+                    append(s)
+                }
+            } else {
+                append(s)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RemoveDialog(
+    isOpen: Boolean,
+    onClose: () -> Unit,
+    title: String,
+    musicCount: UInt,
+    playlistCount: UInt,
+) {
+    val mainDesc = buildStr(
+        stringResource(R.string.storage_remove_desc_main)
+            .replace("E_TITLE", title)
+    )
+    val countDesc = buildStr(
+        stringResource(R.string.storage_remove_desc_count)
+            .replace("E_MCNT", musicCount.toString())
+            .replace("E_PCNT", playlistCount.toString())
+    )
+
+    ConfirmDialog(
+        open = isOpen,
+        onConfirm = {
+            onClose()
+            Bridge.dispatchClick(StorageUpsertWidget.Remove)
+        },
+        onCancel = onClose,
+    ) {
+        Text(
+            text = mainDesc,
+            fontSize = 14.sp
+        )
+        Text(
+            text = countDesc,
+            fontSize = 14.sp
+        )
+    }
+}
 
 @Composable
 private fun StorageBlock(
@@ -96,6 +154,7 @@ fun EditStoragesPage(
     formVM: EditStorageFormViewModel,
 ) {
     val context = LocalContext.current
+    var removeDialogOpen by remember { mutableStateOf(false) }
 
     val toast = remember {
         Toast.makeText(context, "", Toast.LENGTH_SHORT)
@@ -176,7 +235,9 @@ fun EditStoragesPage(
                         sizeType = EaseIconButtonSize.Medium,
                         buttonType = EaseIconButtonType.Error,
                         painter = painterResource(id = R.drawable.icon_deleteseep),
-                        onClick = {}
+                        onClick = {
+                            removeDialogOpen = true
+                        }
                     )
                 }
                 EaseIconButton(
@@ -259,6 +320,14 @@ fun EditStoragesPage(
                 )
             }
         }
-
     }
+    RemoveDialog(
+        isOpen = removeDialogOpen,
+        onClose = {
+            removeDialogOpen = false
+        },
+        title = state.title,
+        musicCount = state.musicCount,
+        playlistCount = state.playlistCount
+    )
 }

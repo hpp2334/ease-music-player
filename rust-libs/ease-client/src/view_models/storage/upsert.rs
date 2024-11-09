@@ -99,6 +99,7 @@ impl StorageUpsertVM {
     fn remove(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let id = cx.model_get(&self.edit).info.id.unwrap();
 
+        RouterVM::of(cx).pop(cx);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).remove_storage(&cx, id).await?;
             Ok(())

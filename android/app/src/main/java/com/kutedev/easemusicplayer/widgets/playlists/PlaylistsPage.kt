@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -120,7 +121,7 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
             horizontalAlignment = Alignment.Start
         ) {
             Box(
-                modifier = Modifier.clip(RoundedCornerShape(20.dp)).size(120.dp)
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant).size(120.dp)
             ) {
                 if (playlist.coverUrl.isEmpty()) {
                     Image(
