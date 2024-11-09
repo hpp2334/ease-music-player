@@ -1,9 +1,11 @@
 use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use router::RouterVM;
 use state::{RootRouteSubKey, RouterState};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
+    RoutesKey,
 };
 
 use super::music::time_to_pause::TimeToPauseVM;
@@ -15,6 +17,7 @@ pub mod state;
 pub enum MainBodyWidget {
     Tab { key: RootRouteSubKey },
     TimeToPause,
+    MiniPlayer,
 }
 
 pub(crate) struct MainBodyVM {
@@ -43,6 +46,9 @@ impl ViewModel for MainBodyVM {
                         }
                         MainBodyWidget::TimeToPause => {
                             TimeToPauseVM::of(cx).open(cx);
+                        }
+                        MainBodyWidget::MiniPlayer => {
+                            RouterVM::of(cx).navigate(cx, RoutesKey::MusicPlayer);
                         }
                     },
                     _ => {}

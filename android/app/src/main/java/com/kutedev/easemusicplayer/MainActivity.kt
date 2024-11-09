@@ -77,47 +77,6 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun Root() {
-
-        RoutesProvider { controller ->
-            EaseMusicPlayerTheme {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                ) { innerPadding ->
-                        Column(
-                            modifier = Modifier
-                                .padding(innerPadding)
-                                .fillMaxSize()
-                        ) {
-                            val bottomBarPageState = rememberPagerState(pageCount = {
-                                3
-                            })
-
-                            Box(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                RouteBlock(
-                                    controller = controller,
-                                    bottomBarPageState = bottomBarPageState,
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .shadow(2.dp)
-                            ) {
-                                BottomBar(bottomBarPageState)
-                            }
-                        }
-                }
-            }
-        }
-    }
-
-    @Composable
-    fun RouteBlock(
-        controller: NavHostController,
-        bottomBarPageState: PagerState,
-    ) {
         val playlistsVM: PlaylistsViewModel by viewModels()
         val timeToPauseVM: TimeToPauseViewModel by viewModels()
         val storageListVM: StorageListViewModel by viewModels()
@@ -128,43 +87,68 @@ class MainActivity : ComponentActivity() {
         val currentMusicVM: CurrentMusicViewModel by viewModels()
         val editPlaylistVM: EditPlaylistViewModel by viewModels()
 
-        NavHost(
-            navController = controller,
-            startDestination = RoutesKey.HOME.toString(),
-        ) {
-            composable(RoutesKey.HOME.toString()) {
-                HomePage(
-                    ctx = applicationContext,
-                    pagerState = bottomBarPageState,
-                    playlistsVM = playlistsVM,
-                    timeToPauseVM = timeToPauseVM,
-                    storageListVM = storageListVM,
-                )
-                CreatePlaylistsDialog(vm = createPlaylistVM)
-            }
-            composable(RoutesKey.ADD_DEVICES.toString()) {
-                EditStoragesPage(
-                    formVM = editStorageVM,
-                )
-            }
-            composable(RoutesKey.PLAYLIST.toString()) {
-                PlaylistPage(
-                    vm = currentPlaylistVM,
-                    currentMusicVM = currentMusicVM,
-                )
-                EditPlaylistsDialog(vm = editPlaylistVM)
-            }
-            composable(RoutesKey.IMPORT_MUSICS.toString()) {
-                ImportMusicsPage(vm = currentStorageEntriesVM)
-            }
-            composable(RoutesKey.MUSIC_PLAYER.toString()) {
-                MusicPlayerPage(
-                    vm = currentMusicVM,
-                    timeToPauseVM = timeToPauseVM,
-                )
+        RoutesProvider { controller ->
+            EaseMusicPlayerTheme {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                ) { innerPadding ->
+                    Column(
+                        modifier = Modifier
+                            .padding(innerPadding)
+                            .fillMaxSize()
+                    ) {
+                        val bottomBarPageState = rememberPagerState(pageCount = {
+                            3
+                        })
+
+                        Box(
+                            modifier = Modifier.weight(1f)
+                        ) {NavHost(
+                            navController = controller,
+                            startDestination = RoutesKey.HOME.toString(),
+                        ) {
+                            composable(RoutesKey.HOME.toString()) {
+                                HomePage(
+                                    ctx = applicationContext,
+                                    pagerState = bottomBarPageState,
+                                    playlistsVM = playlistsVM,
+                                    timeToPauseVM = timeToPauseVM,
+                                    storageListVM = storageListVM,
+                                )
+                                CreatePlaylistsDialog(vm = createPlaylistVM)
+                            }
+                            composable(RoutesKey.ADD_DEVICES.toString()) {
+                                EditStoragesPage(
+                                    formVM = editStorageVM,
+                                )
+                            }
+                            composable(RoutesKey.PLAYLIST.toString()) {
+                                PlaylistPage(
+                                    vm = currentPlaylistVM,
+                                    currentMusicVM = currentMusicVM,
+                                )
+                                EditPlaylistsDialog(vm = editPlaylistVM)
+                            }
+                            composable(RoutesKey.IMPORT_MUSICS.toString()) {
+                                ImportMusicsPage(vm = currentStorageEntriesVM)
+                            }
+                            composable(RoutesKey.MUSIC_PLAYER.toString()) {
+                                MusicPlayerPage(
+                                    vm = currentMusicVM,
+                                    timeToPauseVM = timeToPauseVM,
+                                )
+                            }
+                        }
+                            TimeToPauseModal(vm = timeToPauseVM)
+                        }
+                        BottomBar(
+                            bottomBarPageState = bottomBarPageState,
+                            currentMusicVM = currentMusicVM,
+                        )
+                    }
+                }
             }
         }
-        TimeToPauseModal(vm = timeToPauseVM)
     }
 
 
