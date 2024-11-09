@@ -13,7 +13,7 @@ use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewMod
 use super::{common::MusicCommonVM, state::CurrentMusicState};
 use crate::{
     actions::{event::ViewAction, Widget},
-    to_host::player::MusicPlayerService,
+    to_host::player::{MusicPlayerService, MusicToPlay},
     view_models::{
         connector::ConnectorAction, main::router::RouterVM, playlist::common::PlaylistCommonVM,
     },
@@ -251,12 +251,18 @@ impl MusicControlVM {
                 state.playlist_id = Some(playlist_id);
                 state.playlist_musics = playlist.musics.clone();
                 state.index_musics = index_musics;
-                state.lyric = music.lyric;
+                state.lyric = music.lyric.clone();
                 state.lyric_line_index = -1;
             }
             {
                 let url = Connector::of(&cx).serve_music_url(&cx, music_id);
-                MusicPlayerService::of(&cx).set_music_url(music_id, url);
+                let item = MusicToPlay {
+                    id: music_id,
+                    title: music.title().to_string(),
+                    url,
+                    cover_url: Default::default(),
+                };
+                MusicPlayerService::of(&cx).set_music_url(item);
             }
             this.sync_current_duration(&cx)?;
             this.request_resume(&cx)?;

@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 
 use crate::{backends::code::Code, define_id, define_message};
@@ -19,7 +18,6 @@ pub struct MusicAbstract {
     pub meta: MusicMeta,
     pub cover_url: String,
 }
-
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 pub enum LyricLoadState {

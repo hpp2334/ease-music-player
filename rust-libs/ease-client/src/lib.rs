@@ -8,7 +8,7 @@ pub mod view_models;
 
 uniffi::setup_scaffolding!();
 
-pub use to_host::player::{IMusicPlayerService, MusicPlayerService};
+pub use to_host::player::{IMusicPlayerService, MusicPlayerService, MusicToPlay};
 pub use to_host::router::{IRouterService, RouterService, RoutesKey};
 pub use to_host::toast::{IToastService, ToastService};
 pub use to_host::view_state::{IViewStateService, ViewStateService};

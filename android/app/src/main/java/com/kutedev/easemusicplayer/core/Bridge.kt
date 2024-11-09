@@ -111,7 +111,7 @@ class RouterService : IRouterService {
 
 object Bridge {
     @SuppressLint("StaticFieldLeak")
-    private val _player: MusicPlayer = MusicPlayer()
+    private val _player: EaseMusicController = EaseMusicController()
     private val _viewStates = ViewStates()
     private val _flushNotifier = FlushNotifier()
     @SuppressLint("StaticFieldLeak")

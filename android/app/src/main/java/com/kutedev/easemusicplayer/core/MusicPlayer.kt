@@ -1,28 +1,39 @@
 package com.kutedev.easemusicplayer.core
 
+import android.content.ComponentName
+import android.content.Intent
 import android.media.MediaMetadataRetriever
 import androidx.core.text.isDigitsOnly
 import androidx.media3.common.C.TIME_UNSET
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaController
+import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.MoreExecutors
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import uniffi.ease_client.IMusicPlayerService
+import uniffi.ease_client.MusicToPlay
 import uniffi.ease_client.PlayerEvent
 import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.MusicId
 
-class MusicPlayer : IMusicPlayerService {
+class PlaybackService : MediaSessionService() {
+    private var _mediaSession: MediaSession? = null
 
-    private var _internal: ExoPlayer? = null
-    val customScope = CoroutineScope(Dispatchers.IO)
+    // Create your player and media session in the onCreate lifecycle event
+    override fun onCreate() {
+        super.onCreate()
 
-    fun onActivityCreate(context: android.content.Context) {
-        val player = ExoPlayer.Builder(context).build()
-        _internal = player
+        val player = ExoPlayer.Builder(this).build()
+        _mediaSession = MediaSession.Builder(this, player)
+            .build()
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -45,19 +56,48 @@ class MusicPlayer : IMusicPlayerService {
         })
     }
 
-    fun onActivityStart() {
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Get the player from the media session
+        val player = _mediaSession?.player ?: return
+
+        // Check if the player is not ready to play or there are no items in the media queue
+        if (!player.playWhenReady || player.mediaItemCount == 0) {
+            // Stop the service
+            stopSelf()
+        }
     }
 
-    fun onActivityStop() {
+    /**
+     * This method is called when a MediaSession.ControllerInfo requests the MediaSession.
+     * It returns the current MediaSession instance.
+     *
+     * @param controllerInfo The MediaSession.ControllerInfo that is requesting the MediaSession.
+     * @return The current MediaSession instance.
+     */
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+        return _mediaSession
     }
 
-    fun onActivityDestroy() {
-        _internal?.release()
-        _internal = null
+    /**
+     * This method is called when the service is being destroyed.
+     * It releases the player and the MediaSession instances.
+     */
+    override fun onDestroy() {
+        // If _mediaSession is not null, run the following block
+        _mediaSession?.run {
+            // Release the player
+            player.release()
+            // Release the MediaSession instance
+            release()
+            // Set _mediaSession to null
+            _mediaSession = null
+        }
+        // Call the superclass method
+        super.onDestroy()
     }
 
     private fun syncTotalDuration() {
-        val player = _internal ?: return
+        val player = _mediaSession?.player ?: return
         if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
             return
         }
@@ -74,6 +114,41 @@ class MusicPlayer : IMusicPlayerService {
                 Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Total(id, durationMS)))
             }
         }
+    }
+}
+
+class EaseMusicController : IMusicPlayerService {
+
+    private var _internal: MediaController? = null
+    val customScope = CoroutineScope(Dispatchers.IO)
+
+    fun onActivityCreate(context: android.content.Context) {
+        val factory = MediaController.Builder(
+            context,
+            SessionToken(context, ComponentName(context, PlaybackService::class.java))
+        ).buildAsync()
+        factory.addListener(
+            {
+                // MediaController is available here with controllerFuture.get()
+                _internal = factory.let {
+                    if (it.isDone)
+                        it.get()
+                    else
+                        null
+                }
+            },
+            MoreExecutors.directExecutor()
+        )
+    }
+
+    fun onActivityStart() {
+    }
+
+    fun onActivityStop() {
+    }
+
+    fun onActivityDestroy() {
+        _internal = null
     }
 
     override fun resume() {
@@ -106,10 +181,18 @@ class MusicPlayer : IMusicPlayerService {
         player.seekTo(msec.toLong())
     }
 
-    override fun setMusicUrl(id: MusicId, url: String) {
+    override fun setMusicUrl(item: MusicToPlay) {
         val player = _internal ?: return
 
-        val mediaItem = MediaItem.Builder().setMediaId(id.value.toString()).setUri(url).build()
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(item.id.value.toString())
+            .setUri(item.url)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(item.title)
+                    .build()
+            )
+            .build()
         player.stop()
         player.setMediaItem(mediaItem)
         player.prepare()

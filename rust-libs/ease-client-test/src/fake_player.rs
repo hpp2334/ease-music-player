@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ease_client::{Action, IMusicPlayerService, PlayerEvent, ViewAction};
+use ease_client::{Action, IMusicPlayerService, MusicToPlay, PlayerEvent, ViewAction};
 use ease_client_shared::backends::music::MusicId;
 use hyper::StatusCode;
 use lofty::AudioFile;
@@ -159,8 +159,10 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
             .store(duration, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn set_music_url(&self, id: MusicId, url: String) {
+    fn set_music_url(&self, item: MusicToPlay) {
         let inner = self.inner.clone();
+        let id = item.id;
+        let url = item.url;
         {
             let mut url_v = inner.url.lock().unwrap();
             *url_v = Some((id, url.clone()));
