@@ -35,7 +35,9 @@ import com.kutedev.easemusicplayer.components.ImportCover
 import com.kutedev.easemusicplayer.components.SimpleFormText
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
+import com.kutedev.easemusicplayer.viewmodels.EditPlaylistViewModel
 import uniffi.ease_client.PlaylistCreateWidget
+import uniffi.ease_client.PlaylistEditWidget
 import uniffi.ease_client_shared.CreatePlaylistMode
 
 @Composable
@@ -136,7 +138,7 @@ private fun FullImportBlock(
             SimpleFormText(
                 label = null,
                 value = state.name,
-                onChange = {value ->
+                onChange = { value ->
                     Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
                 }
             )
@@ -171,7 +173,7 @@ private fun FullImportBlock(
 }
 
 @Composable
-fun PlaylistsDialog(
+fun CreatePlaylistsDialog(
     vm: CreatePlaylistViewModel
 ) {
     val state = vm.state.collectAsState().value
@@ -219,7 +221,7 @@ fun PlaylistsDialog(
                 SimpleFormText(
                     label = stringResource(R.string.playlists_dialog_playlist_name),
                     value = state.name,
-                    onChange = {value ->
+                    onChange = { value ->
                         Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
                     }
                 )
@@ -259,6 +261,78 @@ fun PlaylistsDialog(
                         }
                     )
                 }
+            }
+        }
+    }
+}
+
+
+@Composable
+fun EditPlaylistsDialog(
+    vm: EditPlaylistViewModel
+) {
+    val state = vm.state.collectAsState().value
+    val isOpen = state.modalOpen
+
+    val onDismissRequest = {
+        Bridge.dispatchClick(PlaylistEditWidget.CloseModal)
+    }
+    if (!isOpen) {
+        return
+    }
+
+    Dialog(
+        onDismissRequest = onDismissRequest
+    ) {
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(24.dp, 24.dp),
+        ) {
+
+            FullImportHeader(
+                text = stringResource(R.string.playlists_dialog_playlist_name),
+            )
+            SimpleFormText(
+                label = null,
+                value = state.name,
+                onChange = { value ->
+                    Bridge.dispatchChangeText(PlaylistEditWidget.Name, value)
+                }
+            )
+            Box(modifier = Modifier.height(12.dp))
+            FullImportHeader(
+                text = stringResource(R.string.playlists_dialog_cover),
+            )
+            ImportCover(
+                url = state.picture,
+                onAdd = {
+                    Bridge.dispatchClick(PlaylistEditWidget.Cover);
+                },
+                onRemove = {
+                    Bridge.dispatchClick(PlaylistEditWidget.ClearCover);
+                }
+            )
+            Row(
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier
+                    .fillMaxWidth()
+            ) {
+                EaseTextButton(
+                    text = stringResource(id = R.string.playlists_dialog_button_cancel),
+                    type = EaseTextButtonType.Primary,
+                    size = EaseTextButtonSize.Medium,
+                    onClick = onDismissRequest
+                )
+                EaseTextButton(
+                    text = stringResource(id = R.string.playlists_dialog_button_ok),
+                    type = EaseTextButtonType.Primary,
+                    size = EaseTextButtonSize.Medium,
+                    onClick = {
+                        Bridge.dispatchClick(PlaylistEditWidget.FinishEdit);
+                    }
+                )
             }
         }
     }

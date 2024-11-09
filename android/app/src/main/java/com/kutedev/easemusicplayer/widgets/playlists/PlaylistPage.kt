@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseContextMenu
@@ -73,7 +75,6 @@ import uniffi.ease_client_shared.PlaylistId
 
 @Composable
 private fun RemovePlaylistDialog(
-    id: PlaylistId,
     title: String,
     open: Boolean,
     onClose: () -> Unit
@@ -97,6 +98,7 @@ private fun RemovePlaylistDialog(
 
 @Composable
 private fun PlaylistHeader(
+    coverUrl: String,
     title: String,
     duration: String,
     items: List<VPlaylistMusicItem>,
@@ -114,13 +116,32 @@ private fun PlaylistHeader(
             .height(157.dp)
             .fillMaxWidth()
     ) {
-        Image(
-            modifier = Modifier
-                .fillMaxSize(),
-            painter = painterResource(id = R.drawable.cover_default_playlist_image),
-            contentDescription = null,
-            contentScale = ContentScale.FillWidth
-        )
+        if (coverUrl.isEmpty()) {
+            Image(
+                modifier = Modifier
+                    .fillMaxSize(),
+                painter = painterResource(id = R.drawable.cover_default_playlist_image),
+                contentDescription = null,
+                contentScale = ContentScale.FillWidth
+            )
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                AsyncImage(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    model = coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.FillWidth
+                )
+                Box(
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.6f))
+                        .fillMaxSize()
+                )
+            }
+        }
         Row(
             horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
@@ -160,7 +181,7 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_edit,
                                 onClick = {
-
+                                    Bridge.dispatchClick(PlaylistDetailWidget.Edit);
                                 }
                             ),
                             EaseContextMenuItem(
@@ -393,6 +414,7 @@ fun PlaylistPage(
     ) {
         Column {
             PlaylistHeader(
+                coverUrl = state.coverUrl,
                 title = state.title,
                 duration = state.duration,
                 items = items,
@@ -426,7 +448,6 @@ fun PlaylistPage(
         }
     }
     RemovePlaylistDialog(
-        id = id,
         title = state.title,
         open = removeDialogOpen,
         onClose = { removeDialogOpen = false }

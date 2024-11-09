@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,7 +14,6 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.dp
@@ -23,7 +21,6 @@ import androidx.lifecycle.ViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
@@ -31,6 +28,7 @@ import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentStorageEntriesViewModel
+import com.kutedev.easemusicplayer.viewmodels.EditPlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
@@ -43,7 +41,8 @@ import com.kutedev.easemusicplayer.widgets.home.HomePage
 import com.kutedev.easemusicplayer.widgets.musics.ImportMusicsPage
 import com.kutedev.easemusicplayer.widgets.musics.MusicPlayerPage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
-import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsDialog
+import com.kutedev.easemusicplayer.widgets.playlists.CreatePlaylistsDialog
+import com.kutedev.easemusicplayer.widgets.playlists.EditPlaylistsDialog
 import uniffi.ease_client.RoutesKey
 
 inline fun <reified T> MainActivity.registerViewModel()
@@ -127,6 +126,7 @@ class MainActivity : ComponentActivity() {
         val currentPlaylistVM: CurrentPlaylistViewModel by viewModels()
         val currentStorageEntriesVM: CurrentStorageEntriesViewModel by viewModels()
         val currentMusicVM: CurrentMusicViewModel by viewModels()
+        val editPlaylistVM: EditPlaylistViewModel by viewModels()
 
         NavHost(
             navController = controller,
@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
                     timeToPauseVM = timeToPauseVM,
                     storageListVM = storageListVM,
                 )
-                PlaylistsDialog(vm = createPlaylistVM)
+                CreatePlaylistsDialog(vm = createPlaylistVM)
             }
             composable(RoutesKey.ADD_DEVICES.toString()) {
                 EditStoragesPage(
@@ -152,6 +152,7 @@ class MainActivity : ComponentActivity() {
                     vm = currentPlaylistVM,
                     currentMusicVM = currentMusicVM,
                 )
+                EditPlaylistsDialog(vm = editPlaylistVM)
             }
             composable(RoutesKey.IMPORT_MUSICS.toString()) {
                 ImportMusicsPage(vm = currentStorageEntriesVM)
@@ -187,6 +188,7 @@ class MainActivity : ComponentActivity() {
         registerViewModel<StorageListViewModel>()
         registerViewModel<EditStorageFormViewModel>()
         registerViewModel<CreatePlaylistViewModel>()
+        registerViewModel<EditPlaylistViewModel>()
         registerViewModel<CurrentPlaylistViewModel>()
         registerViewModel<CurrentStorageEntriesViewModel>()
         registerViewModel<CurrentMusicViewModel>()

@@ -21,6 +21,7 @@ pub struct EditPlaylistState {
     pub id: Option<PlaylistId>,
     pub cover: Option<StorageEntryLoc>,
     pub playlist_name: String,
+    pub modal_open: bool,
 }
 
 #[derive(Default, Clone)]

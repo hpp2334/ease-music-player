@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.widgets.playlists
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,12 +24,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
@@ -114,11 +119,25 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.Start
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.cover_default_image),
-                contentDescription = null,
-                modifier = Modifier.clip(RoundedCornerShape(20.dp))
-            )
+            Box(
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).size(120.dp)
+            ) {
+                if (playlist.coverUrl.isEmpty()) {
+                    Image(
+                        modifier = Modifier.fillMaxSize(),
+                        painter = painterResource(id = R.drawable.cover_default_image),
+                        contentDescription = null,
+                        contentScale = ContentScale.FillWidth
+                    )
+                } else {
+                    AsyncImage(
+                        modifier = Modifier.fillMaxSize(),
+                        model = playlist.coverUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.FillWidth
+                    )
+                }
+            }
             Text(
                 text = playlist.title,
                 fontSize = 14.sp,

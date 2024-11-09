@@ -21,6 +21,8 @@ pub enum PlaylistEditWidget {
     ClearCover,
     Cover,
     FinishEdit,
+    CloseModal,
+    Unused { value: bool },
 }
 
 pub(crate) struct PlaylistEditVM {
@@ -41,11 +43,20 @@ impl PlaylistEditVM {
         cx: &ViewModelContext,
         playlist: &Playlist,
     ) -> EaseResult<()> {
-        let mut form = cx.model_mut(&self.form);
-        form.id = Some(playlist.id());
-        form.cover = playlist.cover().as_ref().map(|v| v.clone());
-        form.playlist_name = playlist.title().to_string();
+        {
+            let mut form = cx.model_mut(&self.form);
+            form.id = Some(playlist.id());
+            form.cover = playlist.cover().as_ref().map(|v| v.clone());
+            form.playlist_name = playlist.title().to_string();
+        }
+
+        self.update_modal_open(cx, true);
         Ok(())
+    }
+
+    fn update_modal_open(&self, cx: &ViewModelContext, value: bool) {
+        let mut form = cx.model_mut(&self.form);
+        form.modal_open = value;
     }
 
     fn prepare_cover(&self, cx: &ViewModelContext) -> EaseResult<()> {
@@ -76,6 +87,7 @@ impl PlaylistEditVM {
             Connector::of(&cx).update_playlist(&cx, arg).await?;
             Ok(())
         });
+        self.update_modal_open(cx, false);
         Ok(())
     }
 }
@@ -96,6 +108,9 @@ impl ViewModel for PlaylistEditVM {
                         }
                         PlaylistEditWidget::FinishEdit => {
                             self.finish_edit(cx)?;
+                        }
+                        PlaylistEditWidget::CloseModal => {
+                            self.update_modal_open(cx, false);
                         }
                         _ => {}
                     },

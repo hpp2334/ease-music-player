@@ -50,6 +50,7 @@ pub struct VCurrentPlaylistState {
 pub struct VEditPlaylistState {
     pub picture: String,
     pub name: String,
+    pub modal_open: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
@@ -135,6 +136,7 @@ pub(crate) fn edit_playlist_vs(
     root.edit_playlist = Some(VEditPlaylistState {
         picture: connector_state.serve_asset_url_opt(edit_playlist.cover.clone()),
         name: edit_playlist.playlist_name.clone(),
+        modal_open: edit_playlist.modal_open,
     });
 }
 

@@ -126,7 +126,6 @@ fun EditStoragesPage(
     }
 
     LaunchedEffect(testing) {
-        println(testing)
         if (testing == StorageConnectionTestResult.NONE || testing == StorageConnectionTestResult.TESTING) {
             return@LaunchedEffect;
         }

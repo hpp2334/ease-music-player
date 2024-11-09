@@ -54,7 +54,7 @@ fun ImportCover(
                     model = url,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.FillBounds
+                    contentScale = ContentScale.FillWidth
                 )
             }
             Box(
