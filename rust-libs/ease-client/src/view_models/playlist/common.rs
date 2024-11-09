@@ -1,13 +1,17 @@
 use ease_client_shared::backends::playlist::{Playlist, PlaylistAbstract, PlaylistId};
-use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
     view_models::connector::{Connector, ConnectorAction},
+    MusicPlayerService,
 };
 
-use super::state::{AllPlaylistState, CurrentPlaylistState};
+use super::{
+    detail::PlaylistDetailVM,
+    state::{AllPlaylistState, CurrentPlaylistState},
+};
 
 pub struct PlaylistCommonVM {
     store: Model<AllPlaylistState>,
@@ -54,14 +58,15 @@ impl PlaylistCommonVM {
     }
 
     fn sync_playlists(&self, cx: &ViewModelContext, playlists: Vec<PlaylistAbstract>) {
-        tracing::trace!("sync_playlists: {:?}", playlists);
         let mut store = cx.model_mut(&self.store);
         store.playlists = playlists;
     }
 
     fn sync_playlist(&self, cx: &ViewModelContext, playlist: Playlist) {
-        let mut current_state = cx.model_mut(&self.current);
-        current_state.playlist = Some(playlist);
+        {
+            let mut current_state = cx.model_mut(&self.current);
+            current_state.playlist = Some(playlist.clone());
+        }
     }
 }
 

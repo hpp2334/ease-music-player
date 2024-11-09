@@ -120,14 +120,12 @@ object Bridge {
     private const val SCHEMA_VERSION = 1u
     private const val STORAGE_PATH = "/"
 
-
     fun onActivityStart() {
         _player.onActivityStart()
     }
 
     fun onActivityStop() {
         _player.onActivityStop()
-        routerInternal.destroy()
     }
 
     fun onActivityDestroy() {

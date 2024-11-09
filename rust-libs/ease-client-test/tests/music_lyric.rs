@@ -10,7 +10,7 @@ async fn music_lyric_1() {
 
     let a_music_id = app.get_first_music_id_from_latest_state();
     let state = app.latest_state().current_playlist.unwrap();
-    assert_eq!(state.duration, "-:-:-");
+    assert_eq!(state.duration, "00:00:30");
 
     app.dispatch_click(PlaylistDetailWidget::Music { id: a_music_id });
     app.wait_network().await;

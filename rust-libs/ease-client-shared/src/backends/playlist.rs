@@ -103,7 +103,7 @@ define_message!(
     CreatePlaylistMsg,
     Code::CreatePlaylist,
     ArgCreatePlaylist,
-    ()
+    PlaylistId
 );
 
 #[derive(Debug, Serialize, Deserialize)]

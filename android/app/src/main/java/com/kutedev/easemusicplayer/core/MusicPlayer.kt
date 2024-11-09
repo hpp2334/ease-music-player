@@ -122,20 +122,25 @@ class MusicPlayer : IMusicPlayerService {
         }
     }
 
-    private fun requestTotalDuration(id: MusicId, url: String) {
+    override fun requestTotalDuration(id: MusicId, url: String) {
         customScope.launch {
             val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(url)
+            try {
+                retriever.setDataSource(url)
 
-            // Get the duration in milliseconds
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                // Get the duration in milliseconds
+                val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
 
-            if (duration != null) {
-                val durationMS = duration.toULong()
+                if (duration != null) {
+                    val durationMS = duration.toULong()
 
-                nextTickOnMain {
-                    Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Total(id, durationMS)))
+                    nextTickOnMain {
+                        Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Total(id, durationMS)))
+                    }
                 }
+                retriever.release()
+            } catch (_: Exception) {
+
             }
             retriever.release()
         }

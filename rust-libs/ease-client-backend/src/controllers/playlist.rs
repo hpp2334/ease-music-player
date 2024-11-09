@@ -134,7 +134,10 @@ pub(crate) async fn cu_update_playlist(cx: BackendContext, arg: ArgUpdatePlaylis
     Ok(())
 }
 
-pub(crate) async fn cc_create_playlist(cx: BackendContext, arg: ArgCreatePlaylist) -> BResult<()> {
+pub(crate) async fn cc_create_playlist(
+    cx: BackendContext,
+    arg: ArgCreatePlaylist,
+) -> BResult<PlaylistId> {
     let mut conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
 
@@ -150,7 +153,7 @@ pub(crate) async fn cc_create_playlist(cx: BackendContext, arg: ArgCreatePlaylis
     };
 
     let mut musics: Vec<(MusicId, PlaylistId)> = Default::default();
-    conn.transaction::<BError>(|conn| {
+    let playlist_id = conn.transaction::<PlaylistId, BError>(|conn| {
         let playlist_id = db_upsert_playlist(conn, arg, current_time_ms)?;
 
         for (entry, name) in entries {
@@ -165,10 +168,10 @@ pub(crate) async fn cc_create_playlist(cx: BackendContext, arg: ArgCreatePlaylis
             musics.push((music_id, playlist_id));
         }
         db_batch_add_music_to_playlist(conn, musics)?;
-        Ok(())
+        Ok(playlist_id)
     })?;
 
-    Ok(())
+    Ok(playlist_id)
 }
 
 pub(crate) async fn cu_add_musics_to_playlist(
@@ -179,7 +182,7 @@ pub(crate) async fn cu_add_musics_to_playlist(
     let playlist_id = arg.id;
     let mut musics: Vec<(MusicId, PlaylistId)> = Default::default();
 
-    conn.transaction::<BError>(move |conn| {
+    conn.transaction::<(), BError>(move |conn| {
         for (entry, name) in arg.entries {
             let music_id = db_add_music(
                 conn,

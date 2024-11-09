@@ -5,12 +5,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -86,6 +90,7 @@ private fun FullImportHeader(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FullImportBlock(
     vm: CreatePlaylistViewModel
@@ -142,9 +147,13 @@ private fun FullImportBlock(
                     Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
                 }
             )
-            Row {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
                 for (name in state.recommendPlaylistNames) {
                     EaseTextButton(
+                        modifier = Modifier.widthIn(max = 120.dp),
                         text = name,
                         type = EaseTextButtonType.Default,
                         size = EaseTextButtonSize.Small,

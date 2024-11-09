@@ -198,13 +198,17 @@ private fun PlaylistHeader(
         }
         Column(
             modifier = Modifier
-                .offset(48.dp, 60.dp)
+                .padding(48.dp, 0.dp)
+                .offset(0.dp, 60.dp)
         ) {
             Text(
                 text = title,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.surface,
                 fontSize = 24.sp,
+                lineHeight = 26.sp,
+                overflow = TextOverflow.Ellipsis,
+                maxLines = 2
             )
             Text(
                 text = "${items.size} ${stringResource(id = countSuffixStringId)} · ${duration}",

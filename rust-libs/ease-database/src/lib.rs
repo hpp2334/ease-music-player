@@ -24,10 +24,10 @@ impl DbConnection {
         })
     }
 
-    pub fn transaction<E>(
+    pub fn transaction<T, E>(
         &mut self,
-        f: impl FnOnce(DbConnectionRef) -> std::result::Result<(), E>,
-    ) -> std::result::Result<(), E>
+        f: impl FnOnce(DbConnectionRef) -> std::result::Result<T, E>,
+    ) -> std::result::Result<T, E>
     where
         E: From<Error>,
     {
@@ -35,9 +35,9 @@ impl DbConnection {
 
         let conn = DbConnectionRef { conn: &transaction };
 
-        f(conn)?;
+        let value = f(conn)?;
         transaction.commit()?;
-        Ok(())
+        Ok(value)
     }
 
     pub fn get_ref(&self) -> DbConnectionRef<'_> {

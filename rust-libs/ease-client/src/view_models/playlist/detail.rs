@@ -6,7 +6,7 @@ use ease_client_shared::{
     },
     uis::storage::CurrentStorageImportType,
 };
-use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
@@ -18,7 +18,7 @@ use crate::{
         music::{common::MusicCommonVM, control::MusicControlVM},
         storage::import::StorageImportVM,
     },
-    RoutesKey,
+    MusicPlayerService, RoutesKey,
 };
 
 use super::{common::PlaylistCommonVM, edit::PlaylistEditVM, state::CurrentPlaylistState};
@@ -65,8 +65,11 @@ impl PlaylistDetailVM {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let playlist = Connector::of(&cx).get_playlist(&cx, id).await?;
 
-            let mut state = cx.model_mut(&current);
-            state.playlist = playlist;
+            {
+                let mut state = cx.model_mut(&current);
+                state.playlist = playlist;
+            }
+
             Ok(())
         });
         Ok(())

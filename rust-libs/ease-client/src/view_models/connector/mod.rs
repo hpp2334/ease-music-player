@@ -30,6 +30,7 @@ use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
     to_host::connector::ConnectorHostService,
+    MusicPlayerService,
 };
 
 use super::playlist::state::CurrentPlaylistState;
@@ -135,8 +136,10 @@ impl Connector {
         cx: &ViewModelContext,
         arg: ArgCreatePlaylist,
     ) -> EaseResult<()> {
-        self.request::<CreatePlaylistMsg>(cx, arg).await?;
+        let id = self.request::<CreatePlaylistMsg>(cx, arg).await?;
         self.sync_playlist_abstracts(cx).await?;
+        self.sync_request_playlist_music_total_duration(cx, id)
+            .await?;
         Ok(())
     }
 
@@ -156,6 +159,8 @@ impl Connector {
         self.sync_playlist(cx, id).await?;
         self.sync_playlist_abstracts(cx).await?;
         self.sync_storages(cx).await?;
+        self.sync_request_playlist_music_total_duration(cx, id)
+            .await?;
         Ok(())
     }
 
@@ -276,6 +281,23 @@ impl Connector {
     async fn sync_preference_data(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let data = self.request::<GetPreferenceMsg>(cx, ()).await?;
         cx.enqueue_emit(Action::Connector(ConnectorAction::Preference(data)));
+        Ok(())
+    }
+
+    async fn sync_request_playlist_music_total_duration(
+        &self,
+        cx: &ViewModelContext,
+        id: PlaylistId,
+    ) -> EaseResult<()> {
+        let playlist = self.request::<GetPlaylistMsg>(cx, id).await?;
+        if let Some(playlist) = playlist {
+            for music in playlist.musics {
+                if music.duration().is_none() {
+                    let url = Connector::of(cx).serve_music_url(cx, music.id());
+                    MusicPlayerService::of(cx).request_total_duration(music.id(), url);
+                }
+            }
+        }
         Ok(())
     }
 

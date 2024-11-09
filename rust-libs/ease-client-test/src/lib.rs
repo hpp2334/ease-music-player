@@ -279,7 +279,7 @@ impl TestApp {
     }
 
     pub async fn wait_network(&self) {
-        for _ in 0..3 {
+        for _ in 0..4 {
             self.wait(20).await;
         }
     }

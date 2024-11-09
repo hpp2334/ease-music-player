@@ -34,6 +34,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
@@ -116,12 +117,12 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
         )
     ) {
         Column(
-            modifier = Modifier.padding(24.dp, 8.dp),
+            modifier = Modifier.padding(12.dp, 8.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.Start
         ) {
             Box(
-                modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant).size(120.dp)
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant).size(136.dp)
             ) {
                 if (playlist.coverUrl.isEmpty()) {
                     Image(
@@ -142,7 +143,9 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
             Text(
                 text = playlist.title,
                 fontSize = 14.sp,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(top = 8.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = buildAnnotatedString {

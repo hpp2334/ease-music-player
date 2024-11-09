@@ -16,7 +16,6 @@ struct FakeMusicPlayerInner {
     playing: Arc<AtomicBool>,
     current_duration: Arc<AtomicU64>,
     total_duration: Arc<AtomicU64>,
-    should_sync_total_duration: Arc<AtomicBool>,
     pending_events: Arc<Mutex<Vec<PlayerEvent>>>,
     pod: AppPod,
 }
@@ -35,7 +34,6 @@ impl FakeMusicPlayerInner {
             playing: Default::default(),
             current_duration: Default::default(),
             total_duration: Default::default(),
-            should_sync_total_duration: Default::default(),
             pending_events: Default::default(),
             pod,
         }
@@ -87,19 +85,6 @@ impl FakeMusicPlayerInner {
     }
 
     fn flush_player_events(&self) {
-        let should_sync = self
-            .should_sync_total_duration
-            .swap(false, std::sync::atomic::Ordering::SeqCst);
-        if should_sync {
-            let v = self
-                .total_duration
-                .load(std::sync::atomic::Ordering::SeqCst);
-            let curr = self.url.lock().unwrap().clone();
-            if let Some((id, url)) = curr {
-                self.push_player_event(PlayerEvent::Total { id, duration_ms: v });
-            }
-        }
-
         loop {
             let mut events: Vec<PlayerEvent> = Default::default();
 
@@ -209,9 +194,10 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
                 .total_duration
                 .store(total_duration, std::sync::atomic::Ordering::SeqCst);
 
-            cloned_inner
-                .should_sync_total_duration
-                .store(true, std::sync::atomic::Ordering::SeqCst);
+            cloned_inner.push_player_event(PlayerEvent::Total {
+                id,
+                duration_ms: total_duration,
+            });
 
             let mut last_bytes = cloned_inner.last_bytes.lock().unwrap();
             *last_bytes = bytes.to_vec();
@@ -222,5 +208,27 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
         }
 
         self.resume();
+    }
+
+    fn request_total_duration(&self, id: MusicId, url: String) {
+        let cloned_inner = self.inner.clone();
+        tokio::spawn(async move {
+            let resp = reqwest::get(&url).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let bytes = resp.bytes().await.unwrap();
+            let buf_cursor = std::io::Cursor::new(bytes.to_vec());
+
+            let file = lofty::Probe::new(std::io::BufReader::new(buf_cursor))
+                .guess_file_type()
+                .unwrap()
+                .read()
+                .unwrap();
+            let music_properties = file.properties();
+            let total_duration = music_properties.duration().as_millis() as u64;
+            cloned_inner.push_player_event(PlayerEvent::Total {
+                id,
+                duration_ms: total_duration,
+            });
+        });
     }
 }

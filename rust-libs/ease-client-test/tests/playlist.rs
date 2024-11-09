@@ -1,5 +1,6 @@
 use ease_client::{
-    view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget, PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget, ViewAction
+    view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget,
+    PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget, ViewAction,
 };
 use ease_client_shared::uis::{playlist::CreatePlaylistMode, storage::CurrentStorageStateType};
 use ease_client_test::{PresetDepth, ReqInteceptor, TestApp};
@@ -94,7 +95,9 @@ async fn playlist_import_select_non_music_1() {
     assert_eq!(item.checked, false);
     assert_eq!(entries.selected_count, 0);
 
-    app.emit(Action::View(ViewAction::StorageImport(StorageImportAction::Undo)));
+    app.emit(Action::View(ViewAction::StorageImport(
+        StorageImportAction::Undo,
+    )));
     app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
@@ -161,7 +164,7 @@ async fn playlist_import_musics_1() {
     app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_playlist.clone().unwrap();
-    assert_eq!(state.duration, "-:-:-");
+    assert_eq!(state.duration, "00:00:24");
     assert_eq!(state.items.len(), 1);
     let item = state.items[0].clone();
     assert_eq!(item.title, "angelical-pad-143276");
@@ -375,7 +378,7 @@ async fn playlist_full_reimport_discarded_bug() {
         app.wait_network().await;
         let state = app.latest_state();
         let state = state.current_playlist.clone().unwrap();
-        assert_eq!(state.duration, "-:-:-");
+        assert_eq!(state.duration, "00:00:24");
         assert_eq!(state.items.len(), 1);
         let item = state.items[0].clone();
         assert_eq!(item.title, "angelical-pad-143276");
