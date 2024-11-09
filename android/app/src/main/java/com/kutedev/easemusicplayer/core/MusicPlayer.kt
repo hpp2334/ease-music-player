@@ -14,30 +14,30 @@ import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.MusicId
 
 class MusicPlayer : IMusicPlayerService {
-    private var _internal: MediaPlayer = MediaPlayer()
+    private var _internal: MediaPlayer? = null
     private var _isPrepared = false
     private var _context: android.content.Context? = null
     val customScope = CoroutineScope(Dispatchers.IO)
 
-    fun getInternal(): MediaPlayer {
-        return _internal
+    fun onActivityCreate(context: android.content.Context) {
+        _context = context
+        _internal = MediaPlayer()
     }
 
-    fun install(context: android.content.Context) {
-        _context = context
+    fun onActivityStart() {
     }
 
     fun onActivityStop() {
-        _internal.release()
-        _context = null
     }
 
-    fun destroy() {
-        onActivityStop()
+    fun onActivityDestroy() {
+        _internal?.release()
+        _internal = null
     }
 
     override fun resume() {
-        val player = getInternal()
+        val player = _internal ?: return
+
         player.start()
 
         syncPlayingState()
@@ -48,7 +48,7 @@ class MusicPlayer : IMusicPlayerService {
             return
         }
 
-        val player = getInternal()
+        val player = _internal ?: return
         player.setOnPreparedListener {}
         player.pause()
 
@@ -58,7 +58,7 @@ class MusicPlayer : IMusicPlayerService {
     }
 
     override fun stop() {
-        val player = getInternal()
+        val player = _internal ?: return
         player.setOnPreparedListener {}
         player.setOnSeekCompleteListener {}
         player.stop()
@@ -69,14 +69,14 @@ class MusicPlayer : IMusicPlayerService {
     }
 
     override fun seek(arg: ULong) {
-        val player = getInternal()
+        val player = _internal ?: return
         player.seekTo(arg.toInt())
 
         syncPlayingState()
     }
 
     override fun setMusicUrl(id: MusicId, url: String) {
-        val player = getInternal()
+        val player = _internal ?: return
         _isPrepared = false;
         player.reset()
         player.setAudioAttributes(
@@ -105,13 +105,13 @@ class MusicPlayer : IMusicPlayerService {
     }
 
     override fun getCurrentDurationS(): ULong {
-        val player = getInternal()
+        val player = _internal ?: return 0uL
 
         return (player.currentPosition / 1000).toULong();
     }
 
     private fun syncPlayingState() {
-        val player = getInternal()
+        val player = _internal ?: return
 
         nextTickOnMain {
             val isPlaying = player.isPlaying

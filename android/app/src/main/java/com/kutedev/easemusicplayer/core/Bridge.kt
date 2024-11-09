@@ -111,7 +111,7 @@ class RouterService : IRouterService {
 
 object Bridge {
     @SuppressLint("StaticFieldLeak")
-    private var _player: MusicPlayer? = null
+    private val _player: MusicPlayer = MusicPlayer()
     private val _viewStates = ViewStates()
     private val _flushNotifier = FlushNotifier()
     @SuppressLint("StaticFieldLeak")
@@ -120,33 +120,29 @@ object Bridge {
     private const val SCHEMA_VERSION = 1u
     private const val STORAGE_PATH = "/"
 
-    fun onStop() {
-        if (_player != null) {
-            _player!!.destroy()
-        }
-        _player = null
+
+    fun onActivityStart() {
+        _player.onActivityStart()
+    }
+
+    fun onActivityStop() {
+        _player.onActivityStop()
         routerInternal.destroy()
     }
 
-    fun onDestroy() {
-        onStop()
+    fun onActivityDestroy() {
+        _player.onActivityDestroy()
+        routerInternal.destroy()
     }
 
-    fun onRestart(context: android.content.Context) {
-        val player = MusicPlayer()
-        player.install(context)
-        _player = player
-    }
-
-    fun initApp(context: android.content.Context) {
-        val player = MusicPlayer()
-        player.install(context)
+    fun onActivityCreate(context: android.content.Context) {
+        _player.onActivityCreate(context)
 
         _toastService.setContext(context)
 
         apiBuildClient(
             routerInternal,
-            player,
+            _player,
             _toastService,
             _viewStates,
             _flushNotifier
@@ -156,8 +152,6 @@ object Bridge {
             SCHEMA_VERSION,
             STORAGE_PATH
         ))
-
-        _player = player
     }
 
     fun dispatchClick(widget: Widget) {

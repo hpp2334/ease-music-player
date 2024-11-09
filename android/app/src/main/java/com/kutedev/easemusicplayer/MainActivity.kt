@@ -63,16 +63,31 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         registerViewModels()
-        Bridge.initApp(applicationContext)
+        Bridge.onActivityCreate(applicationContext)
 
         setContent {
             Root()
         }
     }
 
-    override fun onRestart() {
-        super.onRestart()
-        Bridge.initApp(applicationContext)
+    override fun onStart() {
+        super.onStart()
+        Bridge.onActivityStart()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        Bridge.onActivityStop()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Bridge.onActivityDestroy()
+
+        for (destroy in vmDestroyers) {
+            destroy()
+        }
+        vmDestroyers.clear()
     }
 
     @Composable
@@ -149,22 +164,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-
-    override fun onStop() {
-        super.onStop()
-        Bridge.onStop()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        Bridge.onDestroy()
-
-        for (destroy in vmDestroyers) {
-            destroy()
-        }
-        vmDestroyers.clear()
     }
 
     private fun registerViewModels() {
