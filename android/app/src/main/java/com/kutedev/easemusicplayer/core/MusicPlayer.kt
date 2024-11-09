@@ -1,9 +1,11 @@
 package com.kutedev.easemusicplayer.core
 
-import android.media.AudioAttributes
 import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
-import android.net.Uri
+import androidx.core.text.isDigitsOnly
+import androidx.media3.common.C.TIME_UNSET
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,14 +16,33 @@ import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.MusicId
 
 class MusicPlayer : IMusicPlayerService {
-    private var _internal: MediaPlayer? = null
-    private var _isPrepared = false
-    private var _context: android.content.Context? = null
+
+    private var _internal: ExoPlayer? = null
     val customScope = CoroutineScope(Dispatchers.IO)
 
     fun onActivityCreate(context: android.content.Context) {
-        _context = context
-        _internal = MediaPlayer()
+        val player = ExoPlayer.Builder(context).build()
+        _internal = player
+
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                nextTickOnMain {
+                    if (isPlaying) {
+                        Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Play));
+                    }
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    nextTickOnMain {
+                        Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Complete))
+                    }
+                } else if (playbackState == Player.STATE_READY) {
+                    syncTotalDuration()
+                }
+            }
+        })
     }
 
     fun onActivityStart() {
@@ -35,21 +56,34 @@ class MusicPlayer : IMusicPlayerService {
         _internal = null
     }
 
-    override fun resume() {
+    private fun syncTotalDuration() {
         val player = _internal ?: return
-
-        player.start()
-
-        syncPlayingState()
-    }
-
-    override fun pause() {
-        if (!_isPrepared) {
+        if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
+            return
+        }
+        if (player.duration == TIME_UNSET) {
             return
         }
 
+        val mediaItem = player.currentMediaItem
+        if (mediaItem != null && mediaItem.mediaId.isDigitsOnly()) {
+            val id = MusicId(mediaItem.mediaId.toLong())
+            val durationMS = player.duration.toULong()
+
+            nextTickOnMain {
+                Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Total(id, durationMS)))
+            }
+        }
+    }
+
+    override fun resume() {
         val player = _internal ?: return
-        player.setOnPreparedListener {}
+
+        player.play()
+    }
+
+    override fun pause() {
+        val player = _internal ?: return
         player.pause()
 
         nextTickOnMain {
@@ -59,8 +93,6 @@ class MusicPlayer : IMusicPlayerService {
 
     override fun stop() {
         val player = _internal ?: return
-        player.setOnPreparedListener {}
-        player.setOnSeekCompleteListener {}
         player.stop()
 
         nextTickOnMain {
@@ -68,58 +100,26 @@ class MusicPlayer : IMusicPlayerService {
         }
     }
 
-    override fun seek(arg: ULong) {
+    override fun seek(msec: ULong) {
         val player = _internal ?: return
-        player.seekTo(arg.toInt())
-
-        syncPlayingState()
+        println("seekTo ${msec.toLong()}")
+        player.seekTo(msec.toLong())
     }
 
     override fun setMusicUrl(id: MusicId, url: String) {
         val player = _internal ?: return
-        _isPrepared = false;
-        player.reset()
-        player.setAudioAttributes(
-            AudioAttributes.Builder()
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .build()
-        )
-        player.setDataSource(_context!!, Uri.parse(url))
-        player.setOnCompletionListener {}
-        player.setOnPreparedListener {
-            player.setOnCompletionListener {
-                player.setOnCompletionListener {}
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Complete))
-                }
-            }
-            _isPrepared = true;
-            this.resume()
-            syncPlayingState()
-        }
-        player.prepareAsync()
 
-        requestTotalDuration(id, url)
-        syncPlayingState()
+        val mediaItem = MediaItem.Builder().setMediaId(id.value.toString()).setUri(url).build()
+        player.stop()
+        player.setMediaItem(mediaItem)
+        player.prepare()
+        player.play()
     }
 
     override fun getCurrentDurationS(): ULong {
         val player = _internal ?: return 0uL
 
         return (player.currentPosition / 1000).toULong();
-    }
-
-    private fun syncPlayingState() {
-        val player = _internal ?: return
-
-        nextTickOnMain {
-            val isPlaying = player.isPlaying
-
-            if (isPlaying) {
-                Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Play));
-            }
-        }
     }
 
     override fun requestTotalDuration(id: MusicId, url: String) {
