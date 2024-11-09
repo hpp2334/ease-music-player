@@ -5,6 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.navigation.NavHostController
@@ -118,48 +122,52 @@ class MainActivity : ComponentActivity() {
 
                         Box(
                             modifier = Modifier.weight(1f)
-                        ) {NavHost(
-                            navController = controller,
-                            startDestination = RoutesKey.HOME.toString(),
                         ) {
-                            composable(RoutesKey.HOME.toString()) {
-                                HomePage(
-                                    ctx = applicationContext,
-                                    pagerState = bottomBarPageState,
-                                    playlistsVM = playlistsVM,
-                                    timeToPauseVM = timeToPauseVM,
-                                    storageListVM = storageListVM,
-                                )
-                                CreatePlaylistsDialog(vm = createPlaylistVM)
+                            NavHost(
+                                modifier = Modifier
+                                    .fillMaxSize(),
+                                navController = controller,
+                                startDestination = RoutesKey.HOME.toString(),
+                                enterTransition = { EnterTransition.None },
+                                exitTransition = { ExitTransition.None },
+                                popEnterTransition = { EnterTransition.None },
+                                popExitTransition = { ExitTransition.None },
+                            ) {
+                                composable(RoutesKey.HOME.toString()) {
+                                    HomePage(
+                                        ctx = applicationContext,
+                                        pagerState = bottomBarPageState,
+                                        currentMusicVM = currentMusicVM,
+                                        playlistsVM = playlistsVM,
+                                        timeToPauseVM = timeToPauseVM,
+                                        storageListVM = storageListVM,
+                                    )
+                                    CreatePlaylistsDialog(vm = createPlaylistVM)
+                                }
+                                composable(RoutesKey.ADD_DEVICES.toString()) {
+                                    EditStoragesPage(
+                                        formVM = editStorageVM,
+                                    )
+                                }
+                                composable(RoutesKey.PLAYLIST.toString()) {
+                                    PlaylistPage(
+                                        vm = currentPlaylistVM,
+                                        currentMusicVM = currentMusicVM,
+                                    )
+                                    EditPlaylistsDialog(vm = editPlaylistVM)
+                                }
+                                composable(RoutesKey.IMPORT_MUSICS.toString()) {
+                                    ImportMusicsPage(vm = currentStorageEntriesVM)
+                                }
+                                composable(RoutesKey.MUSIC_PLAYER.toString()) {
+                                    MusicPlayerPage(
+                                        vm = currentMusicVM,
+                                        timeToPauseVM = timeToPauseVM,
+                                    )
+                                }
                             }
-                            composable(RoutesKey.ADD_DEVICES.toString()) {
-                                EditStoragesPage(
-                                    formVM = editStorageVM,
-                                )
-                            }
-                            composable(RoutesKey.PLAYLIST.toString()) {
-                                PlaylistPage(
-                                    vm = currentPlaylistVM,
-                                    currentMusicVM = currentMusicVM,
-                                )
-                                EditPlaylistsDialog(vm = editPlaylistVM)
-                            }
-                            composable(RoutesKey.IMPORT_MUSICS.toString()) {
-                                ImportMusicsPage(vm = currentStorageEntriesVM)
-                            }
-                            composable(RoutesKey.MUSIC_PLAYER.toString()) {
-                                MusicPlayerPage(
-                                    vm = currentMusicVM,
-                                    timeToPauseVM = timeToPauseVM,
-                                )
-                            }
-                        }
                             TimeToPauseModal(vm = timeToPauseVM)
                         }
-                        BottomBar(
-                            bottomBarPageState = bottomBarPageState,
-                            currentMusicVM = currentMusicVM,
-                        )
                     }
                 }
             }

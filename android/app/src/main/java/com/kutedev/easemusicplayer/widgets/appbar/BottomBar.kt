@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -61,8 +62,9 @@ private object BSetting: IBottomItem {
 }
 
 @Composable
-fun BottomBar(
-    bottomBarPageState: PagerState,
+fun BoxScope.BottomBar(
+    currentRoute: RoutesKey,
+    bottomBarPageState: PagerState?,
     currentMusicVM: CurrentMusicViewModel,
 ) {
     val items = listOf(
@@ -72,18 +74,17 @@ fun BottomBar(
     )
     val animationScope = rememberCoroutineScope()
 
-    val currentRoute = getCurrentRoute().collectAsState(null).value
     val hasCurrentMusic = currentMusicVM.state.collectAsState().value.id != null
 
-    val showBottomBar = currentRoute == RoutesKey.HOME.toString()
-    val showMiniPlayer = hasCurrentMusic && (currentRoute == RoutesKey.HOME.toString() || currentRoute == RoutesKey.PLAYLIST.toString())
+    val showBottomBar = currentRoute == RoutesKey.HOME
+    val showMiniPlayer = hasCurrentMusic && (currentRoute == RoutesKey.HOME || currentRoute == RoutesKey.PLAYLIST)
     if (!showBottomBar && !showMiniPlayer) {
         return;
     }
 
-
     Column(
         modifier = Modifier
+            .align(Alignment.BottomStart)
             .dropShadow(
                 MaterialTheme.colorScheme.surfaceVariant,
                 0.dp,
@@ -99,7 +100,7 @@ fun BottomBar(
                 vm = currentMusicVM
             )
         }
-        if (showBottomBar) {
+        if (showBottomBar && bottomBarPageState != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

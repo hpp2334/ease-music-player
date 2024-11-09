@@ -66,6 +66,7 @@ import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
+import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import uniffi.ease_client.PlaylistDetailWidget
 import uniffi.ease_client.RoutesKey
 import uniffi.ease_client.VCurrentMusicState
@@ -247,7 +248,6 @@ private fun EmptyPlaylist() {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PlaylistItem(
     item: VPlaylistMusicItem,
@@ -414,6 +414,7 @@ fun PlaylistPage(
 
     Box(
         modifier = Modifier
+            .background(Color.White)
             .fillMaxSize()
     ) {
         Column {
@@ -450,6 +451,11 @@ fun PlaylistPage(
                 }
             )
         }
+        BottomBar(
+            currentRoute = RoutesKey.PLAYLIST,
+            bottomBarPageState = null,
+            currentMusicVM = currentMusicVM,
+        )
     }
     RemovePlaylistDialog(
         title = state.title,

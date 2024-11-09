@@ -51,12 +51,20 @@ fn create_log(dir: &str) -> std::fs::File {
     file
 }
 
+fn trace_level() -> tracing::Level {
+    if std::env::var("EBUILD").is_ok() {
+        tracing::Level::INFO
+    } else {
+        tracing::Level::TRACE
+    }
+}
+
 #[cfg(target_os = "android")]
 fn setup_subscriber(dir: &str) {
     use tracing_subscriber::layer::SubscriberExt;
     let log_file = create_log(dir);
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(trace_level())
         .with_writer(log_file)
         .with_ansi(false)
         .finish();
@@ -68,7 +76,7 @@ fn setup_subscriber(dir: &str) {
 fn setup_subscriber(dir: &str) {
     let log_file = create_log(dir);
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(trace_level())
         .with_writer(log_file)
         .with_ansi(false)
         .finish();

@@ -325,6 +325,7 @@ fun MusicPlayerPage(
 
     Box(
         modifier = Modifier
+            .background(Color.White)
             .fillMaxSize()
     ) {
         Column {

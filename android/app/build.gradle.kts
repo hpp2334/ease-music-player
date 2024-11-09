@@ -86,7 +86,7 @@ android {
 }
 
 dependencies {
-    val nav_version = "2.7.7"
+    val nav_version = "2.8.3"
     val media3_version = "1.4.1"
 
     implementation(libs.androidx.core.ktx)
