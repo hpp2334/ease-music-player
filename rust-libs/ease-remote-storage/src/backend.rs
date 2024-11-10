@@ -22,7 +22,7 @@ pub struct StreamFile {
     inner: StreamFileInner,
     total: Option<usize>,
     content_type: Option<String>,
-    url: String,
+    name: String,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -74,6 +74,7 @@ pub trait StorageBackend {
 impl StreamFile {
     pub fn new(resp: reqwest::Response) -> Self {
         let url = resp.url().to_string();
+        let name = url.split('/').last().unwrap();
         let header_map = resp.headers();
         let content_length = header_map.get(reqwest::header::CONTENT_LENGTH).map(|v| {
             let v = v.to_str().unwrap();
@@ -86,17 +87,17 @@ impl StreamFile {
             inner: StreamFileInner::Response(resp),
             total: content_length,
             content_type,
-            url,
+            name: name.to_string(),
         }
     }
-    pub fn new_from_bytes(buf: &[u8], p: &str) -> Self {
+    pub fn new_from_bytes(buf: &[u8], name: &str) -> Self {
         let total: usize = buf.len() as usize;
         let buf = bytes::Bytes::copy_from_slice(buf);
         Self {
             inner: StreamFileInner::Total(buf),
             total: Some(total),
             content_type: None,
-            url: p.to_string(),
+            name: name.to_string(),
         }
     }
     pub fn size(&self) -> Option<usize> {
@@ -105,8 +106,8 @@ impl StreamFile {
     pub fn content_type(&self) -> Option<&str> {
         self.content_type.as_ref().map(|v| v.as_str())
     }
-    pub fn url(&self) -> &str {
-        &self.url
+    pub fn name(&self) -> &str {
+        self.name.as_str()
     }
 
     pub fn into_stream(self) -> impl futures_util::Stream<Item = StorageBackendResult<Bytes>> {

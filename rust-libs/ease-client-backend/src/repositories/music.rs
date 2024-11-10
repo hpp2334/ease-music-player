@@ -14,7 +14,7 @@ pub fn db_load_music_metas_by_playlist_id(
 ) -> BResult<Vec<MusicModel>> {
     let models = conn.query::<MusicModel>(
         r#"
-    SELECT id, path, storage_id, title, duration, lyric_default
+    SELECT *
     FROM music
     WHERE id IN (SELECT music_id FROM playlist_music WHERE playlist_id = ?1)
     "#,
@@ -90,14 +90,10 @@ pub fn db_update_music_total_duration(
     Ok(())
 }
 
-pub fn db_update_music_cover(
-    conn: DbConnectionRef,
-    id: MusicId,
-    cover_loc: StorageEntryLocModel,
-) -> BResult<()> {
+pub fn db_update_music_cover(conn: DbConnectionRef, id: MusicId, cover: Vec<u8>) -> BResult<()> {
     conn.execute(
-        "UPDATE music set picture_path = ?1, picture_storage_id = ?2 WHERE id = ?3",
-        params![cover_loc.0, cover_loc.1, id],
+        "UPDATE music set cover = ?1 WHERE id = ?2",
+        params![cover, id],
     )?;
 
     Ok(())

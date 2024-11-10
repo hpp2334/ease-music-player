@@ -3,8 +3,8 @@ use ease_client_shared::{
         app::ArgInitializeApp,
         message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload},
         music::{
-            ArgUpdateMusicDuration, ArgUpdateMusicLyric, GetMusicMsg, Music, MusicId,
-            UpdateMusicDurationMsg, UpdateMusicLyricMsg,
+            ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, GetMusicMsg, Music,
+            MusicId, UpdateMusicCoverMsg, UpdateMusicDurationMsg, UpdateMusicLyricMsg,
         },
         playlist::{
             AddMusicsToPlaylistMsg, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
@@ -172,6 +172,19 @@ impl Connector {
         let id = arg.id;
         self.request::<UpdateMusicLyricMsg>(cx, arg).await?;
         self.sync_music(cx, id).await?;
+        Ok(())
+    }
+
+    pub async fn update_music_cover(
+        &self,
+        cx: &ViewModelContext,
+        arg: ArgUpdateMusicCover,
+    ) -> EaseResult<()> {
+        let id = arg.id;
+        self.request::<UpdateMusicCoverMsg>(cx, arg).await?;
+        self.sync_music(cx, id).await?;
+        self.sync_current_playlist(cx).await?;
+        self.sync_playlist_abstracts(cx).await?;
         Ok(())
     }
 

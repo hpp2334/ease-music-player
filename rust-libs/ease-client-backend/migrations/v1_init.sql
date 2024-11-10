@@ -25,8 +25,7 @@ CREATE TABLE IF NOT EXISTS music (
     lyric_storage_id INTEGER,
     lyric_path TEXT,
     lyric_default BOOLEAN NOT NULL,
-    picture_storage_id INTEGER,
-    picture_path TEXT,
+    cover BLOB,
     UNIQUE(storage_id, path)
 );
 

@@ -210,6 +210,7 @@ fun EditStoragesPage(
 
     Column(
         modifier = Modifier
+            .background(Color.White)
             .fillMaxSize()
     ) {
         Row(

@@ -322,12 +322,16 @@ private fun ImportStorages(
                         color = textColor,
                         fontSize = 14.sp,
                         lineHeight = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = item.subtitle,
                         color = textColor,
                         fontSize = 10.sp,
                         lineHeight = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (!item.isLocal) {

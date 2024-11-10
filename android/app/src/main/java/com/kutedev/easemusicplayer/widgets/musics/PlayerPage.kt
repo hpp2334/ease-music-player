@@ -43,6 +43,8 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.components.MusicCover
+import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
@@ -198,33 +200,23 @@ private fun MusicPlayerCover(
 ) {
     @Composable
     fun CoverImage(url: String) {
-
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .fillMaxSize()
         ) {
-            Box(
+            MusicCover(
                 modifier = Modifier
-                    .padding(horizontal = 37.dp)
-                    .shadow(
-                        elevation = 8.dp,
-                        shape = RoundedCornerShape(20.dp)
+                    .dropShadow(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        offsetX = 0.dp,
+                        offsetY = 0.dp,
+                        blurRadius = 16.dp
                     )
                     .clip(RoundedCornerShape(20.dp))
-            ) {
-                if (url.isEmpty()) {
-                    Image(
-                        painter = painterResource(id = R.drawable.cover_default_image),
-                        contentDescription = null
-                    )
-                } else {
-                    AsyncImage(
-                        model = url,
-                        contentDescription = null,
-                    )
-                }
-            }
+                    .size(300.dp),
+                coverUrl = url,
+            )
         }
     }
 

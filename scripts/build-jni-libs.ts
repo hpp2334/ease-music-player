@@ -9,17 +9,9 @@ import path from "node:path";
 //     'armeabi-v7a'
 // ]
 
-const TARGETS = ENVS.Build ? [
-    'x86',
+const TARGETS = [
     'arm64-v8a',
-] : [
-    'x86',
 ]
-
-
-// sys env "ANDROID_NDK_HOME"
-
-const isProduction = Boolean(process.env.PRODUCTION)
 
 console.log("Build ease-client in debug mode")
 execSync(`cargo build -p ease-client`, {
@@ -35,6 +27,7 @@ for (const buildTarget of TARGETS) {
         env: {
             ...process.env,
             RUST_BACKTRACE: '1',
+            CARGO_NDK_ANDROID_PLATFORM: '34'
         }
     })
 
@@ -45,6 +38,7 @@ for (const buildTarget of TARGETS) {
         env: {
             ...process.env,
             RUST_BACKTRACE: '1',
+            CARGO_NDK_ANDROID_PLATFORM: '34'
         }
     })
 }

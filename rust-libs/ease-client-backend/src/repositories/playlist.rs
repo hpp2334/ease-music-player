@@ -102,21 +102,21 @@ pub fn db_load_playlist_music_count(conn: DbConnectionRef) -> BResult<HashMap<Pl
     Ok(map)
 }
 
-pub type FirstMusicCovers = HashMap<PlaylistId, StorageEntryLocModel>;
+pub type FirstMusicCovers = HashMap<PlaylistId, MusicId>;
 
 pub fn db_load_first_music_covers(conn: DbConnectionRef) -> BResult<FirstMusicCovers> {
-    let list = conn.query::<(MusicId, PlaylistId, Option<String>, Option<StorageId>)>(
+    let list = conn.query::<(MusicId, PlaylistId)>(
         r#"
-    SELECT music_id, playlist_id, picture_path, picture_storage_id
+    SELECT music_id, playlist_id
     FROM playlist_music
     JOIN music ON music.id = playlist_music.music_id
-    WHERE music.picture_path NOT NULL
+    WHERE music.cover NOT NULL
     GROUP BY playlist_id;
 "#,
         [],
     )?;
 
-    let map: FirstMusicCovers = list.into_iter().map(|v| (v.1, (v.2, v.3))).collect();
+    let map: FirstMusicCovers = list.into_iter().map(|v| (v.1, v.0)).collect();
     Ok(map)
 }
 

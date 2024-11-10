@@ -16,7 +16,10 @@ use ease_remote_storage::StreamFile;
 use crate::{
     ctx::BackendContext,
     error::{BError, BResult},
-    services::{music::get_music_storage_entry_loc, storage::get_storage_backend},
+    services::{
+        music::{get_music_cover_bytes, get_music_storage_entry_loc},
+        storage::get_storage_backend,
+    },
 };
 
 async fn get_stream_file_by_loc(
@@ -44,6 +47,18 @@ async fn get_stream_file_by_music_id(
     get_stream_file_by_loc(cx, loc).await
 }
 
+async fn get_stream_file_cover_by_music_id(
+    cx: &BackendContext,
+    id: MusicId,
+) -> BResult<Option<StreamFile>> {
+    let bytes = get_music_cover_bytes(&cx, id)?;
+    if !bytes.is_empty() {
+        Ok(Some(StreamFile::new_from_bytes(bytes.as_slice(), "cover")))
+    } else {
+        Ok(None)
+    }
+}
+
 async fn handle_got_stream_file(res: BResult<Option<StreamFile>>) -> Response {
     if let Err(e) = res {
         tracing::error!("{}", e);
@@ -66,8 +81,7 @@ async fn handle_got_stream_file(res: BResult<Option<StreamFile>>) -> Response {
     }
 
     let stream_file = res.unwrap();
-    let file_name = stream_file.url().to_string();
-    let file_name = file_name.split('/').last().unwrap();
+    let file_name = stream_file.name().to_string();
 
     let content_type = stream_file
         .content_type()
@@ -101,6 +115,16 @@ async fn handle_music_download(State(cx): State<BackendContext>, Path(id): Path<
     handle_got_stream_file(res).await
 }
 
+#[axum::debug_handler]
+async fn handle_music_cover_download(
+    State(cx): State<BackendContext>,
+    Path(id): Path<i64>,
+) -> Response {
+    let id = MusicId::wrap(id);
+    let res = get_stream_file_cover_by_music_id(&cx, id).await;
+    handle_got_stream_file(res).await
+}
+
 async fn handle_asset_download(
     State(cx): State<BackendContext>,
     Path(id): Path<i64>,
@@ -123,6 +147,10 @@ async fn handle_asset_download(
 pub fn start_server(cx: &BackendContext) -> u16 {
     let router_svc = Router::new()
         .route("/music/:id", axum::routing::get(handle_music_download))
+        .route(
+            "/music_cover/:id",
+            axum::routing::get(handle_music_cover_download),
+        )
         .route("/asset/:id", axum::routing::get(handle_asset_download))
         .with_state(cx.clone())
         .into_make_service();

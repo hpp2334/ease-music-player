@@ -17,6 +17,7 @@ pub struct PlaylistMeta {
     pub id: PlaylistId,
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
+    pub show_cover_url: String,
     pub created_time: Duration,
 }
 
@@ -45,6 +46,9 @@ impl PlaylistAbstract {
     }
     pub fn cover(&self) -> &Option<StorageEntryLoc> {
         &self.meta.cover
+    }
+    pub fn cover_url(&self) -> &str {
+        self.meta.show_cover_url.as_str()
     }
 }
 

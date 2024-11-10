@@ -23,7 +23,10 @@ use crate::{
             db_upsert_playlist, ArgDBUpsertPlaylist, FirstMusicCovers,
         },
     },
-    services::music::build_music_abstract,
+    services::{
+        music::build_music_abstract,
+        server::loc::{get_serve_cover_url_from_music_id, get_serve_url_from_loc},
+    },
 };
 
 use super::storage::to_opt_storage_entry;
@@ -37,16 +40,23 @@ fn build_playlist_meta(
         if let Some(picture) = to_opt_storage_entry(model.picture_path, model.picture_storage_id) {
             Some(picture)
         } else {
-            let loc = first_covers
-                .get(&model.id)
-                .map(|c| c.clone())
-                .unwrap_or_default();
-            to_opt_storage_entry(loc.0, loc.1)
+            None
         };
+    let show_cover_url = if let Some(loc) = cover_loc.clone() {
+        get_serve_url_from_loc(cx, loc)
+    } else {
+        let id = first_covers.get(&model.id).map(|c| c.clone());
+        if let Some(id) = id {
+            get_serve_cover_url_from_music_id(cx, id)
+        } else {
+            Default::default()
+        }
+    };
     PlaylistMeta {
         id: model.id,
         title: model.title,
         cover: cover_loc,
+        show_cover_url,
         created_time: Duration::from_millis(model.created_time as u64),
     }
 }

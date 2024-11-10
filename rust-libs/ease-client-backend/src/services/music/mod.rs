@@ -11,7 +11,7 @@ use crate::{
     storage::to_opt_storage_entry,
 };
 
-use super::server::loc::get_serve_url_from_opt_loc;
+use super::server::loc::{get_serve_cover_url_from_music_id, get_serve_url_from_opt_loc};
 
 pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     MusicMeta {
@@ -22,8 +22,16 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
 }
 
 pub(crate) fn build_music_abstract(cx: &BackendContext, model: MusicModel) -> MusicAbstract {
-    let cover_loc = to_opt_storage_entry(model.picture_path.clone(), model.picture_storage_id);
-    let cover_url = get_serve_url_from_opt_loc(&cx, cover_loc.clone());
+    let cover_url = if model
+        .cover
+        .as_ref()
+        .map(|v| !v.is_empty())
+        .unwrap_or_default()
+    {
+        get_serve_cover_url_from_music_id(&cx, model.id)
+    } else {
+        Default::default()
+    };
 
     MusicAbstract {
         cover_url,
@@ -46,4 +54,15 @@ pub fn get_music_storage_entry_loc(
         storage_id: m.storage_id,
     };
     Ok(Some(m))
+}
+
+pub fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<Vec<u8>> {
+    let conn = get_conn(cx)?;
+    let m = db_load_music(conn.get_ref(), id)?;
+    if m.is_none() {
+        return Ok(Default::default());
+    }
+    let m = m.unwrap();
+    let cover = m.cover.unwrap_or_default();
+    Ok(cover)
 }

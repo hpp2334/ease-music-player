@@ -19,7 +19,10 @@ use crate::{
     services::{
         lyrics::parse_lrc,
         music::build_music_meta,
-        server::loc::{get_serve_url_from_music_id, get_serve_url_from_opt_loc},
+        server::loc::{
+            get_serve_cover_url_from_music_id, get_serve_url_from_music_id,
+            get_serve_url_from_opt_loc,
+        },
     },
 };
 
@@ -114,14 +117,16 @@ pub(crate) async fn cr_get_music(cx: BackendContext, id: MusicId) -> BResult<Opt
     }
 
     let lyric: Option<MusicLyric> = load_lyric(&cx, lyric_loc, using_fallback).await;
-    let cover_loc = to_opt_storage_entry(model.picture_path, model.picture_storage_id);
-    let cover_url = get_serve_url_from_opt_loc(&cx, cover_loc.clone());
+    let cover_url = if model.cover.unwrap_or_default().is_empty() {
+        Default::default()
+    } else {
+        get_serve_cover_url_from_music_id(&cx, model.id)
+    };
 
     let music: Music = Music {
         meta,
         loc,
         url,
-        cover_loc,
         cover_url,
         lyric,
     };
@@ -142,8 +147,7 @@ pub(crate) async fn cu_update_music_cover(
     arg: ArgUpdateMusicCover,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
-    let cover_loc = from_opt_storage_entry(arg.cover_loc);
-    db_update_music_cover(conn.get_ref(), arg.id, cover_loc)?;
+    db_update_music_cover(conn.get_ref(), arg.id, arg.cover)?;
     Ok(())
 }
 

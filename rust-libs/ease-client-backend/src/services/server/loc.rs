@@ -26,3 +26,8 @@ pub fn get_serve_url_from_music_id(cx: &BackendContext, id: MusicId) -> String {
     let id: i64 = *id.as_ref();
     format!("{}/music/{}", base_url(cx), id)
 }
+
+pub fn get_serve_cover_url_from_music_id(cx: &BackendContext, id: MusicId) -> String {
+    let id: i64 = *id.as_ref();
+    format!("{}/music_cover/{}", base_url(cx), id)
+}

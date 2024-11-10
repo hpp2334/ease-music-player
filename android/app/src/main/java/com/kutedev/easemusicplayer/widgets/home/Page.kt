@@ -3,6 +3,7 @@ package com.kutedev.easemusicplayer.widgets.home
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -35,7 +36,7 @@ fun HomePage(
     val isPlaying = currentMusicVM.state.collectAsState().value.playing
 
     Box(
-        modifier = Modifier.background(Color.White),
+        modifier = Modifier.fillMaxSize(),
     ) {
         HorizontalPager(
             modifier = Modifier.padding(

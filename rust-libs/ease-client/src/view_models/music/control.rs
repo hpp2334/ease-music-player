@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use ease_client_shared::{
     backends::{
-        music::{ArgUpdateMusicDuration, MusicId},
+        music::{ArgUpdateMusicCover, ArgUpdateMusicDuration, MusicId},
         music_duration::MusicDuration,
         playlist::PlaylistId,
     },
@@ -49,6 +49,7 @@ pub enum PlayerEvent {
     Pause,
     Stop,
     Total { id: MusicId, duration_ms: u64 },
+    Cover { id: MusicId, buffer: Vec<u8> },
 }
 
 pub(crate) struct MusicControlVM {
@@ -260,7 +261,7 @@ impl MusicControlVM {
                     id: music_id,
                     title: music.title().to_string(),
                     url,
-                    cover_url: Default::default(),
+                    cover_url: music.cover_url,
                 };
                 MusicPlayerService::of(&cx).set_music_url(item);
             }
@@ -318,6 +319,9 @@ impl MusicControlVM {
             PlayerEvent::Total { id, duration_ms } => {
                 self.on_sync_total_duration(cx, *id, Duration::from_millis(*duration_ms))?
             }
+            PlayerEvent::Cover { id, buffer } => {
+                self.on_sync_cover(cx, *id, buffer.clone())?;
+            }
         };
         Ok(())
     }
@@ -333,6 +337,16 @@ impl MusicControlVM {
             PlayMode::SingleLoop => self.request_replay(cx)?,
             PlayMode::List | PlayMode::ListLoop => self.request_play_next(cx)?,
         }
+        Ok(())
+    }
+
+    fn on_sync_cover(&self, cx: &ViewModelContext, id: MusicId, cover: Vec<u8>) -> EaseResult<()> {
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+            Connector::of(&cx)
+                .update_music_cover(&cx, ArgUpdateMusicCover { id, cover })
+                .await?;
+            Ok(())
+        });
         Ok(())
     }
 

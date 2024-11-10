@@ -40,7 +40,6 @@ pub struct Music {
     pub meta: MusicMeta,
     pub loc: StorageEntryLoc,
     pub url: String,
-    pub cover_loc: Option<StorageEntryLoc>,
     pub cover_url: String,
     pub lyric: Option<MusicLyric>,
 }
@@ -92,7 +91,7 @@ define_message!(
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgUpdateMusicCover {
     pub id: MusicId,
-    pub cover_loc: Option<StorageEntryLoc>,
+    pub cover: Vec<u8>,
 }
 define_message!(
     UpdateMusicCoverMsg,
