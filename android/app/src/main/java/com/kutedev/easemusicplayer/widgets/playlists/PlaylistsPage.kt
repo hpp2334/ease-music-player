@@ -41,6 +41,8 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
+import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
+import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client.PlaylistListWidget
 
 @Composable

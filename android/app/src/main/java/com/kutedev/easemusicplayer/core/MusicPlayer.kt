@@ -7,6 +7,7 @@ import androidx.core.text.isDigitsOnly
 import androidx.media3.common.C.TIME_UNSET
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
@@ -18,11 +19,33 @@ import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import uniffi.ease_client.IMusicPlayerService
 import uniffi.ease_client.MusicToPlay
 import uniffi.ease_client.PlayerEvent
 import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.MusicId
+
+
+private fun syncTotalDurationImpl(player: Player) {
+    if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
+        return
+    }
+    if (player.duration == TIME_UNSET) {
+        return
+    }
+
+    val mediaItem = player.currentMediaItem
+    if (mediaItem != null && mediaItem.mediaId.isDigitsOnly()) {
+        val id = MusicId(mediaItem.mediaId.toLong())
+        val durationMS = player.duration.toULong()
+
+        nextTickOnMain {
+            Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Total(id, durationMS)))
+        }
+    }
+}
 
 class PlaybackService : MediaSessionService() {
     private var _mediaSession: MediaSession? = null
@@ -57,72 +80,41 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Get the player from the media session
         val player = _mediaSession?.player ?: return
 
-        // Check if the player is not ready to play or there are no items in the media queue
         if (!player.playWhenReady || player.mediaItemCount == 0) {
-            // Stop the service
             stopSelf()
         }
     }
 
-    /**
-     * This method is called when a MediaSession.ControllerInfo requests the MediaSession.
-     * It returns the current MediaSession instance.
-     *
-     * @param controllerInfo The MediaSession.ControllerInfo that is requesting the MediaSession.
-     * @return The current MediaSession instance.
-     */
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
         return _mediaSession
     }
 
-    /**
-     * This method is called when the service is being destroyed.
-     * It releases the player and the MediaSession instances.
-     */
     override fun onDestroy() {
-        // If _mediaSession is not null, run the following block
         _mediaSession?.run {
-            // Release the player
             player.release()
-            // Release the MediaSession instance
             release()
-            // Set _mediaSession to null
             _mediaSession = null
         }
-        // Call the superclass method
         super.onDestroy()
     }
 
     private fun syncTotalDuration() {
         val player = _mediaSession?.player ?: return
-        if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
-            return
-        }
-        if (player.duration == TIME_UNSET) {
-            return
-        }
-
-        val mediaItem = player.currentMediaItem
-        if (mediaItem != null && mediaItem.mediaId.isDigitsOnly()) {
-            val id = MusicId(mediaItem.mediaId.toLong())
-            val durationMS = player.duration.toULong()
-
-            nextTickOnMain {
-                Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Total(id, durationMS)))
-            }
-        }
+        syncTotalDurationImpl(player)
     }
 }
 
 class EaseMusicController : IMusicPlayerService {
-
+    private var _context: android.content.Context? = null
     private var _internal: MediaController? = null
-    val customScope = CoroutineScope(Dispatchers.IO)
+    private val _requestSemaphore = Semaphore(4)
+    val customScope = CoroutineScope(Dispatchers.Main)
 
     fun onActivityCreate(context: android.content.Context) {
+        _context = context
+
         val factory = MediaController.Builder(
             context,
             SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -206,26 +198,36 @@ class EaseMusicController : IMusicPlayerService {
     }
 
     override fun requestTotalDuration(id: MusicId, url: String) {
+        val context = _context ?: return
+
         customScope.launch {
-            val retriever = MediaMetadataRetriever()
+            _requestSemaphore.acquire()
             try {
-                retriever.setDataSource(url)
+                val player = ExoPlayer.Builder(context).build()
 
-                // Get the duration in milliseconds
-                val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-
-                if (duration != null) {
-                    val durationMS = duration.toULong()
-
-                    nextTickOnMain {
-                        Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Total(id, durationMS)))
+                player.addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY) {
+                            syncTotalDurationImpl(player)
+                            player.release()
+                            _requestSemaphore.release()
+                        }
                     }
-                }
-                retriever.release()
-            } catch (_: Exception) {
 
+                    override fun onPlayerError(error: PlaybackException) {
+                        player.release()
+                        _requestSemaphore.release()
+                    }
+                })
+                val mediaItem = MediaItem.Builder()
+                    .setMediaId(id.value.toString())
+                    .setUri(url)
+                    .build()
+                player.setMediaItem(mediaItem)
+                player.prepare()
+            } catch (e: Exception) {
+                println(e)
             }
-            retriever.release()
         }
     }
 }

@@ -67,6 +67,7 @@ import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
+import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client.PlaylistDetailWidget
 import uniffi.ease_client.RoutesKey
 import uniffi.ease_client.VCurrentMusicState
@@ -392,7 +393,9 @@ private fun PlaylistItemsBlock(
                 )
             }
         }
-        Box(modifier = Modifier.height(24.dp))
+        BottomBarSpacer(
+            isPlaying = currentMusicState.playing
+        )
     }
 }
 

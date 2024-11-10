@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.kutedev.easemusicplayer.R
@@ -34,6 +35,7 @@ import com.kutedev.easemusicplayer.widgets.getCurrentRoute
 import com.kutedev.easemusicplayer.widgets.musics.MiniPlayer
 import kotlinx.coroutines.launch
 import uniffi.ease_client.RoutesKey
+import kotlin.math.tan
 
 private interface IBottomItem {
     val painterId: Int;
@@ -59,6 +61,21 @@ private object BSetting: IBottomItem {
         get() = R.drawable.icon_setting
     override val pageIndex: Int
         get() = 2;
+}
+
+fun getBottomBarSpace(isPlaying: Boolean): Dp {
+    var total = 60.dp;
+    if (isPlaying) {
+        total += 124.dp;
+    }
+    return total;
+}
+
+@Composable
+fun BottomBarSpacer(
+    isPlaying: Boolean
+) {
+    Box(modifier = Modifier.height(getBottomBarSpace(isPlaying)))
 }
 
 @Composable

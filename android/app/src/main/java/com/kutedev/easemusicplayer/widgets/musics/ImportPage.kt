@@ -447,6 +447,7 @@ fun ImportMusicsPage(
     }
     Column(
         modifier = Modifier
+            .background(Color.White)
             .fillMaxSize()
     ) {
         Row(
