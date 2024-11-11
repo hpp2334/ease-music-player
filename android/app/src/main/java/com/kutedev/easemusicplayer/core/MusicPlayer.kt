@@ -5,6 +5,8 @@ import android.content.Intent
 import android.os.Handler
 import androidx.annotation.OptIn
 import androidx.core.text.isDigitsOnly
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -97,6 +99,7 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
 
         val player = ExoPlayer.Builder(this)
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .build()
         _mediaSession = MediaSession.Builder(this, player)

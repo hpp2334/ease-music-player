@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
 
         registerViewModels()
 
-        val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
             nextTickOnMain {
                 Bridge.dispatchAction(ViewAction.Main(MainAction.PERMISSION_CHANGED))
             }
