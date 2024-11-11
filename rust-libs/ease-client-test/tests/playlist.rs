@@ -1,8 +1,11 @@
 use ease_client::{
-    view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget,
+    view_models::storage::import::StorageImportAction, Action, MainAction, PlaylistCreateWidget,
     PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget, ViewAction,
 };
-use ease_client_shared::uis::{playlist::CreatePlaylistMode, storage::CurrentStorageStateType};
+use ease_client_shared::{
+    backends::storage::StorageType,
+    uis::{playlist::CreatePlaylistMode, storage::CurrentStorageStateType},
+};
 use ease_client_test::{PresetDepth, ReqInteceptor, TestApp};
 
 async fn create_playlist(app: &TestApp, name: &str) {
@@ -217,89 +220,93 @@ async fn playlist_import_musics_3() {
     assert_eq!(state.items.len(), 1);
 }
 
-// #[tokio::test]
-// async fn playlist_import_from_local_1() {
-//     let mut app = TestApp::new("test-dbs/playlist_import_from_local_1", true).await;
-//     app.setup_preset(PresetDepth::Playlist).await;
+#[tokio::test]
+async fn playlist_import_from_local_1() {
+    let mut app = TestApp::new("test-dbs/playlist_import_from_local_1", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
-//     let state = app.latest_state();
-//     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
+    let state = app.latest_state();
+    let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
-//     app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
-//     app.dispatch_click(PlaylistDetailWidget::Edit);
-//     app.dispatch_click(PlaylistDetailWidget::Import);
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
 
-//     let state = app.latest_state();
-//     let state = state.storage_list.unwrap();
-//     assert_eq!(state.items[0].typ, StorageType::Webdav);
-//     assert_eq!(state.items[1].typ, StorageType::Local);
+    app.dispatch_click(PlaylistDetailWidget::Edit);
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.wait_network().await;
 
-//     let storage_id = state.items[1].clone().storage_id.clone();
-//     app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
-//     app.wait_network().await;
+    let state = app.latest_state();
+    let state = state.storage_list.unwrap();
+    assert_eq!(state.items[0].typ, StorageType::Webdav);
+    assert_eq!(state.items[1].typ, StorageType::Local);
 
-//     let cwd = std::env::current_dir().unwrap().join("test-files");
-//     let cwd = cwd.to_string_lossy().to_string().replace('\\', "/");
-//     app.dispatch_click(StorageImportWidget::StorageEntry { path: cwd });
-//     app.wait_network().await;
-//     let state = app.latest_state();
-//     let entries = state.current_storage_entries.unwrap();
-//     assert_eq!(entries.entries.len(), 7);
-//     let item = &entries.entries[0];
-//     assert_eq!(item.name, "musics");
-//     assert_eq!(item.is_folder, true);
-//     assert_eq!(item.can_check, false);
-//     assert_eq!(item.checked, false);
+    let storage_id = state.items[1].clone().storage_id.clone();
+    app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+    app.wait_network().await;
 
-//     app.dispatch_click(StorageImportWidget::StorageEntry {
-//         path: entries.entries[4].path.clone(),
-//     });
-//     app.dispatch_click(StorageImportWidget::Import);
-//     app.wait_network().await;
-//     let state = app.latest_state();
-//     let state = state.current_playlist.clone().unwrap();
-//     assert_eq!(state.duration, "00:00:24");
-//     assert_eq!(state.items.len(), 1);
-//     let item = state.items[0].clone();
-//     assert_eq!(item.title, "angelical-pad-143276");
+    let cwd = std::env::current_dir().unwrap().join("test-files");
+    let cwd = cwd.to_string_lossy().to_string().replace('\\', "/");
+    app.dispatch_click(StorageImportWidget::StorageEntry { path: cwd });
+    app.wait_network().await;
+    let state = app.latest_state();
+    let entries = state.current_storage_entries.unwrap();
+    assert_eq!(entries.entries.len(), 7);
+    let item = &entries.entries[0];
+    assert_eq!(item.name, "musics");
+    assert_eq!(item.is_folder, true);
+    assert_eq!(item.can_check, false);
+    assert_eq!(item.checked, false);
 
-//     app.dispatch_click(PlaylistDetailWidget::PlayAll);
-//     app.wait_network().await;
-//     let state = app.latest_state();
-//     let state = state.current_music.clone().unwrap();
-//     assert_eq!(state.current_duration, "00:00:00");
-//     assert_eq!(state.total_duration, "00:00:24");
-// }
+    app.dispatch_click(StorageImportWidget::StorageEntry {
+        path: entries.entries[4].path.clone(),
+    });
+    app.dispatch_click(StorageImportWidget::Import);
+    app.wait_network().await;
+    let state = app.latest_state();
+    let state = state.current_playlist.clone().unwrap();
+    assert_eq!(state.duration, "00:00:24");
+    assert_eq!(state.items.len(), 1);
+    let item = state.items[0].clone();
+    assert_eq!(item.title, "angelical-pad-143276");
 
-// #[tokio::test]
-// async fn playlist_import_need_permission() {
-//     let mut app = TestApp::new("test-dbs/playlist_import_need_permission", true).await;
-//     app.setup_preset(PresetDepth::Playlist).await;
+    app.dispatch_click(PlaylistDetailWidget::PlayAll);
+    app.wait_network().await;
+    let state = app.latest_state();
+    let state = state.current_music.clone().unwrap();
+    assert_eq!(state.current_duration, "00:00:00");
+    assert_eq!(state.total_duration, "00:00:24");
+}
 
-//     let state = app.latest_state();
-//     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
+#[tokio::test]
+async fn playlist_import_need_permission() {
+    let mut app = TestApp::new("test-dbs/playlist_import_need_permission", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
-//     app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    let state = app.latest_state();
+    let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
-//     // local storage id
-//     let state = app.latest_state();
-//     let state = state.storage_list.unwrap();
-//     let storage_id = state.items[1].clone().storage_id.clone();
-//     app.dispatch_click(PlaylistDetailWidget::Import);
-//     app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
-//     app.wait_network().await;
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
 
-//     let state = app.latest_state();
-//     let state = state.current_storage_entries.unwrap();
-//     assert_eq!(state.state_type, CurrentStorageStateType::NeedPermission);
+    // local storage id
+    let state = app.latest_state();
+    let state = state.storage_list.unwrap();
+    let storage_id = state.items[1].clone().storage_id.clone();
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+    app.wait_network().await;
 
-//     app.dispatch_click(StorageImportWidget::UpdatePermission { value: true });
-//     app.dispatch_click(StorageImportWidget::Refresh);
-//     app.wait_network().await;
-//     let state = app.latest_state();
-//     let state = state.current_storage_entries.unwrap();
-//     assert_eq!(state.state_type, CurrentStorageStateType::OK);
-// }
+    let state = app.latest_state();
+    let state = state.current_storage_entries.unwrap();
+    assert_eq!(state.state_type, CurrentStorageStateType::NeedPermission);
+
+    app.permission().update_permission(true);
+    app.dispatch_click(StorageImportWidget::Error);
+    app.wait_network().await;
+    let state = app.latest_state();
+    let state = state.current_storage_entries.unwrap();
+    assert_eq!(state.state_type, CurrentStorageStateType::OK);
+}
 
 #[tokio::test]
 async fn playlist_import_authentication() {

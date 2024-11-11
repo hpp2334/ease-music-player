@@ -8,6 +8,7 @@ pub mod view_models;
 
 uniffi::setup_scaffolding!();
 
+pub use to_host::permission::{IPermissionService, PermissionService};
 pub use to_host::player::{IMusicPlayerService, MusicPlayerService, MusicToPlay};
 pub use to_host::router::{IRouterService, RouterService, RoutesKey};
 pub use to_host::toast::{IToastService, ToastService};
@@ -16,7 +17,7 @@ pub use view_models::view_state::views::RootViewModelState;
 
 pub use actions::widget::{Widget, WidgetAction, WidgetActionType};
 pub use actions::{Action, ViewAction};
-pub use view_models::main::MainBodyWidget;
+pub use view_models::main::{MainAction, MainBodyWidget};
 pub use view_models::music::control::{MusicControlWidget, PlayerEvent};
 pub use view_models::music::detail::MusicDetailWidget;
 pub use view_models::music::lyric::MusicLyricWidget;

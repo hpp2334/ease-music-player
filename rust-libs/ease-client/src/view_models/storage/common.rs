@@ -23,6 +23,11 @@ impl StorageCommonVM {
         StorageCommonVM { store: cx.model() }
     }
 
+    pub(crate) fn update_local_storage_path(&self, cx: &ViewModelContext, p: String) {
+        let mut state = cx.model_mut(&self.store);
+        state.local_storage_path = p;
+    }
+
     fn sync_storages(&self, cx: &ViewModelContext, storages: Vec<Storage>) -> EaseResult<()> {
         let mut state = cx.model_mut(&self.store);
         state.storage_ids = storages.iter().map(|v| v.id).collect();

@@ -4,15 +4,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ease_client::{
-    build_client, Action, IRouterService, IToastService, PlaylistCreateWidget,
-    PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey, StorageImportWidget,
-    StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
+    build_client, Action, IPermissionService, IRouterService, IToastService, MainAction,
+    PlaylistCreateWidget, PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey,
+    StorageImportWidget, StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction,
+    WidgetActionType,
 };
 use ease_client_shared::backends::app::ArgInitializeApp;
 use ease_client_shared::backends::music::MusicId;
 use ease_client_shared::backends::playlist::PlaylistId;
 use ease_client_shared::backends::storage::{StorageId, StorageType};
 use ease_client_shared::uis::playlist::CreatePlaylistMode;
+use event_loop::EventLoop;
+use fake_permission::FakePermissionService;
 use fake_player::*;
 pub use fake_server::ReqInteceptor;
 use fake_server::*;
@@ -20,6 +23,8 @@ use misty_vm::AppPod;
 use misty_vm_test::AsyncRuntime;
 use view_state::ViewStateServiceRef;
 
+mod event_loop;
+mod fake_permission;
 mod fake_player;
 mod fake_server;
 mod view_state;
@@ -29,7 +34,9 @@ pub struct TestApp {
     server: FakeServerRef,
     player: FakeMusicPlayerRef,
     view_state: ViewStateServiceRef,
+    permission: FakePermissionService,
     async_runtime: AsyncRuntime,
+    event_loop: EventLoop,
     last_wait_req_session: AtomicUsize,
 }
 
@@ -49,7 +56,7 @@ impl IToastService for FakeToastServiceImpl {
 
 static SETUP_SUBCRIBER_ONCE: AtomicBool = AtomicBool::new(false);
 
-static SCHEMA_VERSION: u32 = 1;
+static SCHEMA_VERSION: u32 = 2;
 
 fn setup_subscriber() {
     let has_setup = SETUP_SUBCRIBER_ONCE.swap(true, std::sync::atomic::Ordering::Relaxed);
@@ -95,10 +102,13 @@ impl TestApp {
         }
 
         let pod = AppPod::new();
-        let player = FakeMusicPlayerRef::new(pod.clone());
+        let event_loop: EventLoop = EventLoop::new();
+        let player = FakeMusicPlayerRef::new(event_loop.clone());
         let async_runtime = AsyncRuntime::new();
         let view_state = ViewStateServiceRef::new();
+        let permission = FakePermissionService::new(event_loop.clone());
         let app = build_client(
+            Arc::new(permission.clone()),
             Arc::new(FakeRouterService),
             Arc::new(player.clone()),
             Arc::new(FakeToastServiceImpl),
@@ -128,17 +138,23 @@ impl TestApp {
             app: pod,
             server: FakeServerRef::setup("test-files"),
             player,
+            permission,
             async_runtime,
             view_state,
+            event_loop,
             last_wait_req_session: Default::default(),
         };
         ret.wait_network().await;
         ret
     }
 
+    pub fn permission(&self) -> &FakePermissionService {
+        &self.permission
+    }
+
     pub fn emit(&self, action: Action) {
         self.app.get().emit(action);
-        self.player.flush_player_events();
+        self.event_loop.flush(&self.app.get());
     }
 
     pub fn dispatch_click(&self, widget: impl Into<Widget>) {
@@ -302,7 +318,7 @@ impl TestApp {
                 break;
             }
             self.advance_timer_impl(0);
-            self.player.flush_player_events();
+            self.event_loop.flush(&self.app.get());
             tokio::time::sleep(Duration::from_millis(t)).await;
         }
     }

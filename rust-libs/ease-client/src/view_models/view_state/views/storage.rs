@@ -97,19 +97,22 @@ fn resolve_upsert_storage_name(storage: &ArgUpsertStorage) -> String {
 }
 
 pub(crate) fn storage_list_vs(state: &AllStorageState, root: &mut RootViewModelState) {
-    let mut items: Vec<VStorageListItem> = {
+    let items: Vec<VStorageListItem> = {
         state
-            .storages
+            .storage_ids
             .iter()
-            .map(|(id, info)| VStorageListItem {
-                storage_id: *id,
-                name: resolve_storage_name(info),
-                sub_title: info.addr.clone(),
-                typ: info.typ.clone(),
+            .map(|id| {
+                let info = state.storages.get(id).unwrap();
+
+                VStorageListItem {
+                    storage_id: *id,
+                    name: resolve_storage_name(info),
+                    sub_title: info.addr.clone(),
+                    typ: info.typ.clone(),
+                }
             })
             .collect()
     };
-    items.sort_by(|lhs, rhs| lhs.storage_id.cmp(&rhs.storage_id));
 
     let list = VStorageListState { items };
     root.storage_list = Some(list);

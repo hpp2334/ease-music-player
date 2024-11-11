@@ -69,7 +69,7 @@ impl Connector {
         state.serve_music_url(id)
     }
 
-    fn init(&self, cx: &ViewModelContext, arg: ArgInitializeApp) -> EaseResult<()> {
+    pub(crate) fn init(&self, cx: &ViewModelContext, arg: ArgInitializeApp) -> EaseResult<()> {
         let host = ConnectorHostService::of(cx);
         host.init(arg)?;
         {
@@ -334,11 +334,8 @@ impl Connector {
 impl ViewModel for Connector {
     type Event = Action;
     type Error = EaseError;
-    fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
+    fn on_event(&self, _cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
-            Action::Init(arg) => {
-                self.init(cx, arg.clone())?;
-            }
             _ => {}
         }
         Ok(())

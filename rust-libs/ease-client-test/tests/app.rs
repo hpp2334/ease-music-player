@@ -13,7 +13,7 @@ async fn app_loaded_state_1() {
     let state = app.latest_state();
 
     let storage_list = state.storage_list.clone().unwrap();
-    assert_eq!(storage_list.items.len(), 1);
+    assert_eq!(storage_list.items.len(), 2);
     assert!(state.playlist_list.is_some());
     let playlist_list = state.playlist_list.clone().unwrap();
     assert_eq!(playlist_list.playlist_list.len(), 1);

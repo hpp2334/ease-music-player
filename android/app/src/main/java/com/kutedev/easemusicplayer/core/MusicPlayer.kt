@@ -96,7 +96,9 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
-        val player = ExoPlayer.Builder(this).build()
+        val player = ExoPlayer.Builder(this)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
         _mediaSession = MediaSession.Builder(this, player)
             .setCallback(object : MediaSession.Callback {
                 @OptIn(UnstableApi::class)

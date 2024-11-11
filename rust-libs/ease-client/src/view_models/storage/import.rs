@@ -2,18 +2,20 @@ use std::collections::HashSet;
 
 use ease_client_shared::{
     backends::storage::{
-        ListStorageEntryChildrenResp, StorageEntry, StorageEntryLoc, StorageEntryType, StorageId,
+        ListStorageEntryChildrenResp, Storage, StorageEntry, StorageEntryLoc, StorageEntryType,
+        StorageId, StorageType,
     },
     uis::storage::{CurrentStorageImportType, CurrentStorageStateType},
 };
-use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
+    to_host::permission::PermissionService,
     view_models::{
         connector::Connector,
-        main::router::RouterVM,
+        main::{router::RouterVM, MainAction},
         music::lyric::MusicLyricVM,
         playlist::{create::PlaylistCreateVM, detail::PlaylistDetailVM, edit::PlaylistEditVM},
     },
@@ -29,6 +31,7 @@ pub enum StorageImportWidget {
     FolderNav { path: String },
     ToggleAll,
     Import,
+    Error,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -106,16 +109,17 @@ impl StorageImportVM {
         let exist = cx.model_get(&self.store).storages.contains_key(&id);
         if exist {
             let mut state = cx.model_mut(&self.current);
+            let store = cx.model_get(&self.store);
             let prev_storage_id = state.current_storage_id;
 
             if prev_storage_id != Some(id) {
                 state.current_storage_id = Some(id);
                 state.checked_entries_path.clear();
-                state.current_path = self.get_current_path(cx)?;
+                state.current_path = self.get_current_path(id, &store);
                 state.undo_stack.clear();
             }
         }
-        self.reload(cx)?;
+        self.reload(cx);
         Ok(())
     }
 
@@ -177,12 +181,12 @@ impl StorageImportVM {
             state.current_path = path.clone();
             state.checked_entries_path.clear();
         }
-        self.reload(cx)?;
+        self.reload(cx);
 
         Ok(())
     }
 
-    fn reload(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    fn reload(&self, cx: &ViewModelContext) {
         self.check_can_mutate(cx);
         let current = self.current.clone();
         let (storage_id, current_path) = {
@@ -190,6 +194,17 @@ impl StorageImportVM {
 
             (m.current_storage_id.unwrap(), m.current_path.clone())
         };
+        let storage = {
+            let store = cx.model_get(&self.store);
+            store.storages.get(&storage_id).unwrap().clone()
+        };
+        if storage.typ == StorageType::Local && !PermissionService::of(cx).have_storage_permission()
+        {
+            let mut current = cx.model_mut(&current);
+            current.state_type = CurrentStorageStateType::NeedPermission;
+            return;
+        }
+
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let connector = Connector::of(&cx);
             let res = connector
@@ -226,7 +241,6 @@ impl StorageImportVM {
 
             Ok(())
         });
-        Ok(())
     }
 
     fn select_entry(&self, cx: &ViewModelContext, path: String) -> EaseResult<()> {
@@ -323,6 +337,15 @@ impl StorageImportVM {
         Ok(())
     }
 
+    fn on_error_click(&self, cx: &ViewModelContext) {
+        let state = cx.model_get(&self.current);
+        if state.state_type == CurrentStorageStateType::NeedPermission {
+            PermissionService::of(cx).request_storage_permission();
+        } else {
+            self.reload(cx);
+        }
+    }
+
     pub(crate) fn prepare(
         &self,
         cx: &ViewModelContext,
@@ -332,22 +355,31 @@ impl StorageImportVM {
             let store = cx.model_get(&self.store);
             let mut state = cx.model_mut(&self.current);
             state.import_type = typ;
+            state.state_type = CurrentStorageStateType::Loading;
             state.entries.clear();
-            state.current_path = self.get_current_path(cx)?;
             state.checked_entries_path.clear();
+            state.undo_stack.clear();
 
             if state.current_storage_id.is_none() {
                 state.current_storage_id = Some(store.storage_ids[0]);
             }
+            let id = state.current_storage_id.unwrap();
+            state.current_path = self.get_current_path(id, &store);
         }
-        self.reload(cx)?;
+        self.reload(cx);
         RouterVM::of(cx).navigate(cx, RoutesKey::ImportMusics);
 
         Ok(())
     }
 
-    fn get_current_path(&self, _cx: &ViewModelContext) -> EaseResult<String> {
-        Ok("/".to_string())
+    fn get_current_path(&self, id: StorageId, store: &AllStorageState) -> String {
+        let storage = store.storages.get(&id);
+        if let Some(storage) = storage {
+            if storage.typ == StorageType::Local {
+                return store.local_storage_path.to_string();
+            }
+        }
+        return "/".to_string();
     }
 
     fn check_can_mutate(&self, cx: &ViewModelContext) {
@@ -387,12 +419,16 @@ impl ViewModel for StorageImportVM {
                             self.handle_import(cx)?;
                         }
                         StorageImportWidget::ToggleAll => self.toggle_all(cx),
+                        StorageImportWidget::Error => self.on_error_click(cx),
                     },
                     _ => {}
                 },
                 ViewAction::StorageImport(action) => match action {
-                    StorageImportAction::Reload => self.reload(cx)?,
+                    StorageImportAction::Reload => self.reload(cx),
                     StorageImportAction::Undo => self.undo(cx)?,
+                },
+                ViewAction::Main(action) => match action {
+                    MainAction::PermissionChanged => self.reload(cx),
                 },
                 _ => {}
             },

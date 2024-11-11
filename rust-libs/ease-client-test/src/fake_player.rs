@@ -8,6 +8,8 @@ use hyper::StatusCode;
 use lofty::AudioFile;
 use misty_vm::AppPod;
 
+use crate::event_loop::EventLoop;
+
 #[derive(Clone)]
 struct FakeMusicPlayerInner {
     url: Arc<Mutex<Option<(MusicId, String)>>>,
@@ -16,8 +18,7 @@ struct FakeMusicPlayerInner {
     playing: Arc<AtomicBool>,
     current_duration: Arc<AtomicU64>,
     total_duration: Arc<AtomicU64>,
-    pending_events: Arc<Mutex<Vec<PlayerEvent>>>,
-    pod: AppPod,
+    event_loop: EventLoop,
 }
 
 #[derive(Clone)]
@@ -26,7 +27,7 @@ pub struct FakeMusicPlayerRef {
 }
 
 impl FakeMusicPlayerInner {
-    fn new(pod: AppPod) -> Self {
+    fn new(event_loop: EventLoop) -> Self {
         Self {
             url: Default::default(),
             req_handle: Default::default(),
@@ -34,8 +35,7 @@ impl FakeMusicPlayerInner {
             playing: Default::default(),
             current_duration: Default::default(),
             total_duration: Default::default(),
-            pending_events: Default::default(),
-            pod,
+            event_loop,
         }
     }
 
@@ -80,34 +80,14 @@ impl FakeMusicPlayerInner {
     }
 
     fn push_player_event(&self, evt: PlayerEvent) {
-        let mut w = self.pending_events.lock().unwrap();
-        w.push(evt);
-    }
-
-    fn flush_player_events(&self) {
-        loop {
-            let mut events: Vec<PlayerEvent> = Default::default();
-
-            {
-                let mut w = self.pending_events.lock().unwrap();
-                std::mem::swap(&mut *w, &mut events);
-            }
-
-            if events.is_empty() {
-                break;
-            }
-
-            for evt in events {
-                self.pod.get().emit(Action::View(ViewAction::Player(evt)));
-            }
-        }
+        self.event_loop.queue(ViewAction::Player(evt));
     }
 }
 
 impl FakeMusicPlayerRef {
-    pub fn new(pod: AppPod) -> Self {
+    pub fn new(event_loop: EventLoop) -> Self {
         FakeMusicPlayerRef {
-            inner: Arc::new(FakeMusicPlayerInner::new(pod)),
+            inner: Arc::new(FakeMusicPlayerInner::new(event_loop)),
         }
     }
 
@@ -116,10 +96,6 @@ impl FakeMusicPlayerRef {
     }
     pub fn advance(&self, duration: Duration) {
         self.inner.advance(duration);
-    }
-
-    pub fn flush_player_events(&self) {
-        self.inner.flush_player_events();
     }
 }
 

@@ -26,6 +26,7 @@ pub struct EditStorageFormValidated {
 pub struct AllStorageState {
     pub storages: HashMap<StorageId, Storage>,
     pub storage_ids: Vec<StorageId>,
+    pub local_storage_path: String,
 }
 
 #[derive(Default, Clone)]

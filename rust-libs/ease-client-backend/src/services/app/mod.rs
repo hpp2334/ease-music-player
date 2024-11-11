@@ -1,9 +1,16 @@
-
-use ease_client_shared::backends::{app::ArgInitializeApp, preference::PreferenceData};
+use ease_client_shared::backends::{
+    app::ArgInitializeApp,
+    preference::PreferenceData,
+    storage::{ArgUpsertStorage, StorageType},
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::Level;
 
-use crate::{ctx::BackendContext, error::BResult, repositories::core::get_conn};
+use crate::{
+    ctx::BackendContext,
+    error::BResult,
+    repositories::{core::get_conn, storage::db_upsert_storage},
+};
 
 use super::server::start_server;
 
@@ -115,6 +122,18 @@ fn upgrade_db_schema(cx: &BackendContext, prev_version: u32) -> BResult<()> {
     if prev_version < 1 {
         tracing::info!("start to upgrade to v1");
         conn.execute_batch(include_str!("../../../migrations/v1_init.sql"))?;
+        db_upsert_storage(
+            conn.get_ref(),
+            ArgUpsertStorage {
+                id: None,
+                addr: Default::default(),
+                alias: "Local".to_string(),
+                username: Default::default(),
+                password: Default::default(),
+                is_anonymous: true,
+                typ: StorageType::Local,
+            },
+        )?;
         tracing::info!("finish to upgrade to v1");
     }
 

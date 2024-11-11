@@ -32,6 +32,7 @@ use crate::{
         },
         view_state::ViewStateVM,
     },
+    IPermissionService, PermissionService,
 };
 use tracing::subscriber::set_global_default;
 
@@ -106,6 +107,7 @@ fn init_tracers(dir: &str) {
 }
 
 pub fn build_client(
+    permission: Arc<dyn IPermissionService>,
     router: Arc<dyn IRouterService>,
     player: Arc<dyn IMusicPlayerService>,
     toast: Arc<dyn IToastService>,
@@ -141,6 +143,7 @@ pub fn build_client(
         })
         .with_to_hosts(|builder| {
             builder
+                .add(PermissionService::new_with_arc(permission))
                 .add(RouterService::new_with_arc(router))
                 .add(ConnectorHostService::new(ConnectorHostImpl::new()))
                 .add(MusicPlayerService::new_with_arc(player))
@@ -153,6 +156,7 @@ pub fn build_client(
 
 #[uniffi::export]
 pub fn api_build_client(
+    permission: Arc<dyn IPermissionService>,
     router: Arc<dyn IRouterService>,
     player: Arc<dyn IMusicPlayerService>,
     toast: Arc<dyn IToastService>,
@@ -160,7 +164,14 @@ pub fn api_build_client(
     notifier: Arc<dyn IFlushNotifier>,
 ) {
     let _guard = ASYNC_RT.enter();
-    let app = build_client(router, player, toast, vs, AsyncAdapter::new(notifier));
+    let app = build_client(
+        permission,
+        router,
+        player,
+        toast,
+        vs,
+        AsyncAdapter::new(notifier),
+    );
     CLIENT.set(app);
 }
 

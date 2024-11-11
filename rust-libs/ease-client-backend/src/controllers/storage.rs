@@ -2,7 +2,7 @@ use ease_client_shared::backends::{
     message::IMessage,
     storage::{
         ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
-        StorageEntry, StorageEntryLoc, StorageId, TestStorageMsg,
+        StorageEntry, StorageEntryLoc, StorageId, StorageType, TestStorageMsg,
     },
 };
 
@@ -77,6 +77,17 @@ pub async fn cr_list_storage(cx: BackendContext, _arg: ()) -> BResult<Vec<Storag
 
         storages.push(build_storage(m, music_count, playlist_count));
     }
+
+    storages.sort_by(|lhs, rhs| {
+        let l_local = lhs.typ == StorageType::Local;
+        let r_local = rhs.typ == StorageType::Local;
+
+        if l_local != r_local {
+            l_local.cmp(&r_local)
+        } else {
+            lhs.id.cmp(&rhs.id)
+        }
+    });
 
     Ok(storages)
 }

@@ -8,7 +8,9 @@ use crate::{
     RoutesKey,
 };
 
-use super::music::time_to_pause::TimeToPauseVM;
+use super::{
+    connector::Connector, music::time_to_pause::TimeToPauseVM, storage::common::StorageCommonVM,
+};
 
 pub mod router;
 pub mod state;
@@ -18,6 +20,11 @@ pub enum MainBodyWidget {
     Tab { key: RootRouteSubKey },
     TimeToPause,
     MiniPlayer,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum MainAction {
+    PermissionChanged,
 }
 
 pub(crate) struct MainBodyVM {
@@ -55,6 +62,10 @@ impl ViewModel for MainBodyVM {
                 },
                 _ => {}
             },
+            Action::Init(arg) => {
+                Connector::of(cx).init(cx, arg.clone())?;
+                StorageCommonVM::of(cx).update_local_storage_path(cx, arg.storage_path.clone());
+            }
             _ => {}
         }
         Ok(())

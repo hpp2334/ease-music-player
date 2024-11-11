@@ -16,7 +16,7 @@ async fn storage_crud_1() {
 
     let state = app.latest_state();
     let list = state.storage_list.clone().unwrap_or_default();
-    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items.len(), 2);
     let item = list.items[0].clone();
     assert_eq!(item.name, "http://fake");
 
@@ -29,7 +29,7 @@ async fn storage_crud_1() {
 
     let state = app.latest_state();
     let list = state.storage_list.clone().unwrap_or_default();
-    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items.len(), 2);
     let item = list.items[0].clone();
     assert_eq!(item.storage_id, id);
     assert_eq!(item.name, "Demo");
@@ -57,7 +57,7 @@ async fn storage_crud_2() {
 
     let state = app.latest_state();
     let list = state.storage_list.clone().unwrap_or_default();
-    assert_eq!(list.items.len(), 2);
+    assert_eq!(list.items.len(), 3);
     assert_eq!(list.items[0].name, "http://1");
     assert_eq!(list.items[1].name, "http://2");
 
@@ -68,7 +68,7 @@ async fn storage_crud_2() {
 
     let state = app.latest_state();
     let list = state.storage_list.clone().unwrap_or_default();
-    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items.len(), 2);
     assert_eq!(list.items[0].name, "http://2");
 }
 
@@ -79,7 +79,7 @@ async fn storage_remove_1() {
 
     let state = app.latest_state();
     let list = state.storage_list.clone().unwrap_or_default();
-    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items.len(), 2);
     let item = list.items[0].clone();
     assert_eq!(item.typ, StorageType::Webdav);
 

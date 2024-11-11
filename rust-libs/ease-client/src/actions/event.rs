@@ -2,7 +2,7 @@ use ease_client_shared::backends::app::ArgInitializeApp;
 
 use crate::view_models::{
     connector::ConnectorAction,
-    main::router::RouterAction,
+    main::{router::RouterAction, MainAction},
     music::{
         common::MusicCommonAction,
         control::{MusicControlAction, PlayerEvent},
@@ -28,5 +28,6 @@ pub enum ViewAction {
     TimeToPause(TimeToPauseAction),
     Player(PlayerEvent),
     Router(RouterAction),
+    Main(MainAction),
     Widget(WidgetAction),
 }

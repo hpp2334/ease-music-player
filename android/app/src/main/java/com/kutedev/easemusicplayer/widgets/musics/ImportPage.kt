@@ -407,6 +407,7 @@ private fun ImportMusicsError(
         CurrentStorageStateType.AUTHENTICATION_FAILED -> stringResource(id = R.string.import_musics_error_authentication_title)
         CurrentStorageStateType.TIMEOUT -> stringResource(id = R.string.import_musics_error_timeout_title)
         CurrentStorageStateType.UNKNOWN_ERROR -> stringResource(id = R.string.import_musics_error_unknown_title)
+        CurrentStorageStateType.NEED_PERMISSION -> stringResource(id = R.string.import_musics_error_permission_title)
         else -> {
             throw RuntimeException("unsupported type")
         }
@@ -415,6 +416,7 @@ private fun ImportMusicsError(
         CurrentStorageStateType.AUTHENTICATION_FAILED -> stringResource(id = R.string.import_musics_error_authentication_desc)
         CurrentStorageStateType.TIMEOUT -> stringResource(id = R.string.import_musics_error_timeout_desc)
         CurrentStorageStateType.UNKNOWN_ERROR -> stringResource(id = R.string.import_musics_error_unknown_desc)
+        CurrentStorageStateType.NEED_PERMISSION -> stringResource(id = R.string.import_musics_error_permission_desc)
         else -> {
             throw RuntimeException("unsupported type")
         }
@@ -426,7 +428,7 @@ private fun ImportMusicsError(
         color = MaterialTheme.colorScheme.error,
         iconPainter = painterResource(id = R.drawable.icon_warning),
         onClick = {
-            Bridge.dispatchAction(ViewAction.StorageImport(StorageImportAction.RELOAD))
+            Bridge.dispatchClick(StorageImportWidget.Error)
         }
     )
 }
@@ -436,7 +438,7 @@ fun ImportMusicsPage(
     vm: CurrentStorageEntriesViewModel
 ) {
     val state = vm.state.collectAsState().value
-    val storageItems = state.storageItems.filter { item -> !item.isLocal }
+    val storageItems = state.storageItems
     val titleText = when (state.selectedCount) {
         0 -> stringResource(id = R.string.import_musics_title_default)
         1 -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_single_suffix)}"
@@ -493,7 +495,10 @@ fun ImportMusicsPage(
         )
         when (state.stateType) {
             CurrentStorageStateType.LOADING -> ImportEntriesSkeleton()
-            CurrentStorageStateType.TIMEOUT, CurrentStorageStateType.AUTHENTICATION_FAILED, CurrentStorageStateType.UNKNOWN_ERROR -> ImportMusicsError(
+            CurrentStorageStateType.TIMEOUT,
+            CurrentStorageStateType.AUTHENTICATION_FAILED,
+            CurrentStorageStateType.UNKNOWN_ERROR,
+            CurrentStorageStateType.NEED_PERMISSION -> ImportMusicsError(
                 type = state.stateType,
             )
             else -> {

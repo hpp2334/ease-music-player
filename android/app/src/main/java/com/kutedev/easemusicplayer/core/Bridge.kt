@@ -1,9 +1,17 @@
 package com.kutedev.easemusicplayer.core
 
+import android.Manifest.permission.READ_EXTERNAL_STORAGE
+import android.Manifest.permission.READ_MEDIA_AUDIO
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.result.ActivityResultLauncher
+import androidx.core.app.ActivityCompat
+import androidx.core.app.ActivityCompat.requestPermissions
 import androidx.navigation.NavHostController
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import uniffi.ease_client.IFlushNotifier
+import uniffi.ease_client.IPermissionService
 import uniffi.ease_client.IRouterService
 import uniffi.ease_client.IToastService
 import uniffi.ease_client.IViewStateService
@@ -109,6 +117,33 @@ class RouterService : IRouterService {
     }
 }
 
+private class PermissionService : IPermissionService {
+    private var context: android.content.Context? = null
+    private var requestPermissionLauncher: ActivityResultLauncher<String>? = null
+
+    fun setContext(context: android.content.Context, requestPermissionLauncher: ActivityResultLauncher<String>) {
+        this.context = context
+        this.requestPermissionLauncher = requestPermissionLauncher
+    }
+
+    override fun haveStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context?.checkSelfPermission(READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        } else {
+            context?.checkSelfPermission(READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    override fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            this.requestPermissionLauncher?.launch(READ_MEDIA_AUDIO)
+        } else {
+            this.requestPermissionLauncher?.launch(READ_EXTERNAL_STORAGE)
+        }
+    }
+
+}
+
 object Bridge {
     @SuppressLint("StaticFieldLeak")
     private val _player: EaseMusicController = EaseMusicController()
@@ -117,6 +152,8 @@ object Bridge {
     @SuppressLint("StaticFieldLeak")
     private val _toastService = ToastService()
     val routerInternal = RouterService()
+    @SuppressLint("StaticFieldLeak")
+    private val _permissionService = PermissionService()
     private const val SCHEMA_VERSION = 1u
     private const val STORAGE_PATH = "/"
 
@@ -133,12 +170,14 @@ object Bridge {
         routerInternal.destroy()
     }
 
-    fun onActivityCreate(context: android.content.Context) {
+    fun onActivityCreate(context: android.content.Context, requestPermissionLauncher: ActivityResultLauncher<String>) {
         _player.onActivityCreate(context)
 
         _toastService.setContext(context)
+        _permissionService.setContext(context, requestPermissionLauncher)
 
         apiBuildClient(
+            _permissionService,
             routerInternal,
             _player,
             _toastService,

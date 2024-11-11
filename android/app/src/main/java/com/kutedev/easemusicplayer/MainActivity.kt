@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -28,6 +29,7 @@ import androidx.navigation.compose.composable
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
+import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
@@ -47,7 +49,9 @@ import com.kutedev.easemusicplayer.widgets.musics.MusicPlayerPage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
 import com.kutedev.easemusicplayer.widgets.playlists.CreatePlaylistsDialog
 import com.kutedev.easemusicplayer.widgets.playlists.EditPlaylistsDialog
+import uniffi.ease_client.MainAction
 import uniffi.ease_client.RoutesKey
+import uniffi.ease_client.ViewAction
 
 inline fun <reified T> MainActivity.registerViewModel()
 where T : ViewModel, T : IOnNotifyView {
@@ -67,7 +71,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         registerViewModels()
-        Bridge.onActivityCreate(applicationContext)
+
+        val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            nextTickOnMain {
+                Bridge.dispatchAction(ViewAction.Main(MainAction.PERMISSION_CHANGED))
+            }
+        }
+        Bridge.onActivityCreate(applicationContext, requestPermissionLauncher)
 
         setContent {
             Root()

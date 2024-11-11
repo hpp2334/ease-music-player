@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use ease_client_shared::backends::storage::{ArgUpsertStorage, Storage, StorageId, StorageType};
-use ease_remote_storage::{BuildWebdavArg, StorageBackend, Webdav};
+use ease_remote_storage::{BuildWebdavArg, LocalBackend, StorageBackend, Webdav};
 use num_traits::FromPrimitive;
 
 pub fn build_storage(model: StorageModel, music_count: u32, playlist_count: u32) -> Storage {
@@ -34,9 +34,7 @@ pub fn get_storage_backend_by_arg(
     let connect_timeout = Duration::from_secs(5);
 
     let ret: Arc<dyn StorageBackend + Send + Sync + 'static> = match arg.typ {
-        StorageType::Local => {
-            unimplemented!()
-        }
+        StorageType::Local => Arc::new(LocalBackend::new()),
         StorageType::Webdav => {
             let arg = BuildWebdavArg {
                 addr: arg.addr,
