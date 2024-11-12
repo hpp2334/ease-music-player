@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -260,65 +261,69 @@ fun EditStoragesPage(
                 )
             }
         }
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier
-                .padding(30.dp, 12.dp)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+        Box(
+            modifier = Modifier.fillMaxSize()
         ) {
-            Row {
-                StorageBlock(
-                    title = "WebDAV",
-                    isActive = storageType == StorageType.WEBDAV,
-                    onSelect = {
-                        Bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.WEBDAV))
-                    }
-                )
-            }
-            Box(modifier = Modifier.height(30.dp))
-            FormSwitch(
-                label = stringResource(id = R.string.storage_edit_anonymous),
-                value = isAnonymous,
-                onChange = { Bridge.dispatchClick(StorageUpsertWidget.IsAnonymous); }
-            )
-            FormText(
-                label = stringResource(id = R.string.storage_edit_alias),
-                value = form.alias,
-                onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
-            )
-            FormText(
-                label = stringResource(id = R.string.storage_edit_addr),
-                value = form.addr,
-                onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Address, value) },
-                error = if (validated.address == FormFieldStatus.CANNOT_BE_EMPTY) {
-                    R.string.storage_edit_form_address
-                } else {
-                    null
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .imePadding()
+                    .padding(30.dp, 12.dp)
+            ) {
+                Row {
+                    StorageBlock(
+                        title = "WebDAV",
+                        isActive = storageType == StorageType.WEBDAV,
+                        onSelect = {
+                            Bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.WEBDAV))
+                        }
+                    )
                 }
-            )
-            if (!isAnonymous) {
+                Box(modifier = Modifier.height(30.dp))
+                FormSwitch(
+                    label = stringResource(id = R.string.storage_edit_anonymous),
+                    value = isAnonymous,
+                    onChange = { Bridge.dispatchClick(StorageUpsertWidget.IsAnonymous); }
+                )
                 FormText(
-                    label = stringResource(id = R.string.storage_edit_username),
-                    value = form.username,
-                    onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Username, value) },
-                    error = if (validated.username == FormFieldStatus.CANNOT_BE_EMPTY) {
-                        R.string.storage_edit_form_username
+                    label = stringResource(id = R.string.storage_edit_alias),
+                    value = form.alias,
+                    onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
+                )
+                FormText(
+                    label = stringResource(id = R.string.storage_edit_addr),
+                    value = form.addr,
+                    onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Address, value) },
+                    error = if (validated.address == FormFieldStatus.CANNOT_BE_EMPTY) {
+                        R.string.storage_edit_form_address
                     } else {
                         null
                     }
                 )
-                FormText(
-                    label = stringResource(id = R.string.storage_edit_password),
-                    value = form.password,
-                    isPassword = true,
-                    onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Password, value) },
-                    error = if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
-                        R.string.storage_edit_form_password
-                    } else {
-                        null
-                    }
-                )
+                if (!isAnonymous) {
+                    FormText(
+                        label = stringResource(id = R.string.storage_edit_username),
+                        value = form.username,
+                        onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Username, value) },
+                        error = if (validated.username == FormFieldStatus.CANNOT_BE_EMPTY) {
+                            R.string.storage_edit_form_username
+                        } else {
+                            null
+                        }
+                    )
+                    FormText(
+                        label = stringResource(id = R.string.storage_edit_password),
+                        value = form.password,
+                        isPassword = true,
+                        onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Password, value) },
+                        error = if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
+                            R.string.storage_edit_form_password
+                        } else {
+                            null
+                        }
+                    )
+                }
             }
         }
     }

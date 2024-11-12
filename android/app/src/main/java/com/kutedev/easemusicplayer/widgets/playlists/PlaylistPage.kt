@@ -1,8 +1,16 @@
 package com.kutedev.easemusicplayer.widgets.playlists
 
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.DecayAnimationSpec
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableState
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -43,17 +51,21 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
+import com.kutedev.easemusicplayer.components.CustomAnchoredDraggableState
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
+import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
@@ -65,6 +77,7 @@ import uniffi.ease_client.RoutesKey
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.VPlaylistMusicItem
 import uniffi.ease_client_shared.MusicId
+import kotlin.math.roundToInt
 
 @Composable
 private fun RemovePlaylistDialog(
@@ -248,19 +261,19 @@ private fun PlaylistItem(
     onSwipe: () -> Unit,
     onRemove: () -> Unit,
 ) {
-    val panelWidth = 48f
+    val panelWidthDp = 48.dp
 
     val density = LocalDensity.current
-    val interactionSource = remember { MutableInteractionSource() }
 
-    LaunchedEffect(Unit) {
-        interactionSource.interactions.collect {interaction ->
-            when (interaction) {
-                is DragInteraction.Start -> {
-                    onSwipe()
-                }
-            }
-        }
+    val anchoredDraggableState = with(density) {
+        rememberCustomAnchoredDraggableState(
+            initialValue = 0f,
+            anchors = mapOf(
+                0.dp.toPx() to "START",
+                -panelWidthDp.toPx() to "END"
+            ),
+            animationSpec = tween(200),
+        )
     }
 
     val color = if (playing) {
@@ -271,12 +284,18 @@ private fun PlaylistItem(
     val bgColor = if (playing) {
         MaterialTheme.colorScheme.secondary
     } else {
-        MaterialTheme.colorScheme.surface
+        Color.Transparent
     }
     val durationColor = if (playing) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    LaunchedEffect(currentSwipingMusicId) {
+        if (currentSwipingMusicId != item.id) {
+            anchoredDraggableState.update(0f)
+        }
     }
 
     Box(
@@ -291,7 +310,15 @@ private fun PlaylistItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
+                .offset(x = with(density) { anchoredDraggableState.value.toDp() })
                 .clip(RoundedCornerShape(14.dp))
+                .customAnchoredDraggable(
+                    state = anchoredDraggableState,
+                    orientation = Orientation.Horizontal,
+                    onDragStarted = {
+                        onSwipe()
+                    }
+                )
                 .clickable {
                     Bridge.dispatchClick(PlaylistDetailWidget.Music(item.id));
                     onSwipe()
@@ -330,23 +357,28 @@ private fun PlaylistItem(
                 fontSize = 14.sp,
             )
         }
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxHeight()
-                .width(panelWidth.dp)
                 .clipToBounds()
-                .offset(x = panelWidth.dp)
+                .fillMaxSize()
                 .align(alignment = Alignment.CenterEnd)
         ) {
-            Box(modifier = Modifier.width(8.dp))
-            EaseIconButton(
-                sizeType = EaseIconButtonSize.Medium,
-                buttonType = EaseIconButtonType.ErrorVariant,
-                painter = painterResource(id = R.drawable.icon_deleteseep),
-                onClick = {
-                    onRemove()
-                }
-            )
+            Row(
+                modifier = Modifier
+                    .offset(x = panelWidthDp + with(density) { anchoredDraggableState.value.toDp() })
+                    .fillMaxSize(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Box(modifier = Modifier.width(8.dp))
+                EaseIconButton(
+                    sizeType = EaseIconButtonSize.Medium,
+                    buttonType = EaseIconButtonType.ErrorVariant,
+                    painter = painterResource(id = R.drawable.icon_deleteseep),
+                    onClick = {
+                        onRemove()
+                    }
+                )
+            }
         }
     }
 }

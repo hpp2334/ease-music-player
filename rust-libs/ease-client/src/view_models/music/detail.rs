@@ -1,8 +1,9 @@
-use misty_vm::{AppBuilderContext, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, IToHost, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
+    RouterService,
 };
 
 use super::common::MusicCommonVM;
@@ -30,6 +31,7 @@ impl ViewModel for MusicDetailVM {
                     (Widget::MusicDetail(action), WidgetActionType::Click) => match action {
                         MusicDetailWidget::Remove => {
                             MusicCommonVM::of(cx).remove_current(cx)?;
+                            RouterService::of(cx).pop();
                         }
                     },
                     _ => {}

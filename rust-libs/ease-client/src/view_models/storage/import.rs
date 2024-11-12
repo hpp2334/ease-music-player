@@ -117,6 +117,8 @@ impl StorageImportVM {
                 state.checked_entries_path.clear();
                 state.current_path = self.get_current_path(id, &store);
                 state.undo_stack.clear();
+                state.state_type = CurrentStorageStateType::Loading;
+                state.entries.clear();
             }
         }
         self.reload(cx);

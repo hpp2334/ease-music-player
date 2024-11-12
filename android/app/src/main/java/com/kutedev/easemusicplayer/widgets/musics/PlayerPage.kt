@@ -1,6 +1,5 @@
 package com.kutedev.easemusicplayer.widgets.musics
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +25,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,7 +33,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
@@ -48,16 +45,16 @@ import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
-import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
 import uniffi.ease_client.MusicControlAction
 import uniffi.ease_client.MusicControlWidget
+import uniffi.ease_client.MusicDetailWidget
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.PlayMode
 
 @Composable
 private fun MusicPlayerHeader(
-    onRemoveDialogOpen: () -> Unit,
+    onRemoveClick: () -> Unit,
 ) {
     var moreMenuExpanded by remember {
         mutableStateOf(false)
@@ -97,7 +94,7 @@ private fun MusicPlayerHeader(
                             stringId = R.string.music_player_context_menu_remove,
                             isError = true,
                             onClick = {
-                                onRemoveDialogOpen()
+                                onRemoveClick()
                             }
                         ),
                     )
@@ -311,9 +308,6 @@ fun MusicPlayerPage(
     timeToPauseVM: TimeToPauseViewModel
 ) {
     val state = vm.state.collectAsState().value
-    var removeDialogOpen by remember {
-        mutableStateOf(false)
-    }
 
     Box(
         modifier = Modifier
@@ -322,8 +316,8 @@ fun MusicPlayerPage(
     ) {
         Column {
             MusicPlayerHeader(
-                onRemoveDialogOpen = {
-                    removeDialogOpen = true
+                onRemoveClick = {
+                    Bridge.dispatchClick(MusicDetailWidget.REMOVE)
                 },
             )
             Column(
