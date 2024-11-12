@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -116,17 +117,23 @@ private fun MiniPlayerCore(
                 }
             }
             Box(modifier = Modifier.height(4.dp))
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth(),
-                progress = {
-                    if (totalDurationMS == 0uL) {
-                        0f
-                    } else {
-                        currentDurationMS.toFloat() / totalDurationMS.toFloat()
-                    }
-                },
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .fillMaxWidth()
+            ) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    progress = {
+                        if (totalDurationMS == 0uL) {
+                            0f
+                        } else {
+                            currentDurationMS.toFloat() / totalDurationMS.toFloat()
+                        }
+                    },
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
             Text(
                 text = totalDuration,
                 fontSize = 9.sp,

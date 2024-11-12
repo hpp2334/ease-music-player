@@ -1,6 +1,10 @@
 package com.kutedev.easemusicplayer.widgets.musics
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -107,7 +111,7 @@ private fun MusicPlayerHeader(
 @Composable
 private fun MusicSlider(
     currentDuration: String,
-    currentDurationMS: ULong,
+    _currentDurationMS: ULong,
     totalDuration: String,
     totalDurationMS: ULong,
     onChangeMusicPosition: (ms: ULong) -> Unit,
@@ -116,10 +120,26 @@ private fun MusicSlider(
     val sliderHeight = 4.dp
     val sliderContainerHeight = 16.dp
 
+    var isDragging by remember { mutableStateOf(false) }
+    var draggingCurrentDurationMS by remember { mutableStateOf(_currentDurationMS) }
+    val currentDurationMS = if (isDragging) {
+        draggingCurrentDurationMS
+    } else {
+        _currentDurationMS
+    }
+
     val durationRate = if (totalDurationMS == 0UL) { 0f } else { (currentDurationMS.toDouble() / totalDurationMS.toDouble()).toFloat() };
     var sliderWidth by remember { mutableIntStateOf(0) }
     val sliderWidthDp = with(LocalDensity.current) {
         sliderWidth.toDp()
+    }
+
+    val draggableState = rememberDraggableState { deltaPx ->
+        val delta = (deltaPx.toDouble() / sliderWidth.toDouble() * totalDurationMS.toDouble()).toLong()
+        var nextMS = draggingCurrentDurationMS.toLong() + delta
+        nextMS = nextMS.coerceIn(0L, totalDurationMS.toLong())
+
+        draggingCurrentDurationMS = nextMS.toULong()
     }
 
     Column(
@@ -133,19 +153,25 @@ private fun MusicSlider(
                 .onSizeChanged { size ->
                     sliderWidth = size.width;
                 }
-                .pointerInput(sliderWidth, totalDurationMS) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val position = event.changes.first().position
-
-                            var nextMS =
-                                (position.x / sliderWidth.toDouble() * totalDurationMS.toDouble()).toLong()
-                            nextMS = nextMS.coerceIn(0L, totalDurationMS.toLong())
-                            onChangeMusicPosition(nextMS.toULong())
-                        }
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        var nextMS = (offset.x.toDouble() / sliderWidth.toDouble() * totalDurationMS.toDouble()).toLong()
+                        nextMS = nextMS.coerceIn(0L, totalDurationMS.toLong())
+                        onChangeMusicPosition(nextMS.toULong())
                     }
                 }
+                .draggable(
+                    state = draggableState,
+                    orientation = Orientation.Horizontal,
+                    onDragStarted = {
+                        isDragging = true
+                        draggingCurrentDurationMS = _currentDurationMS
+                    },
+                    onDragStopped = {
+                        isDragging = false
+                        onChangeMusicPosition(draggingCurrentDurationMS)
+                    }
+                )
         ) {
             Row(modifier = Modifier
                 .fillMaxWidth()
@@ -348,7 +374,7 @@ fun MusicPlayerPage(
                 )
                 MusicSlider(
                     currentDuration = state.currentDuration,
-                    currentDurationMS = state.currentDurationMs,
+                    _currentDurationMS = state.currentDurationMs,
                     totalDuration = state.totalDuration,
                     totalDurationMS = state.totalDurationMs,
                     onChangeMusicPosition = { nextMS ->
@@ -400,7 +426,7 @@ private fun MusicSliderPreview() {
     ) {
         MusicSlider(
             currentDuration = formatMS(currentMS),
-            currentDurationMS = currentMS,
+            _currentDurationMS = currentMS,
             totalDuration = formatMS(totalMS),
             totalDurationMS = totalMS,
             onChangeMusicPosition = {nextMS ->
