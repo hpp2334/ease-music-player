@@ -294,7 +294,7 @@ private fun PlaylistItem(
 
     LaunchedEffect(currentSwipingMusicId) {
         if (currentSwipingMusicId != item.id) {
-            anchoredDraggableState.update(0f)
+            anchoredDraggableState.animateTo(0f)
         }
     }
 

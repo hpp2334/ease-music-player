@@ -1,5 +1,7 @@
 package com.kutedev.easemusicplayer.widgets.musics
 
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -17,11 +19,15 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +51,9 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.MusicCover
+import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.dropShadow
+import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
 import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
@@ -55,6 +63,8 @@ import uniffi.ease_client.MusicDetailWidget
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.PlayMode
+import kotlin.math.absoluteValue
+import kotlin.math.sign
 
 @Composable
 private fun MusicPlayerHeader(
@@ -213,37 +223,134 @@ private fun MusicSlider(
     }
 }
 
+
 @Composable
-private fun MusicPlayerCover(
-    onLeft: () -> Unit,
-    onRight: () -> Unit,
+private fun CoverImage(url: String) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxSize()
+    ) {
+        MusicCover(
+            modifier = Modifier
+                .dropShadow(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    offsetX = 0.dp,
+                    offsetY = 0.dp,
+                    blurRadius = 16.dp
+                )
+                .clip(RoundedCornerShape(20.dp))
+                .size(300.dp),
+            coverUrl = url,
+        )
+    }
+}
+
+@Composable
+private fun MusicPlayerBody(
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
     cover: String,
     prevCover: String,
-    nextCover: String
+    nextCover: String,
+    canPrev: Boolean,
+    canNext: Boolean,
 ) {
-    @Composable
-    fun CoverImage(url: String) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
-            MusicCover(
-                modifier = Modifier
-                    .dropShadow(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        offsetX = 0.dp,
-                        offsetY = 0.dp,
-                        blurRadius = 16.dp
-                    )
-                    .clip(RoundedCornerShape(20.dp))
-                    .size(300.dp),
-                coverUrl = url,
-            )
-        }
+    val density = LocalDensity.current
+    val anchoredDraggableState = rememberCustomAnchoredDraggableState(
+        initialValue = 0f,
+        animationSpec = tween(
+            durationMillis = 300,
+            easing = LinearOutSlowInEasing
+        ),
+        anchors = mapOf(0f to "DEFAULT"),
+    )
+    val deltaDp = with(density) {
+        anchoredDraggableState.value.toDp()
+    }
+    var widgetWidth by remember { mutableIntStateOf(0) }
+    val widgetWidthDp = with(LocalDensity.current) {
+        widgetWidth.toDp()
     }
 
-    CoverImage(url = cover)
+    var dragStartX by remember { mutableFloatStateOf(0f) }
+
+    fun updateAnchored() {
+        val anchors =listOfNotNull(
+            0f to "DEFAULT",
+            if (canPrev) { widgetWidth.toFloat() to "PREV" } else null,
+            if (canNext) { -widgetWidth.toFloat() to "NEXT" } else null,
+        ).toMap()
+
+        anchoredDraggableState.updateAnchors(
+            anchors,
+            {value ->
+                if (value == widgetWidth.toFloat()) {
+                    onPrev()
+                    anchoredDraggableState.update(0f)
+                } else if (value == -widgetWidth.toFloat()) {
+                    onNext()
+                    anchoredDraggableState.update(0f)
+                }
+            }
+        )
+    }
+
+    LaunchedEffect(canPrev, canNext) {
+        updateAnchored()
+    }
+
+    Box(
+        modifier = Modifier
+            .onSizeChanged { size ->
+                if (widgetWidth != size.width) {
+                    widgetWidth = size.width;
+                    updateAnchored()
+                }
+            }
+            .customAnchoredDraggable(
+                state = anchoredDraggableState,
+                orientation = Orientation.Horizontal,
+                onDragStarted = {
+                    dragStartX = anchoredDraggableState.value
+                },
+                onLimitDragEnded = {nextValue ->
+                    val dis = (nextValue - dragStartX).absoluteValue.coerceIn(0f, widgetWidth.toFloat());
+                    val sign = (nextValue - dragStartX).sign;
+                    val next = dragStartX + dis * sign
+                    next
+                }
+            )
+            .fillMaxSize()
+    ) {
+        if (widgetWidth > 0) {
+            if (canPrev) {
+                Box(
+                    modifier = Modifier
+                        .offset(x = -widgetWidthDp + deltaDp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CoverImage(url = prevCover)
+                }
+            }
+            if (canNext) {
+                Box(
+                    modifier = Modifier
+                        .offset(x = widgetWidthDp + deltaDp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CoverImage(url = nextCover)
+                }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .offset(x = deltaDp),
+            contentAlignment = Alignment.Center,
+        ) {
+            CoverImage(url = cover)
+        }
+    }
 }
 
 @Composable
@@ -350,16 +457,18 @@ fun MusicPlayerPage(
                 modifier = Modifier
                     .weight(1.0F)
             ) {
-                MusicPlayerCover(
-                    onLeft = {
+                MusicPlayerBody(
+                    onPrev = {
                         Bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
                     },
-                    onRight = {
+                    onNext = {
                         Bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
                     },
                     cover = state.cover,
                     prevCover = state.previousCover,
                     nextCover = state.nextCover,
+                    canPrev = state.canPlayPrevious,
+                    canNext = state.canPlayNext
                 )
             }
             Column(
@@ -442,29 +551,49 @@ private fun MusicSliderPreview() {
     heightDp = 800,
 )
 @Composable
-private fun MusicCoverPreview() {
+private fun MusicPlayerBodyPreview() {
+    var canPrev by remember { mutableStateOf(true) }
+    var canNext by remember { mutableStateOf(true) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
     ) {
+        Row {
+            Column {
+                Text(text = "canPrev")
+                Switch(
+                    checked = canPrev,
+                    onCheckedChange = {value -> canPrev = value}
+                )
+            }
+            Column {
+                Text(text = "canNext")
+                Switch(
+                    checked = canNext,
+                    onCheckedChange = {value -> canNext = value}
+                )
+            }
+        }
         Box(modifier = Modifier
             .fillMaxWidth()
             .height(40.dp)
-            .background(Color.Blue))
+            .background(Color.Blue)
+        )
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.weight(1f)
         ) {
-            MusicPlayerCover(
-                onLeft = {
-                    println("onLeft")
+            MusicPlayerBody(
+                onPrev = {
                 },
-                onRight = {
-                    println("onRight")
+                onNext = {
                 },
                 cover = "",
                 prevCover = "",
-                nextCover = ""
+                nextCover = "",
+                canPrev = canPrev,
+                canNext = canNext
             )
         }
         Box(modifier = Modifier
