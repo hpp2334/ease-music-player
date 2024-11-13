@@ -61,4 +61,9 @@
     <string name="time_to_pause_minute">分</string>
     <string name="storage_remove_desc_main">是否删除 “$$B__E_TITLE$$” 存储 ?</string>
     <string name="storage_remove_desc_count">将会在 $$B__E_PCNT$$ 个播放列表中删除 $$B__E_MCNT$$ 首曲目。</string>
+    <string name="music_lyric_add">添加歌词</string>
+    <string name="music_lyric_remove">删除歌词</string>
+    <string name="music_lyric_no_desc">找不到歌词</string>
+    <string name="music_lyric_try_add_desc">点击尝试添加</string>
+    <string name="music_lyric_fail">加载歌词失败</string>
 </resources>

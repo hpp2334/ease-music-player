@@ -228,6 +228,8 @@ async fn playlist_import_from_local_1() {
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
+    app.permission().update_permission(true);
+
     app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
     app.wait_network().await;
 

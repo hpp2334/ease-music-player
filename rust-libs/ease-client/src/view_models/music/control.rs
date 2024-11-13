@@ -92,15 +92,14 @@ impl MusicControlVM {
     }
 
     pub(crate) fn tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        self.sync_current_duration(cx)?;
+        self.sync_current_duration(cx);
         Ok(())
     }
 
-    fn sync_current_duration(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    fn sync_current_duration(&self, cx: &ViewModelContext) {
         let mut current = cx.model_mut(&self.current);
         current.current_duration =
             Duration::from_secs(MusicPlayerService::of(cx).get_current_duration_s());
-        Ok(())
     }
 
     fn request_play_next(&self, cx: &ViewModelContext) -> EaseResult<()> {
@@ -193,7 +192,7 @@ impl MusicControlVM {
 
     fn request_seek(&self, cx: &ViewModelContext, arg: u64) -> EaseResult<()> {
         MusicPlayerService::of(cx).seek(arg);
-        self.sync_current_duration(cx)?;
+        self.sync_current_duration(cx);
         Ok(())
     }
 
@@ -265,7 +264,7 @@ impl MusicControlVM {
                 };
                 MusicPlayerService::of(&cx).set_music_url(item);
             }
-            this.sync_current_duration(&cx)?;
+            this.sync_current_duration(&cx);
             this.request_resume(&cx)?;
 
             Ok(())
@@ -323,6 +322,7 @@ impl MusicControlVM {
                 self.on_sync_cover(cx, *id, buffer.clone())?;
             }
         };
+        self.sync_current_duration(&cx);
         Ok(())
     }
 
