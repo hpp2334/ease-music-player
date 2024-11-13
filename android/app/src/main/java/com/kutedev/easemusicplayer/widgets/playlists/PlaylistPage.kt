@@ -68,8 +68,7 @@ import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
-import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
-import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client.PlaylistDetailWidget
@@ -424,11 +423,10 @@ private fun PlaylistItemsBlock(
 
 @Composable
 fun PlaylistPage(
-    vm: CurrentPlaylistViewModel,
-    currentMusicVM: CurrentMusicViewModel,
+    evm: EaseViewModel,
 ) {
-    val state = vm.state.collectAsState().value
-    val currentMusicState = currentMusicVM.state.collectAsState().value
+    val state = evm.currentPlaylistState.collectAsState().value
+    val currentMusicState = evm.currentMusicState.collectAsState().value
     var removeDialogOpen by remember { mutableStateOf(false) }
     val id = state.id
 
@@ -480,7 +478,7 @@ fun PlaylistPage(
         BottomBar(
             currentRoute = RoutesKey.PLAYLIST,
             bottomBarPageState = null,
-            currentMusicVM = currentMusicVM,
+            evm = evm,
         )
     }
     RemovePlaylistDialog(

@@ -143,6 +143,8 @@ class PlaybackService : MediaSessionService() {
                 nextTickOnMain {
                     if (isPlaying) {
                         Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Play));
+                    } else {
+                        Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Pause));
                     }
                 }
             }

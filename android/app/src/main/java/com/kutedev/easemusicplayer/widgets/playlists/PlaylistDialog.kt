@@ -38,8 +38,7 @@ import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.ImportCover
 import com.kutedev.easemusicplayer.components.SimpleFormText
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
-import com.kutedev.easemusicplayer.viewmodels.EditPlaylistViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.PlaylistCreateWidget
 import uniffi.ease_client.PlaylistEditWidget
 import uniffi.ease_client_shared.CreatePlaylistMode
@@ -93,9 +92,9 @@ private fun FullImportHeader(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FullImportBlock(
-    vm: CreatePlaylistViewModel
+    evm: EaseViewModel
 ) {
-    val state = vm.state.collectAsState().value
+    val state = evm.createPlaylistState.collectAsState().value
 
     if (!state.fullImported) {
         Column(
@@ -183,9 +182,9 @@ private fun FullImportBlock(
 
 @Composable
 fun CreatePlaylistsDialog(
-    vm: CreatePlaylistViewModel
+    evm: EaseViewModel
 ) {
-    val state = vm.state.collectAsState().value
+    val state = evm.createPlaylistState.collectAsState().value
     val isOpen = state.modalOpen
     val mode = state.mode
 
@@ -224,7 +223,7 @@ fun CreatePlaylistsDialog(
             Box(modifier = Modifier.height(8.dp))
             if (state.mode == CreatePlaylistMode.FULL) {
                 FullImportBlock(
-                    vm = vm,
+                    evm = evm,
                 )
             } else {
                 SimpleFormText(
@@ -278,9 +277,9 @@ fun CreatePlaylistsDialog(
 
 @Composable
 fun EditPlaylistsDialog(
-    vm: EditPlaylistViewModel
+    evm: EaseViewModel
 ) {
-    val state = vm.state.collectAsState().value
+    val state = evm.editPlaylistState.collectAsState().value
     val isOpen = state.modalOpen
 
     val onDismissRequest = {

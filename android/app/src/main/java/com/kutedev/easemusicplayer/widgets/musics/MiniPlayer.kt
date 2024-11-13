@@ -34,7 +34,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.MusicCover
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.MainBodyWidget
 import uniffi.ease_client.MusicControlWidget
 
@@ -144,9 +144,9 @@ private fun MiniPlayerCore(
 
 @Composable
 fun MiniPlayer(
-    vm: CurrentMusicViewModel
+    evm: EaseViewModel
 ) {
-    val state = vm.state.collectAsState().value
+    val state = evm.currentMusicState.collectAsState().value
 
     MiniPlayerCore(
         isPlaying = state.playing,

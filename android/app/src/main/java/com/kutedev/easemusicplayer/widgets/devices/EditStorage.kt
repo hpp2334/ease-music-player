@@ -49,7 +49,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.FormFieldStatus
 import uniffi.ease_client.StorageUpsertWidget
 import uniffi.ease_client.Widget
@@ -152,7 +152,7 @@ private fun StorageBlock(
 
 @Composable
 fun EditStoragesPage(
-    formVM: EditStorageFormViewModel,
+    evm: EaseViewModel,
 ) {
     val context = LocalContext.current
     var removeDialogOpen by remember { mutableStateOf(false) }
@@ -160,7 +160,7 @@ fun EditStoragesPage(
     val toast = remember {
         Toast.makeText(context, "", Toast.LENGTH_SHORT)
     }
-    val state = formVM.state.collectAsState().value;
+    val state by evm.editStorageState.collectAsState();
     val form = state.info;
     val validated = state.validated;
 

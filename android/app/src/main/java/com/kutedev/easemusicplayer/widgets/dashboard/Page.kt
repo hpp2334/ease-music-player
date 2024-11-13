@@ -21,9 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,19 +29,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.navigation.NavHostController
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
-import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.MainBodyWidget
 import uniffi.ease_client.StorageListWidget
-import uniffi.ease_client.TimeToPauseAction
 import uniffi.ease_client.VStorageListItem
-import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.StorageId
 import uniffi.ease_client_shared.StorageType
 
@@ -67,8 +60,8 @@ private fun Title(title: String) {
 }
 
 @Composable
-private fun SleepModeBlock(vm: TimeToPauseViewModel) {
-    val state = vm.state.collectAsState().value
+private fun SleepModeBlock(evm: EaseViewModel) {
+    val state by evm.timeToPauseState.collectAsState()
     val blockBg = if (state.enabled) {
         MaterialTheme.colorScheme.secondary
     } else {
@@ -182,10 +175,9 @@ private fun DevicesBlock(storageItems: List<VStorageListItem>) {
 
 @Composable
 fun DashboardSubpage(
-    timeToPauseVM: TimeToPauseViewModel,
-    storageListVM: StorageListViewModel,
+    evm: EaseViewModel,
 ) {
-    val storageState = storageListVM.state.collectAsState().value
+    val storageState by evm.storageListState.collectAsState()
     val storageItems = storageState.items.filter { v -> v.typ != StorageType.LOCAL }
 
     Column(
@@ -201,7 +193,7 @@ fun DashboardSubpage(
         ) {
             Title(title = stringResource(id = R.string.dashboard_sleep_mode))
         }
-        SleepModeBlock(vm = timeToPauseVM)
+        SleepModeBlock(evm = evm)
         Box(modifier = Modifier.height(48.dp))
         Row(
             modifier = Modifier

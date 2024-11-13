@@ -9,14 +9,9 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
-import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
-import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
-import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
-import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
-import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.getBottomBarSpace
 import com.kutedev.easemusicplayer.widgets.dashboard.DashboardSubpage
@@ -28,12 +23,10 @@ import uniffi.ease_client.RoutesKey
 fun HomePage(
     ctx: android.content.Context,
     pagerState: PagerState,
-    currentMusicVM: CurrentMusicViewModel,
-    playlistsVM: PlaylistsViewModel,
-    timeToPauseVM: TimeToPauseViewModel,
-    storageListVM: StorageListViewModel,
+    evm: EaseViewModel,
 ) {
-    val isPlaying = currentMusicVM.state.collectAsState().value.playing
+    val state by evm.currentMusicState.collectAsState()
+    val isPlaying = state.playing
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -46,11 +39,11 @@ fun HomePage(
         ) { page ->
             if (page == 0) {
                 PlaylistsSubpage(
-                    playlistsVM = playlistsVM,
+                    evm = evm,
                 )
             }
             if (page == 1) {
-                DashboardSubpage(timeToPauseVM = timeToPauseVM, storageListVM = storageListVM)
+                DashboardSubpage(evm = evm)
             }
             if (page == 2) {
                 SettingSubpage(ctx = ctx)
@@ -59,7 +52,7 @@ fun HomePage(
         BottomBar(
             currentRoute = RoutesKey.HOME,
             bottomBarPageState = pagerState,
-            currentMusicVM = currentMusicVM,
+            evm = evm,
         )
     }
 }

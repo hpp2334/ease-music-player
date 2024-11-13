@@ -17,7 +17,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.R
-import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
 import uniffi.ease_client.VPlaylistAbstractItem
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -40,16 +39,15 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
-import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client.PlaylistListWidget
 
 @Composable
 fun PlaylistsSubpage(
-    playlistsVM: PlaylistsViewModel,
+    evm: EaseViewModel,
 ) {
-    val state = playlistsVM.state.collectAsState().value
+    val state = evm.playlistListState.collectAsState().value
 
     if (state.playlistList.isEmpty()) {
         Box(

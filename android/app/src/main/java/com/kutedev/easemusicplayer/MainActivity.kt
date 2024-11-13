@@ -8,38 +8,22 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
-import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistViewModel
-import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
-import com.kutedev.easemusicplayer.viewmodels.CurrentPlaylistViewModel
-import com.kutedev.easemusicplayer.viewmodels.CurrentStorageEntriesViewModel
-import com.kutedev.easemusicplayer.viewmodels.EditPlaylistViewModel
-import com.kutedev.easemusicplayer.viewmodels.PlaylistsViewModel
-import com.kutedev.easemusicplayer.viewmodels.StorageListViewModel
-import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
-import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
-import com.kutedev.easemusicplayer.viewmodels.EditStorageFormViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.RoutesProvider
 import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
@@ -106,15 +90,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun Root() {
-        val playlistsVM: PlaylistsViewModel by viewModels()
-        val timeToPauseVM: TimeToPauseViewModel by viewModels()
-        val storageListVM: StorageListViewModel by viewModels()
-        val editStorageVM: EditStorageFormViewModel by viewModels()
-        val createPlaylistVM: CreatePlaylistViewModel by viewModels()
-        val currentPlaylistVM: CurrentPlaylistViewModel by viewModels()
-        val currentStorageEntriesVM: CurrentStorageEntriesViewModel by viewModels()
-        val currentMusicVM: CurrentMusicViewModel by viewModels()
-        val editPlaylistVM: EditPlaylistViewModel by viewModels()
+        val evm: EaseViewModel by viewModels()
 
         RoutesProvider { controller ->
             EaseMusicPlayerTheme {
@@ -147,36 +123,31 @@ class MainActivity : ComponentActivity() {
                                     HomePage(
                                         ctx = applicationContext,
                                         pagerState = bottomBarPageState,
-                                        currentMusicVM = currentMusicVM,
-                                        playlistsVM = playlistsVM,
-                                        timeToPauseVM = timeToPauseVM,
-                                        storageListVM = storageListVM,
+                                        evm = evm,
                                     )
-                                    CreatePlaylistsDialog(vm = createPlaylistVM)
+                                    CreatePlaylistsDialog(evm = evm)
                                 }
                                 composable(RoutesKey.ADD_DEVICES.toString()) {
                                     EditStoragesPage(
-                                        formVM = editStorageVM,
+                                        evm = evm,
                                     )
                                 }
                                 composable(RoutesKey.PLAYLIST.toString()) {
                                     PlaylistPage(
-                                        vm = currentPlaylistVM,
-                                        currentMusicVM = currentMusicVM,
+                                        evm = evm
                                     )
-                                    EditPlaylistsDialog(vm = editPlaylistVM)
+                                    EditPlaylistsDialog(evm = evm)
                                 }
                                 composable(RoutesKey.IMPORT_MUSICS.toString()) {
-                                    ImportMusicsPage(vm = currentStorageEntriesVM)
+                                    ImportMusicsPage(evm = evm)
                                 }
                                 composable(RoutesKey.MUSIC_PLAYER.toString()) {
                                     MusicPlayerPage(
-                                        vm = currentMusicVM,
-                                        timeToPauseVM = timeToPauseVM,
+                                        evm = evm
                                     )
                                 }
                             }
-                            TimeToPauseModal(vm = timeToPauseVM)
+                            TimeToPauseModal(evm = evm)
                         }
                     }
                 }
@@ -185,15 +156,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun registerViewModels() {
-        registerViewModel<PlaylistsViewModel>()
-        registerViewModel<StorageListViewModel>()
-        registerViewModel<EditStorageFormViewModel>()
-        registerViewModel<CreatePlaylistViewModel>()
-        registerViewModel<EditPlaylistViewModel>()
-        registerViewModel<CurrentPlaylistViewModel>()
-        registerViewModel<CurrentStorageEntriesViewModel>()
-        registerViewModel<CurrentMusicViewModel>()
-        registerViewModel<TimeToPauseViewModel>()
+        registerViewModel<EaseViewModel>()
     }
 }
 

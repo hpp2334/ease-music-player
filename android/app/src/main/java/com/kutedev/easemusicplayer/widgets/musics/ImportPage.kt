@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,10 +46,9 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.CurrentStorageEntriesViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.StorageImportAction
 import uniffi.ease_client.StorageImportWidget
-import uniffi.ease_client.StorageUpsertWidget
 import uniffi.ease_client.VCurrentStorageEntriesStateStorageItem
 import uniffi.ease_client.VCurrentStorageEntry
 import uniffi.ease_client.VSplitPathItem
@@ -435,9 +435,9 @@ private fun ImportMusicsError(
 
 @Composable
 fun ImportMusicsPage(
-    vm: CurrentStorageEntriesViewModel
+    evm: EaseViewModel
 ) {
-    val state = vm.state.collectAsState().value
+    val state by evm.currentStorageEntriesState.collectAsState()
     val storageItems = state.storageItems
     val titleText = when (state.selectedCount) {
         0 -> stringResource(id = R.string.import_musics_title_default)

@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.dropShadow
-import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.getCurrentRoute
 import com.kutedev.easemusicplayer.widgets.musics.MiniPlayer
 import kotlinx.coroutines.launch
@@ -82,7 +82,7 @@ fun BottomBarSpacer(
 fun BoxScope.BottomBar(
     currentRoute: RoutesKey,
     bottomBarPageState: PagerState?,
-    currentMusicVM: CurrentMusicViewModel,
+    evm: EaseViewModel
 ) {
     val items = listOf(
         BPlaylist,
@@ -91,7 +91,7 @@ fun BoxScope.BottomBar(
     )
     val animationScope = rememberCoroutineScope()
 
-    val hasCurrentMusic = currentMusicVM.state.collectAsState().value.id != null
+    val hasCurrentMusic = evm.currentMusicState.collectAsState().value.id != null
 
     val showBottomBar = currentRoute == RoutesKey.HOME
     val showMiniPlayer = hasCurrentMusic && (currentRoute == RoutesKey.HOME || currentRoute == RoutesKey.PLAYLIST)
@@ -114,7 +114,7 @@ fun BoxScope.BottomBar(
     ) {
         if (showMiniPlayer) {
             MiniPlayer(
-                vm = currentMusicVM
+                evm = evm
             )
         }
         if (showBottomBar && bottomBarPageState != null) {

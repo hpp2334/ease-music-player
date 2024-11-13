@@ -55,8 +55,7 @@ import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.CurrentMusicViewModel
-import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.MusicControlAction
 import uniffi.ease_client.MusicControlWidget
 import uniffi.ease_client.MusicDetailWidget
@@ -247,6 +246,13 @@ private fun CoverImage(url: String) {
 }
 
 @Composable
+private fun MusicLyric(
+
+) {
+
+}
+
+@Composable
 private fun MusicPlayerBody(
     onPrev: () -> Unit,
     onNext: () -> Unit,
@@ -355,9 +361,9 @@ private fun MusicPlayerBody(
 
 @Composable
 private fun MusicPanel(
-    state: VCurrentMusicState,
-    timeToPauseVM: TimeToPauseViewModel
+    evm: EaseViewModel,
 ) {
+    val state by evm.currentMusicState.collectAsState()
     var isOpen by remember { mutableStateOf(false) }
     val modeDrawable = when (state.playMode) {
         PlayMode.SINGLE -> R.drawable.icon_mode_one
@@ -437,10 +443,9 @@ private fun MusicPanel(
 
 @Composable
 fun MusicPlayerPage(
-    vm: CurrentMusicViewModel,
-    timeToPauseVM: TimeToPauseViewModel
+    evm: EaseViewModel,
 ) {
-    val state = vm.state.collectAsState().value
+    val state by evm.currentMusicState.collectAsState()
 
     Box(
         modifier = Modifier
@@ -497,8 +502,7 @@ fun MusicPlayerPage(
                     .padding(0.dp, 48.dp)
             ) {
                 MusicPanel(
-                    state = state,
-                    timeToPauseVM = timeToPauseVM,
+                    evm = evm,
                 )
             }
         }

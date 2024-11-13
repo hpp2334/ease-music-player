@@ -45,7 +45,7 @@ import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.TimeToPauseViewModel
+import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import uniffi.ease_client.TimeToPauseAction
@@ -274,9 +274,9 @@ private fun TimeToPauseModalCore(
 
 @Composable
 fun TimeToPauseModal(
-    vm: TimeToPauseViewModel,
+    evm: EaseViewModel,
 ) {
-    val state = vm.state.collectAsState().value
+    val state by evm.timeToPauseState.collectAsState()
     val onClose = {
         Bridge.dispatchAction(ViewAction.TimeToPause(TimeToPauseAction.CloseModal));
     }
