@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -82,7 +83,8 @@ fun BottomBarSpacer(
 fun BoxScope.BottomBar(
     currentRoute: RoutesKey,
     bottomBarPageState: PagerState?,
-    evm: EaseViewModel
+    evm: EaseViewModel,
+    scaffoldPadding: PaddingValues,
 ) {
     val items = listOf(
         BPlaylist,
@@ -95,7 +97,12 @@ fun BoxScope.BottomBar(
 
     val showBottomBar = currentRoute == RoutesKey.HOME
     val showMiniPlayer = hasCurrentMusic && (currentRoute == RoutesKey.HOME || currentRoute == RoutesKey.PLAYLIST)
+
     if (!showBottomBar && !showMiniPlayer) {
+        Box(modifier = Modifier
+            .fillMaxWidth()
+            .height(scaffoldPadding.calculateBottomPadding())
+        )
         return;
     }
 
@@ -153,5 +160,9 @@ fun BoxScope.BottomBar(
                 }
             }
         }
+        Box(modifier = Modifier
+            .fillMaxWidth()
+            .height(scaffoldPadding.calculateBottomPadding())
+        )
     }
 }

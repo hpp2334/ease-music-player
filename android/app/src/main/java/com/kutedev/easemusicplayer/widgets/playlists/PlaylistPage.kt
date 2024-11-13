@@ -16,6 +16,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -424,6 +425,7 @@ private fun PlaylistItemsBlock(
 @Composable
 fun PlaylistPage(
     evm: EaseViewModel,
+    scaffoldPadding: PaddingValues,
 ) {
     val state = evm.currentPlaylistState.collectAsState().value
     val currentMusicState = evm.currentMusicState.collectAsState().value
@@ -479,6 +481,7 @@ fun PlaylistPage(
             currentRoute = RoutesKey.PLAYLIST,
             bottomBarPageState = null,
             evm = evm,
+            scaffoldPadding = scaffoldPadding,
         )
     }
     RemovePlaylistDialog(

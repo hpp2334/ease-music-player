@@ -3,6 +3,7 @@ package com.kutedev.easemusicplayer.widgets.home
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
@@ -24,6 +25,7 @@ fun HomePage(
     ctx: android.content.Context,
     pagerState: PagerState,
     evm: EaseViewModel,
+    scaffoldPadding: PaddingValues,
 ) {
     val state by evm.currentMusicState.collectAsState()
     val isPlaying = state.playing
@@ -53,6 +55,7 @@ fun HomePage(
             currentRoute = RoutesKey.HOME,
             bottomBarPageState = pagerState,
             evm = evm,
+            scaffoldPadding = scaffoldPadding,
         )
     }
 }

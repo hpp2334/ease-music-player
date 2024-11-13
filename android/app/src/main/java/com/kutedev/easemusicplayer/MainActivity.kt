@@ -10,12 +10,15 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -96,10 +99,14 @@ class MainActivity : ComponentActivity() {
             EaseMusicPlayerTheme {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                ) { innerPadding ->
+                ) { scaffoldPadding ->
                     Column(
                         modifier = Modifier
-                            .padding(innerPadding)
+                            .padding(
+                                start = scaffoldPadding.calculateLeftPadding(LayoutDirection.Ltr),
+                                end = scaffoldPadding.calculateRightPadding(LayoutDirection.Ltr),
+                                top = scaffoldPadding.calculateTopPadding(),
+                            )
                             .fillMaxSize()
                     ) {
                         val bottomBarPageState = rememberPagerState(pageCount = {
@@ -124,6 +131,7 @@ class MainActivity : ComponentActivity() {
                                         ctx = applicationContext,
                                         pagerState = bottomBarPageState,
                                         evm = evm,
+                                        scaffoldPadding = scaffoldPadding,
                                     )
                                     CreatePlaylistsDialog(evm = evm)
                                 }
@@ -134,7 +142,8 @@ class MainActivity : ComponentActivity() {
                                 }
                                 composable(RoutesKey.PLAYLIST.toString()) {
                                     PlaylistPage(
-                                        evm = evm
+                                        evm = evm,
+                                        scaffoldPadding = scaffoldPadding,
                                     )
                                     EditPlaylistsDialog(evm = evm)
                                 }
