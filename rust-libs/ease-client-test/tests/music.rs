@@ -590,6 +590,25 @@ async fn time_to_pause_2() {
     assert_eq!(state.enabled, false);
 }
 
+#[tokio::test]
+async fn time_to_pause_3() {
+    let mut app: TestApp = TestApp::new("test-dbs/time_to_pause_3", true).await;
+    app.setup_preset(PresetDepth::Music).await;
+
+    app.emit(Action::View(ViewAction::TimeToPause(
+        TimeToPauseAction::Finish {
+            hour: 0,
+            minute: 0,
+            second: 8,
+        },
+    )));
+    app.advance_timer(8).await;
+    let state = app.latest_state().time_to_pause.unwrap();
+    assert_eq!(state.enabled, false);
+    assert_eq!(state.left_hour, 0);
+    assert_eq!(state.left_minute, 0);
+}
+
 // #[tokio::test]
 // async fn music_cover_1() {
 //     let mut app = TestApp::new("test-dbs/music_cover_1", true).await;
