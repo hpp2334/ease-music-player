@@ -158,15 +158,22 @@ class PlaybackService : MediaSessionService() {
                     syncMetadata()
                 }
             }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                nextTickOnMain {
+                    Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Seek))
+                }
+            }
         })
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val player = _mediaSession?.player ?: return
-
-        if (!player.playWhenReady || player.mediaItemCount == 0) {
-            stopSelf()
-        }
+        destroyImpl()
+        stopSelf()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -174,12 +181,20 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        destroyImpl()
+        super.onDestroy()
+    }
+
+    private fun destroyImpl() {
         _mediaSession?.run {
             player.release()
             release()
             _mediaSession = null
+
+            nextTickOnMain {
+                Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Stop))
+            }
         }
-        super.onDestroy()
     }
 
     private fun syncMetadata() {

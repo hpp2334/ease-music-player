@@ -100,10 +100,8 @@ impl MusicCommonVM {
         let is_playing = cx.model_get(&self.current).playing;
         let time_to_pause_enabled = cx.model_get(&self.time_to_pause).enabled;
 
-        if is_playing {
-            MusicControlVM::of(cx).tick(cx)?;
-            MusicLyricVM::of(cx).tick_lyric_index(cx)?;
-        }
+        MusicControlVM::of(cx).tick(cx)?;
+        MusicLyricVM::of(cx).tick_lyric_index(cx)?;
         if time_to_pause_enabled {
             TimeToPauseVM::of(cx).tick(cx)?;
         }

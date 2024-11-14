@@ -417,7 +417,7 @@ private fun PlaylistItemsBlock(
             }
         }
         BottomBarSpacer(
-            isPlaying = currentMusicState.playing
+            hasCurrentMusic = currentMusicState.id != null
         )
     }
 }

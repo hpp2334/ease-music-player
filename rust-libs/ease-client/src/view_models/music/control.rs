@@ -48,6 +48,7 @@ pub enum PlayerEvent {
     Play,
     Pause,
     Stop,
+    Seek,
     Total { id: MusicId, duration_ms: u64 },
     Cover { id: MusicId, buffer: Vec<u8> },
 }
@@ -310,8 +311,7 @@ impl MusicControlVM {
     fn on_player_event(&self, cx: &ViewModelContext, event: &PlayerEvent) -> EaseResult<()> {
         match event {
             PlayerEvent::Complete => self.on_complete(cx)?,
-            PlayerEvent::Loading => {}
-            PlayerEvent::Loaded => {}
+            PlayerEvent::Loading | PlayerEvent::Loaded | PlayerEvent::Seek => {}
             PlayerEvent::Play => self.update_playing(cx, true)?,
             PlayerEvent::Pause => self.update_playing(cx, false)?,
             PlayerEvent::Stop => self.stop_impl(cx)?,
@@ -323,6 +323,7 @@ impl MusicControlVM {
             }
         };
         self.sync_current_duration(&cx);
+        MusicCommonVM::of(cx).schedule_tick::<true>(cx)?;
         Ok(())
     }
 

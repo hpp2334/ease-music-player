@@ -74,9 +74,9 @@ fun getBottomBarSpace(isPlaying: Boolean): Dp {
 
 @Composable
 fun BottomBarSpacer(
-    isPlaying: Boolean
+    hasCurrentMusic: Boolean
 ) {
-    Box(modifier = Modifier.height(getBottomBarSpace(isPlaying)))
+    Box(modifier = Modifier.height(getBottomBarSpace(hasCurrentMusic)))
 }
 
 @Composable
