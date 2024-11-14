@@ -248,7 +248,7 @@ fun EditStoragesPage(
                     painter = painterResource(id = R.drawable.icon_wifitethering),
                     overrideColors = testingColors,
                     onClick = {
-                        Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Test));
+                        Bridge.dispatchClick(StorageUpsertWidget.Test);
                     }
                 )
                 EaseIconButton(
@@ -256,7 +256,7 @@ fun EditStoragesPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_ok),
                     onClick = {
-                        Bridge.dispatchClick(Widget.StorageUpsert(StorageUpsertWidget.Finish));
+                        Bridge.dispatchClick(StorageUpsertWidget.Finish);
                     }
                 )
             }

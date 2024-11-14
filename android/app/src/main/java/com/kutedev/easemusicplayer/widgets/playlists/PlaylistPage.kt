@@ -68,7 +68,6 @@ import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
@@ -90,7 +89,7 @@ private fun RemovePlaylistDialog(
         onConfirm = {
             onClose()
             Bridge.popRoute()
-            nextTickOnMain {
+            Bridge.schedule {
                 Bridge.dispatchClick(PlaylistDetailWidget.Remove);
             }
         },

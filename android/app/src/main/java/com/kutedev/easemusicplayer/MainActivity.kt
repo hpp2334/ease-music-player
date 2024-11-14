@@ -25,7 +25,6 @@ import androidx.navigation.compose.composable
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
-import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.RoutesProvider
 import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
@@ -60,7 +59,7 @@ class MainActivity : ComponentActivity() {
         registerViewModels()
 
         val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
-            nextTickOnMain {
+            Bridge.schedule {
                 Bridge.dispatchAction(ViewAction.Main(MainAction.PERMISSION_CHANGED))
             }
         }

@@ -55,10 +55,10 @@ pub struct VTimeToPauseState {
 }
 
 pub(crate) fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewModelState) {
-    let id = {
-        let id = state.id;
-        if let Some(id) = id {
-            id
+    let music = {
+        let music = state.music.clone();
+        if let Some(music) = music {
+            music
         } else {
             let mut view_model_state: VCurrentMusicState = Default::default();
             view_model_state.play_mode = state.play_mode;
@@ -66,14 +66,14 @@ pub(crate) fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewMod
             return;
         }
     };
-    let abstr = &state.playlist_musics[state.index_musics];
+    let abstr = &music.queue[music.index];
 
     let title = abstr.meta.title.clone();
     let total_duration = abstr.meta.duration.clone();
     let current_duration = MusicDuration::new(state.current_duration);
 
     let view_model_state = VCurrentMusicState {
-        id: Some(id),
+        id: Some(music.id),
         title,
         current_duration: get_display_duration(&Some(current_duration)),
         total_duration: get_display_duration(&total_duration),

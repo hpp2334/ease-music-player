@@ -1,4 +1,4 @@
-use std::{sync::atomic::AtomicBool, time::Duration};
+use std::{rc::Rc, sync::atomic::AtomicBool, time::Duration};
 
 use ease_client_shared::backends::{
     music::{Music, MusicId},
@@ -15,7 +15,7 @@ use crate::{
 use super::{
     control::MusicControlVM,
     lyric::MusicLyricVM,
-    state::{CurrentMusicState, TimeToPauseState},
+    state::{CurrentMusicState, QueueMusic, TimeToPauseState},
     time_to_pause::TimeToPauseVM,
 };
 
@@ -57,8 +57,11 @@ impl MusicCommonVM {
 
     pub(crate) fn remove_current(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let m = cx.model_get(&self.current);
-        if let (Some(current_id), Some(playlist_id)) = (m.id, m.playlist_id) {
-            self.remove(cx, current_id, playlist_id)
+        if let Some(QueueMusic {
+            id, playlist_id, ..
+        }) = m.music
+        {
+            self.remove(cx, id, playlist_id)
         } else {
             Ok(())
         }
@@ -114,26 +117,27 @@ impl MusicCommonVM {
 
     fn sync_music(&self, cx: &ViewModelContext, music: &Music) -> EaseResult<()> {
         let mut state = cx.model_mut(&self.current);
-        if state.id == Some(music.id()) {
-            let index_music = state.index_musics;
-
+        if state.id() == Some(music.id()) {
             state.lyric = music.lyric.clone();
-
-            let r = &mut state.playlist_musics[index_music];
-            assert!(r.id() == music.id());
-            *r = music.music_abstract();
         }
         Ok(())
     }
 
     fn sync_playlist(&self, cx: &ViewModelContext, playlist: &Playlist) -> EaseResult<()> {
         let mut state = cx.model_mut(&self.current);
-        if state.playlist_id == Some(playlist.id()) {
-            let id = state.id.unwrap();
-            let pos = playlist.musics.iter().position(|v| v.id() == id);
+        if let Some(QueueMusic {
+            id,
+            playlist_id,
+            queue,
+            index,
+        }) = &mut state.music
+        {
+            if *playlist_id == playlist.id() {
+                let pos = playlist.musics.iter().position(|v| v.id() == *id);
 
-            state.playlist_musics = playlist.musics.clone();
-            state.index_musics = pos.unwrap_or(0);
+                *queue = Rc::new(playlist.musics.clone());
+                *index = pos.unwrap_or(0);
+            }
         }
 
         Ok(())

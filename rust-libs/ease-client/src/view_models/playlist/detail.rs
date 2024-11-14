@@ -48,8 +48,15 @@ impl PlaylistDetailVM {
     fn play_all(&self, cx: &ViewModelContext) -> EaseResult<()> {
         if let Some(playlist) = cx.model_get(&self.current).playlist.as_ref() {
             if let Some(music_id) = playlist.musics.first().map(|m| m.id()) {
-                MusicControlVM::of(cx).prepare(cx, music_id)?;
+                MusicControlVM::of(cx).prepare(cx, playlist, music_id)?;
             }
+        }
+        Ok(())
+    }
+
+    fn play(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
+        if let Some(playlist) = cx.model_get(&self.current).playlist.as_ref() {
+            MusicControlVM::of(cx).prepare(cx, playlist, id)?;
         }
         Ok(())
     }
@@ -120,7 +127,7 @@ impl ViewModel for PlaylistDetailVM {
                             PlaylistEditVM::of(cx).prepare_edit(cx, &playlist)?;
                         }
                         PlaylistDetailWidget::Music { id } => {
-                            MusicControlVM::of(cx).prepare(cx, *id)?;
+                            self.play(cx, *id)?;
                         }
                         PlaylistDetailWidget::RemoveMusic { id } => {
                             let playlist_id = cx

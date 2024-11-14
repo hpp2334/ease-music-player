@@ -157,6 +157,8 @@ object Bridge {
     private const val SCHEMA_VERSION = 1u
     private const val STORAGE_PATH = "/"
 
+    private var _executingAction = false
+
     fun onActivityStart() {
         _player.onActivityStart()
     }
@@ -191,16 +193,28 @@ object Bridge {
         ))
     }
 
-    fun dispatchClick(widget: Widget) {
-        apiEmitViewAction(ViewAction.Widget(WidgetAction(widget, WidgetActionType.Click)))
+    private fun dispatchClick(widget: Widget) {
+        dispatchAction(ViewAction.Widget(WidgetAction(widget, WidgetActionType.Click)))
     }
 
-    fun dispatchChangeText(widget: Widget, text: String) {
-        apiEmitViewAction(ViewAction.Widget(WidgetAction(widget, WidgetActionType.ChangeText(text))))
+    private fun dispatchChangeText(widget: Widget, text: String) {
+        dispatchAction(ViewAction.Widget(WidgetAction(widget, WidgetActionType.ChangeText(text))))
+    }
+
+    fun schedule(block: () -> Unit) {
+        if (!this._executingAction) {
+            block()
+        } else {
+            nextTickOnMain {
+                block()
+            }
+        }
     }
 
     fun dispatchAction(action: ViewAction) {
+        this._executingAction = true
         apiEmitViewAction(action)
+        this._executingAction = false
     }
 
     fun popRoute() {

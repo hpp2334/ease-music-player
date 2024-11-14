@@ -1,16 +1,19 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use ease_client_shared::{
     backends::{
         music::{ArgUpdateMusicCover, ArgUpdateMusicDuration, MusicId},
         music_duration::MusicDuration,
-        playlist::PlaylistId,
+        playlist::{Playlist, PlaylistId},
     },
     uis::preference::PlayMode,
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
-use super::{common::MusicCommonVM, state::CurrentMusicState};
+use super::{
+    common::MusicCommonVM,
+    state::{CurrentMusicState, QueueMusic},
+};
 use crate::{
     actions::{event::ViewAction, Widget},
     to_host::player::{MusicPlayerService, MusicToPlay},
@@ -66,28 +69,35 @@ impl MusicControlVM {
         }
     }
 
-    pub(crate) fn prepare(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
-        self.request_play(cx, id)?;
+    pub(crate) fn prepare(
+        &self,
+        cx: &ViewModelContext,
+        playlist: &Playlist,
+        id: MusicId,
+    ) -> EaseResult<()> {
+        let current_index = playlist
+            .musics
+            .iter()
+            .position(|m| m.id() == id)
+            .unwrap_or(0);
+        let to_play = QueueMusic {
+            id,
+            playlist_id: playlist.id(),
+            queue: Rc::new(playlist.musics.clone()),
+            index: current_index,
+        };
+
+        self.request_play_impl(cx, to_play)?;
         RouterVM::of(cx).navigate(cx, RoutesKey::MusicPlayer);
         Ok(())
     }
 
-    fn request_play(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<()> {
-        let current_playlist = PlaylistCommonVM::of(cx).get_current(cx)?;
-
-        if let Some(current_playlist) = current_playlist {
-            self.request_play_impl(cx, id, current_playlist.id())?;
-        } else {
-            tracing::warn!("current playlist empty");
-        }
-        Ok(())
-    }
-
     fn request_replay(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        let id = cx.model_get(&self.current).id;
-        if let Some(current_id) = id {
-            self.request_stop(cx)?;
-            self.request_play(cx, current_id)?;
+        let has_music = cx.model_get(&self.current).music.is_some();
+        if has_music {
+            self.request_pause(cx)?;
+            self.request_seek(cx, 0)?;
+            self.request_resume(cx)?;
         }
         Ok(())
     }
@@ -112,11 +122,10 @@ impl MusicControlVM {
     }
 
     fn request_play_adjacent<const IS_NEXT: bool>(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        let (current_music_id, playlist_id, can_play) = {
+        let (music, can_play) = {
             let state = cx.model_get(&self.current);
             (
-                state.id,
-                state.playlist_id,
+                state.music.clone(),
                 if IS_NEXT {
                     state.can_play_next()
                 } else {
@@ -125,42 +134,47 @@ impl MusicControlVM {
             )
         };
 
-        let (current_music_id, playlist_id) = match (current_music_id, playlist_id) {
-            (Some(u), Some(v)) => (u, v),
-            _ => return Ok(()),
-        };
+        if music.is_none() {
+            return Ok(());
+        }
+        let QueueMusic {
+            id: current_music_id,
+            playlist_id,
+            queue,
+            ..
+        } = music.unwrap();
+
         if !can_play {
             return Ok(());
         }
 
-        let this = Self::of(cx);
-        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            let playlist = Connector::of(&cx).get_playlist(&cx, playlist_id).await?;
-            if let Some(playlist) = playlist {
-                let ordered_musics = &playlist.musics;
-                let current_index = ordered_musics
-                    .iter()
-                    .position(|m| m.id() == current_music_id)
-                    .unwrap_or(0);
-                let adjacent_index = if IS_NEXT {
-                    if current_index + 1 >= ordered_musics.len() {
-                        0
-                    } else {
-                        current_index + 1
-                    }
-                } else {
-                    if current_index == 0 {
-                        ordered_musics.len() - 1
-                    } else {
-                        current_index - 1
-                    }
-                };
-                if let Some(adjacent_music) = ordered_musics.get(adjacent_index) {
-                    this.request_play_impl(&cx, adjacent_music.id(), playlist_id)?;
-                }
+        let current_index = queue
+            .iter()
+            .position(|m| m.id() == current_music_id)
+            .unwrap_or(0);
+        let adjacent_index = if IS_NEXT {
+            if current_index + 1 >= queue.len() {
+                0
+            } else {
+                current_index + 1
             }
-            Ok(())
-        });
+        } else {
+            if current_index == 0 {
+                queue.len() - 1
+            } else {
+                current_index - 1
+            }
+        };
+        if let Some(adjacent_music) = queue.get(adjacent_index) {
+            let to_play = QueueMusic {
+                id: adjacent_music.id(),
+                playlist_id,
+                queue,
+                index: adjacent_index,
+            };
+
+            self.request_play_impl(&cx, to_play)?;
+        }
         Ok(())
     }
 
@@ -215,59 +229,53 @@ impl MusicControlVM {
         Ok(())
     }
 
-    fn request_play_impl(
-        &self,
-        cx: &ViewModelContext,
-        music_id: MusicId,
-        playlist_id: PlaylistId,
-    ) -> EaseResult<()> {
+    fn request_play_impl(&self, cx: &ViewModelContext, to_play: QueueMusic) -> EaseResult<()> {
         let this = Self::of(cx);
+
+        let prev_music = cx.model_get(&this.current).music.clone();
+
+        if prev_music.is_some()
+            && prev_music.as_ref().map(|v| v.id).unwrap() == to_play.id
+            && prev_music.as_ref().map(|v| v.playlist_id).unwrap() == to_play.playlist_id
+        {
+            return Ok(());
+        }
+
+        let music = to_play.queue[to_play.index].clone();
+
+        {
+            let mut state = cx.model_mut(&this.current);
+            state.music = Some(to_play.clone());
+            state.lyric = None;
+            state.lyric_line_index = -1;
+        }
+        {
+            let url = Connector::of(&cx).serve_music_url(&cx, to_play.id);
+            let item = MusicToPlay {
+                id: to_play.id,
+                title: music.title().to_string(),
+                url,
+                cover_url: music.cover_url,
+            };
+            MusicPlayerService::of(&cx).set_music_url(item);
+        }
+        this.sync_current_duration(&cx);
+        this.request_resume(&cx)?;
+
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            let music = Connector::of(&cx).get_music(&cx, music_id).await?;
-            let playlist = Connector::of(&cx).get_playlist(&cx, playlist_id).await?;
-            if music.is_none() || playlist.is_none() {
+            let music = Connector::of(&cx).get_music(&cx, to_play.id).await?;
+            if music.is_none() {
                 return Ok(());
             }
             let music = music.unwrap();
-            let playlist = playlist.unwrap();
 
-            let prev_current_music_id = cx.model_get(&this.current).id;
-            let prev_playlist_id = cx.model_get(&this.current).playlist_id;
-
-            if prev_current_music_id.is_some()
-                && prev_current_music_id.as_ref().unwrap() == &music_id
-                && prev_playlist_id == Some(playlist_id)
-            {
-                return Ok(());
-            }
-
-            let index_musics = playlist
-                .musics
-                .iter()
-                .position(|m| m.id() == music.id())
-                .unwrap();
             {
                 let mut state = cx.model_mut(&this.current);
-                state.id = Some(music_id);
-                state.playlist_id = Some(playlist_id);
-                state.playlist_musics = playlist.musics.clone();
-                state.index_musics = index_musics;
-                state.lyric = music.lyric.clone();
-                state.lyric_line_index = -1;
+                if state.id() == Some(music.id()) {
+                    state.lyric = music.lyric.clone();
+                    state.lyric_line_index = -1;
+                }
             }
-            {
-                let url = Connector::of(&cx).serve_music_url(&cx, music_id);
-                let item = MusicToPlay {
-                    id: music_id,
-                    title: music.title().to_string(),
-                    url,
-                    cover_url: music.cover_url,
-                };
-                MusicPlayerService::of(&cx).set_music_url(item);
-            }
-            this.sync_current_duration(&cx);
-            this.request_resume(&cx)?;
-
             Ok(())
         });
         Ok(())
@@ -276,12 +284,10 @@ impl MusicControlVM {
     fn stop_if_invalid(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let is_valid = {
             let state = cx.model_get(&self.current);
-            if let (Some(id), Some(playlist_id)) = (state.id, state.playlist_id) {
-                if !PlaylistCommonVM::of(cx).has_playlist(cx, playlist_id) {
+            if let Some(to_play) = &state.music {
+                if !PlaylistCommonVM::of(cx).has_playlist(cx, to_play.playlist_id) {
                     false
-                } else if !state.playlist_musics.is_empty()
-                    && !state.playlist_musics.iter().any(|v| v.id() == id)
-                {
+                } else if !to_play.queue.iter().any(|v| v.id() == to_play.id) {
                     false
                 } else {
                     true

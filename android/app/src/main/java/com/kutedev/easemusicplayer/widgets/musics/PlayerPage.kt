@@ -65,6 +65,7 @@ import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.MusicControlAction
 import uniffi.ease_client.MusicControlWidget
@@ -422,13 +423,17 @@ private fun MusicPlayerBody(
             anchors,
             {value ->
                 if (value == widgetWidth.toFloat()) {
-                    onPrev()
-                    anchoredDraggableState.update(0f)
-                    showLyric = false
+                    nextTickOnMain {
+                        onPrev()
+                        anchoredDraggableState.update(0f)
+                        showLyric = false
+                    }
                 } else if (value == -widgetWidth.toFloat()) {
-                    onNext()
-                    anchoredDraggableState.update(0f)
-                    showLyric = false
+                    nextTickOnMain {
+                        onNext()
+                        anchoredDraggableState.update(0f)
+                        showLyric = false
+                    }
                 }
             }
         )

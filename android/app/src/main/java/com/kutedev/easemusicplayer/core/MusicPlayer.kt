@@ -34,7 +34,6 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
-import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,7 +81,7 @@ private fun syncMetadataImpl(player: Player) {
         val durationMS = player.duration.toULong()
         val coverData = extractCurrentTracksCover(player)
 
-        nextTickOnMain {
+        Bridge.schedule {
             Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Total(id, durationMS)))
 
             if (coverData != null) {
@@ -140,7 +139,7 @@ class PlaybackService : MediaSessionService() {
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                nextTickOnMain {
+                Bridge.schedule {
                     if (isPlaying) {
                         Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Play));
                     } else {
@@ -151,7 +150,7 @@ class PlaybackService : MediaSessionService() {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
-                    nextTickOnMain {
+                    Bridge.schedule {
                         Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Complete))
                     }
                 } else if (playbackState == Player.STATE_READY) {
@@ -164,7 +163,7 @@ class PlaybackService : MediaSessionService() {
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                nextTickOnMain {
+                Bridge.schedule {
                     Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Seek))
                 }
             }
@@ -191,7 +190,7 @@ class PlaybackService : MediaSessionService() {
             release()
             _mediaSession = null
 
-            nextTickOnMain {
+            Bridge.schedule {
                 Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Stop))
             }
         }
@@ -234,14 +233,14 @@ class EaseMusicController : IMusicPlayerService {
         val player = _internal
 
         if (player == null) {
-            nextTickOnMain {
+            Bridge.schedule {
                 Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Stop));
             }
             return
         }
 
         val isPlaying = player.isPlaying
-        nextTickOnMain {
+        Bridge.schedule {
             if (isPlaying) {
                 Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Play));
             } else {
@@ -267,7 +266,7 @@ class EaseMusicController : IMusicPlayerService {
         val player = _internal ?: return
         player.pause()
 
-        nextTickOnMain {
+        Bridge.schedule {
             Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Pause));
         }
     }
@@ -276,7 +275,7 @@ class EaseMusicController : IMusicPlayerService {
         val player = _internal ?: return
         player.stop()
 
-        nextTickOnMain {
+        Bridge.schedule {
             Bridge.dispatchAction(ViewAction.Player(PlayerEvent.Stop));
         }
     }

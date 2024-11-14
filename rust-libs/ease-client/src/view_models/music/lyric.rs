@@ -30,12 +30,12 @@ impl MusicLyricVM {
         }
     }
 
-    fn update_loc_impl(
+    fn update_lyric_loc_impl(
         &self,
         cx: &ViewModelContext,
         loc: Option<StorageEntryLoc>,
     ) -> EaseResult<()> {
-        let id = cx.model_get(&self.current).id;
+        let id = cx.model_get(&self.current).music.as_ref().map(|v| v.id);
         if id.is_none() {
             return Ok(());
         }
@@ -52,11 +52,11 @@ impl MusicLyricVM {
     }
 
     fn remove(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        self.update_loc_impl(cx, None)
+        self.update_lyric_loc_impl(cx, None)
     }
 
     fn prepare_storage(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        let id = cx.model_get(&self.current).id;
+        let id = cx.model_get(&self.current).id();
         if let Some(id) = id {
             StorageImportVM::of(cx)
                 .prepare(cx, CurrentStorageImportType::CurrentMusicLyrics { id })?;
@@ -69,7 +69,7 @@ impl MusicLyricVM {
         cx: &ViewModelContext,
         loc: StorageEntryLoc,
     ) -> EaseResult<()> {
-        self.update_loc_impl(cx, Some(loc))
+        self.update_lyric_loc_impl(cx, Some(loc))
     }
 
     pub(crate) fn tick_lyric_index(&self, cx: &ViewModelContext) -> EaseResult<()> {
