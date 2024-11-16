@@ -45,7 +45,7 @@ import com.kutedev.easemusicplayer.components.EaseCheckbox
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.StorageImportAction
 import uniffi.ease_client.StorageImportWidget
@@ -189,6 +189,8 @@ private fun ImportEntries(
     splitPaths: List<VSplitPathItem>,
     entries: List<VCurrentStorageEntry>,
 ) {
+    val bridge = UIBridgeController.current
+
     @Composable
     fun PathTab(
         text: String,
@@ -210,7 +212,7 @@ private fun ImportEntries(
                 .clickable(
                     enabled = !disabled,
                     onClick = {
-                        Bridge.dispatchClick(StorageImportWidget.FolderNav(path))
+                        bridge.dispatchClick(StorageImportWidget.FolderNav(path))
                     }
                 )
                 .clip(RoundedCornerShape(2.dp))
@@ -255,7 +257,7 @@ private fun ImportEntries(
                 for (entry in entries) {
                     ImportEntry(
                         entry = entry,
-                        onLocateEntry = { path -> Bridge.dispatchClick(StorageImportWidget.StorageEntry(path)) },
+                        onLocateEntry = { path -> bridge.dispatchClick(StorageImportWidget.StorageEntry(path)) },
                     )
                 }
                 Box(modifier = Modifier.height(12.dp))
@@ -266,7 +268,7 @@ private fun ImportEntries(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.surface,
                 onClick = {
-                    Bridge.dispatchClick(StorageImportWidget.Import);
+                    bridge.dispatchClick(StorageImportWidget.Import);
                 },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -285,6 +287,7 @@ private fun ImportEntries(
 private fun ImportStorages(
     storageItems: List<VCurrentStorageEntriesStateStorageItem>
 ) {
+    val bridge = UIBridgeController.current
     Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier
@@ -307,7 +310,7 @@ private fun ImportStorages(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .clickable {
-                        Bridge.dispatchClick(StorageImportWidget.StorageItem(item.id))
+                        bridge.dispatchClick(StorageImportWidget.StorageItem(item.id))
                     }
                     .background(bgColor)
                     .width(142.dp)
@@ -403,6 +406,7 @@ private fun ImportMusicsWarningImpl(
 private fun ImportMusicsError(
     type: CurrentStorageStateType,
 ) {
+    val bridge = UIBridgeController.current
     val title = when (type) {
         CurrentStorageStateType.AUTHENTICATION_FAILED -> stringResource(id = R.string.import_musics_error_authentication_title)
         CurrentStorageStateType.TIMEOUT -> stringResource(id = R.string.import_musics_error_timeout_title)
@@ -428,7 +432,7 @@ private fun ImportMusicsError(
         color = MaterialTheme.colorScheme.error,
         iconPainter = painterResource(id = R.drawable.icon_warning),
         onClick = {
-            Bridge.dispatchClick(StorageImportWidget.Error)
+            bridge.dispatchClick(StorageImportWidget.Error)
         }
     )
 }
@@ -437,6 +441,7 @@ private fun ImportMusicsError(
 fun ImportMusicsPage(
     evm: EaseViewModel
 ) {
+    val bridge = UIBridgeController.current
     val state by evm.currentStorageEntriesState.collectAsState()
     val storageItems = state.storageItems
     val titleText = when (state.selectedCount) {
@@ -445,7 +450,7 @@ fun ImportMusicsPage(
         else -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_multi_suffix)}"
     }
     fun doUndo() {
-        Bridge.dispatchAction(ViewAction.StorageImport(StorageImportAction.UNDO));
+        bridge.dispatchAction(ViewAction.StorageImport(StorageImportAction.UNDO));
     }
 
     BackHandler(enabled = state.canUndo) {
@@ -485,7 +490,7 @@ fun ImportMusicsPage(
                     painter = painterResource(id = R.drawable.icon_toggle_all),
                     disabled = state.disabledToggleAll,
                     onClick = {
-                        Bridge.dispatchClick(StorageImportWidget.ToggleAll)
+                        bridge.dispatchClick(StorageImportWidget.ToggleAll)
                     }
                 )
             }

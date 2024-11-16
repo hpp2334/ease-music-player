@@ -67,7 +67,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
@@ -84,13 +84,14 @@ private fun RemovePlaylistDialog(
     open: Boolean,
     onClose: () -> Unit
 ) {
+    val bridge = UIBridgeController.current
     ConfirmDialog(
         open = open,
         onConfirm = {
             onClose()
-            Bridge.popRoute()
-            Bridge.schedule {
-                Bridge.dispatchClick(PlaylistDetailWidget.Remove);
+            bridge.popRoute()
+            bridge.schedule {
+                bridge.dispatchClick(PlaylistDetailWidget.Remove);
             }
         },
         onCancel = onClose
@@ -109,6 +110,7 @@ private fun PlaylistHeader(
     items: List<VPlaylistMusicItem>,
     onRemoveDialogOpen: () -> Unit,
 ) {
+    val bridge = UIBridgeController.current
     var moreMenuExpanded by remember { mutableStateOf(false) }
     val countSuffixStringId = if (items.size <= 1) {
         R.string.playlist_list_count_suffix
@@ -158,7 +160,7 @@ private fun PlaylistHeader(
                 buttonType = EaseIconButtonType.Surface,
                 painter = painterResource(id = R.drawable.icon_back),
                 onClick = {
-                    Bridge.popRoute()
+                    bridge.popRoute()
                 }
             )
             Box {
@@ -180,13 +182,13 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
-                                    Bridge.dispatchClick(PlaylistDetailWidget.Import);
+                                    bridge.dispatchClick(PlaylistDetailWidget.Import);
                                 }
                             ),
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_edit,
                                 onClick = {
-                                    Bridge.dispatchClick(PlaylistDetailWidget.Edit);
+                                    bridge.dispatchClick(PlaylistDetailWidget.Edit);
                                 }
                             ),
                             EaseContextMenuItem(
@@ -262,6 +264,7 @@ private fun PlaylistItem(
 ) {
     val panelWidthDp = 48.dp
 
+    val bridge = UIBridgeController.current
     val density = LocalDensity.current
 
     val anchoredDraggableState = with(density) {
@@ -319,7 +322,7 @@ private fun PlaylistItem(
                     }
                 )
                 .clickable {
-                    Bridge.dispatchClick(PlaylistDetailWidget.Music(item.id));
+                    bridge.dispatchClick(PlaylistDetailWidget.Music(item.id));
                     onSwipe()
                 }
                 .background(bgColor)
@@ -387,6 +390,7 @@ private fun PlaylistItemsBlock(
     items: List<VPlaylistMusicItem>,
     currentMusicState: VCurrentMusicState,
 ) {
+    val bridge = UIBridgeController.current
     var swipingMusicId by remember {
         mutableStateOf<MusicId?>(null)
     }
@@ -410,7 +414,7 @@ private fun PlaylistItemsBlock(
                         if (swipingMusicId == item.id) {
                             swipingMusicId = null
                         }
-                        Bridge.dispatchClick(PlaylistDetailWidget.RemoveMusic(item.id));
+                        bridge.dispatchClick(PlaylistDetailWidget.RemoveMusic(item.id));
                     }
                 )
             }
@@ -426,6 +430,7 @@ fun PlaylistPage(
     evm: EaseViewModel,
     scaffoldPadding: PaddingValues,
 ) {
+    val bridge = UIBridgeController.current
     val state = evm.currentPlaylistState.collectAsState().value
     val currentMusicState = evm.currentMusicState.collectAsState().value
     var removeDialogOpen by remember { mutableStateOf(false) }
@@ -472,7 +477,7 @@ fun PlaylistPage(
                 painter = painterResource(id = R.drawable.icon_play),
                 disabled = items.isEmpty(),
                 onClick = {
-                    Bridge.dispatchClick(PlaylistDetailWidget.PlayAll);
+                    bridge.dispatchClick(PlaylistDetailWidget.PlayAll);
                 }
             )
         }

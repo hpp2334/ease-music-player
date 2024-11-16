@@ -3,26 +3,30 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::Arc;
 use std::time::Duration;
 
+use backend_host::BackendHost;
+use ease_client::to_host::connector::IConnectorHost;
 use ease_client::{
-    build_client, Action, IPermissionService, IRouterService, IToastService, MainAction,
-    PlaylistCreateWidget, PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey,
-    StorageImportWidget, StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction,
-    WidgetActionType,
+    build_client, Action, IRouterService, IToastService, PlaylistCreateWidget,
+    PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey, StorageImportWidget,
+    StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
 };
+use ease_client_backend::Backend;
 use ease_client_shared::backends::app::ArgInitializeApp;
 use ease_client_shared::backends::music::MusicId;
-use ease_client_shared::backends::playlist::PlaylistId;
+use ease_client_shared::backends::playlist::{CreatePlaylistMode, PlaylistId};
 use ease_client_shared::backends::storage::{StorageId, StorageType};
-use ease_client_shared::uis::playlist::CreatePlaylistMode;
+use ease_client_shared::backends::MessagePayload;
 use event_loop::EventLoop;
 use fake_permission::FakePermissionService;
 use fake_player::*;
 pub use fake_server::ReqInteceptor;
 use fake_server::*;
-use misty_vm::AppPod;
-use misty_vm_test::AsyncRuntime;
+use misty_vm::{AppPod, AsyncRuntime};
+use misty_vm_test::TestAsyncRuntimeAdapter;
+use tokio::sync::mpsc;
 use view_state::ViewStateServiceRef;
 
+mod backend_host;
 mod event_loop;
 mod fake_permission;
 mod fake_player;
@@ -31,11 +35,13 @@ mod view_state;
 
 pub struct TestApp {
     app: AppPod,
+    backend: Arc<Backend>,
     server: FakeServerRef,
     player: FakeMusicPlayerRef,
     view_state: ViewStateServiceRef,
     permission: FakePermissionService,
-    async_runtime: AsyncRuntime,
+    ui_async_runtime: Arc<TestAsyncRuntimeAdapter>,
+    backend_async_runtime: Arc<TestAsyncRuntimeAdapter>,
     event_loop: EventLoop,
     last_wait_req_session: AtomicUsize,
 }
@@ -56,7 +62,7 @@ impl IToastService for FakeToastServiceImpl {
 
 static SETUP_SUBCRIBER_ONCE: AtomicBool = AtomicBool::new(false);
 
-static SCHEMA_VERSION: u32 = 2;
+static SCHEMA_VERSION: u32 = 1;
 
 fn setup_subscriber() {
     let has_setup = SETUP_SUBCRIBER_ONCE.swap(true, std::sync::atomic::Ordering::Relaxed);
@@ -101,23 +107,6 @@ impl TestApp {
             std::fs::create_dir_all(&test_dir).unwrap();
         }
 
-        let pod = AppPod::new();
-        let event_loop: EventLoop = EventLoop::new();
-        let player = FakeMusicPlayerRef::new(event_loop.clone());
-        let async_runtime = AsyncRuntime::new();
-        let view_state = ViewStateServiceRef::new();
-        let permission = FakePermissionService::new(event_loop.clone());
-        let app = build_client(
-            Arc::new(permission.clone()),
-            Arc::new(FakeRouterService),
-            Arc::new(player.clone()),
-            Arc::new(FakeToastServiceImpl),
-            Arc::new(view_state.clone()),
-            async_runtime.clone(),
-        );
-        async_runtime.bind_app(app.clone());
-        pod.set(app.clone());
-
         let storage_path = {
             let dir = std::env::current_dir().unwrap();
             let dir = dir.to_string_lossy().to_string();
@@ -127,19 +116,59 @@ impl TestApp {
                 dir
             }
         };
+        let event_loop: EventLoop = EventLoop::new();
+        let ui_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
+        let backend_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
 
-        app.emit(Action::Init(ArgInitializeApp {
-            app_document_dir: test_dir.to_string(),
-            schema_version: SCHEMA_VERSION,
-            storage_path,
-        }));
+        let (tx, mut rx) = mpsc::channel::<MessagePayload>(10);
+        let player = FakeMusicPlayerRef::new(tx);
+        let backend = Arc::new(Backend::new(
+            AsyncRuntime::new(backend_async_runtime_adapter.clone()),
+            Arc::new(player.clone()),
+        ));
+        backend_async_runtime_adapter.bind(backend.clone());
+        let backend_host = BackendHost::new();
+        backend_host.set_backend(backend.clone());
+        {
+            let backend = backend_host.clone();
+            tokio::spawn(async move {
+                while let Some(v) = rx.recv().await {
+                    backend.request(v).await.unwrap();
+                }
+            });
+        }
+        backend
+            .init(ArgInitializeApp {
+                app_document_dir: test_dir.to_string(),
+                schema_version: SCHEMA_VERSION,
+                storage_path,
+            })
+            .unwrap();
+
+        let pod = AppPod::new();
+        let view_state = ViewStateServiceRef::new();
+        let permission = FakePermissionService::new(event_loop.clone());
+        let app = build_client(
+            backend_host,
+            Arc::new(permission.clone()),
+            Arc::new(FakeRouterService),
+            Arc::new(FakeToastServiceImpl),
+            Arc::new(view_state.clone()),
+            AsyncRuntime::new(ui_async_runtime_adapter.clone()),
+        );
+        ui_async_runtime_adapter.bind(Arc::new(pod.clone()));
+        pod.set(app.clone());
+
+        app.emit(Action::Init);
 
         let ret = Self {
             app: pod,
+            backend,
             server: FakeServerRef::setup("test-files"),
             player,
             permission,
-            async_runtime,
+            ui_async_runtime: ui_async_runtime_adapter,
+            backend_async_runtime: backend_async_runtime_adapter,
             view_state,
             event_loop,
             last_wait_req_session: Default::default(),
@@ -291,12 +320,13 @@ impl TestApp {
     fn advance_timer_impl(&self, duration_s: u64) {
         let duration = Duration::from_secs(duration_s);
         self.player.advance(duration);
-        self.async_runtime.advance(duration);
+        self.backend_async_runtime.advance(duration);
+        self.ui_async_runtime.advance(duration);
     }
 
     pub async fn wait_network(&self) {
-        for _ in 0..4 {
-            self.wait(20).await;
+        for _ in 0..8 {
+            self.wait(10).await;
         }
     }
 
@@ -325,5 +355,8 @@ impl TestApp {
 }
 
 impl Drop for TestApp {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        let app = self.app.get();
+        app.emit(Action::Destroy);
+    }
 }

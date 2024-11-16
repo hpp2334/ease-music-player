@@ -4,7 +4,7 @@ use ease_client::{
     view_models::*, Action, MusicControlWidget, PlaylistDetailWidget, PlaylistListWidget,
     StorageImportWidget, TimeToPauseWidget, ViewAction,
 };
-use ease_client_shared::{backends::music::LyricLoadState, uis::preference::PlayMode};
+use ease_client_shared::backends::{music::LyricLoadState, player::PlayMode};
 use ease_client_test::{PresetDepth, TestApp};
 use music::{control::MusicControlAction, time_to_pause::TimeToPauseAction};
 
@@ -26,6 +26,7 @@ async fn music_play_1() {
     assert_eq!(state.current_music.as_ref().unwrap().playing, true);
 
     app.dispatch_click(MusicControlWidget::Pause);
+    app.wait_network().await;
     let state = app.latest_state();
     assert_eq!(state.current_music.is_some(), true);
     let state = state.current_music.clone().unwrap();
@@ -83,6 +84,7 @@ async fn music_play_2() {
     app.wait_network().await;
     app.advance_timer(3).await;
     app.dispatch_click(MusicControlWidget::Pause);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, false);
@@ -90,12 +92,14 @@ async fn music_play_2() {
     assert_eq!(state.total_duration, "00:00:06");
 
     app.dispatch_click(MusicControlWidget::Play);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
 
     app.advance_timer(1).await;
     app.dispatch_click(MusicControlWidget::Pause);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, false);
@@ -300,6 +304,7 @@ async fn music_play_list_non_loop_to_loop_1() {
     app.wait_network().await;
     app.dispatch_click(MusicControlWidget::Playmode);
     app.dispatch_click(MusicControlWidget::Playmode);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -308,6 +313,7 @@ async fn music_play_list_non_loop_to_loop_1() {
     assert_eq!(state.play_mode, PlayMode::List);
 
     app.dispatch_click(MusicControlWidget::Playmode);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);
@@ -325,6 +331,7 @@ async fn music_play_single_loop_1() {
     app.dispatch_click(PlaylistDetailWidget::Music { id: a_music_id });
     app.wait_network().await;
     app.dispatch_click(MusicControlWidget::Playmode);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.as_ref().unwrap();
     assert_eq!(state.playing, true);

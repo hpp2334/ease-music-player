@@ -44,7 +44,7 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -276,9 +276,10 @@ private fun TimeToPauseModalCore(
 fun TimeToPauseModal(
     evm: EaseViewModel,
 ) {
+    val bridge = UIBridgeController.current
     val state by evm.timeToPauseState.collectAsState()
     val onClose = {
-        Bridge.dispatchAction(ViewAction.TimeToPause(TimeToPauseAction.CloseModal));
+        bridge.dispatchAction(ViewAction.TimeToPause(TimeToPauseAction.CloseModal));
     }
 
     TimeToPauseModalCore(
@@ -288,11 +289,11 @@ fun TimeToPauseModal(
         deleteEnabled = state.enabled,
         onCancel = onClose,
         onConfirm = { hour, minute ->
-            Bridge.dispatchAction(ViewAction.TimeToPause(TimeToPauseAction.Finish(hour.toUByte(), minute.toUByte(), 0u)))
+            bridge.dispatchAction(ViewAction.TimeToPause(TimeToPauseAction.Finish(hour.toUByte(), minute.toUByte(), 0u)))
             onClose()
         },
         onDelete = {
-            Bridge.dispatchClick(TimeToPauseWidget.DELETE)
+            bridge.dispatchClick(TimeToPauseWidget.DELETE)
             onClose()
         }
     )

@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use ease_client_shared::backends::{
     music::MusicId,
     playlist::PlaylistId,
-    storage::{StorageEntry, StorageEntryLoc, StorageId},
+    storage::{StorageEntryLoc, StorageId},
 };
 use ease_database::{params, DbConnectionRef};
 
 use crate::{
     error::BResult,
-    models::{playlist::PlaylistModel, storage::StorageEntryLocModel},
+    models::playlist::PlaylistModel,
 };
 
 pub struct ArgDBUpsertPlaylist {

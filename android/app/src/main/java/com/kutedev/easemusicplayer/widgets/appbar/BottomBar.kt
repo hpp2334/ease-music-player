@@ -32,7 +32,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import com.kutedev.easemusicplayer.widgets.getCurrentRoute
 import com.kutedev.easemusicplayer.widgets.musics.MiniPlayer
 import kotlinx.coroutines.launch
 import uniffi.ease_client.RoutesKey

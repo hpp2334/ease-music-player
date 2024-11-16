@@ -1,20 +1,22 @@
 package com.kutedev.easemusicplayer.core
 
+import AsyncRuntimeAdapter
 import android.Manifest.permission.READ_EXTERNAL_STORAGE
 import android.Manifest.permission.READ_MEDIA_AUDIO
 import android.annotation.SuppressLint
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.result.ActivityResultLauncher
-import androidx.core.app.ActivityCompat
-import androidx.core.app.ActivityCompat.requestPermissions
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import androidx.navigation.NavHostController
+import com.google.common.util.concurrent.MoreExecutors
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
-import uniffi.ease_client.IFlushNotifier
-import uniffi.ease_client.IPermissionService
-import uniffi.ease_client.IRouterService
-import uniffi.ease_client.IToastService
-import uniffi.ease_client.IViewStateService
+import uniffi.ease_client_android.IPermissionServiceForeign
+import uniffi.ease_client_android.IRouterServiceForeign
+import uniffi.ease_client_android.IToastServiceForeign
+import uniffi.ease_client_android.IViewStateServiceForeign
 import uniffi.ease_client.MainBodyWidget
 import uniffi.ease_client.MusicControlWidget
 import uniffi.ease_client.MusicDetailWidget
@@ -34,32 +36,19 @@ import uniffi.ease_client.ViewAction
 import uniffi.ease_client.Widget
 import uniffi.ease_client.WidgetAction
 import uniffi.ease_client.WidgetActionType
-import uniffi.ease_client.apiBuildClient
-import uniffi.ease_client.apiEmitViewAction
-import uniffi.ease_client.apiFlushSpawned
-import uniffi.ease_client.apiStartClient
+import uniffi.ease_client_android.IAsyncAdapterForeign
+import uniffi.ease_client_android.apiBuildClient
+import uniffi.ease_client_android.apiDestroyClient
+import uniffi.ease_client_android.apiEmitViewAction
+import uniffi.ease_client_android.apiStartClient
 import uniffi.ease_client_shared.ArgInitializeApp
 
-typealias OnNotifyView = (view: RootViewModelState) -> Unit;
 
 interface IOnNotifyView {
     fun onNotifyView(v: RootViewModelState);
 }
 
-private class FlushNotifier : IFlushNotifier {
-    private val _isNotified = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    override fun handleNotify() {
-        if (_isNotified.compareAndSet(false, true)) {
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                _isNotified.set(false)
-                apiFlushSpawned()
-            }
-        }
-    }
-}
-
-private class ViewStates : IViewStateService {
+private class ViewStates : IViewStateServiceForeign {
     private val _store: HashSet<IOnNotifyView> = HashSet();
 
     override fun handleNotify(v: RootViewModelState) {
@@ -77,7 +66,7 @@ private class ViewStates : IViewStateService {
     }
 }
 
-private class ToastService : IToastService {
+private class ToastService : IToastServiceForeign {
     private var context: android.content.Context? = null
 
     fun setContext(context: android.content.Context) {
@@ -90,7 +79,7 @@ private class ToastService : IToastService {
     }
 }
 
-class RouterService : IRouterService {
+class RouterService : IRouterServiceForeign {
     private var _navigatorController: NavHostController? = null;
 
     fun install(controller: NavHostController) {
@@ -117,7 +106,7 @@ class RouterService : IRouterService {
     }
 }
 
-private class PermissionService : IPermissionService {
+private class PermissionService : IPermissionServiceForeign {
     private var context: android.content.Context? = null
     private var requestPermissionLauncher: ActivityResultLauncher<String>? = null
 
@@ -144,55 +133,66 @@ private class PermissionService : IPermissionService {
 
 }
 
-object Bridge {
+class UIBridge {
+    private var _handle: ULong = 0uL
+
     @SuppressLint("StaticFieldLeak")
-    private val _player: EaseMusicController = EaseMusicController()
     private val _viewStates = ViewStates()
-    private val _flushNotifier = FlushNotifier()
     @SuppressLint("StaticFieldLeak")
     private val _toastService = ToastService()
     val routerInternal = RouterService()
     @SuppressLint("StaticFieldLeak")
     private val _permissionService = PermissionService()
-    private const val SCHEMA_VERSION = 1u
-    private const val STORAGE_PATH = "/"
-
+    private var _playerController: MediaController? = null
     private var _executingAction = false
 
-    fun onActivityStart() {
-        _player.onActivityStart()
+
+    fun onBackendConnected() {
+        apiStartClient(this._handle)
     }
 
-    fun onActivityStop() {
-        _player.onActivityStop()
-    }
-
-    fun onActivityDestroy() {
-        _player.onActivityDestroy()
-        routerInternal.destroy()
-    }
-
-    fun onActivityCreate(context: android.content.Context, requestPermissionLauncher: ActivityResultLauncher<String>) {
-        _player.onActivityCreate(context)
-
+    fun onActivityCreate(context: android.content.Context,
+                         requestPermissionLauncher: ActivityResultLauncher<String>) {
         _toastService.setContext(context)
         _permissionService.setContext(context, requestPermissionLauncher)
 
-        apiBuildClient(
+        val factory = MediaController.Builder(
+            context,
+            SessionToken(context, ComponentName(context, PlaybackService::class.java))
+        ).buildAsync()
+        factory.addListener(
+            {
+                _playerController = factory.let {
+                    if (it.isDone)
+                        it.get()
+                    else
+                        null
+                }
+            },
+            MoreExecutors.directExecutor()
+        )
+
+        this._handle = apiBuildClient(
             _permissionService,
             routerInternal,
-            _player,
             _toastService,
             _viewStates,
-            _flushNotifier
-        );
-        apiStartClient(ArgInitializeApp(
-            context.filesDir.absolutePath,
-            SCHEMA_VERSION,
-            STORAGE_PATH
-        ))
+            AsyncRuntimeAdapter()
+        )
     }
 
+    fun onActivityStart() {
+    }
+
+    fun onActivityStop() {
+    }
+
+    fun onActivityDestroy() {
+        routerInternal.destroy()
+        apiDestroyClient(this._handle)
+        _playerController?.release()
+        _playerController = null
+    }
     private fun dispatchClick(widget: Widget) {
         dispatchAction(ViewAction.Widget(WidgetAction(widget, WidgetActionType.Click)))
     }
@@ -213,7 +213,7 @@ object Bridge {
 
     fun dispatchAction(action: ViewAction) {
         this._executingAction = true
-        apiEmitViewAction(action)
+        apiEmitViewAction(this._handle, action)
         this._executingAction = false
     }
 

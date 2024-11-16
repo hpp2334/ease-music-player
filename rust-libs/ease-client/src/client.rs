@@ -1,16 +1,11 @@
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Arc;
 
-use ease_client_shared::backends::app::ArgInitializeApp;
-use misty_vm::{App, AppPod, IAsyncRuntimeAdapter};
-use once_cell::sync::Lazy;
+use misty_vm::{App, AsyncRuntime};
 
 use crate::{
-    actions::{event::ViewAction, Action},
-    async_adapter::AsyncAdapter,
+    actions::Action,
     to_host::{
-        connector::{ConnectorHostImpl, ConnectorHostService},
-        flush_notifier::IFlushNotifier,
-        player::{IMusicPlayerService, MusicPlayerService},
+        connector::{ConnectorHostService, IConnectorHost},
         router::{IRouterService, RouterService},
         toast::{IToastService, ToastService},
         view_state::{IViewStateService, ViewStateService},
@@ -34,85 +29,14 @@ use crate::{
     },
     IPermissionService, PermissionService,
 };
-use tracing::subscriber::set_global_default;
-
-static CLIENT: Lazy<AppPod> = Lazy::new(|| AppPod::new());
-static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .worker_threads(4)
-        .build()
-        .unwrap()
-});
-
-fn create_log(dir: &str) -> std::fs::File {
-    let p = std::path::Path::new(dir).join("latest.log");
-    let _r = std::fs::remove_file(&p);
-    let file = std::fs::File::create(&p).unwrap();
-    file
-}
-
-fn trace_level() -> tracing::Level {
-    if std::env::var("EBUILD").is_ok() {
-        tracing::Level::INFO
-    } else {
-        tracing::Level::TRACE
-    }
-}
-
-#[cfg(target_os = "android")]
-fn setup_subscriber(dir: &str) {
-    use tracing_subscriber::layer::SubscriberExt;
-    let log_file = create_log(dir);
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(trace_level())
-        .with_writer(log_file)
-        .with_ansi(false)
-        .finish();
-    let subscriber = subscriber.with(tracing_android::layer("com.ease_music_player").unwrap());
-    set_global_default(subscriber).unwrap();
-}
-
-#[cfg(not(target_os = "android"))]
-fn setup_subscriber(dir: &str) {
-    let log_file = create_log(dir);
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(trace_level())
-        .with_writer(log_file)
-        .with_ansi(false)
-        .finish();
-
-    set_global_default(subscriber).unwrap();
-}
-
-fn setup_panic_hook() {
-    std::panic::set_hook(Box::new(|info| {
-        let stacktrace = std::backtrace::Backtrace::force_capture();
-
-        tracing::error!("panic info: {}", info);
-        tracing::error!("panic stacktrace: {}", stacktrace);
-
-        std::process::abort()
-    }));
-}
-
-fn init_tracers(dir: &str) {
-    static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
-    let is_init = IS_INITIALIZED.swap(true, std::sync::atomic::Ordering::SeqCst);
-    std::env::set_var("RUST_BACKTRACE", "1");
-    if !is_init {
-        setup_subscriber(dir);
-        setup_panic_hook();
-    }
-}
 
 pub fn build_client(
+    backend: Arc<dyn IConnectorHost>,
     permission: Arc<dyn IPermissionService>,
     router: Arc<dyn IRouterService>,
-    player: Arc<dyn IMusicPlayerService>,
     toast: Arc<dyn IToastService>,
     vs: Arc<dyn IViewStateService>,
-    adapter: impl IAsyncRuntimeAdapter,
+    async_runtime: Arc<AsyncRuntime>,
 ) -> App {
     App::builder::<Action>()
         .with_view_models(|cx, builder| {
@@ -145,51 +69,10 @@ pub fn build_client(
             builder
                 .add(PermissionService::new_with_arc(permission))
                 .add(RouterService::new_with_arc(router))
-                .add(ConnectorHostService::new(ConnectorHostImpl::new()))
-                .add(MusicPlayerService::new_with_arc(player))
+                .add(ConnectorHostService::new_with_arc(backend))
                 .add(ToastService::new_with_arc(toast))
                 .add(ViewStateService::new_with_arc(vs));
         })
-        .with_async_runtime_adapter(adapter)
+        .with_async_runtime(async_runtime)
         .build()
-}
-
-#[uniffi::export]
-pub fn api_build_client(
-    permission: Arc<dyn IPermissionService>,
-    router: Arc<dyn IRouterService>,
-    player: Arc<dyn IMusicPlayerService>,
-    toast: Arc<dyn IToastService>,
-    vs: Arc<dyn IViewStateService>,
-    notifier: Arc<dyn IFlushNotifier>,
-) {
-    let _guard = ASYNC_RT.enter();
-    let app = build_client(
-        permission,
-        router,
-        player,
-        toast,
-        vs,
-        AsyncAdapter::new(notifier),
-    );
-    CLIENT.set(app);
-}
-
-#[uniffi::export]
-pub fn api_start_client(arg: ArgInitializeApp) {
-    let _guard = ASYNC_RT.enter();
-    init_tracers(&arg.app_document_dir);
-    CLIENT.get().emit(Action::Init(arg));
-}
-
-#[uniffi::export]
-pub fn api_emit_view_action(action: ViewAction) {
-    let _guard = ASYNC_RT.enter();
-    CLIENT.get().emit(Action::View(action));
-}
-
-#[uniffi::export]
-pub fn api_flush_spawned() {
-    let _guard = ASYNC_RT.enter();
-    CLIENT.get().flush_spawned();
 }

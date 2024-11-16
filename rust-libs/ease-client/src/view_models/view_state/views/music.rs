@@ -1,9 +1,7 @@
-use ease_client_shared::{
-    backends::{
-        music::{LyricLoadState, MusicId},
-        music_duration::MusicDuration,
-    },
-    uis::preference::PlayMode,
+use ease_client_shared::backends::{
+    music::{LyricLoadState, MusicId},
+    music_duration::MusicDuration,
+    player::PlayMode,
 };
 use serde::Serialize;
 
@@ -66,25 +64,25 @@ pub(crate) fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewMod
             return;
         }
     };
-    let abstr = &music.queue[music.index];
+    let abstr = music.abstr;
 
     let title = abstr.meta.title.clone();
     let total_duration = abstr.meta.duration.clone();
     let current_duration = MusicDuration::new(state.current_duration);
 
     let view_model_state = VCurrentMusicState {
-        id: Some(music.id),
+        id: Some(abstr.id()),
         title,
         current_duration: get_display_duration(&Some(current_duration)),
         total_duration: get_display_duration(&total_duration),
         current_duration_ms: current_duration.as_millis() as u64,
         total_duration_ms: total_duration.map_or(i32::MAX as u64, |d| d.as_millis() as u64),
         can_change_position: total_duration.is_some(),
-        can_play_next: state.can_play_next(),
-        can_play_previous: state.can_play_previous(),
-        previous_cover: state.prev_cover(),
-        next_cover: state.next_cover(),
-        cover: state.cover(),
+        can_play_next: music.can_next,
+        can_play_previous: music.can_prev,
+        previous_cover: music.prev_cover,
+        next_cover: music.next_cover,
+        cover: abstr.cover_url,
         playing: state.playing,
         play_mode: state.play_mode,
         lyric_index: state.lyric_line_index,

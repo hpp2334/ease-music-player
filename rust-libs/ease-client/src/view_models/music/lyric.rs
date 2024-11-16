@@ -3,9 +3,9 @@ use crate::{
     error::{EaseError, EaseResult},
     view_models::{connector::Connector, storage::import::StorageImportVM},
 };
-use ease_client_shared::{
-    backends::{music::ArgUpdateMusicLyric, storage::StorageEntryLoc},
-    uis::storage::CurrentStorageImportType,
+use ease_client_shared::backends::{
+    music::ArgUpdateMusicLyric,
+    storage::{CurrentStorageImportType, StorageEntryLoc},
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
@@ -35,7 +35,7 @@ impl MusicLyricVM {
         cx: &ViewModelContext,
         loc: Option<StorageEntryLoc>,
     ) -> EaseResult<()> {
-        let id = cx.model_get(&self.current).music.as_ref().map(|v| v.id);
+        let id = cx.model_get(&self.current).id();
         if id.is_none() {
             return Ok(());
         }
@@ -72,7 +72,7 @@ impl MusicLyricVM {
         self.update_lyric_loc_impl(cx, Some(loc))
     }
 
-    pub(crate) fn tick_lyric_index(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    pub(crate) fn sync_lyric_index(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let mut state = cx.model_mut(&self.current);
         if state.lyric.is_none() {
             return Ok(());

@@ -33,7 +33,8 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.MainBodyWidget
 import uniffi.ease_client.StorageListWidget
@@ -43,11 +44,11 @@ import uniffi.ease_client_shared.StorageType
 
 private val paddingX = 24.dp
 
-private fun toEditStorage(arg: StorageId?) {
+private fun toEditStorage(bridge: UIBridge, arg: StorageId?) {
     if (arg != null) {
-        Bridge.dispatchClick(StorageListWidget.Item(arg))
+        bridge.dispatchClick(StorageListWidget.Item(arg))
     } else {
-        Bridge.dispatchClick(StorageListWidget.Create)
+        bridge.dispatchClick(StorageListWidget.Create)
     }
 }
 
@@ -61,6 +62,7 @@ private fun Title(title: String) {
 
 @Composable
 private fun SleepModeBlock(evm: EaseViewModel) {
+    val bridge = UIBridgeController.current
     val state by evm.timeToPauseState.collectAsState()
     val blockBg = if (state.enabled) {
         MaterialTheme.colorScheme.secondary
@@ -80,7 +82,7 @@ private fun SleepModeBlock(evm: EaseViewModel) {
             .padding(paddingX, 0.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable {
-                Bridge.dispatchClick(MainBodyWidget.TimeToPause)
+                bridge.dispatchClick(MainBodyWidget.TimeToPause)
             },
     ) {
         Row(
@@ -107,6 +109,7 @@ private fun SleepModeBlock(evm: EaseViewModel) {
 
 @Composable
 private fun DevicesBlock(storageItems: List<VStorageListItem>) {
+    val bridge = UIBridgeController.current
     Column(
         modifier = Modifier
             .padding(paddingX, 0.dp)
@@ -118,7 +121,7 @@ private fun DevicesBlock(storageItems: List<VStorageListItem>) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable {
-                    toEditStorage(null)
+                    toEditStorage(bridge, null)
                 }
             ) {
                 Row(
@@ -145,7 +148,7 @@ private fun DevicesBlock(storageItems: List<VStorageListItem>) {
                     .fillMaxWidth()
                     .padding(0.dp, 4.dp)
                     .clickable {
-                        toEditStorage(item.storageId)
+                        toEditStorage(bridge, item.storageId)
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -177,6 +180,7 @@ private fun DevicesBlock(storageItems: List<VStorageListItem>) {
 fun DashboardSubpage(
     evm: EaseViewModel,
 ) {
+    val bridge = UIBridgeController.current
     val storageState by evm.storageListState.collectAsState()
     val storageItems = storageState.items.filter { v -> v.typ != StorageType.LOCAL }
 
@@ -208,7 +212,7 @@ fun DashboardSubpage(
                     buttonType = EaseIconButtonType.Primary,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        toEditStorage(null)
+                        toEditStorage(bridge, null)
                     }
                 )
             }

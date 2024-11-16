@@ -33,7 +33,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.MusicCover
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.MainBodyWidget
 import uniffi.ease_client.MusicControlWidget
@@ -146,6 +146,7 @@ private fun MiniPlayerCore(
 fun MiniPlayer(
     evm: EaseViewModel
 ) {
+    val bridge = UIBridgeController.current
     val state = evm.currentMusicState.collectAsState().value
 
     MiniPlayerCore(
@@ -156,11 +157,11 @@ fun MiniPlayer(
         totalDuration = state.totalDuration,
         totalDurationMS = state.totalDurationMs,
         canNext = state.canPlayNext,
-        onClick = { Bridge.dispatchClick(MainBodyWidget.MiniPlayer) },
-        onPlay = { Bridge.dispatchClick(MusicControlWidget.PLAY) },
-        onPause = { Bridge.dispatchClick(MusicControlWidget.PAUSE) },
-        onStop = { Bridge.dispatchClick(MusicControlWidget.STOP) },
-        onNext = { Bridge.dispatchClick(MusicControlWidget.PLAY_NEXT) },
+        onClick = { bridge.dispatchClick(MainBodyWidget.MiniPlayer) },
+        onPlay = { bridge.dispatchClick(MusicControlWidget.PLAY) },
+        onPause = { bridge.dispatchClick(MusicControlWidget.PAUSE) },
+        onStop = { bridge.dispatchClick(MusicControlWidget.STOP) },
+        onNext = { bridge.dispatchClick(MusicControlWidget.PLAY_NEXT) },
     )
 }
 

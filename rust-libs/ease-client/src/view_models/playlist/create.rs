@@ -1,11 +1,10 @@
 use std::collections::HashSet;
 
-use ease_client_shared::{
-    backends::{
-        playlist::ArgCreatePlaylist,
-        storage::{StorageEntry, StorageEntryLoc, StorageEntryType, StorageId},
+use ease_client_shared::backends::{
+    playlist::{ArgCreatePlaylist, CreatePlaylistMode},
+    storage::{
+        CurrentStorageImportType, StorageEntry, StorageEntryType,
     },
-    uis::{playlist::CreatePlaylistMode, storage::CurrentStorageImportType},
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 

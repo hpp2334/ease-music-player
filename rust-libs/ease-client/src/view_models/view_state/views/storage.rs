@@ -1,9 +1,6 @@
-use ease_client_shared::{
-    backends::storage::{
-        ArgUpsertStorage, Storage, StorageConnectionTestResult, StorageEntryType, StorageId,
-        StorageType,
-    },
-    uis::storage::*,
+use ease_client_shared::backends::storage::{
+    ArgUpsertStorage, CurrentStorageImportType, CurrentStorageStateType, Storage,
+    StorageConnectionTestResult, StorageEntryType, StorageId, StorageType,
 };
 use serde::Serialize;
 

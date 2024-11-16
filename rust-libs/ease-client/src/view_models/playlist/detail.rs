@@ -1,10 +1,7 @@
-use ease_client_shared::{
-    backends::{
-        music::MusicId,
-        playlist::{ArgAddMusicsToPlaylist, PlaylistId},
-        storage::{StorageEntry, StorageEntryLoc, StorageId},
-    },
-    uis::storage::CurrentStorageImportType,
+use ease_client_shared::backends::{
+    music::MusicId,
+    playlist::{ArgAddMusicsToPlaylist, PlaylistId},
+    storage::{CurrentStorageImportType, StorageEntry, StorageId},
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
@@ -18,7 +15,7 @@ use crate::{
         music::{common::MusicCommonVM, control::MusicControlVM},
         storage::import::StorageImportVM,
     },
-    MusicPlayerService, RoutesKey,
+    RoutesKey,
 };
 
 use super::{common::PlaylistCommonVM, edit::PlaylistEditVM, state::CurrentPlaylistState};

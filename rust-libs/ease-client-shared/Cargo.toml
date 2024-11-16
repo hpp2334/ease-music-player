@@ -8,7 +8,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-uniffi = "=0.28.0"
+uniffi = "=0.28.3"
 num-traits = "0.2"
 num-derive = "0.2"
 ease-database = { path = "../ease-database" }

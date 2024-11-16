@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use ease_client::{Action, ViewAction};
-use misty_vm::{App, AppPod};
+use misty_vm::App;
 
 #[derive(Clone)]
 pub struct EventLoop {

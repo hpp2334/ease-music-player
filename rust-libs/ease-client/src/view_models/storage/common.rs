@@ -1,9 +1,11 @@
 use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
-    view_models::connector::ConnectorAction,
 };
-use ease_client_shared::backends::storage::{Storage, StorageId};
+use ease_client_shared::backends::{
+    connector::ConnectorAction,
+    storage::{Storage, StorageId},
+};
 use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
 
 use super::state::AllStorageState;
@@ -21,11 +23,6 @@ pub(crate) struct StorageCommonVM {
 impl StorageCommonVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         StorageCommonVM { store: cx.model() }
-    }
-
-    pub(crate) fn update_local_storage_path(&self, cx: &ViewModelContext, p: String) {
-        let mut state = cx.model_mut(&self.store);
-        state.local_storage_path = p;
     }
 
     fn sync_storages(&self, cx: &ViewModelContext, storages: Vec<Storage>) -> EaseResult<()> {

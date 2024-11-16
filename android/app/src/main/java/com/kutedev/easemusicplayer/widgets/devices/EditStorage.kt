@@ -48,7 +48,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.FormFieldStatus
 import uniffi.ease_client.StorageUpsertWidget
@@ -85,6 +85,7 @@ private fun RemoveDialog(
     musicCount: UInt,
     playlistCount: UInt,
 ) {
+    val bridge = UIBridgeController.current
     val mainDesc = buildStr(
         stringResource(R.string.storage_remove_desc_main)
             .replace("E_TITLE", title)
@@ -99,7 +100,7 @@ private fun RemoveDialog(
         open = isOpen,
         onConfirm = {
             onClose()
-            Bridge.dispatchClick(StorageUpsertWidget.Remove)
+            bridge.dispatchClick(StorageUpsertWidget.Remove)
         },
         onCancel = onClose,
     ) {
@@ -155,6 +156,7 @@ fun EditStoragesPage(
     evm: EaseViewModel,
 ) {
     val context = LocalContext.current
+    val bridge = UIBridgeController.current
     var removeDialogOpen by remember { mutableStateOf(false) }
 
     val toast = remember {
@@ -227,7 +229,7 @@ fun EditStoragesPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_back),
                     onClick = {
-                        Bridge.popRoute()
+                        bridge.popRoute()
                     }
                 )
             }
@@ -248,7 +250,7 @@ fun EditStoragesPage(
                     painter = painterResource(id = R.drawable.icon_wifitethering),
                     overrideColors = testingColors,
                     onClick = {
-                        Bridge.dispatchClick(StorageUpsertWidget.Test);
+                        bridge.dispatchClick(StorageUpsertWidget.Test);
                     }
                 )
                 EaseIconButton(
@@ -256,7 +258,7 @@ fun EditStoragesPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_ok),
                     onClick = {
-                        Bridge.dispatchClick(StorageUpsertWidget.Finish);
+                        bridge.dispatchClick(StorageUpsertWidget.Finish);
                     }
                 )
             }
@@ -276,7 +278,7 @@ fun EditStoragesPage(
                         title = "WebDAV",
                         isActive = storageType == StorageType.WEBDAV,
                         onSelect = {
-                            Bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.WEBDAV))
+                            bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.WEBDAV))
                         }
                     )
                 }
@@ -284,17 +286,17 @@ fun EditStoragesPage(
                 FormSwitch(
                     label = stringResource(id = R.string.storage_edit_anonymous),
                     value = isAnonymous,
-                    onChange = { Bridge.dispatchClick(StorageUpsertWidget.IsAnonymous); }
+                    onChange = { bridge.dispatchClick(StorageUpsertWidget.IsAnonymous); }
                 )
                 FormText(
                     label = stringResource(id = R.string.storage_edit_alias),
                     value = form.alias,
-                    onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
+                    onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
                 )
                 FormText(
                     label = stringResource(id = R.string.storage_edit_addr),
                     value = form.addr,
-                    onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Address, value) },
+                    onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Address, value) },
                     error = if (validated.address == FormFieldStatus.CANNOT_BE_EMPTY) {
                         R.string.storage_edit_form_address
                     } else {
@@ -305,7 +307,7 @@ fun EditStoragesPage(
                     FormText(
                         label = stringResource(id = R.string.storage_edit_username),
                         value = form.username,
-                        onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Username, value) },
+                        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Username, value) },
                         error = if (validated.username == FormFieldStatus.CANNOT_BE_EMPTY) {
                             R.string.storage_edit_form_username
                         } else {
@@ -316,7 +318,7 @@ fun EditStoragesPage(
                         label = stringResource(id = R.string.storage_edit_password),
                         value = form.password,
                         isPassword = true,
-                        onChange = { value -> Bridge.dispatchChangeText(StorageUpsertWidget.Password, value) },
+                        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Password, value) },
                         error = if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
                             R.string.storage_edit_form_password
                         } else {

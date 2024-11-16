@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use super::code::Code;
+use super::generated::Code;
 
 pub trait IMessage {
     const CODE: Code;
@@ -17,7 +17,6 @@ pub struct MessagePayload {
     pub payload: Vec<u8>,
 }
 
-#[macro_export]
 macro_rules! define_message {
     ($msg: ident, $code: expr, $arg: ty, $ret: ty) => {
         pub struct $msg {}

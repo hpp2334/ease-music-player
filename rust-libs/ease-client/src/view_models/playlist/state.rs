@@ -1,9 +1,6 @@
-use ease_client_shared::{
-    backends::{
-        playlist::{Playlist, PlaylistAbstract, PlaylistId},
-        storage::{StorageEntry, StorageEntryLoc, StorageId},
-    },
-    uis::playlist::CreatePlaylistMode,
+use ease_client_shared::backends::{
+    playlist::{CreatePlaylistMode, Playlist, PlaylistAbstract, PlaylistId},
+    storage::{StorageEntry, StorageEntryLoc},
 };
 
 #[derive(Default, Clone)]

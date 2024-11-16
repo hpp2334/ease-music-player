@@ -10,4 +10,5 @@ members = [
     "ease-client",
     "ease-client-test",
     "ease-client-android-ffi-builder",
+    "ease-client-android",
 ]

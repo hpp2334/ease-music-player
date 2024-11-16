@@ -9,7 +9,6 @@ pub enum RoutesKey {
     MusicPlayer,
 }
 
-#[uniffi::export(with_foreign)]
 pub trait IRouterService: Send + Sync + 'static {
     fn naviagate(&self, key: RoutesKey);
     fn pop(&self);

@@ -3,15 +3,63 @@ use std::{sync::Arc, time::Duration};
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    models::storage::StorageModel,
+    models::storage::{StorageEntryLocModel, StorageModel},
     repositories::{
         core::get_conn, music::db_get_playlists_count_by_storage,
         playlist::db_get_musics_count_by_storage, storage::db_load_storage,
     },
 };
-use ease_client_shared::backends::storage::{ArgUpsertStorage, Storage, StorageId, StorageType};
+use ease_client_shared::backends::storage::{
+    ArgUpsertStorage, Storage, StorageEntryLoc, StorageId, StorageType,
+};
 use ease_remote_storage::{BuildWebdavArg, LocalBackend, StorageBackend, Webdav};
 use num_traits::FromPrimitive;
+
+pub(crate) fn to_opt_storage_entry(
+    path: Option<String>,
+    id: Option<StorageId>,
+) -> Option<StorageEntryLoc> {
+    if path.is_some() && id.is_some() {
+        Some(StorageEntryLoc {
+            path: path.unwrap(),
+            storage_id: id.unwrap(),
+        })
+    } else {
+        None
+    }
+}
+
+pub(crate) fn from_opt_storage_entry(loc: Option<StorageEntryLoc>) -> StorageEntryLocModel {
+    if let Some(loc) = loc {
+        (Some(loc.path), Some(loc.storage_id))
+    } else {
+        (None, None)
+    }
+}
+
+pub(crate) async fn load_storage_entry_data(
+    cx: &BackendContext,
+    loc: &StorageEntryLoc,
+) -> BResult<Option<Vec<u8>>> {
+    let loc = loc.clone();
+    let backend = get_storage_backend(cx, loc.storage_id)?;
+    if let Some(backend) = backend {
+        cx.async_runtime()
+            .spawn(async move {
+                match backend.get(&loc.path).await {
+                    Ok(data) => {
+                        let data = data.bytes().await.unwrap();
+                        let data = data.to_vec();
+                        Ok(Some(data))
+                    }
+                    Err(e) => Ok(None),
+                }
+            })
+            .await
+    } else {
+        Ok(None)
+    }
+}
 
 pub fn build_storage(model: StorageModel, music_count: u32, playlist_count: u32) -> Storage {
     Storage {

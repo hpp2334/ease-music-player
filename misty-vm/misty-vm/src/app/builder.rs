@@ -1,11 +1,10 @@
 use std::{any::Any, sync::Arc};
 
+use misty_async::{AsyncRuntime, IAsyncRuntimeAdapter};
+
 use crate::{
-    async_task::{AsyncExecutor, DefaultAsyncRuntimeAdapter, IAsyncRuntimeAdapter},
-    models::Models,
-    to_host::ToHostsBuilder,
-    view_models::builder::ViewModelsBuilder,
-    Model,
+    async_task::DefaultAsyncRuntimeAdapter, models::Models, to_host::ToHostsBuilder,
+    view_models::builder::ViewModelsBuilder, Model,
 };
 
 use super::{internal::AppInternal, pod::App};
@@ -21,7 +20,7 @@ where
     cx: AppBuilderContext,
     view_models_builder: ViewModelsBuilder<Event>,
     to_hosts_builder: ToHostsBuilder,
-    async_tasks: AsyncExecutor,
+    async_tasks: Arc<AsyncRuntime>,
 }
 
 impl AppBuilderContext {
@@ -44,7 +43,7 @@ where
             },
             view_models_builder: ViewModelsBuilder::new(),
             to_hosts_builder: ToHostsBuilder::new(),
-            async_tasks: AsyncExecutor::new(DefaultAsyncRuntimeAdapter),
+            async_tasks: AsyncRuntime::new(Arc::new(DefaultAsyncRuntimeAdapter)),
         }
     }
 
@@ -61,8 +60,8 @@ where
         self
     }
 
-    pub fn with_async_runtime_adapter(mut self, adapter: impl IAsyncRuntimeAdapter) -> Self {
-        self.async_tasks = AsyncExecutor::new(adapter);
+    pub fn with_async_runtime(mut self, rt: Arc<AsyncRuntime>) -> Self {
+        self.async_tasks = rt;
         self
     }
 

@@ -64,7 +64,7 @@ import com.kutedev.easemusicplayer.components.MusicCover
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.MusicControlAction
@@ -82,6 +82,7 @@ import kotlin.math.sign
 private fun MusicPlayerHeader(
     hasLyric: Boolean,
 ) {
+    val bridge = UIBridgeController.current
     var moreMenuExpanded by remember {
         mutableStateOf(false)
     }
@@ -97,7 +98,7 @@ private fun MusicPlayerHeader(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_back),
             onClick = {
-                Bridge.popRoute()
+                bridge.popRoute()
             }
         )
         Box {
@@ -120,14 +121,14 @@ private fun MusicPlayerHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.music_lyric_remove,
                                 onClick = {
-                                    Bridge.dispatchClick(MusicLyricWidget.REMOVE)
+                                    bridge.dispatchClick(MusicLyricWidget.REMOVE)
                                 }
                             )
                         } else {
                             EaseContextMenuItem(
                                 stringId = R.string.music_lyric_add,
                                 onClick = {
-                                    Bridge.dispatchClick(MusicLyricWidget.ADD)
+                                    bridge.dispatchClick(MusicLyricWidget.ADD)
                                 }
                             )
                         },
@@ -135,7 +136,7 @@ private fun MusicPlayerHeader(
                             stringId = R.string.music_player_context_menu_remove,
                             isError = true,
                             onClick = {
-                                Bridge.dispatchClick(MusicDetailWidget.REMOVE)
+                                bridge.dispatchClick(MusicDetailWidget.REMOVE)
                             }
                         ),
                     )
@@ -518,6 +519,7 @@ private fun MusicPlayerBody(
 private fun MusicPanel(
     evm: EaseViewModel,
 ) {
+    val bridge = UIBridgeController.current
     val state by evm.currentMusicState.collectAsState()
     var isOpen by remember { mutableStateOf(false) }
     val modeDrawable = when (state.playMode) {
@@ -553,7 +555,7 @@ private fun MusicPanel(
             painter = painterResource(id = R.drawable.icon_play_previous),
             disabled = !state.canPlayPrevious,
             onClick = {
-                Bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
+                bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
             }
         )
         if (!state.playing) {
@@ -562,7 +564,7 @@ private fun MusicPanel(
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
                 onClick = {
-                    Bridge.dispatchClick(MusicControlWidget.PLAY)
+                    bridge.dispatchClick(MusicControlWidget.PLAY)
                 }
             )
         }
@@ -572,7 +574,7 @@ private fun MusicPanel(
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_pause),
                 onClick = {
-                    Bridge.dispatchClick(MusicControlWidget.PAUSE)
+                    bridge.dispatchClick(MusicControlWidget.PAUSE)
                 }
             )
         }
@@ -582,7 +584,7 @@ private fun MusicPanel(
             painter = painterResource(id = R.drawable.icon_play_next),
             disabled = !state.canPlayNext,
             onClick = {
-                Bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
+                bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
             }
         )
         EaseIconButton(
@@ -590,7 +592,7 @@ private fun MusicPanel(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = modeDrawable),
             onClick = {
-                Bridge.dispatchClick(MusicControlWidget.PLAYMODE)
+                bridge.dispatchClick(MusicControlWidget.PLAYMODE)
             }
         )
     }
@@ -600,6 +602,7 @@ private fun MusicPanel(
 fun MusicPlayerPage(
     evm: EaseViewModel,
 ) {
+    val bridge = UIBridgeController.current
     val currentMusicState by evm.currentMusicState.collectAsState()
     val currentLyricState by evm.currentMusicLyricState.collectAsState()
 
@@ -620,10 +623,10 @@ fun MusicPlayerPage(
             ) {
                 MusicPlayerBody(
                     onPrev = {
-                        Bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
+                        bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
                     },
                     onNext = {
-                        Bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
+                        bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
                     },
                     cover = currentMusicState.cover,
                     prevCover = currentMusicState.previousCover,
@@ -634,7 +637,7 @@ fun MusicPlayerPage(
                     lyricLoadedState = currentLyricState.loadState,
                     lyrics = currentLyricState.lyricLines,
                     onClickAddLyric = {
-                        Bridge.dispatchClick(MusicLyricWidget.ADD)
+                        bridge.dispatchClick(MusicLyricWidget.ADD)
                     }
                 )
             }
@@ -654,7 +657,7 @@ fun MusicPlayerPage(
                     totalDuration = currentMusicState.totalDuration,
                     totalDurationMS = currentMusicState.totalDurationMs,
                     onChangeMusicPosition = { nextMS ->
-                        Bridge.dispatchAction(ViewAction.MusicControl(MusicControlAction.Seek(nextMS)))
+                        bridge.dispatchAction(ViewAction.MusicControl(MusicControlAction.Seek(nextMS)))
                     }
                 )
             }

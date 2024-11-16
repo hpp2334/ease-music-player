@@ -1,8 +1,11 @@
+
 use serde::{Deserialize, Serialize};
 
-use crate::{backends::code::Code, define_id, define_message};
+use crate::define_id;
 
-use super::{lyric::Lyrics, music_duration::MusicDuration, storage::StorageEntryLoc};
+use super::{
+    lyric::Lyrics, music_duration::MusicDuration, storage::StorageEntryLoc,
+};
 
 define_id!(MusicId);
 
@@ -74,40 +77,8 @@ impl MusicAbstract {
     }
 }
 
-define_message!(GetMusicMsg, Code::GetMusic, MusicId, Option<Music>);
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ArgUpdateMusicDuration {
-    pub id: MusicId,
-    pub duration: MusicDuration,
-}
-define_message!(
-    UpdateMusicDurationMsg,
-    Code::UpdateMusicDuration,
-    ArgUpdateMusicDuration,
-    ()
-);
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ArgUpdateMusicCover {
-    pub id: MusicId,
-    pub cover: Vec<u8>,
-}
-define_message!(
-    UpdateMusicCoverMsg,
-    Code::UpdateMusicCover,
-    ArgUpdateMusicCover,
-    ()
-);
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgUpdateMusicLyric {
     pub id: MusicId,
     pub lyric_loc: Option<StorageEntryLoc>,
 }
-define_message!(
-    UpdateMusicLyricMsg,
-    Code::UpdateMusicLyric,
-    ArgUpdateMusicLyric,
-    ()
-);

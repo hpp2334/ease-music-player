@@ -50,6 +50,7 @@ async fn music_lyric_1() {
 
     app.advance_timer(5).await;
     let state = app.latest_state().current_music.unwrap();
+    assert_eq!(state.current_duration_ms, 5000);
     assert_eq!(state.lyric_index, 0);
 
     app.advance_timer(3).await;

@@ -79,7 +79,7 @@ impl TimeToPauseVM {
             MusicControlVM::of(cx).request_pause(cx)?;
         } else {
             drop(state);
-            MusicCommonVM::of(cx).schedule_tick::<false>(cx)?;
+            MusicCommonVM::of(cx).schedule_tick(cx)?;
         }
         Ok(())
     }

@@ -1,4 +1,4 @@
-use ease_client_shared::backends::code::Code;
+use ease_client_shared::backends::generated::Code;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BError {

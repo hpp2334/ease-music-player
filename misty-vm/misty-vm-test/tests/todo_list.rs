@@ -1,6 +1,8 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 
-use misty_vm::{App, AppBuilderContext, IAsyncRuntimeAdapter, Model, ViewModel, ViewModelContext};
+use misty_vm::{
+    App, AppBuilderContext, AsyncRuntime, IAsyncRuntimeAdapter, Model, ViewModel, ViewModelContext,
+};
 
 #[derive(Debug, Clone)]
 enum TodoEvent {
@@ -69,24 +71,26 @@ fn build_app(adapter: impl IAsyncRuntimeAdapter) -> App {
         .with_view_models(|cx, builder| {
             builder.add(TodoListVM::new(cx));
         })
-        .with_async_runtime_adapter(adapter)
+        .with_async_runtime(AsyncRuntime::new(Arc::new(adapter)))
         .build();
     app
 }
 
 #[cfg(test)]
 mod tests {
-    use misty_vm_test::AsyncRuntime;
+    use misty_vm::AppPod;
+    use misty_vm_test::TestAsyncRuntimeAdapter;
 
     use super::*;
 
-    #[test]
-    fn test_todo_list() {
-        let rt = AsyncRuntime::new();
-        let _guard = rt.enter();
+    #[tokio::test]
+    async fn test_todo_list() {
+        let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        rt.bind_app(app.clone());
+        let pod = AppPod::new();
+        pod.set(app.clone());
+        rt.bind(Arc::new(pod));
 
         // Add a new item
         app.emit(TodoEvent::AddButtonClicked);
@@ -129,13 +133,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_mark_complete_toggle() {
-        let rt = AsyncRuntime::new();
-        let _guard = rt.enter();
+    #[tokio::test]
+    async fn test_mark_complete_toggle() {
+        let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        rt.bind_app(app.clone());
+        let pod = AppPod::new();
+        pod.set(app.clone());
+        rt.bind(Arc::new(pod));
 
         // Add a new item
         app.emit(TodoEvent::AddButtonClicked);
@@ -161,13 +166,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_multiple_items() {
-        let rt = AsyncRuntime::new();
-        let _guard = rt.enter();
+    #[tokio::test]
+    async fn test_multiple_items() {
+        let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        rt.bind_app(app.clone());
+        let pod = AppPod::new();
+        pod.set(app.clone());
+        rt.bind(Arc::new(pod));
 
         // Add multiple items
         for i in 0..5 {

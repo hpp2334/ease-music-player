@@ -38,7 +38,7 @@ import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client.PlaylistListWidget
@@ -47,6 +47,7 @@ import uniffi.ease_client.PlaylistListWidget
 fun PlaylistsSubpage(
     evm: EaseViewModel,
 ) {
+    val bridge = UIBridgeController.current
     val state = evm.playlistListState.collectAsState().value
 
     if (state.playlistList.isEmpty()) {
@@ -58,7 +59,7 @@ fun PlaylistsSubpage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .clickable {
-                        Bridge.dispatchClick(PlaylistListWidget.Add)
+                        bridge.dispatchClick(PlaylistListWidget.Add)
                     }
                     .clip(RoundedCornerShape(16.dp))
                     .padding(24.dp, 24.dp),
@@ -86,7 +87,7 @@ fun PlaylistsSubpage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        Bridge.dispatchClick(PlaylistListWidget.Add)
+                        bridge.dispatchClick(PlaylistListWidget.Add)
                     }
                 )
             }
@@ -109,10 +110,11 @@ private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
 
 @Composable
 private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
+    val bridge = UIBridgeController.current
     Box(Modifier
         .clickable(
             onClick = {
-                Bridge.dispatchClick(PlaylistListWidget.Item(playlist.id));
+                bridge.dispatchClick(PlaylistListWidget.Item(playlist.id));
             },
         )
     ) {

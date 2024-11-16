@@ -10,6 +10,7 @@ use crate::{
     ctx::BackendContext,
     error::BResult,
     repositories::{core::get_conn, storage::db_upsert_storage},
+    services::player::on_connect_for_player,
 };
 
 use super::server::start_server;
@@ -114,6 +115,7 @@ fn init_persistent_state(cx: &BackendContext) -> BResult<()> {
         upgrade_db_schema(cx, prev_version)?;
         save_current_app_meta(cx);
     }
+
     Ok(())
 }
 

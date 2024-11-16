@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell},
     collections::HashMap,
     future::Future,
     hash::Hash,
@@ -11,12 +11,9 @@ use std::{
 
 use async_task::{Runnable, Task};
 use futures::future::LocalBoxFuture;
+use misty_async::{AsyncRuntime, IAsyncRuntimeAdapter};
 
-pub trait IAsyncRuntimeAdapter: Send + Sync + 'static {
-    fn on_schedule(&self);
-    fn sleep(&self, duration: Duration) -> LocalBoxFuture<'static, ()>;
-    fn get_time(&self) -> Duration;
-}
+use crate::internal::{AppInternal, WeakAppInternal};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct AsyncTaskId(u64);
@@ -27,10 +24,9 @@ pub struct AsyncTasks {
     id_allocator: Arc<AtomicU64>,
 }
 
-pub struct AsyncExecutor {
-    adapter: Arc<dyn IAsyncRuntimeAdapter>,
-    runnable_sender: flume::Sender<Runnable>,
-    runnable_receiver: flume::Receiver<Runnable>,
+#[derive(Default, Clone)]
+pub struct AsyncTaskPod {
+    id: Rc<RefCell<Option<AsyncTaskId>>>,
 }
 
 impl AsyncTasks {
@@ -60,63 +56,39 @@ impl AsyncTasks {
     }
 }
 
-impl AsyncExecutor {
-    pub fn new(adapter: impl IAsyncRuntimeAdapter) -> Self {
-        let (tx, rx) = flume::unbounded();
-
-        Self {
-            adapter: Arc::new(adapter),
-            runnable_sender: tx,
-            runnable_receiver: rx,
+impl AsyncTaskPod {
+    pub fn cancel(&self, tasks: &AsyncTasks) {
+        let mut id = self.id.borrow_mut();
+        {
+            if let Some(id) = id.clone() {
+                tasks.cancel(id);
+            }
         }
+        *id = None;
     }
 
-    pub(crate) fn spawn_local<Fut>(&self, fut: Fut) -> (Runnable, Task<()>)
-    where
-        Fut: Future<Output = ()> + 'static,
-    {
-        let sender = self.runnable_sender.clone();
-        let adapter = self.adapter.clone();
-
-        let schedule = move |runnable| {
-            sender.send(runnable).unwrap();
-            adapter.on_schedule();
-        };
-        async_task::spawn_local(fut, schedule)
-    }
-
-    pub async fn sleep(&self, duration: Duration) {
-        self.adapter.sleep(duration).await
-    }
-
-    pub fn get_time(&self) -> Duration {
-        self.adapter.get_time()
-    }
-
-    pub(crate) fn flush_runnables(&self) -> bool {
-        if self.runnable_receiver.is_empty() {
-            return false;
-        }
-
-        while let Ok(runnable) = self.runnable_receiver.try_recv() {
-            runnable.run();
-        }
-        return true;
+    pub(crate) fn set(&self, id: AsyncTaskId) {
+        assert!(self.id.borrow().is_none());
+        *self.id.borrow_mut() = Some(id);
     }
 }
 
 pub(crate) struct DefaultAsyncRuntimeAdapter;
 
 impl IAsyncRuntimeAdapter for DefaultAsyncRuntimeAdapter {
-    fn on_schedule(&self) {
-        panic!("async runtime adapter not registered")
+    fn is_main_thread(&self) -> bool {
+        todo!()
     }
 
-    fn sleep(&self, _duration: std::time::Duration) -> LocalBoxFuture<'static, ()> {
-        panic!("async runtime adapter not registered")
+    fn on_spawn_locals(&self) {
+        todo!()
     }
 
-    fn get_time(&self) -> std::time::Duration {
-        panic!("async runtime adapter not registered")
+    fn sleep(&self, duration: Duration) -> LocalBoxFuture<()> {
+        todo!()
+    }
+
+    fn get_time(&self) -> Duration {
+        todo!()
     }
 }

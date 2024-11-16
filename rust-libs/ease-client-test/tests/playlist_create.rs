@@ -1,5 +1,5 @@
 use ease_client::{PlaylistCreateWidget, PlaylistListWidget, StorageImportWidget};
-use ease_client_shared::uis::playlist::CreatePlaylistMode;
+use ease_client_shared::backends::playlist::CreatePlaylistMode;
 use ease_client_test::{PresetDepth, TestApp};
 
 #[tokio::test]

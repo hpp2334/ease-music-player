@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process"
 import { ENVS, ROOT, RUST_LIBS_ROOTS } from "./base";
 import path from "node:path";
+import { generateMetas } from "./generate-meta-lib";
 
 // [
 //     'x86_64',
@@ -13,15 +14,18 @@ const TARGETS = [
     'arm64-v8a',
 ]
 
+console.log("Generate codes and messages")
+generateMetas()
+
 console.log("Build ease-client in debug mode")
-execSync(`cargo build -p ease-client`, {
+execSync(`cargo build -p ease-client-android`, {
     stdio: 'inherit',
     cwd: RUST_LIBS_ROOTS
 });
 
 for (const buildTarget of TARGETS) {
     console.log(`Generate kotlin file of ${buildTarget}`)
-    execSync(`cargo run -p ease-client-android-ffi-builder generate --library ${path.resolve(RUST_LIBS_ROOTS, './target/debug/libease_client.so')} --language kotlin --out-dir ${path.resolve(ROOT, 'android/app/src/main/java/')}`, {
+    execSync(`cargo run -p ease-client-android-ffi-builder generate --library ${path.resolve(RUST_LIBS_ROOTS, './target/debug/libease_client_android.so')} --language kotlin --out-dir ${path.resolve(ROOT, 'android/app/src/main/java/')}`, {
         stdio: 'inherit',
         cwd: RUST_LIBS_ROOTS,
         env: {

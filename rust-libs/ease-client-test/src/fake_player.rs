@@ -2,13 +2,15 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ease_client::{Action, IMusicPlayerService, MusicToPlay, PlayerEvent, ViewAction};
+use ease_client_backend::{IPlayerDelegate, MusicToPlay};
+use ease_client_shared::backends::generated::Code;
 use ease_client_shared::backends::music::MusicId;
+use ease_client_shared::backends::player::PlayerDelegateEvent;
+use ease_client_shared::backends::{encode_message_payload, MessagePayload};
 use hyper::StatusCode;
 use lofty::AudioFile;
-use misty_vm::AppPod;
+use tokio::sync::mpsc;
 
-use crate::event_loop::EventLoop;
 
 #[derive(Clone)]
 struct FakeMusicPlayerInner {
@@ -18,7 +20,7 @@ struct FakeMusicPlayerInner {
     playing: Arc<AtomicBool>,
     current_duration: Arc<AtomicU64>,
     total_duration: Arc<AtomicU64>,
-    event_loop: EventLoop,
+    tx: mpsc::Sender<MessagePayload>,
 }
 
 #[derive(Clone)]
@@ -27,7 +29,7 @@ pub struct FakeMusicPlayerRef {
 }
 
 impl FakeMusicPlayerInner {
-    fn new(event_loop: EventLoop) -> Self {
+    fn new(tx: mpsc::Sender<MessagePayload>) -> Self {
         Self {
             url: Default::default(),
             req_handle: Default::default(),
@@ -35,7 +37,7 @@ impl FakeMusicPlayerInner {
             playing: Default::default(),
             current_duration: Default::default(),
             total_duration: Default::default(),
-            event_loop,
+            tx,
         }
     }
 
@@ -75,19 +77,27 @@ impl FakeMusicPlayerInner {
             self.current_duration
                 .store(0, std::sync::atomic::Ordering::SeqCst);
 
-            self.push_player_event(PlayerEvent::Complete);
+            self.send_player_event(PlayerDelegateEvent::Complete);
         }
     }
 
-    fn push_player_event(&self, evt: PlayerEvent) {
-        self.event_loop.queue(ViewAction::Player(evt));
+    fn send_player_event(&self, evt: PlayerDelegateEvent) {
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            tx.send(MessagePayload {
+                code: Code::OnPlayerEvent,
+                payload: encode_message_payload(evt),
+            })
+            .await
+            .unwrap();
+        });
     }
 }
 
 impl FakeMusicPlayerRef {
-    pub fn new(event_loop: EventLoop) -> Self {
+    pub fn new(tx: mpsc::Sender<MessagePayload>) -> Self {
         FakeMusicPlayerRef {
-            inner: Arc::new(FakeMusicPlayerInner::new(event_loop)),
+            inner: Arc::new(FakeMusicPlayerInner::new(tx)),
         }
     }
 
@@ -99,7 +109,11 @@ impl FakeMusicPlayerRef {
     }
 }
 
-impl IMusicPlayerService for FakeMusicPlayerRef {
+impl IPlayerDelegate for FakeMusicPlayerRef {
+    fn is_playing(&self) -> bool {
+        self.inner.playing.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     fn get_current_duration_s(&self) -> u64 {
         let v = self
             .inner
@@ -116,17 +130,17 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
         if prev_playing {
             return;
         }
-        self.inner.push_player_event(PlayerEvent::Play);
+        self.inner.send_player_event(PlayerDelegateEvent::Play);
     }
 
     fn pause(&self) {
         self.inner.pause();
-        self.inner.push_player_event(PlayerEvent::Pause);
+        self.inner.send_player_event(PlayerDelegateEvent::Pause);
     }
 
     fn stop(&self) {
         self.inner.stop();
-        self.inner.push_player_event(PlayerEvent::Stop);
+        self.inner.send_player_event(PlayerDelegateEvent::Stop);
     }
 
     fn seek(&self, duration: u64) {
@@ -172,7 +186,7 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
                 .total_duration
                 .store(total_duration, std::sync::atomic::Ordering::SeqCst);
 
-            cloned_inner.push_player_event(PlayerEvent::Total {
+            cloned_inner.send_player_event(PlayerDelegateEvent::Total {
                 id,
                 duration_ms: total_duration,
             });
@@ -203,7 +217,7 @@ impl IMusicPlayerService for FakeMusicPlayerRef {
                 .unwrap();
             let music_properties = file.properties();
             let total_duration = music_properties.duration().as_millis() as u64;
-            cloned_inner.push_player_event(PlayerEvent::Total {
+            cloned_inner.send_player_event(PlayerDelegateEvent::Total {
                 id,
                 duration_ms: total_duration,
             });

@@ -1,138 +1,60 @@
-use std::time::Duration;
-
 use ease_client_shared::backends::{
-    music::{MusicAbstract, MusicId},
-    music_duration::MusicDuration,
+    music::MusicId,
     playlist::{
         ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
-        Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta,
+        Playlist, PlaylistAbstract, PlaylistId,
     },
 };
-use ease_database::DbConnectionRef;
 
 use crate::{
     ctx::BackendContext,
     error::{BError, BResult},
-    models::playlist::PlaylistModel,
     repositories::{
         core::get_conn,
-        music::{db_add_music, db_load_music_metas_by_playlist_id, ArgDBAddMusic},
+        music::{db_add_music, ArgDBAddMusic},
         playlist::{
             db_batch_add_music_to_playlist, db_load_first_music_covers, db_load_playlists,
             db_remove_all_musics_in_playlist, db_remove_music_from_playlist, db_remove_playlist,
-            db_upsert_playlist, ArgDBUpsertPlaylist, FirstMusicCovers,
+            db_upsert_playlist, ArgDBUpsertPlaylist,
         },
     },
     services::{
-        music::build_music_abstract,
-        server::loc::{get_serve_cover_url_from_music_id, get_serve_url_from_loc},
+        player::player_refresh_current,
+        playlist::{build_playlist_abstract, get_playlist},
+        server::loc::get_serve_url_from_music_id,
     },
 };
 
-use super::storage::to_opt_storage_entry;
-
-fn build_playlist_meta(
-    cx: &BackendContext,
-    model: PlaylistModel,
-    first_covers: &FirstMusicCovers,
-) -> PlaylistMeta {
-    let cover_loc =
-        if let Some(picture) = to_opt_storage_entry(model.picture_path, model.picture_storage_id) {
-            Some(picture)
-        } else {
-            None
-        };
-    let show_cover_url = if let Some(loc) = cover_loc.clone() {
-        get_serve_url_from_loc(cx, loc)
-    } else {
-        let id = first_covers.get(&model.id).map(|c| c.clone());
-        if let Some(id) = id {
-            get_serve_cover_url_from_music_id(cx, id)
-        } else {
-            Default::default()
-        }
-    };
-    PlaylistMeta {
-        id: model.id,
-        title: model.title,
-        cover: cover_loc,
-        show_cover_url,
-        created_time: Duration::from_millis(model.created_time as u64),
-    }
-}
-
-fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<MusicDuration> {
-    let mut sum: Duration = Default::default();
-    for v in list {
-        if let Some(v) = v.meta.duration {
-            sum += *v;
-        } else {
-            return None;
-        }
-    }
-    Some(MusicDuration::new(sum))
-}
-
-fn build_playlist_abstract(
-    cx: &BackendContext,
-    conn: DbConnectionRef,
-    model: PlaylistModel,
-    first_covers: &FirstMusicCovers,
-) -> BResult<(PlaylistAbstract, Vec<MusicAbstract>)> {
-    let id = model.id;
-    let meta = build_playlist_meta(&cx, model, &first_covers);
-    let musics = db_load_music_metas_by_playlist_id(conn, id)?;
-    let musics = musics
-        .into_iter()
-        .map(|v| build_music_abstract(cx, v))
-        .collect();
-    let duration = compute_musics_duration(&musics);
-
-    let abstr = PlaylistAbstract {
-        meta,
-        music_count: musics.len(),
-        duration,
-    };
-
-    Ok((abstr, musics))
-}
-
 pub(crate) async fn cr_get_all_playlist_abstracts(
-    cx: BackendContext,
+    cx: &BackendContext,
     _arg: (),
 ) -> BResult<Vec<PlaylistAbstract>> {
-    let conn = get_conn(&cx)?;
-    let models = db_load_playlists(conn.get_ref())?;
-    let first_covers = db_load_first_music_covers(conn.get_ref())?;
+    let rt = cx.async_runtime();
+    let cx = cx.clone();
+    rt.spawn(async move {
+        let conn = get_conn(&cx)?;
+        let models = db_load_playlists(conn.get_ref())?;
+        let first_covers = db_load_first_music_covers(conn.get_ref())?;
 
-    let mut ret: Vec<PlaylistAbstract> = Default::default();
-    for model in models {
-        let (abstr, _) = build_playlist_abstract(&cx, conn.get_ref(), model, &first_covers)?;
-        ret.push(abstr)
-    }
+        let mut ret: Vec<PlaylistAbstract> = Default::default();
+        for model in models {
+            let (abstr, _) = build_playlist_abstract(&cx, conn.get_ref(), model, &first_covers)?;
+            ret.push(abstr)
+        }
 
-    Ok(ret)
+        Ok(ret)
+    })
+    .await
 }
 
 pub(crate) async fn cr_get_playlist(
-    cx: BackendContext,
+    cx: &BackendContext,
     arg: PlaylistId,
 ) -> BResult<Option<Playlist>> {
-    let conn = get_conn(&cx)?;
-    let models = db_load_playlists(conn.get_ref())?;
-    let first_covers = db_load_first_music_covers(conn.get_ref())?;
-
-    let model = models.into_iter().find(|m| m.id == arg);
-    if model.is_none() {
-        return Ok(None);
-    }
-    let model = model.unwrap();
-    let (abstr, musics) = build_playlist_abstract(&cx, conn.get_ref(), model, &first_covers)?;
-
-    Ok(Some(Playlist { abstr, musics }))
+    get_playlist(cx, arg).await
 }
 
-pub(crate) async fn cu_update_playlist(cx: BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
+pub(crate) async fn cu_update_playlist(cx: &BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
     let conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
     let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
@@ -145,7 +67,7 @@ pub(crate) async fn cu_update_playlist(cx: BackendContext, arg: ArgUpdatePlaylis
 }
 
 pub(crate) async fn cc_create_playlist(
-    cx: BackendContext,
+    cx: &BackendContext,
     arg: ArgCreatePlaylist,
 ) -> BResult<PlaylistId> {
     let mut conn = get_conn(&cx)?;
@@ -177,22 +99,27 @@ pub(crate) async fn cc_create_playlist(
             )?;
             musics.push((music_id, playlist_id));
         }
-        db_batch_add_music_to_playlist(conn, musics)?;
+        db_batch_add_music_to_playlist(conn, musics.clone())?;
         Ok(playlist_id)
     })?;
+
+    for (id, _) in musics {
+        cx.player_delegate()
+            .request_total_duration(id, get_serve_url_from_music_id(cx, id));
+    }
 
     Ok(playlist_id)
 }
 
 pub(crate) async fn cu_add_musics_to_playlist(
-    cx: BackendContext,
+    cx: &BackendContext,
     arg: ArgAddMusicsToPlaylist,
 ) -> BResult<()> {
     let mut conn = get_conn(&cx)?;
     let playlist_id = arg.id;
-    let mut musics: Vec<(MusicId, PlaylistId)> = Default::default();
 
-    conn.transaction::<(), BError>(move |conn| {
+    let musics = conn.transaction(move |conn| {
+        let mut musics: Vec<(MusicId, PlaylistId)> = Default::default();
         for (entry, name) in arg.entries {
             let music_id = db_add_music(
                 conn,
@@ -204,27 +131,37 @@ pub(crate) async fn cu_add_musics_to_playlist(
             )?;
             musics.push((music_id, playlist_id));
         }
-        db_batch_add_music_to_playlist(conn, musics)?;
-        Ok(())
+        db_batch_add_music_to_playlist(conn, musics.clone())?;
+        Ok::<_, BError>(musics)
     })?;
+
+    for (id, _) in musics {
+        cx.player_delegate()
+            .request_total_duration(id, get_serve_url_from_music_id(cx, id));
+    }
+
+    player_refresh_current(cx)?;
 
     Ok(())
 }
 
 pub(crate) async fn cd_remove_music_from_playlist(
-    cx: BackendContext,
+    cx: &BackendContext,
     arg: ArgRemoveMusicFromPlaylist,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_remove_music_from_playlist(conn.get_ref(), arg.playlist_id, arg.music_id)?;
+    player_refresh_current(cx)?;
     Ok(())
 }
 
-pub(crate) async fn cd_remove_playlist(cx: BackendContext, arg: PlaylistId) -> BResult<()> {
+pub(crate) async fn cd_remove_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<()> {
     let conn = get_conn(&cx)?;
 
     db_remove_all_musics_in_playlist(conn.get_ref(), arg)?;
     db_remove_playlist(conn.get_ref(), arg)?;
+
+    player_refresh_current(cx)?;
 
     Ok(())
 }

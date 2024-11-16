@@ -1,4 +1,3 @@
 mod runtime;
 mod timer;
-
-pub use runtime::AsyncRuntime;
+pub use runtime::TestAsyncRuntimeAdapter;

@@ -1,17 +1,16 @@
-use ease_client_shared::backends::playlist::{Playlist, PlaylistAbstract, PlaylistId};
+use ease_client_shared::backends::{
+    connector::ConnectorAction,
+    playlist::{Playlist, PlaylistAbstract, PlaylistId},
+};
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
-    view_models::connector::{Connector, ConnectorAction},
-    MusicPlayerService,
+    view_models::connector::Connector,
 };
 
-use super::{
-    detail::PlaylistDetailVM,
-    state::{AllPlaylistState, CurrentPlaylistState},
-};
+use super::state::{AllPlaylistState, CurrentPlaylistState};
 
 pub struct PlaylistCommonVM {
     store: Model<AllPlaylistState>,

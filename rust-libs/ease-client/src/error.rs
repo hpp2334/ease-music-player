@@ -12,9 +12,7 @@ pub enum EaseError {
     #[error("serde error")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("backend error: {0}")]
-    BackendChannelError(#[from] ease_client_backend::error::BError),
-    #[error("backend init fail: {0}")]
-    BackendInitFail(anyhow::Error),
+    BackendChannelError(Box<dyn std::error::Error>),
     #[error("other error: {0}")]
     OtherError(String),
     #[error("client destroyed")]
@@ -22,4 +20,3 @@ pub enum EaseError {
 }
 
 pub type EaseResult<T> = Result<T, EaseError>;
-

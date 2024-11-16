@@ -1,14 +1,17 @@
 use std::{
     any::Any,
+    convert::Infallible,
     fmt::Debug,
     future::Future,
-    sync::Arc,
+    sync::{Arc, Weak},
     time::Duration,
 };
 
+use misty_async::AsyncRuntime;
+
 use crate::{
-    async_task::{AsyncTaskId, AsyncTasks},
-    internal::AppInternal,
+    async_task::{AsyncTaskId, AsyncTaskPod, AsyncTasks},
+    internal::{AppInternal, WeakAppInternal},
     utils::PhantomUnsend,
     IToHost, IntoVMError, Model,
 };
@@ -16,6 +19,33 @@ use crate::{
 pub struct ViewModelContext {
     _app: Arc<AppInternal>,
     _unsend: PhantomUnsend,
+}
+
+pub struct AsyncViewModelContext {
+    _async_executor: Weak<AsyncRuntime>,
+    _app: WeakAppInternal,
+}
+
+impl AsyncViewModelContext {
+    pub fn enqueue_emit<Event>(&self, evt: Event)
+    where
+        Event: Any + Debug + Send + Sync + 'static,
+    {
+        let executor = self._async_executor.upgrade();
+        let app = self._app.clone();
+        if let Some(executor) = executor {
+            executor.schedule_main(move || {
+                let app = app.upgrade();
+                if let Some(app) = app {
+                    app.emit(evt);
+                } else {
+                    tracing::error!("Failed to upgrade weak app.");
+                }
+            });
+        } else {
+            tracing::error!("Failed to upgrade weak executor.");
+        }
+    }
 }
 
 impl ViewModelContext {
@@ -28,6 +58,13 @@ impl ViewModelContext {
 
     pub(crate) fn app(&self) -> &AppInternal {
         &self._app
+    }
+
+    pub fn weak(&self) -> AsyncViewModelContext {
+        AsyncViewModelContext {
+            _async_executor: Arc::downgrade(&self._app.async_executor),
+            _app: WeakAppInternal::new(&self._app),
+        }
     }
 
     pub fn model_get<T>(&self, _model: &Model<T>) -> std::cell::Ref<'_, T>
@@ -68,7 +105,7 @@ impl ViewModelContext {
         let id = tasks.allocate();
         let (runnable, raw_task) = {
             let tasks = tasks.clone();
-            self._app.async_executor.spawn_local(async move {
+            self._app.async_executor.spawn_local_runnable(async move {
                 let r = fut.await;
                 tasks.remove(id);
                 if let Err(e) = r {
@@ -79,6 +116,17 @@ impl ViewModelContext {
         tasks.bind(id, raw_task);
         runnable.schedule();
         id
+    }
+
+    pub fn spawn_in_pod<F, Fut, E>(&self, tasks: &AsyncTasks, pod: &AsyncTaskPod, f: F)
+    where
+        F: FnOnce(ViewModelContext) -> Fut,
+        Fut: Future<Output = Result<(), E>> + 'static,
+        E: IntoVMError,
+    {
+        pod.cancel(tasks);
+        let id = self.spawn(tasks, f);
+        pod.set(id);
     }
 
     pub async fn sleep(&self, duration: Duration) {

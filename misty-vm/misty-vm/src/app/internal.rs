@@ -1,22 +1,48 @@
 use std::{
     any::Any,
     fmt::Debug,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc, Weak},
     thread::ThreadId,
 };
 
-use crate::{
-    async_task::AsyncExecutor, models::Models, to_host::ToHosts, view_models::pod::ViewModels,
-};
+use misty_async::AsyncRuntime;
+
+use crate::{models::Models, to_host::ToHosts, view_models::pod::ViewModels};
 
 pub(crate) struct AppInternal {
     pub thread_id: ThreadId,
     pub models: Models,
     pub view_models: ViewModels,
     pub to_hosts: ToHosts,
-    pub async_executor: AsyncExecutor,
+    pub async_executor: Arc<AsyncRuntime>,
     pub during_flush: AtomicBool,
 }
+
+#[derive(Clone)]
+pub(crate) struct WeakAppInternal {
+    pub internal: Weak<AppInternal>,
+}
+unsafe impl Send for WeakAppInternal {}
+unsafe impl Sync for WeakAppInternal {}
+
+impl WeakAppInternal {
+    pub fn new(app: &Arc<AppInternal>) -> Self {
+        Self {
+            internal: Arc::downgrade(app),
+        }
+    }
+
+    pub fn upgrade(&self) -> Option<Arc<AppInternal>> {
+        let app = self.internal.upgrade();
+        if let Some(app) = app {
+            app.check_same_thread();
+            Some(app)
+        } else {
+            None
+        }
+    }
+}
+
 impl std::fmt::Debug for AppInternal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppInternal").finish()
@@ -36,7 +62,7 @@ impl AppInternal {
 
     pub fn flush_spawned(self: &Arc<Self>) {
         self.check_same_thread();
-        let should_flush = self.async_executor.flush_runnables();
+        let should_flush = self.async_executor.flush_local_spawns();
         if should_flush {
             self.before_flush_flush_spawned();
             self.view_models.handle_flush(self);
@@ -48,9 +74,8 @@ impl AppInternal {
     where
         Event: Any + Debug + 'static,
     {
-        self.check_same_thread();
         let app = self.clone();
-        let (runnable, task) = self.async_executor.spawn_local(async move {
+        let (runnable, task) = self.async_executor.spawn_local_runnable(async move {
             app.emit(evt);
         });
         runnable.schedule();

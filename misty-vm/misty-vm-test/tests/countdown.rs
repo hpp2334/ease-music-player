@@ -1,6 +1,9 @@
-use std::{convert::Infallible, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 
-use misty_vm::{App, AppBuilderContext, AsyncTasks, IAsyncRuntimeAdapter, Model, ViewModel, ViewModelContext};
+use misty_vm::{
+    App, AppBuilderContext, AsyncRuntime, AsyncTasks, IAsyncRuntimeAdapter, Model, ViewModel,
+    ViewModelContext,
+};
 
 #[derive(Debug)]
 enum Event {
@@ -32,7 +35,10 @@ struct CountdownVM {
 
 impl CountdownVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
-        Self { value: cx.model(), tasks: Default::default() }
+        Self {
+            value: cx.model(),
+            tasks: Default::default(),
+        }
     }
 
     fn tick(&self, cx: &ViewModelContext) {
@@ -136,26 +142,28 @@ fn build_app(adapter: impl IAsyncRuntimeAdapter) -> App {
         .with_view_models(|cx, builder| {
             builder.add(CountdownVM::new(cx));
         })
-        .with_async_runtime_adapter(adapter)
+        .with_async_runtime(AsyncRuntime::new(Arc::new(adapter)))
         .build()
 }
 
 #[cfg(test)]
 mod tests {
 
-    use std::{time::Duration};
+    use std::{sync::Arc, time::Duration};
 
-    use misty_vm_test::AsyncRuntime;
+    use misty_vm::AppPod;
+    use misty_vm_test::TestAsyncRuntimeAdapter;
 
     use crate::{build_app, CountdownState, Event, PlayingState};
 
-    #[test]
-    fn test_update_and_start() {
-        let rt = AsyncRuntime::new();
-        let _guard = rt.enter();
+    #[tokio::test]
+    async fn test_update_and_start() {
+        let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        rt.bind_app(app.clone());
+        let pod = AppPod::new();
+        pod.set(app.clone());
+        rt.bind(Arc::new(pod));
         app.emit(Event::Update { value: 10 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(9));
@@ -166,13 +174,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_update_start_and_pause() {
-        let rt = AsyncRuntime::new();
-        let _guard = rt.enter();
+    #[tokio::test]
+    async fn test_update_start_and_pause() {
+        let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        rt.bind_app(app.clone());
+        let pod = AppPod::new();
+        pod.set(app.clone());
+        rt.bind(Arc::new(pod));
         app.emit(Event::Update { value: 5 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(2));
@@ -196,13 +205,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_update_and_restart() {
-        let rt = AsyncRuntime::new();
-        let _guard = rt.enter();
+    #[tokio::test]
+    async fn test_update_and_restart() {
+        let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        rt.bind_app(app.clone());
+        let pod = AppPod::new();
+        pod.set(app.clone());
+        rt.bind(Arc::new(pod));
         app.emit(Event::Update { value: 5 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(3));

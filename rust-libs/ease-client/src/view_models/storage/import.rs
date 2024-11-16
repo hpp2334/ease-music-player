@@ -1,11 +1,8 @@
 use std::collections::HashSet;
 
-use ease_client_shared::{
-    backends::storage::{
-        ListStorageEntryChildrenResp, Storage, StorageEntry, StorageEntryLoc, StorageEntryType,
-        StorageId, StorageType,
-    },
-    uis::storage::{CurrentStorageImportType, CurrentStorageStateType},
+use ease_client_shared::backends::storage::{
+    CurrentStorageImportType, CurrentStorageStateType, ListStorageEntryChildrenResp,
+    StorageEntry, StorageEntryLoc, StorageEntryType, StorageId, StorageType,
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
@@ -115,7 +112,7 @@ impl StorageImportVM {
             if prev_storage_id != Some(id) {
                 state.current_storage_id = Some(id);
                 state.checked_entries_path.clear();
-                state.current_path = self.get_current_path(id, &store);
+                state.current_path = self.get_current_path(cx, id, &store);
                 state.undo_stack.clear();
                 state.state_type = CurrentStorageStateType::Loading;
                 state.entries.clear();
@@ -366,7 +363,7 @@ impl StorageImportVM {
                 state.current_storage_id = Some(store.storage_ids[0]);
             }
             let id = state.current_storage_id.unwrap();
-            state.current_path = self.get_current_path(id, &store);
+            state.current_path = self.get_current_path(cx, id, &store);
         }
         self.reload(cx);
         RouterVM::of(cx).navigate(cx, RoutesKey::ImportMusics);
@@ -374,11 +371,16 @@ impl StorageImportVM {
         Ok(())
     }
 
-    fn get_current_path(&self, id: StorageId, store: &AllStorageState) -> String {
+    fn get_current_path(
+        &self,
+        cx: &ViewModelContext,
+        id: StorageId,
+        store: &AllStorageState,
+    ) -> String {
         let storage = store.storages.get(&id);
         if let Some(storage) = storage {
             if storage.typ == StorageType::Local {
-                return store.local_storage_path.to_string();
+                return Connector::of(cx).storage_path(cx);
             }
         }
         return "/".to_string();

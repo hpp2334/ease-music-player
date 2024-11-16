@@ -1,7 +1,9 @@
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
-use crate::{backends::code::Code, define_id, define_message};
+use crate::define_id;
+
+use super::{music::MusicId, playlist::PlaylistId};
 
 define_id!(StorageId);
 
@@ -83,6 +85,32 @@ pub struct Storage {
     pub playlist_count: u32,
 }
 
+#[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, uniffi::Enum)]
+pub enum CurrentStorageImportType {
+    #[default]
+    None,
+    ImportMusics {
+        id: PlaylistId,
+    },
+    EditPlaylistCover,
+    CreatePlaylistEntries,
+    CreatePlaylistCover,
+    CurrentMusicLyrics {
+        id: MusicId,
+    },
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, uniffi::Enum)]
+pub enum CurrentStorageStateType {
+    #[default]
+    Loading,
+    OK,
+    NeedPermission,
+    AuthenticationFailed,
+    Timeout,
+    UnknownError,
+}
+
 impl StorageEntry {
     pub fn loc(&self) -> StorageEntryLoc {
         StorageEntryLoc {
@@ -91,18 +119,6 @@ impl StorageEntry {
         }
     }
 }
-
-define_message!(UpsertStorageMsg, Code::UpsertStorage, ArgUpsertStorage, ());
-define_message!(ListStorageMsg, Code::ListStorage, (), Vec<Storage>);
-define_message!(GetStorageMsg, Code::GetStorage, StorageId, Option<Storage>);
-
-define_message!(RemoveStorageMsg, Code::RemoveStorage, StorageId, ());
-define_message!(
-    TestStorageMsg,
-    Code::TestStorage,
-    ArgUpsertStorage,
-    StorageConnectionTestResult
-);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ListStorageEntryChildrenResp {
@@ -122,10 +138,3 @@ impl ListStorageEntryChildrenResp {
         }
     }
 }
-
-define_message!(
-    ListStorageEntryChildrenMsg,
-    Code::ListStorageEntryChildren,
-    StorageEntryLoc,
-    ListStorageEntryChildrenResp
-);

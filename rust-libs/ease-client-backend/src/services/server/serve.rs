@@ -162,9 +162,11 @@ pub fn start_server(cx: &BackendContext) -> u16 {
 
     let port = incomming.local_addr().port();
 
-    tokio::spawn(async move {
-        let _ = incomming.await.unwrap();
-    });
+    cx.async_runtime()
+        .spawn(async move {
+            let _ = incomming.await.unwrap();
+        })
+        .detach();
     tracing::info!("setup a local server on {}", port);
 
     port

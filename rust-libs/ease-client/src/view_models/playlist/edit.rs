@@ -1,9 +1,6 @@
-use ease_client_shared::{
-    backends::{
-        playlist::{ArgUpdatePlaylist, Playlist},
-        storage::StorageEntryLoc,
-    },
-    uis::storage::CurrentStorageImportType,
+use ease_client_shared::backends::{
+    playlist::{ArgUpdatePlaylist, Playlist},
+    storage::{CurrentStorageImportType, StorageEntryLoc},
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 

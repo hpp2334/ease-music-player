@@ -1,6 +1,6 @@
-use ease_client_shared::{
-    backends::{music::MusicId, playlist::PlaylistId},
-    uis::playlist::CreatePlaylistMode,
+use ease_client_shared::backends::{
+    music::MusicId,
+    playlist::{CreatePlaylistMode, PlaylistId},
 };
 use serde::Serialize;
 

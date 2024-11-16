@@ -1,10 +1,13 @@
 use std::{
     any::Any,
     cell::RefCell,
+    collections::HashMap,
     fmt::Debug,
     rc::Rc,
-    sync::{Arc, RwLock},
+    sync::{atomic::AtomicU64, Arc, RwLock},
 };
+
+use misty_async::IOnAsyncRuntime;
 
 use crate::IToHost;
 
@@ -19,6 +22,17 @@ pub struct App {
 pub struct AppPod {
     _app: Arc<RwLock<Option<Arc<AppInternal>>>>,
 }
+
+unsafe impl Send for AppPod {}
+unsafe impl Sync for AppPod {}
+
+#[derive(Default)]
+pub struct AppPods {
+    _apps: Arc<RwLock<HashMap<u64, Arc<AppInternal>>>>,
+    _alloc: AtomicU64,
+}
+unsafe impl Send for AppPods {}
+unsafe impl Sync for AppPods {}
 
 impl App {
     pub fn builder<Event>() -> AppBuilder<Event>
@@ -54,8 +68,11 @@ impl App {
     }
 }
 
-unsafe impl Send for AppPod {}
-unsafe impl Sync for AppPod {}
+impl IOnAsyncRuntime for AppPod {
+    fn flush_spawned_locals(&self) {
+        self.get().flush_spawned();
+    }
+}
 
 impl AppPod {
     pub fn new() -> Self {
@@ -71,6 +88,53 @@ impl AppPod {
     pub fn get(&self) -> App {
         let _app = self._app.read().expect("Failed to get App from AppPod");
         let _app = _app.clone().expect("App in AppPod is None");
+        _app.check_same_thread();
+        App { _app }
+    }
+}
+
+impl AppPods {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn preallocate(&self) -> u64 {
+        let id = self
+            ._alloc
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        id
+    }
+
+    pub fn allocate(&self, id: u64, app: App) {
+        app._app.check_same_thread();
+        let mut apps = self._apps.write().unwrap();
+        apps.insert(id, app._app.clone());
+    }
+
+    pub fn try_get(&self, handle: u64) -> Option<App> {
+        let app = {
+            let apps = self._apps.read().unwrap();
+            apps.get(&handle).map(|v| v.clone()).clone()
+        };
+        let _app = app;
+        if let Some(_app) = _app {
+            _app.check_same_thread();
+            Some(App { _app })
+        } else {
+            None
+        }
+    }
+
+    pub fn get(&self, handle: u64) -> App {
+        self.try_get(handle).unwrap()
+    }
+
+    pub fn take(&self, handle: u64) -> App {
+        let app = {
+            let mut apps = self._apps.write().unwrap();
+            apps.remove(&handle).map(|v| v.clone()).clone()
+        };
+        let _app = app.unwrap();
         _app.check_same_thread();
         App { _app }
     }

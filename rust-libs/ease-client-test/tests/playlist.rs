@@ -1,10 +1,10 @@
 use ease_client::{
-    view_models::storage::import::StorageImportAction, Action, MainAction, PlaylistCreateWidget,
+    view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget,
     PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget, ViewAction,
 };
-use ease_client_shared::{
-    backends::storage::StorageType,
-    uis::{playlist::CreatePlaylistMode, storage::CurrentStorageStateType},
+use ease_client_shared::backends::{
+    playlist::CreatePlaylistMode,
+    storage::{CurrentStorageStateType, StorageType},
 };
 use ease_client_test::{PresetDepth, ReqInteceptor, TestApp};
 

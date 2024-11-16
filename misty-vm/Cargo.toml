@@ -2,4 +2,4 @@
 
 [workspace]
 resolver = "2"
-members = ["misty-vm-macro", "misty-vm", "misty-vm-test"]
+members = ["misty-async", "misty-vm-macro", "misty-vm", "misty-vm-test"]

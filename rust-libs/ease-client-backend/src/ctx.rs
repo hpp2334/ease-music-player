@@ -1,27 +1,68 @@
 use std::{
+    collections::HashMap,
     sync::{
-        atomic::{AtomicU16, AtomicU32},
+        atomic::{AtomicU16, AtomicU32, AtomicUsize},
         Arc, RwLock,
     },
     time::Duration,
 };
 
-#[derive(Clone, Debug)]
+use ease_client_shared::backends::connector::{ConnectorAction, IConnectorNotifier};
+use misty_async::AsyncRuntime;
+
+use crate::services::player::{IPlayerDelegate, PlayerState};
+
+#[derive(Clone)]
 pub struct BackendContext {
     storage_path: Arc<RwLock<String>>,
     app_document_dir: Arc<RwLock<String>>,
     schema_version: Arc<AtomicU32>,
     server_port: Arc<AtomicU16>,
+    rt: Arc<AsyncRuntime>,
+    player: Arc<dyn IPlayerDelegate>,
+    player_state: Arc<PlayerState>,
+    connectors: Arc<(
+        RwLock<HashMap<usize, Arc<dyn IConnectorNotifier>>>,
+        AtomicUsize,
+    )>,
 }
 
 impl BackendContext {
-    pub fn new() -> Self {
+    pub fn new(rt: Arc<AsyncRuntime>, player: Arc<dyn IPlayerDelegate>) -> Self {
         Self {
             storage_path: Arc::new(RwLock::new(String::new())),
             app_document_dir: Arc::new(RwLock::new(String::new())),
             schema_version: Arc::new(AtomicU32::new(0)),
             server_port: Arc::new(AtomicU16::new(0)),
+            rt,
+            player_state: Default::default(),
+            player,
+            connectors: Default::default(),
         }
+    }
+
+    pub fn connect(&self, notifier: Arc<dyn IConnectorNotifier>) -> usize {
+        let id = self
+            .connectors
+            .1
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.connectors.0.write().unwrap().insert(id, notifier);
+        id
+    }
+
+    pub fn disconnect(&self, handle: usize) {
+        self.connectors.0.write().unwrap().remove(&handle);
+    }
+
+    pub fn async_runtime(&self) -> &Arc<AsyncRuntime> {
+        &self.rt
+    }
+
+    pub fn player_state(&self) -> &Arc<PlayerState> {
+        &self.player_state
+    }
+    pub fn player_delegate(&self) -> &Arc<dyn IPlayerDelegate> {
+        &self.player
     }
 
     pub fn current_time(&self) -> Duration {
@@ -63,5 +104,12 @@ impl BackendContext {
 
     pub fn get_server_port(&self) -> u16 {
         self.server_port.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn notify(&self, payload: ConnectorAction) {
+        let connectors = self.connectors.0.read().unwrap();
+        for (_, connector) in connectors.iter() {
+            connector.notify(payload.clone());
+        }
     }
 }

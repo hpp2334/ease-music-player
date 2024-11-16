@@ -1,21 +1,23 @@
-use std::{rc::Rc, sync::atomic::AtomicBool, time::Duration};
+use std::{sync::atomic::AtomicBool, time::Duration};
 
 use ease_client_shared::backends::{
+    connector::ConnectorAction,
     music::{Music, MusicId},
-    playlist::{Playlist, PlaylistId},
+    player::PlayerCurrentPlaying,
+    playlist::PlaylistId,
 };
-use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTaskPod, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
-    view_models::connector::{Connector, ConnectorAction},
+    view_models::connector::Connector,
 };
 
 use super::{
     control::MusicControlVM,
     lyric::MusicLyricVM,
-    state::{CurrentMusicState, QueueMusic, TimeToPauseState},
+    state::{CurrentMusicState, TimeToPauseState},
     time_to_pause::TimeToPauseVM,
 };
 
@@ -28,7 +30,7 @@ pub(crate) struct MusicCommonVM {
     current: Model<CurrentMusicState>,
     time_to_pause: Model<TimeToPauseState>,
     tasks: AsyncTasks,
-    ticking: AtomicBool,
+    tick_task: AsyncTaskPod,
 }
 
 impl MusicCommonVM {
@@ -37,7 +39,7 @@ impl MusicCommonVM {
             current: cx.model(),
             time_to_pause: cx.model(),
             tasks: Default::default(),
-            ticking: Default::default(),
+            tick_task: Default::default(),
         }
     }
 
@@ -57,42 +59,20 @@ impl MusicCommonVM {
 
     pub(crate) fn remove_current(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let m = cx.model_get(&self.current);
-        if let Some(QueueMusic {
-            id, playlist_id, ..
-        }) = m.music
+        if let Some(PlayerCurrentPlaying {
+            abstr, playlist_id, ..
+        }) = m.music.as_ref()
         {
-            self.remove(cx, id, playlist_id)
+            self.remove(cx, abstr.id(), *playlist_id)
         } else {
             Ok(())
         }
     }
 
-    pub(crate) fn schedule_tick<const IM: bool>(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        if self.ticking.load(std::sync::atomic::Ordering::Relaxed) {
-            return Ok(());
-        }
-
-        if IM {
-            self.tick(cx)?;
-        }
-        self.schedule_tick_impl(cx)?;
-        Ok(())
-    }
-
-    pub(crate) fn schedule_tick_impl(&self, cx: &ViewModelContext) -> EaseResult<()> {
+    pub(crate) fn schedule_tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let this = Self::of(cx);
-
-        if self
-            .ticking
-            .swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
-            return Ok(());
-        }
-
-        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+        cx.spawn_in_pod::<_, _, EaseError>(&self.tasks, &self.tick_task, move |cx| async move {
             cx.sleep(Duration::from_secs(1)).await;
-            this.ticking
-                .store(false, std::sync::atomic::Ordering::Relaxed);
             this.tick(&cx)?;
             Ok(())
         });
@@ -103,14 +83,17 @@ impl MusicCommonVM {
         let is_playing = cx.model_get(&self.current).playing;
         let time_to_pause_enabled = cx.model_get(&self.time_to_pause).enabled;
 
-        MusicControlVM::of(cx).tick(cx)?;
-        MusicLyricVM::of(cx).tick_lyric_index(cx)?;
+        if is_playing {
+            MusicControlVM::of(cx).tick(cx)?;
+        }
         if time_to_pause_enabled {
             TimeToPauseVM::of(cx).tick(cx)?;
         }
 
         if is_playing || time_to_pause_enabled {
-            self.schedule_tick_impl(&cx)?;
+            self.schedule_tick(&cx)?;
+        } else {
+            self.tick_task.cancel(&self.tasks);
         }
         Ok(())
     }
@@ -120,26 +103,6 @@ impl MusicCommonVM {
         if state.id() == Some(music.id()) {
             state.lyric = music.lyric.clone();
         }
-        Ok(())
-    }
-
-    fn sync_playlist(&self, cx: &ViewModelContext, playlist: &Playlist) -> EaseResult<()> {
-        let mut state = cx.model_mut(&self.current);
-        if let Some(QueueMusic {
-            id,
-            playlist_id,
-            queue,
-            index,
-        }) = &mut state.music
-        {
-            if *playlist_id == playlist.id() {
-                let pos = playlist.musics.iter().position(|v| v.id() == *id);
-
-                *queue = Rc::new(playlist.musics.clone());
-                *index = pos.unwrap_or(0);
-            }
-        }
-
         Ok(())
     }
 }
@@ -157,9 +120,6 @@ impl ViewModel for MusicCommonVM {
             Action::Connector(action) => match action {
                 ConnectorAction::Music(music) => {
                     self.sync_music(cx, music)?;
-                }
-                ConnectorAction::Playlist(playlist) => {
-                    self.sync_playlist(cx, playlist)?;
                 }
                 _ => {}
             },

@@ -1,5 +1,5 @@
 use ease_client::MusicControlWidget;
-use ease_client_shared::uis::preference::PlayMode;
+use ease_client_shared::backends::player::PlayMode;
 use ease_client_test::{PresetDepth, TestApp};
 
 #[tokio::test]

@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 ease-client = { path = "../ease-client" }
+ease-client-backend = { path = "../ease-client-backend" }
 ease-client-shared = { path = "../ease-client-shared" }
 misty-vm = { path = "../../misty-vm/misty-vm" }
 misty-vm-test = { path = "../../misty-vm/misty-vm-test" }

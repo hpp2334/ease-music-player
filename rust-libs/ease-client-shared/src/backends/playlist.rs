@@ -2,12 +2,12 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{backends::code::Code, define_id, define_message};
+use crate::define_id;
 
 use super::{
     music::{MusicAbstract, MusicId},
     music_duration::MusicDuration,
-    storage::{StorageEntry, StorageEntryLoc, StorageId},
+    storage::{StorageEntry, StorageEntryLoc},
 };
 
 define_id!(PlaylistId);
@@ -32,6 +32,13 @@ pub struct PlaylistAbstract {
 pub struct Playlist {
     pub abstr: PlaylistAbstract,
     pub musics: Vec<MusicAbstract>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, uniffi::Enum)]
+pub enum CreatePlaylistMode {
+    #[default]
+    Full,
+    Empty,
 }
 
 impl PlaylistAbstract {
@@ -70,32 +77,12 @@ impl Playlist {
     }
 }
 
-define_message!(
-    GetAllPlaylistAbstractsMsg,
-    Code::GetAllPlaylistMetas,
-    (),
-    Vec<PlaylistAbstract>
-);
-
-define_message!(
-    GetPlaylistMsg,
-    Code::GetPlaylist,
-    PlaylistId,
-    Option<Playlist>
-);
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgUpdatePlaylist {
     pub id: PlaylistId,
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
 }
-define_message!(
-    UpdatePlaylistMsg,
-    Code::UpdatePlaylist,
-    ArgUpdatePlaylist,
-    ()
-);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgCreatePlaylist {
@@ -103,35 +90,14 @@ pub struct ArgCreatePlaylist {
     pub cover: Option<StorageEntryLoc>,
     pub entries: Vec<(StorageEntry, String)>,
 }
-define_message!(
-    CreatePlaylistMsg,
-    Code::CreatePlaylist,
-    ArgCreatePlaylist,
-    PlaylistId
-);
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgAddMusicsToPlaylist {
     pub id: PlaylistId,
     pub entries: Vec<(StorageEntry, String)>,
 }
-define_message!(
-    AddMusicsToPlaylistMsg,
-    Code::AddMusicsToPlaylist,
-    ArgAddMusicsToPlaylist,
-    ()
-);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArgRemoveMusicFromPlaylist {
     pub playlist_id: PlaylistId,
     pub music_id: MusicId,
 }
-define_message!(
-    RemoveMusicsFromPlaylistMsg,
-    Code::RemoveMusicFromPlaylist,
-    ArgRemoveMusicFromPlaylist,
-    ()
-);
-
-define_message!(RemovePlaylistMsg, Code::RemovePlaylist, PlaylistId, ());

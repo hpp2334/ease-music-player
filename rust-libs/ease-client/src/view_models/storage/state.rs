@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use ease_client_shared::{
-    backends::storage::{
-        ArgUpsertStorage, Storage, StorageConnectionTestResult, StorageEntry, StorageId,
-    },
-    uis::storage::{CurrentStorageImportType, CurrentStorageStateType},
+use ease_client_shared::backends::storage::{
+    ArgUpsertStorage, CurrentStorageImportType, CurrentStorageStateType, Storage,
+    StorageConnectionTestResult, StorageEntry, StorageId,
 };
 use serde::Serialize;
 
@@ -26,7 +24,6 @@ pub struct EditStorageFormValidated {
 pub struct AllStorageState {
     pub storages: HashMap<StorageId, Storage>,
     pub storage_ids: Vec<StorageId>,
-    pub local_storage_path: String,
 }
 
 #[derive(Default, Clone)]

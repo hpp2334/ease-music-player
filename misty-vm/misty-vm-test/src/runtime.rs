@@ -1,56 +1,55 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, AtomicI64},
+        Arc, Mutex,
+    },
     thread::ThreadId,
     time::Duration,
 };
 
-use misty_vm::{App, AppPod, IAsyncRuntimeAdapter};
+use misty_vm::{App, AppPod, IAsyncRuntimeAdapter, IOnAsyncRuntime, LocalBoxFuture};
 
 use crate::timer::FakeTimers;
 
-struct AsyncRuntimeInternal {
-    runtime: tokio::runtime::Runtime,
-    timers: FakeTimers,
-    pod: AppPod,
+struct AsyncRuntimeAdapterInternal {
+    connected: Arc<Mutex<Option<Arc<dyn IOnAsyncRuntime>>>>,
     thread_id: ThreadId,
     notified: AtomicBool,
+    timers: FakeTimers,
 }
 
 #[derive(Clone)]
-pub struct AsyncRuntime {
-    store: Arc<AsyncRuntimeInternal>,
+pub struct TestAsyncRuntimeAdapter {
+    store: Arc<AsyncRuntimeAdapterInternal>,
 }
-unsafe impl Send for AsyncRuntime {}
-unsafe impl Sync for AsyncRuntime {}
+unsafe impl Send for TestAsyncRuntimeAdapter {}
+unsafe impl Sync for TestAsyncRuntimeAdapter {}
 
-impl AsyncRuntime {
+impl TestAsyncRuntimeAdapter {
     pub fn new() -> Self {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
         Self {
-            store: Arc::new(AsyncRuntimeInternal {
-                runtime: rt,
-                timers: FakeTimers::new(),
-                pod: Default::default(),
+            store: Arc::new(AsyncRuntimeAdapterInternal {
+                connected: Default::default(),
                 thread_id: std::thread::current().id(),
                 notified: Default::default(),
+                timers: FakeTimers::new(),
             }),
         }
     }
 
-    pub fn bind_app(&self, app: App) {
-        self.check_same_thread();
-        self.store.pod.set(app);
+    fn connector(&self) -> Arc<dyn IOnAsyncRuntime> {
+        let w = self.store.connected.lock().unwrap();
+        w.clone().unwrap()
     }
 
-    pub fn enter(&self) -> tokio::runtime::EnterGuard<'_> {
+    pub fn bind(&self, connector: Arc<dyn IOnAsyncRuntime>) {
         self.check_same_thread();
-        self.store.runtime.enter()
+        {
+            let mut w = self.store.connected.lock().unwrap();
+            *w = Some(connector);
+        }
     }
 
     pub fn advance(&self, duration: Duration) {
@@ -75,8 +74,7 @@ impl AsyncRuntime {
     }
 
     fn wait_all(&self) {
-        let store = self.store.clone();
-        let app = store.pod.get();
+        let app = self.connector();
         let mut count = 0;
 
         loop {
@@ -91,22 +89,29 @@ impl AsyncRuntime {
                 panic!("too many flush")
             }
 
-            app.flush_spawned();
+            app.flush_spawned_locals();
             count += 1;
         }
     }
 
+    fn is_same_thread(&self) -> bool {
+        self.store.thread_id == std::thread::current().id()
+    }
+
     fn check_same_thread(&self) {
-        assert_eq!(
-            self.store.thread_id,
-            std::thread::current().id(),
+        assert!(
+            self.is_same_thread(),
             "Operation must be performed on the same thread"
         );
     }
 }
 
-impl IAsyncRuntimeAdapter for AsyncRuntime {
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + 'static>> {
+impl IAsyncRuntimeAdapter for TestAsyncRuntimeAdapter {
+    fn is_main_thread(&self) -> bool {
+        self.is_same_thread()
+    }
+
+    fn sleep(&self, duration: Duration) -> LocalBoxFuture<()> {
         self.check_same_thread();
         let timer = self.store.timers.sleep(duration);
         Box::pin(timer)
@@ -117,7 +122,7 @@ impl IAsyncRuntimeAdapter for AsyncRuntime {
         self.store.timers.get_current_time()
     }
 
-    fn on_schedule(&self) {
+    fn on_spawn_locals(&self) {
         self.store
             .notified
             .store(true, std::sync::atomic::Ordering::Relaxed);

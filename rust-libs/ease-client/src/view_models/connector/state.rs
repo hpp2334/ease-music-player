@@ -4,6 +4,7 @@ use ease_client_shared::backends::{music::MusicId, storage::StorageEntryLoc};
 #[derive(Default, Clone)]
 pub struct ConnectorState {
     pub port: u16,
+    pub connector_handle: usize,
 }
 
 impl ConnectorState {

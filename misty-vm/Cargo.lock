@@ -241,12 +241,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "misty-async"
+version = "0.2.0"
+dependencies = [
+ "async-task",
+ "flume",
+ "futures",
+ "tokio",
+]
+
+[[package]]
 name = "misty-vm"
 version = "0.2.0"
 dependencies = [
  "async-task",
  "flume",
  "futures",
+ "misty-async",
  "misty-vm-macro",
  "once_cell",
  "serde",

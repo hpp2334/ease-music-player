@@ -1,27 +1,18 @@
-use ease_client_shared::{
-    backends::{
-        app::ArgInitializeApp,
-        message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload},
-        music::{
-            ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, GetMusicMsg, Music,
-            MusicId, UpdateMusicCoverMsg, UpdateMusicDurationMsg, UpdateMusicLyricMsg,
-        },
-        playlist::{
-            AddMusicsToPlaylistMsg, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
-            ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist, CreatePlaylistMsg,
-            GetAllPlaylistAbstractsMsg, GetPlaylistMsg, Playlist, PlaylistAbstract, PlaylistId,
-            RemoveMusicsFromPlaylistMsg, RemovePlaylistMsg, UpdatePlaylistMsg,
-        },
-        preference::{GetPreferenceMsg, PreferenceData, UpdatePreferencePlaymodeMsg},
-        storage::{
-            ArgUpsertStorage, ListStorageEntryChildrenMsg, ListStorageEntryChildrenResp,
-            ListStorageMsg, RemoveStorageMsg, Storage, StorageConnectionTestResult,
-            StorageEntryLoc, StorageId, TestStorageMsg, UpsertStorageMsg,
-        },
-    },
-    uis::preference::PlayMode,
+use std::{sync::Arc, time::Duration};
+
+use ease_client_shared::backends::{
+    connector::{ConnectorAction, IConnectorNotifier},
+    generated::*,
+    message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload},
+    music::*,
+    player::{ArgPlayMusic, PlayMode, PlayerCurrentPlaying},
+    playlist::*,
+    storage::*,
 };
-use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
+use misty_vm::{
+    AppBuilderContext, AsyncTasks, AsyncViewModelContext, IToHost, Model, ViewModel,
+    ViewModelContext,
+};
 use state::ConnectorState;
 
 pub mod state;
@@ -30,19 +21,9 @@ use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
     to_host::connector::ConnectorHostService,
-    MusicPlayerService,
 };
 
 use super::playlist::state::CurrentPlaylistState;
-
-#[derive(Debug)]
-pub enum ConnectorAction {
-    PlaylistAbstracts(Vec<PlaylistAbstract>),
-    Playlist(Playlist),
-    Music(Music),
-    Storages(Vec<Storage>),
-    Preference(PreferenceData),
-}
 
 pub struct Connector {
     state: Model<ConnectorState>,
@@ -69,22 +50,32 @@ impl Connector {
         state.serve_music_url(id)
     }
 
-    pub(crate) fn init(&self, cx: &ViewModelContext, arg: ArgInitializeApp) -> EaseResult<()> {
+    pub fn storage_path(&self, cx: &ViewModelContext) -> String {
+        ConnectorHostService::of(cx).storage_path()
+    }
+
+    fn init(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let host = ConnectorHostService::of(cx);
-        host.init(arg)?;
+        let handle = host.connect(Arc::new(ConnectorNotifier { cx: cx.weak() }));
         {
             let mut state = cx.model_mut(&self.state);
             state.port = host.port();
+            state.connector_handle = handle;
         }
 
         let this = Self::of(cx);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+            this.request::<OnConnectMsg>(&cx, ()).await?;
             this.sync_storages(&cx).await?;
             this.sync_playlist_abstracts(&cx).await?;
-            this.sync_preference_data(&cx).await?;
             Ok(())
         });
         Ok(())
+    }
+
+    pub(crate) fn destroy(&self, cx: &ViewModelContext) {
+        let handle = cx.model_get(&self.state).connector_handle;
+        ConnectorHostService::of(cx).disconnect(handle);
     }
 
     pub async fn get_music(&self, cx: &ViewModelContext, id: MusicId) -> EaseResult<Option<Music>> {
@@ -105,7 +96,7 @@ impl Connector {
         id: MusicId,
         playlist_id: PlaylistId,
     ) -> EaseResult<()> {
-        self.request::<RemoveMusicsFromPlaylistMsg>(
+        self.request::<RemoveMusicFromPlaylistMsg>(
             cx,
             ArgRemoveMusicFromPlaylist {
                 playlist_id,
@@ -138,8 +129,6 @@ impl Connector {
     ) -> EaseResult<()> {
         let id = self.request::<CreatePlaylistMsg>(cx, arg).await?;
         self.sync_playlist_abstracts(cx).await?;
-        self.sync_request_playlist_music_total_duration(cx, id)
-            .await?;
         Ok(())
     }
 
@@ -159,8 +148,6 @@ impl Connector {
         self.sync_playlist(cx, id).await?;
         self.sync_playlist_abstracts(cx).await?;
         self.sync_storages(cx).await?;
-        self.sync_request_playlist_music_total_duration(cx, id)
-            .await?;
         Ok(())
     }
 
@@ -172,32 +159,6 @@ impl Connector {
         let id = arg.id;
         self.request::<UpdateMusicLyricMsg>(cx, arg).await?;
         self.sync_music(cx, id).await?;
-        Ok(())
-    }
-
-    pub async fn update_music_cover(
-        &self,
-        cx: &ViewModelContext,
-        arg: ArgUpdateMusicCover,
-    ) -> EaseResult<()> {
-        let id = arg.id;
-        self.request::<UpdateMusicCoverMsg>(cx, arg).await?;
-        self.sync_music(cx, id).await?;
-        self.sync_current_playlist(cx).await?;
-        self.sync_playlist_abstracts(cx).await?;
-        Ok(())
-    }
-
-    pub async fn update_music_total_duration(
-        &self,
-        cx: &ViewModelContext,
-        arg: ArgUpdateMusicDuration,
-    ) -> EaseResult<()> {
-        let id = arg.id;
-        self.request::<UpdateMusicDurationMsg>(cx, arg).await?;
-        self.sync_music(cx, id).await?;
-        self.sync_current_playlist(cx).await?;
-        self.sync_playlist_abstracts(cx).await?;
         Ok(())
     }
 
@@ -242,12 +203,56 @@ impl Connector {
         Ok(())
     }
 
-    pub async fn update_preference_playmode(
+    pub async fn update_playmode(&self, cx: &ViewModelContext, arg: PlayMode) -> EaseResult<()> {
+        self.request::<UpdatePlaymodeMsg>(cx, arg).await?;
+        Ok(())
+    }
+
+    pub async fn get_player_current(
         &self,
         cx: &ViewModelContext,
-        arg: PlayMode,
-    ) -> EaseResult<()> {
-        self.request::<UpdatePreferencePlaymodeMsg>(cx, arg).await?;
+    ) -> EaseResult<Option<PlayerCurrentPlaying>> {
+        let current = self.request::<PlayerCurrentMsg>(cx, ()).await?;
+        Ok(current)
+    }
+
+    pub async fn player_current_duration(&self, cx: &ViewModelContext) -> EaseResult<Duration> {
+        let duration = self.request::<PlayerCurrentDurationMsg>(cx, ()).await?;
+        Ok(duration)
+    }
+
+    pub async fn player_play(&self, cx: &ViewModelContext, arg: ArgPlayMusic) -> EaseResult<()> {
+        self.request::<PlayMusicMsg>(cx, arg).await?;
+        Ok(())
+    }
+
+    pub async fn player_stop(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.request::<StopPlayerMsg>(cx, ()).await?;
+        Ok(())
+    }
+
+    pub async fn player_play_next(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.request::<PlayNextMsg>(cx, ()).await?;
+        Ok(())
+    }
+
+    pub async fn player_play_previous(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.request::<PlayPreviousMsg>(cx, ()).await?;
+        Ok(())
+    }
+
+    pub async fn player_resume(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.request::<ResumePlayerMsg>(cx, ()).await?;
+        Ok(())
+    }
+
+    pub async fn player_pause(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        self.request::<PausePlayerMsg>(cx, ()).await?;
+        Ok(())
+    }
+
+    pub async fn player_seek(&self, cx: &ViewModelContext, ms: u64) -> EaseResult<()> {
+        self.request::<PlayerSeekMsg>(cx, ms).await?;
         Ok(())
     }
 
@@ -291,29 +296,6 @@ impl Connector {
         Ok(())
     }
 
-    async fn sync_preference_data(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        let data = self.request::<GetPreferenceMsg>(cx, ()).await?;
-        cx.enqueue_emit(Action::Connector(ConnectorAction::Preference(data)));
-        Ok(())
-    }
-
-    async fn sync_request_playlist_music_total_duration(
-        &self,
-        cx: &ViewModelContext,
-        id: PlaylistId,
-    ) -> EaseResult<()> {
-        let playlist = self.request::<GetPlaylistMsg>(cx, id).await?;
-        if let Some(playlist) = playlist {
-            for music in playlist.musics {
-                if music.duration().is_none() {
-                    let url = Connector::of(cx).serve_music_url(cx, music.id());
-                    MusicPlayerService::of(cx).request_total_duration(music.id(), url);
-                }
-            }
-        }
-        Ok(())
-    }
-
     async fn request<S: IMessage>(
         &self,
         cx: &ViewModelContext,
@@ -331,11 +313,34 @@ impl Connector {
     }
 }
 
+struct ConnectorNotifier {
+    cx: AsyncViewModelContext,
+}
+impl IConnectorNotifier for ConnectorNotifier {
+    fn notify(&self, action: ConnectorAction) {
+        self.cx.enqueue_emit(Action::Connector(action));
+    }
+}
+
 impl ViewModel for Connector {
     type Event = Action;
     type Error = EaseError;
-    fn on_event(&self, _cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
+    fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
+            Action::Init => self.init(cx)?,
+            Action::Destroy => self.destroy(cx),
+            Action::Connector(action) => match action {
+                ConnectorAction::MusicCoverChanged(_)
+                | ConnectorAction::MusicTotalDurationChanged(_) => {
+                    let this = Self::of(cx);
+                    cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+                        this.sync_current_playlist(&cx).await?;
+                        this.sync_playlist_abstracts(&cx).await?;
+                        Ok(())
+                    });
+                }
+                _ => {}
+            },
             _ => {}
         }
         Ok(())

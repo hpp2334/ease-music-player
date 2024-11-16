@@ -37,7 +37,7 @@ import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.ImportCover
 import com.kutedev.easemusicplayer.components.SimpleFormText
-import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.PlaylistCreateWidget
 import uniffi.ease_client.PlaylistEditWidget
@@ -94,6 +94,7 @@ private fun FullImportHeader(
 private fun FullImportBlock(
     evm: EaseViewModel
 ) {
+    val bridge = UIBridgeController.current
     val state = evm.createPlaylistState.collectAsState().value
 
     if (!state.fullImported) {
@@ -102,7 +103,7 @@ private fun FullImportBlock(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .clickable {
-                    Bridge.dispatchClick(PlaylistCreateWidget.Import)
+                    bridge.dispatchClick(PlaylistCreateWidget.Import)
                 }
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(0.dp, 32.dp),
@@ -143,7 +144,7 @@ private fun FullImportBlock(
                 label = null,
                 value = state.name,
                 onChange = { value ->
-                    Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
+                    bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
                 }
             )
             FlowRow(
@@ -158,7 +159,7 @@ private fun FullImportBlock(
                         size = EaseTextButtonSize.Small,
                         disabled = false,
                         onClick = {
-                            Bridge.dispatchChangeText(PlaylistCreateWidget.Name, name)
+                            bridge.dispatchChangeText(PlaylistCreateWidget.Name, name)
                         },
                     )
                 }
@@ -170,10 +171,10 @@ private fun FullImportBlock(
             ImportCover(
                 url = state.picture,
                 onAdd = {
-                    Bridge.dispatchClick(PlaylistCreateWidget.Cover);
+                    bridge.dispatchClick(PlaylistCreateWidget.Cover);
                 },
                 onRemove = {
-                    Bridge.dispatchClick(PlaylistCreateWidget.ClearCover);
+                    bridge.dispatchClick(PlaylistCreateWidget.ClearCover);
                 }
             )
         }
@@ -184,12 +185,13 @@ private fun FullImportBlock(
 fun CreatePlaylistsDialog(
     evm: EaseViewModel
 ) {
+    val bridge = UIBridgeController.current
     val state = evm.createPlaylistState.collectAsState().value
     val isOpen = state.modalOpen
     val mode = state.mode
 
     val onDismissRequest = {
-        Bridge.dispatchClick(PlaylistCreateWidget.CloseModal)
+        bridge.dispatchClick(PlaylistCreateWidget.CloseModal)
     }
     if (!isOpen) {
         return
@@ -209,14 +211,14 @@ fun CreatePlaylistsDialog(
                     stringId = R.string.playlists_dialog_tab_full,
                     isActive = mode == CreatePlaylistMode.FULL,
                     onClick = {
-                        Bridge.dispatchClick(PlaylistCreateWidget.Tab(CreatePlaylistMode.FULL));
+                        bridge.dispatchClick(PlaylistCreateWidget.Tab(CreatePlaylistMode.FULL));
                     }
                 )
                 Tab(
                     stringId = R.string.playlists_dialog_tab_empty,
                     isActive = mode == CreatePlaylistMode.EMPTY,
                     onClick = {
-                        Bridge.dispatchClick(PlaylistCreateWidget.Tab(CreatePlaylistMode.EMPTY));
+                        bridge.dispatchClick(PlaylistCreateWidget.Tab(CreatePlaylistMode.EMPTY));
                     }
                 )
             }
@@ -230,7 +232,7 @@ fun CreatePlaylistsDialog(
                     label = stringResource(R.string.playlists_dialog_playlist_name),
                     value = state.name,
                     onChange = { value ->
-                        Bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
+                        bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
                     }
                 )
             }
@@ -246,7 +248,7 @@ fun CreatePlaylistsDialog(
                             type = EaseTextButtonType.Primary,
                             size = EaseTextButtonSize.Medium,
                             onClick = {
-                                Bridge.dispatchClick(PlaylistCreateWidget.Reset);
+                                bridge.dispatchClick(PlaylistCreateWidget.Reset);
                             }
                         )
                     }
@@ -264,7 +266,7 @@ fun CreatePlaylistsDialog(
                         size = EaseTextButtonSize.Medium,
                         disabled = !state.canSubmit,
                         onClick = {
-                            Bridge.dispatchClick(PlaylistCreateWidget.FinishCreate);
+                            bridge.dispatchClick(PlaylistCreateWidget.FinishCreate);
                             onDismissRequest()
                         }
                     )
@@ -279,11 +281,12 @@ fun CreatePlaylistsDialog(
 fun EditPlaylistsDialog(
     evm: EaseViewModel
 ) {
+    val bridge = UIBridgeController.current
     val state = evm.editPlaylistState.collectAsState().value
     val isOpen = state.modalOpen
 
     val onDismissRequest = {
-        Bridge.dispatchClick(PlaylistEditWidget.CloseModal)
+        bridge.dispatchClick(PlaylistEditWidget.CloseModal)
     }
     if (!isOpen) {
         return
@@ -306,7 +309,7 @@ fun EditPlaylistsDialog(
                 label = null,
                 value = state.name,
                 onChange = { value ->
-                    Bridge.dispatchChangeText(PlaylistEditWidget.Name, value)
+                    bridge.dispatchChangeText(PlaylistEditWidget.Name, value)
                 }
             )
             Box(modifier = Modifier.height(12.dp))
@@ -316,10 +319,10 @@ fun EditPlaylistsDialog(
             ImportCover(
                 url = state.picture,
                 onAdd = {
-                    Bridge.dispatchClick(PlaylistEditWidget.Cover);
+                    bridge.dispatchClick(PlaylistEditWidget.Cover);
                 },
                 onRemove = {
-                    Bridge.dispatchClick(PlaylistEditWidget.ClearCover);
+                    bridge.dispatchClick(PlaylistEditWidget.ClearCover);
                 }
             )
             Row(
@@ -338,7 +341,7 @@ fun EditPlaylistsDialog(
                     type = EaseTextButtonType.Primary,
                     size = EaseTextButtonSize.Medium,
                     onClick = {
-                        Bridge.dispatchClick(PlaylistEditWidget.FinishEdit);
+                        bridge.dispatchClick(PlaylistEditWidget.FinishEdit);
                     }
                 )
             }
