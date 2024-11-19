@@ -84,7 +84,7 @@ fn trace_level() -> tracing::Level {
     if std::env::var("EBUILD").is_ok() {
         tracing::Level::INFO
     } else {
-        tracing::Level::TRACE
+        tracing::Level::INFO
     }
 }
 

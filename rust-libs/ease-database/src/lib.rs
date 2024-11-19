@@ -31,12 +31,14 @@ impl DbConnection {
     where
         E: From<Error>,
     {
+        tracing::trace!("start db transaction");
         let transaction = self.conn.transaction()?;
 
         let conn = DbConnectionRef { conn: &transaction };
 
         let value = f(conn)?;
         transaction.commit()?;
+        tracing::trace!("end db transaction");
         Ok(value)
     }
 
@@ -49,15 +51,24 @@ impl DbConnection {
         sql: &str,
         params: impl rusqlite::Params,
     ) -> Result<Vec<T>> {
-        self.get_ref().query(sql, params)
+        tracing::trace!("start db query");
+        let ret = self.get_ref().query(sql, params);
+        tracing::trace!("end db query");
+        ret
     }
 
     pub fn execute(&self, sql: &str, params: impl rusqlite::Params) -> Result<()> {
-        self.get_ref().execute(sql, params)
+        tracing::trace!("start db execute");
+        let ret = self.get_ref().execute(sql, params);
+        tracing::trace!("end db execute");
+        ret
     }
 
     pub fn execute_batch(&self, sql: &str) -> Result<()> {
-        self.get_ref().execute_batch(sql)
+        tracing::trace!("start db execute_batch");
+        let ret = self.get_ref().execute_batch(sql);
+        tracing::trace!("end db execute_batch");
+        ret
     }
 }
 
@@ -67,22 +78,28 @@ impl<'a> DbConnectionRef<'a> {
         sql: &str,
         params: impl rusqlite::Params,
     ) -> Result<Vec<T>> {
+        tracing::trace!("start dbref query");
         let mut stmt = self.conn.prepare(sql)?;
         let rows = stmt.query(params)?;
         let list: Vec<T> = serde_rusqlite::from_rows::<T>(rows)
             .into_iter()
             .map(|r| r.unwrap())
             .collect();
+        tracing::trace!("end dbref query");
         Ok(list)
     }
 
     pub fn execute(&self, sql: &str, params: impl rusqlite::Params) -> Result<()> {
+        tracing::trace!("start dbref execute");
         self.conn.execute(sql, params)?;
+        tracing::trace!("end dbref execute");
         Ok(())
     }
 
     pub fn execute_batch(&self, sql: &str) -> Result<()> {
+        tracing::trace!("start dbref execute_batch");
         self.conn.execute_batch(sql)?;
+        tracing::trace!("end dbref execute_batch");
         Ok(())
     }
 }

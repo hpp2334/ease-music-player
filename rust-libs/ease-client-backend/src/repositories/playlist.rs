@@ -6,17 +6,18 @@ use ease_client_shared::backends::{
     storage::{StorageEntryLoc, StorageId},
 };
 use ease_database::{params, DbConnectionRef};
+use tracing::instrument;
 
-use crate::{
-    error::BResult,
-    models::playlist::PlaylistModel,
-};
+use crate::{error::BResult, models::playlist::PlaylistModel};
 
+#[derive(Debug)]
 pub struct ArgDBUpsertPlaylist {
     pub id: Option<PlaylistId>,
     pub title: String,
     pub picture: Option<StorageEntryLoc>,
 }
+
+#[instrument]
 pub fn db_upsert_playlist(
     conn: DbConnectionRef,
     arg: ArgDBUpsertPlaylist,
@@ -42,11 +43,13 @@ pub fn db_upsert_playlist(
     }
 }
 
+#[instrument]
 pub fn db_remove_playlist(conn: DbConnectionRef, id: PlaylistId) -> BResult<()> {
     conn.execute("DELETE FROM playlist WHERE id = ?1", params![id])?;
     Ok(())
 }
 
+#[instrument]
 pub fn db_remove_all_musics_in_playlist(conn: DbConnectionRef, id: PlaylistId) -> BResult<()> {
     conn.execute(
         "DELETE FROM playlist_music WHERE playlist_id = ?1",
@@ -55,6 +58,7 @@ pub fn db_remove_all_musics_in_playlist(conn: DbConnectionRef, id: PlaylistId) -
     Ok(())
 }
 
+#[instrument]
 pub fn db_remove_music_from_playlist(
     conn: DbConnectionRef,
     playlist_id: PlaylistId,
@@ -67,6 +71,7 @@ pub fn db_remove_music_from_playlist(
     Ok(())
 }
 
+#[instrument]
 pub fn db_batch_add_music_to_playlist(
     conn: DbConnectionRef,
     args: Vec<(MusicId, PlaylistId)>,
@@ -80,6 +85,7 @@ pub fn db_batch_add_music_to_playlist(
     Ok(())
 }
 
+#[instrument]
 pub fn db_load_playlists(conn: DbConnectionRef) -> BResult<Vec<PlaylistModel>> {
     let playlist_models = conn.query::<PlaylistModel>(
         r#"
@@ -104,6 +110,7 @@ pub fn db_load_playlist_music_count(conn: DbConnectionRef) -> BResult<HashMap<Pl
 
 pub type FirstMusicCovers = HashMap<PlaylistId, MusicId>;
 
+#[instrument]
 pub fn db_load_first_music_covers(conn: DbConnectionRef) -> BResult<FirstMusicCovers> {
     let list = conn.query::<(MusicId, PlaylistId)>(
         r#"
@@ -120,6 +127,7 @@ pub fn db_load_first_music_covers(conn: DbConnectionRef) -> BResult<FirstMusicCo
     Ok(map)
 }
 
+#[instrument]
 pub fn db_remove_musics_in_playlists_by_storage(
     conn: DbConnectionRef,
     storage_id: StorageId,
@@ -132,6 +140,7 @@ pub fn db_remove_musics_in_playlists_by_storage(
     Ok(())
 }
 
+#[instrument]
 pub fn db_get_musics_count_by_storage(
     conn: DbConnectionRef,
     storage_id: StorageId,

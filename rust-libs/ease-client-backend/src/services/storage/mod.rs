@@ -14,6 +14,7 @@ use ease_client_shared::backends::storage::{
 };
 use ease_remote_storage::{BuildWebdavArg, LocalBackend, StorageBackend, Webdav};
 use num_traits::FromPrimitive;
+use tracing::instrument;
 
 pub(crate) fn to_opt_storage_entry(
     path: Option<String>,
@@ -37,6 +38,7 @@ pub(crate) fn from_opt_storage_entry(loc: Option<StorageEntryLoc>) -> StorageEnt
     }
 }
 
+#[instrument]
 pub(crate) async fn load_storage_entry_data(
     cx: &BackendContext,
     loc: &StorageEntryLoc,
@@ -46,14 +48,17 @@ pub(crate) async fn load_storage_entry_data(
     if let Some(backend) = backend {
         cx.async_runtime()
             .spawn(async move {
-                match backend.get(&loc.path).await {
+                tracing::trace!("start load");
+                let ret = match backend.get(&loc.path).await {
                     Ok(data) => {
                         let data = data.bytes().await.unwrap();
                         let data = data.to_vec();
                         Ok(Some(data))
                     }
                     Err(e) => Ok(None),
-                }
+                };
+                tracing::trace!("end load");
+                ret
             })
             .await
     } else {

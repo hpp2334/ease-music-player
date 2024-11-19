@@ -82,7 +82,7 @@ pub(crate) fn current_music_vs(state: &CurrentMusicState, root: &mut RootViewMod
         can_play_previous: music.can_prev,
         previous_cover: music.prev_cover,
         next_cover: music.next_cover,
-        cover: abstr.cover_url,
+        cover: music.cover,
         playing: state.playing,
         play_mode: state.play_mode,
         lyric_index: state.lyric_line_index,

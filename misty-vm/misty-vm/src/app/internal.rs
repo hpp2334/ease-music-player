@@ -6,6 +6,7 @@ use std::{
 };
 
 use misty_async::AsyncRuntime;
+use tracing::instrument;
 
 use crate::{models::Models, to_host::ToHosts, view_models::pod::ViewModels};
 
@@ -54,6 +55,7 @@ impl std::fmt::Debug for AppInternal {
 }
 
 impl AppInternal {
+    #[instrument]
     pub fn emit<Event>(self: &Arc<Self>, evt: Event)
     where
         Event: Any + Debug + 'static,
@@ -72,12 +74,15 @@ impl AppInternal {
         self.view_models.handle_event(self, &evt);
         self.view_models.handle_flush(self);
         self.after_flush();
+        tracing::trace!("end");
     }
 
+    #[instrument]
     pub fn flush_spawned(self: &Arc<Self>) {
         self.check_same_thread();
         let should_flush = self.async_executor.flush_local_spawns();
         if should_flush {
+            tracing::trace!("start");
             let lock = self
                 .during_flush
                 .swap(true, std::sync::atomic::Ordering::Relaxed);
@@ -86,9 +91,11 @@ impl AppInternal {
             }
             self.view_models.handle_flush(self);
             self.after_flush();
+            tracing::trace!("end");
         }
     }
 
+    #[instrument]
     pub fn flush_pending_events(self: &Arc<Self>) {
         self.check_same_thread();
         let len = self.pending_events.1.len();
@@ -103,13 +110,14 @@ impl AppInternal {
             panic!("flush_pending_events, but ViewModels are during on_event or on_flush")
         }
 
+        tracing::trace!("start");
         while let Ok(evt) = self.pending_events.1.try_recv() {
-            tracing::trace!("start {:?}", evt);
             let evt = evt.as_ref();
             self.view_models.handle_event(self, evt);
         }
         self.view_models.handle_flush(self);
         self.after_flush();
+        tracing::trace!("end");
     }
 
     pub fn push_pending_event<Event>(self: &Arc<Self>, evt: Event)

@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     sync::{
         atomic::{AtomicU16, AtomicU32, AtomicUsize},
         Arc, RwLock,
@@ -25,6 +26,16 @@ pub struct BackendContext {
         RwLock<HashMap<usize, Arc<dyn IConnectorNotifier>>>,
         AtomicUsize,
     )>,
+}
+impl Debug for BackendContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackendContext")
+            .field("storage_path", &self.storage_path)
+            .field("app_document_dir", &self.app_document_dir)
+            .field("schema_version", &self.schema_version)
+            .field("server_port", &self.server_port)
+            .finish()
+    }
 }
 
 impl BackendContext {

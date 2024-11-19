@@ -96,14 +96,10 @@ impl ViewModels {
                 panic!("ViewModel on event error: {}", e);
             }
         }
-
-        tracing::trace!("end");
     }
 
     #[instrument]
     pub fn handle_flush(&self, app: &Arc<AppInternal>) {
-        tracing::trace!("start");
-
         let cx = ViewModelContext::new(app.clone());
         for (_, vm) in self.vms.iter() {
             let res = vm.handle_flush(&cx);
@@ -111,8 +107,6 @@ impl ViewModels {
                 panic!("ViewModel on flush error: {}", e);
             }
         }
-
-        tracing::trace!("end");
     }
 
     pub fn vm<VM>(&self) -> Rc<VM>

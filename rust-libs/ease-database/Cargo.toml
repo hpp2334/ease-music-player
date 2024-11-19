@@ -10,5 +10,6 @@ publish = false
 rusqlite = { version = "0.30.0", features = ["bundled", "trace"] }
 serde_rusqlite = "0.34.0"
 serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
 
 [dev-dependencies]

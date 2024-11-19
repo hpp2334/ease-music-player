@@ -2,12 +2,14 @@ use ease_client_shared::backends::{
     music::MusicId, music_duration::MusicDuration, playlist::PlaylistId, storage::StorageId,
 };
 use ease_database::{params, DbConnectionRef};
+use tracing::instrument;
 
 use crate::{
     error::BResult,
     models::{music::MusicModel, storage::StorageEntryLocModel},
 };
 
+#[instrument]
 pub fn db_load_music_metas_by_playlist_id(
     conn: DbConnectionRef,
     playlist_id: PlaylistId,
@@ -23,6 +25,7 @@ pub fn db_load_music_metas_by_playlist_id(
     Ok(models)
 }
 
+#[instrument]
 pub fn db_load_music(conn: DbConnectionRef, music_id: MusicId) -> BResult<Option<MusicModel>> {
     let model = conn
         .query::<MusicModel>(
@@ -36,6 +39,7 @@ pub fn db_load_music(conn: DbConnectionRef, music_id: MusicId) -> BResult<Option
     Ok(model)
 }
 
+#[instrument]
 fn db_load_music_by_key(
     conn: DbConnectionRef,
     storage_id: StorageId,
@@ -58,6 +62,7 @@ pub struct ArgDBAddMusic {
     pub title: String,
 }
 
+#[instrument]
 pub fn db_add_music(conn: DbConnectionRef, arg: ArgDBAddMusic) -> BResult<MusicId> {
     let music = db_load_music_by_key(conn, arg.storage_id.clone(), arg.path.clone())?;
     if let Some(music) = music {
@@ -77,6 +82,7 @@ pub fn db_add_music(conn: DbConnectionRef, arg: ArgDBAddMusic) -> BResult<MusicI
     return Ok(inserted_id);
 }
 
+#[instrument]
 pub fn db_update_music_total_duration(
     conn: DbConnectionRef,
     id: MusicId,
@@ -90,6 +96,7 @@ pub fn db_update_music_total_duration(
     Ok(())
 }
 
+#[instrument]
 pub fn db_update_music_cover(conn: DbConnectionRef, id: MusicId, cover: Vec<u8>) -> BResult<()> {
     conn.execute(
         "UPDATE music set cover = ?1 WHERE id = ?2",
@@ -99,6 +106,7 @@ pub fn db_update_music_cover(conn: DbConnectionRef, id: MusicId, cover: Vec<u8>)
     Ok(())
 }
 
+#[instrument]
 pub fn db_update_music_lyric(
     conn: DbConnectionRef,
     id: MusicId,
@@ -111,6 +119,7 @@ pub fn db_update_music_lyric(
     Ok(())
 }
 
+#[instrument]
 pub fn db_get_playlists_count_by_storage(
     conn: DbConnectionRef,
     storage_id: StorageId,
