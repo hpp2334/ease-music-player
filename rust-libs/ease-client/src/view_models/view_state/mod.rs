@@ -148,7 +148,7 @@ impl ViewModel for ViewStateVM {
     type Error = EaseError;
 
     fn on_event(&self, cx: &ViewModelContext, _event: &Action) -> EaseResult<()> {
-        self.notify(cx);
+        // noop
         Ok(())
     }
 

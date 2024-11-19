@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc};
+use std::{any::Any, fmt::Debug, sync::Arc};
 
 use misty_async::{AsyncRuntime, IAsyncRuntimeAdapter};
 
@@ -66,6 +66,8 @@ where
     }
 
     pub fn build(self) -> App {
+        let pending_events = flume::unbounded::<Box<dyn Any>>();
+
         App {
             _app: Arc::new(AppInternal {
                 thread_id: std::thread::current().id(),
@@ -73,6 +75,7 @@ where
                 view_models: self.view_models_builder.build(),
                 to_hosts: self.to_hosts_builder.build(),
                 async_executor: self.async_tasks,
+                pending_events,
                 during_flush: Default::default(),
             }),
         }

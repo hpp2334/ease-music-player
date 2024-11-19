@@ -22,7 +22,6 @@ pub struct ViewModelContext {
 }
 
 pub struct AsyncViewModelContext {
-    _async_executor: Weak<AsyncRuntime>,
     _app: WeakAppInternal,
 }
 
@@ -31,19 +30,11 @@ impl AsyncViewModelContext {
     where
         Event: Any + Debug + Send + Sync + 'static,
     {
-        let executor = self._async_executor.upgrade();
-        let app = self._app.clone();
-        if let Some(executor) = executor {
-            executor.schedule_main(move || {
-                let app = app.upgrade();
-                if let Some(app) = app {
-                    app.emit(evt);
-                } else {
-                    tracing::error!("Failed to upgrade weak app.");
-                }
-            });
+        let weak_app = self._app.clone();
+        if let Some(app) = weak_app.upgrade() {
+            app.enqueue_emit(evt);
         } else {
-            tracing::error!("Failed to upgrade weak executor.");
+            tracing::error!("Failed to upgrade weak app.");
         }
     }
 }
@@ -62,7 +53,6 @@ impl ViewModelContext {
 
     pub fn weak(&self) -> AsyncViewModelContext {
         AsyncViewModelContext {
-            _async_executor: Arc::downgrade(&self._app.async_executor),
             _app: WeakAppInternal::new(&self._app),
         }
     }

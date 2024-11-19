@@ -65,7 +65,9 @@ where
     ) -> Result<(), Box<dyn std::error::Error>> {
         let vm_name = std::any::type_name::<VM>();
         let event_name = std::any::type_name::<VM::Event>();
-        let event = event.downcast_ref::<VM::Event>().expect(format!("failed to downcast event {} for VM {}", event_name, vm_name).as_str());
+        let event = event
+            .downcast_ref::<VM::Event>()
+            .expect(format!("failed to downcast event {} for VM {}", event_name, vm_name).as_str());
         self.on_event(cx, event).map_err(|e| e.cast())
     }
 }
@@ -85,16 +87,11 @@ impl ViewModels {
     }
 
     #[instrument]
-    pub fn handle_event<Event>(&self, app: &Arc<AppInternal>, evt: Event)
-    where
-        Event: Any + Debug + 'static,
-    {
-        tracing::trace!("start {:?}", evt);
-
+    pub fn handle_event(&self, app: &Arc<AppInternal>, evt: &dyn Any) {
         let cx = ViewModelContext::new(app.clone());
 
         for (_, vm) in self.vms.iter() {
-            let res = vm.handle_event(&cx, &evt);
+            let res = vm.handle_event(&cx, evt);
             if let Err(e) = res {
                 panic!("ViewModel on event error: {}", e);
             }
@@ -126,7 +123,10 @@ impl ViewModels {
 
         if let Some(vm) = vm {
             let name = std::any::type_name::<VM>();
-            vm.clone().as_any().downcast::<VM>().expect(format!("failed to downcast {}", name).as_str())
+            vm.clone()
+                .as_any()
+                .downcast::<VM>()
+                .expect(format!("failed to downcast {}", name).as_str())
         } else {
             let name = std::any::type_name::<VM>();
             panic!("ViewModel {} not found", name)

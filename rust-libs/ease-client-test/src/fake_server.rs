@@ -121,7 +121,6 @@ impl FakeServerInner {
 
 impl Drop for FakeServerInner {
     fn drop(&mut self) {
-        // std::thread::sleep(Duration::from_secs(1));
         let tx = self.tx.take().unwrap();
         let _ = tx.send(());
         tracing::info!("drop server");
@@ -143,8 +142,12 @@ impl FakeServerRef {
 
     pub async fn load_resource(&self, url: impl ToString) -> Vec<u8> {
         let url = url.to_string();
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
-        let resp = client.get(&url).send().await.unwrap();
-        resp.bytes().await.unwrap().to_vec()
+        tokio::spawn(async move {
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let resp = client.get(&url).send().await.unwrap();
+            resp.bytes().await.unwrap().to_vec()
+        })
+        .await
+        .unwrap()
     }
 }

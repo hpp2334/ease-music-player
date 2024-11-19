@@ -11,7 +11,6 @@ use hyper::StatusCode;
 use lofty::AudioFile;
 use tokio::sync::mpsc;
 
-
 #[derive(Clone)]
 struct FakeMusicPlayerInner {
     url: Arc<Mutex<Option<(MusicId, String)>>>,
@@ -147,6 +146,7 @@ impl IPlayerDelegate for FakeMusicPlayerRef {
         self.inner
             .current_duration
             .store(duration, std::sync::atomic::Ordering::SeqCst);
+        self.inner.send_player_event(PlayerDelegateEvent::Seek);
     }
 
     fn set_music_url(&self, item: MusicToPlay) {

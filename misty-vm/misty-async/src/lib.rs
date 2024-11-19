@@ -1,6 +1,9 @@
 use std::{
     future::Future,
-    sync::{atomic::AtomicU64, Arc, RwLock},
+    sync::{
+        atomic::{AtomicBool, AtomicU64},
+        Arc, RwLock,
+    },
     time::Duration,
 };
 
@@ -28,6 +31,7 @@ pub struct AsyncRuntime {
     adapter: Arc<dyn IAsyncRuntimeAdapter>,
     locals_sender: flume::Sender<LocalTask>,
     locals_receiver: flume::Receiver<LocalTask>,
+    local_notified: Arc<AtomicBool>,
 }
 
 impl AsyncRuntime {
@@ -38,6 +42,7 @@ impl AsyncRuntime {
             adapter,
             locals_sender: tx,
             locals_receiver: rx,
+            local_notified: Default::default(),
         })
     }
 
@@ -45,6 +50,13 @@ impl AsyncRuntime {
         self.locals_sender
             .send(LocalTask::Callback(Box::new(f)))
             .unwrap();
+
+        if !self
+            .local_notified
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            self.adapter.on_spawn_locals();
+        }
     }
 
     pub fn spawn<Fut>(self: &Arc<Self>, fut: Fut) -> Task<Fut::Output>
@@ -70,10 +82,14 @@ impl AsyncRuntime {
         assert!(self.adapter.is_main_thread());
         let sender = self.locals_sender.clone();
         let adapter = self.adapter.clone();
+        let local_notified = self.local_notified.clone();
 
         let schedule = move |runnable| {
             sender.send(LocalTask::Runnable(runnable)).unwrap();
-            adapter.on_spawn_locals();
+
+            if !local_notified.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                adapter.on_spawn_locals();
+            }
         };
         async_task::spawn_local(fut, schedule)
     }
@@ -98,6 +114,8 @@ impl AsyncRuntime {
 
     pub fn flush_local_spawns(self: &Arc<Self>) -> bool {
         assert!(self.adapter.is_main_thread());
+        self.local_notified
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         if self.locals_receiver.is_empty() {
             return false;
         }

@@ -15,6 +15,10 @@ pub(crate) struct AppInternal {
     pub view_models: ViewModels,
     pub to_hosts: ToHosts,
     pub async_executor: Arc<AsyncRuntime>,
+    pub pending_events: (
+        flume::Sender<Box<dyn Any + 'static>>,
+        flume::Receiver<Box<dyn Any + 'static>>,
+    ),
     pub during_flush: AtomicBool,
 }
 
@@ -55,8 +59,18 @@ impl AppInternal {
         Event: Any + Debug + 'static,
     {
         self.check_same_thread();
-        self.before_flush_emit(&evt);
-        self.view_models.handle_event(self, evt);
+        let lock = self
+            .during_flush
+            .swap(true, std::sync::atomic::Ordering::Relaxed);
+        if lock {
+            panic!(
+                "emit Event {:?}, but ViewModels are during on_event or on_flush",
+                evt
+            )
+        }
+        tracing::trace!("start {:?}", evt);
+        self.view_models.handle_event(self, &evt);
+        self.view_models.handle_flush(self);
         self.after_flush();
     }
 
@@ -64,9 +78,58 @@ impl AppInternal {
         self.check_same_thread();
         let should_flush = self.async_executor.flush_local_spawns();
         if should_flush {
-            self.before_flush_flush_spawned();
+            let lock = self
+                .during_flush
+                .swap(true, std::sync::atomic::Ordering::Relaxed);
+            if lock {
+                panic!("flush_spawned, but ViewModels are during on_event or on_flush")
+            }
             self.view_models.handle_flush(self);
             self.after_flush();
+        }
+    }
+
+    pub fn flush_pending_events(self: &Arc<Self>) {
+        self.check_same_thread();
+        let len = self.pending_events.1.len();
+        if len == 0 {
+            return;
+        }
+
+        let lock = self
+            .during_flush
+            .swap(true, std::sync::atomic::Ordering::Relaxed);
+        if lock {
+            panic!("flush_pending_events, but ViewModels are during on_event or on_flush")
+        }
+
+        while let Ok(evt) = self.pending_events.1.try_recv() {
+            tracing::trace!("start {:?}", evt);
+            let evt = evt.as_ref();
+            self.view_models.handle_event(self, evt);
+        }
+        self.view_models.handle_flush(self);
+        self.after_flush();
+    }
+
+    pub fn push_pending_event<Event>(self: &Arc<Self>, evt: Event)
+    where
+        Event: Any + Debug + 'static,
+    {
+        let should_schedule = self.pending_events.0.is_empty();
+        self.pending_events
+            .0
+            .send(Box::new(evt))
+            .expect("failed to push pending events");
+
+        let weak_internal = WeakAppInternal::new(self);
+
+        if should_schedule {
+            self.async_executor.schedule_main(move || {
+                if let Some(app) = weak_internal.upgrade() {
+                    app.flush_pending_events();
+                }
+            });
         }
     }
 
@@ -74,42 +137,13 @@ impl AppInternal {
     where
         Event: Any + Debug + 'static,
     {
-        let app = self.clone();
-        let (runnable, task) = self.async_executor.spawn_local_runnable(async move {
-            app.emit(evt);
-        });
-        runnable.schedule();
-        task.detach();
+        self.push_pending_event(evt);
     }
 
     pub fn check_same_thread(self: &Arc<Self>) {
         let thread_id = std::thread::current().id();
         if self.thread_id != thread_id {
             panic!("cannot operate app in other thread")
-        }
-    }
-
-    fn before_flush_emit<Event>(&self, e: &Event)
-    where
-        Event: Debug,
-    {
-        let lock = self
-            .during_flush
-            .swap(true, std::sync::atomic::Ordering::Relaxed);
-        if lock {
-            panic!(
-                "emit Event {:?}, but ViewModels are during on_event or on_flush",
-                e
-            )
-        }
-    }
-
-    fn before_flush_flush_spawned(&self) {
-        let lock = self
-            .during_flush
-            .swap(true, std::sync::atomic::Ordering::Relaxed);
-        if lock {
-            panic!("flush_spawned, but ViewModels are during on_event or on_flush")
         }
     }
 

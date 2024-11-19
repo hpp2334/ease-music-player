@@ -1,8 +1,5 @@
 use std::{
-    sync::{
-        atomic::AtomicBool,
-        Arc,
-    },
+    sync::{atomic::AtomicBool, Arc},
     thread::ThreadId,
     time::{Duration, SystemTime},
 };
@@ -10,8 +7,8 @@ use std::{
 use ease_client::{build_client, Action, ViewAction};
 use ease_client_backend::Backend;
 use ease_client_shared::backends::{
-    app::ArgInitializeApp, encode_message_payload, generated::Code,
-    player::PlayerDelegateEvent, MessagePayload,
+    app::ArgInitializeApp, encode_message_payload, generated::Code, player::PlayerDelegateEvent,
+    MessagePayload,
 };
 use misty_vm::{AppPods, AsyncRuntime, IAsyncRuntimeAdapter, LocalBoxFuture};
 use once_cell::sync::Lazy;
@@ -87,7 +84,7 @@ fn trace_level() -> tracing::Level {
     if std::env::var("EBUILD").is_ok() {
         tracing::Level::INFO
     } else {
-        tracing::Level::INFO
+        tracing::Level::TRACE
     }
 }
 

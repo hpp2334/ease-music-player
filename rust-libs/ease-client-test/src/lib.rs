@@ -325,9 +325,7 @@ impl TestApp {
     }
 
     pub async fn wait_network(&self) {
-        for _ in 0..8 {
-            self.wait(10).await;
-        }
+        self.wait(100).await;
     }
 
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {

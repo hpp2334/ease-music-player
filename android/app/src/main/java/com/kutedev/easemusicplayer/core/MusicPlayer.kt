@@ -63,43 +63,24 @@ private fun extractCurrentTracksCover(player: Player): ByteArray? {
     return null
 }
 
-private fun syncMetadataImpl(player: Player) {
-    if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
-        return
-    }
-    if (player.duration == TIME_UNSET) {
-        return
-    }
-
-    val mediaItem = player.currentMediaItem
-    if (mediaItem != null && mediaItem.mediaId.isDigitsOnly()) {
-        val id = MusicId(mediaItem.mediaId.toLong())
-        val durationMS = player.duration.toULong()
-        val coverData = extractCurrentTracksCover(player)
-
-        BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Total(id, durationMS))
-
-        if (coverData != null) {
-            BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Cover(id, coverData))
-        }
-    }
-}
 
 private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
     private var _internal: ExoPlayer? = null
     private var _context: android.content.Context? = null
     private val _requestSemaphore = Semaphore(4)
+    private var _lastSyncMusicId: MusicId? = null
     val customScope = CoroutineScope(Dispatchers.Main)
 
     fun onCreate(context: android.content.Context) {
         _context = context
 
-        _internal = ExoPlayer.Builder(context)
+        val player = ExoPlayer.Builder(context)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        _internal = player
 
-        _internal!!.addListener(object : Player.Listener {
+        player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Play)
@@ -112,7 +93,7 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
                 if (playbackState == Player.STATE_ENDED) {
                     BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Complete)
                 } else if (playbackState == Player.STATE_READY) {
-                    syncMetadata()
+                    syncMetadataImpl()
                 }
             }
 
@@ -205,7 +186,7 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
                 player.addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
-                            syncMetadataImpl(player)
+                            syncMetadataImpl()
                             player.release()
                             _requestSemaphore.release()
                         }
@@ -227,9 +208,32 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
         }
     }
 
-    private fun syncMetadata() {
+    private fun syncMetadataImpl() {
         val player = _internal ?: return
-        syncMetadataImpl(player)
+
+        if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
+            return
+        }
+        if (player.duration == TIME_UNSET) {
+            return
+        }
+
+        val mediaItem = player.currentMediaItem
+        if (mediaItem != null && mediaItem.mediaId.isDigitsOnly()) {
+            val id = MusicId(mediaItem.mediaId.toLong())
+            val durationMS = player.duration.toULong()
+            val coverData = extractCurrentTracksCover(player)
+
+            val shouldSync = this._lastSyncMusicId != id
+            if (shouldSync) {
+                this._lastSyncMusicId = id
+                BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Total(id, durationMS))
+
+                if (coverData != null) {
+                    BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Cover(id, coverData))
+                }
+            }
+        }
     }
 }
 

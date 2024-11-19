@@ -73,6 +73,7 @@ impl MusicCommonVM {
         let this = Self::of(cx);
         cx.spawn_in_pod::<_, _, EaseError>(&self.tasks, &self.tick_task, move |cx| async move {
             cx.sleep(Duration::from_secs(1)).await;
+            this.tick_task.cancel(&this.tasks);
             this.tick(&cx)?;
             Ok(())
         });

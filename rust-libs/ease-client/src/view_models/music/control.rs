@@ -138,10 +138,8 @@ impl MusicControlVM {
     }
 
     fn request_seek(&self, cx: &ViewModelContext, arg: u64) -> EaseResult<()> {
-        let this = Self::of(cx);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx).player_seek(&cx, arg).await?;
-            this.request_sync_current_duration(&cx);
             Ok(())
         });
         Ok(())
