@@ -20,10 +20,6 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
         <service
-            android:name=".core.BackendService"
-            android:enabled="true"
-            android:exported="false" />
-        <service
             android:name=".core.PlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback">
@@ -31,11 +27,18 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <receiver android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.EaseMusicPlayer">
+            android:theme="@style/Theme.EaseMusicPlayer"
+            android:launchMode="singleInstance">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

@@ -1,10 +1,9 @@
 package com.kutedev.easemusicplayer.core
 
-import android.content.ComponentName
+import android.app.PendingIntent
 import android.content.Intent
-import android.content.ServiceConnection
 import android.net.Uri
-import android.os.IBinder
+import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.core.text.isDigitsOnly
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -23,16 +22,22 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.metadata.flac.PictureFrame
 import androidx.media3.extractor.metadata.id3.ApicFrame
-import androidx.media3.session.MediaController
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import androidx.media3.session.SessionToken
-import com.google.common.util.concurrent.MoreExecutors
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.ListenableFuture
+import com.kutedev.easemusicplayer.MainActivity
+import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import uniffi.ease_client_android.IPlayerDelegateForeign
+import uniffi.ease_client_android.apiBackendPlayNext
+import uniffi.ease_client_android.apiBackendPlayPrevious
 import uniffi.ease_client_backend.MusicToPlay
 import uniffi.ease_client_shared.MusicId
 import uniffi.ease_client_shared.PlayerDelegateEvent
@@ -108,8 +113,11 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
     }
 
     fun onDestroy() {
+        _internal?.pause()
+        _internal?.stop()
         _internal?.release()
         _internal = null
+        _context = null
     }
 
     fun player(): ExoPlayer {
@@ -237,17 +245,29 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
     }
 }
 
+const val PLAYER_TO_PREV_COMMAND = "PLAYER_TO_PREV_COMMAND";
+const val PLAYER_TO_NEXT_COMMAND = "PLAYER_TO_NEXT_COMMAND";
+
 class PlaybackService : MediaSessionService() {
     private var _mediaSession: MediaSession? = null
     private val _playerDelegate = EaseMusicPlayerDelegate()
+    private var _backendDestroyed = false
 
     override fun onCreate() {
         super.onCreate()
         val context = this
+        this._backendDestroyed = false
         BackendBridge.onCreate(this, _playerDelegate)
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         _playerDelegate.onCreate(context = this)
         _mediaSession = MediaSession.Builder(this, _playerDelegate.player())
+            .setSessionActivity(pendingIntent)
             .setCallback(object : MediaSession.Callback {
                 @OptIn(UnstableApi::class)
                 override fun onConnect(
@@ -255,10 +275,13 @@ class PlaybackService : MediaSessionService() {
                     controller: MediaSession.ControllerInfo
                 ): MediaSession.ConnectionResult {
                     if (session.isMediaNotificationController(controller)) {
+                        val customPrevCommand = SessionCommand(PLAYER_TO_PREV_COMMAND, Bundle.EMPTY)
+                        val customNextCommand = SessionCommand(PLAYER_TO_NEXT_COMMAND, Bundle.EMPTY)
+
                         val sessionCommands =
                             MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
-//                                .add(customCommandSeekBackward)
-//                                .add(customCommandSeekForward)
+                                .add(customPrevCommand)
+                                .add(customNextCommand)
                                 .build()
                         val playerCommands =
                             MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -269,11 +292,20 @@ class PlaybackService : MediaSessionService() {
                                 .build()
                         // Custom layout and available commands to configure the legacy/framework session.
                         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-//                            .setCustomLayout(
-//                                ImmutableList.of(
-//                                    createSeekBackwardButton(customCommandSeekBackward),
-//                                    createSeekForwardButton(customCommandSeekForward))
-//                            )
+                            .setCustomLayout(
+                                ImmutableList.of(
+                                    CommandButton.Builder()
+                                        .setSessionCommand(customPrevCommand)
+                                        .setIconResId(CommandButton.getIconResIdForIconConstant(CommandButton.ICON_PREVIOUS))
+                                        .setDisplayName("Previous")
+                                        .build(),
+                                    CommandButton.Builder()
+                                        .setSessionCommand(customNextCommand)
+                                        .setIconResId(CommandButton.getIconResIdForIconConstant(CommandButton.ICON_NEXT))
+                                        .setDisplayName("Next")
+                                        .build(),
+                                )
+                            )
                             .setAvailablePlayerCommands(playerCommands)
                             .setAvailableSessionCommands(sessionCommands)
                             .build()
@@ -281,13 +313,31 @@ class PlaybackService : MediaSessionService() {
                     LocalBroadcastManager.getInstance(context).sendBroadcast(Intent(BACKEND_STARTED_ACTION))
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
                 }
+
+                override fun onCustomCommand(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                    customCommand: SessionCommand,
+                    args: Bundle
+                ): ListenableFuture<SessionResult> {
+                    if (!_backendDestroyed) {
+                        if (customCommand.customAction == PLAYER_TO_PREV_COMMAND) {
+                            apiBackendPlayPrevious()
+                        } else if (customCommand.customAction == PLAYER_TO_NEXT_COMMAND) {
+                            apiBackendPlayNext()
+                        }
+                    }
+                    return super.onCustomCommand(session, controller, customCommand, args)
+                }
+
             })
             .build()
 
     }
 
+
     override fun onTaskRemoved(rootIntent: Intent?) {
-        destroyImpl()
+        _playerDelegate.stop()
         stopSelf()
     }
 
@@ -297,17 +347,13 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        destroyImpl()
-    }
+        _mediaSession?.release()
+        _mediaSession = null
+        _playerDelegate.onDestroy()
 
-    private fun destroyImpl() {
-        _mediaSession?.run {
-            _playerDelegate.onDestroy()
-            release()
-            _mediaSession = null
-
-            BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Stop)
+        if (!_backendDestroyed) {
+            _backendDestroyed = true;
+            BackendBridge.onDestroy()
         }
-        BackendBridge.onDestroy()
     }
 }

@@ -6,6 +6,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import uniffi.ease_client_android.IPlayerDelegateForeign
 import uniffi.ease_client_android.apiBuildBackend
 import uniffi.ease_client_android.apiDestroyBackend

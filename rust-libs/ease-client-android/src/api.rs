@@ -171,6 +171,26 @@ pub fn api_send_backend_player_event(evt: PlayerDelegateEvent) {
 }
 
 #[uniffi::export]
+pub fn api_backend_play_next() {
+    let _guard = RT.enter();
+    let backend = BACKEND.backend();
+    backend.request_from_host(MessagePayload {
+        code: Code::PlayNext,
+        payload: encode_message_payload(()),
+    });
+}
+
+#[uniffi::export]
+pub fn api_backend_play_previous() {
+    let _guard = RT.enter();
+    let backend = BACKEND.backend();
+    backend.request_from_host(MessagePayload {
+        code: Code::PlayPrevious,
+        payload: encode_message_payload(()),
+    });
+}
+
+#[uniffi::export]
 pub fn api_build_client(
     permission: Arc<dyn IPermissionServiceForeign>,
     router: Arc<dyn IRouterServiceForeign>,
