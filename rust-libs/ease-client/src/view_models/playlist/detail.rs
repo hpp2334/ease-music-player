@@ -1,6 +1,6 @@
 use ease_client_shared::backends::{
     music::MusicId,
-    playlist::{ArgAddMusicsToPlaylist, PlaylistId},
+    playlist::{ArgAddMusicsToPlaylist, Playlist, PlaylistAbstract, PlaylistId},
     storage::{CurrentStorageImportType, StorageEntry, StorageId},
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
@@ -58,14 +58,24 @@ impl PlaylistDetailVM {
         Ok(())
     }
 
-    pub(crate) fn prepare_current(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<()> {
+    pub(crate) fn prepare_current(
+        &self,
+        cx: &ViewModelContext,
+        playlist_abstr: PlaylistAbstract,
+    ) -> EaseResult<()> {
         let current = self.current.clone();
+        let id = playlist_abstr.id();
         {
             let mut state = cx.model_mut(&current);
-            state.playlist.take();
+            if state.playlist.as_ref().map(|v| v.id()) != Some(playlist_abstr.id()) {
+                state.playlist = Some(Playlist {
+                    abstr: playlist_abstr,
+                    musics: Default::default(),
+                })
+            }
         }
 
-        RouterVM::of(cx).navigate(cx, RoutesKey::Playlist);
+        RouterVM::of(&cx).navigate(&cx, RoutesKey::Playlist);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let playlist = Connector::of(&cx).get_playlist(&cx, id).await?;
 

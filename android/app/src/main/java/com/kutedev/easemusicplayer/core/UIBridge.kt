@@ -90,18 +90,14 @@ class RouterService : IRouterServiceForeign {
     }
 
     override fun naviagate(key: RoutesKey) {
-        nextTickOnMain {
-            if (_navigatorController != null) {
-                _navigatorController!!.navigate(key.toString())
-            }
+        if (_navigatorController != null) {
+            _navigatorController!!.navigate(key.toString())
         }
     }
 
     override fun pop() {
-        nextTickOnMain {
-            if (_navigatorController != null) {
-                _navigatorController!!.popBackStack()
-            }
+        if (_navigatorController != null) {
+            _navigatorController!!.popBackStack()
         }
     }
 }

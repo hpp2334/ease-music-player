@@ -68,6 +68,32 @@ private fun extractCurrentTracksCover(player: Player): ByteArray? {
     return null
 }
 
+private fun syncMetadataUtil(player: Player, computeShouldSync: (id: MusicId) -> Boolean) {
+    if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
+        return
+    }
+    if (player.duration == TIME_UNSET) {
+        return
+    }
+
+    val mediaItem = player.currentMediaItem
+    if (mediaItem != null && mediaItem.mediaId.isDigitsOnly()) {
+        val id = MusicId(mediaItem.mediaId.toLong())
+        val durationMS = player.duration.toULong()
+        val coverData = extractCurrentTracksCover(player)
+
+
+        val shouldSync = computeShouldSync(id)
+        if (shouldSync) {
+            BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Total(id, durationMS))
+
+            if (coverData != null) {
+                BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Cover(id, coverData))
+            }
+        }
+    }
+}
+
 
 private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
     private var _internal: ExoPlayer? = null
@@ -194,7 +220,7 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
                 player.addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
-                            syncMetadataImpl()
+                            syncMetadataUtil(player, { true })
                             player.release()
                             _requestSemaphore.release()
                         }
@@ -219,29 +245,11 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
     private fun syncMetadataImpl() {
         val player = _internal ?: return
 
-        if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
-            return
-        }
-        if (player.duration == TIME_UNSET) {
-            return
-        }
-
-        val mediaItem = player.currentMediaItem
-        if (mediaItem != null && mediaItem.mediaId.isDigitsOnly()) {
-            val id = MusicId(mediaItem.mediaId.toLong())
-            val durationMS = player.duration.toULong()
-            val coverData = extractCurrentTracksCover(player)
-
+        syncMetadataUtil(player, {id ->
             val shouldSync = this._lastSyncMusicId != id
-            if (shouldSync) {
-                this._lastSyncMusicId = id
-                BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Total(id, durationMS))
-
-                if (coverData != null) {
-                    BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Cover(id, coverData))
-                }
-            }
-        }
+            this._lastSyncMusicId = id
+            shouldSync
+        })
     }
 }
 
