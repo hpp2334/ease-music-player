@@ -50,8 +50,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
+            multiDexEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -81,6 +83,16 @@ android {
         jniLibs {
             // make stacktrace available
             useLegacyPackaging = true
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+
+            reset()
+            include("arm64-v8a")
+            isUniversalApk = false
         }
     }
 }
