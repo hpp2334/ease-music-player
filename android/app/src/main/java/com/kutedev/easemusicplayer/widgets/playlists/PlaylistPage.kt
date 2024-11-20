@@ -389,6 +389,7 @@ private fun PlaylistItem(
 private fun PlaylistItemsBlock(
     items: List<VPlaylistMusicItem>,
     currentMusicState: VCurrentMusicState,
+    scaffoldPadding: PaddingValues,
 ) {
     val bridge = UIBridgeController.current
     var swipingMusicId by remember {
@@ -420,7 +421,8 @@ private fun PlaylistItemsBlock(
             }
         }
         BottomBarSpacer(
-            hasCurrentMusic = currentMusicState.id != null
+            hasCurrentMusic = currentMusicState.id != null,
+            scaffoldPadding = scaffoldPadding,
         )
     }
 }
@@ -463,6 +465,7 @@ fun PlaylistPage(
                 PlaylistItemsBlock(
                     items = items,
                     currentMusicState = currentMusicState,
+                    scaffoldPadding = scaffoldPadding,
                 )
             }
         }

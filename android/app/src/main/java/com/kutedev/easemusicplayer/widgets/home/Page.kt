@@ -3,9 +3,11 @@ package com.kutedev.easemusicplayer.widgets.home
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -21,10 +23,12 @@ import uniffi.ease_client.RoutesKey
 @Composable
 fun HomePage(
     ctx: android.content.Context,
-    pagerState: PagerState,
     evm: EaseViewModel,
     scaffoldPadding: PaddingValues,
 ) {
+    val pagerState = rememberPagerState(pageCount = {
+        3
+    })
     val state by evm.currentMusicState.collectAsState()
     val isPlaying = state.playing
 
@@ -33,7 +37,7 @@ fun HomePage(
     ) {
         HorizontalPager(
             modifier = Modifier.padding(
-                bottom = getBottomBarSpace(isPlaying),
+                bottom = getBottomBarSpace(isPlaying, scaffoldPadding),
             ),
             state = pagerState
         ) { page ->

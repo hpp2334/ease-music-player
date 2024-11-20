@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.R
@@ -43,6 +45,7 @@ import uniffi.ease_client_shared.StorageId
 import uniffi.ease_client_shared.StorageType
 
 private val paddingX = 24.dp
+private val paddingY = 12.dp
 
 private fun toEditStorage(bridge: UIBridge, arg: StorageId?) {
     if (arg != null) {
@@ -57,6 +60,7 @@ private fun Title(title: String) {
     Text(
         text = title,
         color = MaterialTheme.colorScheme.primary,
+        fontSize = 14.sp,
     )
 }
 
@@ -108,11 +112,13 @@ private fun SleepModeBlock(evm: EaseViewModel) {
 }
 
 @Composable
-private fun DevicesBlock(storageItems: List<VStorageListItem>) {
+private fun ColumnScope.DevicesBlock(storageItems: List<VStorageListItem>) {
     val bridge = UIBridgeController.current
     Column(
         modifier = Modifier
-            .padding(paddingX, 0.dp)
+            .verticalScroll(rememberScrollState())
+            .weight(1f)
+            .padding(paddingX, paddingY)
     ) {
         if (storageItems.isEmpty()) {
             Box(modifier = Modifier
@@ -164,11 +170,15 @@ private fun DevicesBlock(storageItems: List<VStorageListItem>) {
                     Text(
                         text = item.name,
                         fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = item.subTitle,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -192,7 +202,7 @@ fun DashboardSubpage(
         Box(modifier = Modifier.height(48.dp))
         Row(
             modifier = Modifier
-                .padding(paddingX, 0.dp)
+                .padding(paddingX, 4.dp)
                 .fillMaxWidth(),
         ) {
             Title(title = stringResource(id = R.string.dashboard_sleep_mode))
@@ -201,7 +211,7 @@ fun DashboardSubpage(
         Box(modifier = Modifier.height(48.dp))
         Row(
             modifier = Modifier
-                .padding(paddingX, 0.dp)
+                .padding(paddingX, 4.dp)
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {

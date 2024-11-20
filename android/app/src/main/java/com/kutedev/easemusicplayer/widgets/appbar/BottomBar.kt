@@ -63,8 +63,11 @@ private object BSetting: IBottomItem {
         get() = 2;
 }
 
-fun getBottomBarSpace(isPlaying: Boolean): Dp {
-    var total = 60.dp;
+fun getBottomBarSpace(
+    isPlaying: Boolean,
+    scaffoldPadding: PaddingValues
+): Dp {
+    var total = 60.dp + scaffoldPadding.calculateBottomPadding();
     if (isPlaying) {
         total += 124.dp;
     }
@@ -73,9 +76,10 @@ fun getBottomBarSpace(isPlaying: Boolean): Dp {
 
 @Composable
 fun BottomBarSpacer(
-    hasCurrentMusic: Boolean
+    hasCurrentMusic: Boolean,
+    scaffoldPadding: PaddingValues,
 ) {
-    Box(modifier = Modifier.height(getBottomBarSpace(hasCurrentMusic)))
+    Box(modifier = Modifier.height(getBottomBarSpace(hasCurrentMusic, scaffoldPadding)))
 }
 
 @Composable

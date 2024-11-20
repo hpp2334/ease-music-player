@@ -99,6 +99,7 @@ fun PlaylistsSubpage(
 @Composable
 private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
     LazyVerticalGrid(
+        modifier = Modifier.fillMaxSize(),
         columns = GridCells.FixedSize(172.dp),
         horizontalArrangement = Arrangement.Center,
     ) {

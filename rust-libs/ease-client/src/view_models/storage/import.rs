@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use ease_client_shared::backends::storage::{
-    CurrentStorageImportType, CurrentStorageStateType, ListStorageEntryChildrenResp,
-    StorageEntry, StorageEntryLoc, StorageEntryType, StorageId, StorageType,
+    CurrentStorageImportType, CurrentStorageStateType, ListStorageEntryChildrenResp, StorageEntry,
+    StorageEntryLoc, StorageEntryType, StorageId, StorageType,
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
@@ -203,6 +203,10 @@ impl StorageImportVM {
             current.state_type = CurrentStorageStateType::NeedPermission;
             return;
         }
+        {
+            let mut current = cx.model_mut(&current);
+            current.state_type = CurrentStorageStateType::Loading;
+        }
 
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let connector = Connector::of(&cx);
@@ -337,8 +341,8 @@ impl StorageImportVM {
     }
 
     fn on_error_click(&self, cx: &ViewModelContext) {
-        let state = cx.model_get(&self.current);
-        if state.state_type == CurrentStorageStateType::NeedPermission {
+        let state_type = cx.model_get(&self.current).state_type.clone();
+        if state_type == CurrentStorageStateType::NeedPermission {
             PermissionService::of(cx).request_storage_permission();
         } else {
             self.reload(cx);

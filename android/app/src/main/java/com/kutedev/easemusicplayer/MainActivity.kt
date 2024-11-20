@@ -138,9 +138,6 @@ class MainActivity : ComponentActivity() {
                                 )
                                 .fillMaxSize()
                         ) {
-                            val bottomBarPageState = rememberPagerState(pageCount = {
-                                3
-                            })
 
                             Box(
                                 modifier = Modifier.weight(1f)
@@ -174,7 +171,6 @@ class MainActivity : ComponentActivity() {
                                     composable(RoutesKey.HOME.toString()) {
                                         HomePage(
                                             ctx = applicationContext,
-                                            pagerState = bottomBarPageState,
                                             evm = evm,
                                             scaffoldPadding = scaffoldPadding,
                                         )
