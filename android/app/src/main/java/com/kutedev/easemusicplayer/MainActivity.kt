@@ -15,6 +15,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideIn
+import androidx.compose.animation.slideOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -25,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -144,10 +150,26 @@ class MainActivity : ComponentActivity() {
                                         .fillMaxSize(),
                                     navController = controller,
                                     startDestination = RoutesKey.HOME.toString(),
-                                    enterTransition = { EnterTransition.None },
-                                    exitTransition = { ExitTransition.None },
-                                    popEnterTransition = { EnterTransition.None },
-                                    popExitTransition = { ExitTransition.None },
+                                    enterTransition = {
+                                        slideIn(animationSpec = tween(300), initialOffset = {
+                                            fullSize -> IntOffset(fullSize.width,0)
+                                        })
+                                    },
+                                    exitTransition = {
+                                        slideOut(animationSpec = tween(300), targetOffset = {
+                                                fullSize -> IntOffset(-fullSize.width,0)
+                                        })
+                                    },
+                                    popEnterTransition = {
+                                        slideIn(animationSpec = tween(300), initialOffset = {
+                                                fullSize -> IntOffset(fullSize.width, 0)
+                                        })
+                                    },
+                                    popExitTransition = {
+                                        slideOut(animationSpec = tween(300), targetOffset = {
+                                                fullSize -> IntOffset(-fullSize.width,0)
+                                        })
+                                    },
                                 ) {
                                     composable(RoutesKey.HOME.toString()) {
                                         HomePage(

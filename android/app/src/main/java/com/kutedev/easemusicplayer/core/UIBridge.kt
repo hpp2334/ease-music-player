@@ -142,7 +142,6 @@ class UIBridge {
     private var _playerController: MediaController? = null
     private var _executingAction = false
 
-
     fun onBackendConnected() {
         apiStartClient(this._handle)
     }
