@@ -14,10 +14,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT
-import androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM
-import androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS
-import androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.metadata.flac.PictureFrame
@@ -293,10 +289,13 @@ class PlaybackService : MediaSessionService() {
                                 .build()
                         val playerCommands =
                             MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-                                .remove(COMMAND_SEEK_TO_PREVIOUS)
-                                .remove(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-                                .remove(COMMAND_SEEK_TO_NEXT)
-                                .remove(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                                .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
+                                .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                                .remove(Player.COMMAND_SEEK_TO_NEXT)
+                                .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                                .remove(Player.COMMAND_SEEK_BACK)
+                                .remove(Player.COMMAND_SEEK_FORWARD)
+                                .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
                                 .build()
                         // Custom layout and available commands to configure the legacy/framework session.
                         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)

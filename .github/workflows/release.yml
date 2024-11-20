@@ -30,40 +30,35 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo
           restore-keys: ${{ runner.os }}-cargo
-      - uses: pnpm/action-setup@v3
-        with:
-          version: 8
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.22.2"
-          channel: "stable"
+      - uses: oven-sh/setup-bun@v2
       - uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r25c
+          ndk-version: r28-beta2
           add-to-path: false
+          local-cache: true
+      - name: Set Up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
       - name: Install scripts runtime
-        run: pnpm install
+        run: bun install
       - name: Install cargo-ndk
         run: |
           cargo install --locked cargo-ndk || true
-          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-      - name: Install flutter dependencies
-        run: flutter pub get
-      - name: Install flutter rust bridge
-        run: |
-          cargo install --locked cargo-expand@1.0.79 || true
-          cargo install --locked 'flutter_rust_bridge_codegen@1.82.6' || true
-      - name: Generate codes
-        run: pnpm run generate
+          rustup target add aarch64-linux-android
+      - name: Build JNI
+        run: bun run build:jni
       - name: Run tests
-        run: pnpm run test
+        run: bun run test
       - name: Build APK
         if: ${{ startsWith(github.ref, 'refs/tags/v') }} || ${{ startsWith(github.ref, 'refs/tags/pre-v') }}
         run: |
           mkdir -p ~/.gradle
           echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> ~/.gradle/gradle.properties
-          pnpm run build:apk
+          bun run build:apk
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_SIGN_JKS: ${{ secrets.ANDROID_SIGN_JKS }}
