@@ -1,6 +1,6 @@
 use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
 use router::RouterVM;
-use state::{RootRouteSubKey, RouterState};
+use state::{MainState, RootRouteSubKey};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
@@ -26,14 +26,12 @@ pub enum MainAction {
 }
 
 pub(crate) struct MainBodyVM {
-    router_sub: Model<RouterState>,
+    store: Model<MainState>,
 }
 
 impl MainBodyVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
-        Self {
-            router_sub: cx.model(),
-        }
+        Self { store: cx.model() }
     }
 }
 
@@ -46,7 +44,7 @@ impl ViewModel for MainBodyVM {
                 ViewAction::Widget(action) => match (&action.widget, &action.typ) {
                     (Widget::MainBody(action), WidgetActionType::Click) => match action {
                         MainBodyWidget::Tab { key } => {
-                            let mut state = cx.model_mut(&self.router_sub);
+                            let mut state = cx.model_mut(&self.store);
                             state.subkey = *key;
                         }
                         MainBodyWidget::TimeToPause => {
@@ -60,6 +58,10 @@ impl ViewModel for MainBodyVM {
                 },
                 _ => {}
             },
+            Action::VsLoaded => {
+                let mut state = cx.model_mut(&self.store);
+                state.vs_loaded = true;
+            }
             _ => {}
         }
         Ok(())

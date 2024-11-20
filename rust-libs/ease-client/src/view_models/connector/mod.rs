@@ -68,6 +68,8 @@ impl Connector {
             this.request::<OnConnectMsg>(&cx, ()).await?;
             this.sync_storages(&cx).await?;
             this.sync_playlist_abstracts(&cx).await?;
+
+            cx.enqueue_emit(Action::VsLoaded);
             Ok(())
         });
         Ok(())

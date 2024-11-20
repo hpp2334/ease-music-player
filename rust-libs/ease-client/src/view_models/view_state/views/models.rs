@@ -1,9 +1,9 @@
 use super::{
+    main::VMainState,
     music::{VCurrentMusicLyricState, VCurrentMusicState, VTimeToPauseState},
     playlist::{
         VCreatePlaylistState, VCurrentPlaylistState, VEditPlaylistState, VPlaylistListState,
     },
-    router::VRootSubKeyState,
     storage::{VCurrentStorageEntriesState, VEditStorageState, VStorageListState},
 };
 
@@ -49,5 +49,5 @@ generate_vs!(
     current_music_lyric,
     VCurrentMusicLyricState,
     current_router,
-    VRootSubKeyState
+    VMainState
 );

@@ -14,6 +14,7 @@ use super::WidgetAction;
 pub enum Action {
     Init,
     Destroy,
+    VsLoaded,
     MusicCommon(MusicCommonAction),
     Connector(ConnectorAction),
     View(ViewAction),

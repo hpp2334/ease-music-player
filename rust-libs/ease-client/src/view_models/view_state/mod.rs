@@ -1,9 +1,9 @@
 use misty_vm::{AppBuilderContext, IToHost, Model, ViewModel, ViewModelContext};
 use views::{
+    main::main_vs,
     models::RootViewModelState,
     music::{current_music_lyric_vs, current_music_vs, time_to_pause_vs},
     playlist::{create_playlist_vs, current_playlist_vs, edit_playlist_vs, playlist_list_vs},
-    router::root_subkey_vs,
     storage::{current_storage_entries_vs, edit_storage_vs, storage_list_vs},
 };
 
@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     connector::state::ConnectorState,
-    main::state::RouterState,
+    main::state::MainState,
     music::state::{CurrentMusicState, TimeToPauseState},
     playlist::state::{
         AllPlaylistState, CreatePlaylistState, CurrentPlaylistState, EditPlaylistState,
@@ -55,7 +55,7 @@ pub struct ViewStateVM {
     edit_playlist: Model<EditPlaylistState>,
     create_playlist: Model<CreatePlaylistState>,
     // Main
-    router: Model<RouterState>,
+    router: Model<MainState>,
     // Storage
     all_storage: Model<AllStorageState>,
     current_storage: Model<CurrentStorageState>,
@@ -128,7 +128,7 @@ impl ViewStateVM {
             create_playlist_vs
         );
         // Main
-        vsb!(self, cx, root, self.router, root_subkey_vs);
+        vsb!(self, cx, root, self.router, main_vs);
         // Storage
         vsb!(self, cx, root, self.all_storage, storage_list_vs);
         vsb!(

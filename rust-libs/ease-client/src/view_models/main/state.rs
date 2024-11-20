@@ -1,4 +1,3 @@
-
 use serde::Serialize;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, uniffi::Enum)]
@@ -10,6 +9,7 @@ pub enum RootRouteSubKey {
 }
 
 #[derive(Default, Clone)]
-pub struct RouterState {
+pub struct MainState {
     pub subkey: RootRouteSubKey,
+    pub vs_loaded: bool,
 }

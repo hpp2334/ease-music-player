@@ -15,8 +15,8 @@ import uniffi.ease_client.VCurrentPlaylistState
 import uniffi.ease_client.VCurrentStorageEntriesState
 import uniffi.ease_client.VEditPlaylistState
 import uniffi.ease_client.VEditStorageState
+import uniffi.ease_client.VMainState
 import uniffi.ease_client.VPlaylistListState
-import uniffi.ease_client.VRootSubKeyState
 import uniffi.ease_client.VStorageListState
 import uniffi.ease_client.VTimeToPauseState
 import uniffi.ease_client_shared.ArgUpsertStorage
@@ -30,7 +30,7 @@ import uniffi.ease_client_shared.StorageType
 
 
 val DefaultPlaylistListState = VPlaylistListState(emptyList())
-val DefaultRootSubKeyState = VRootSubKeyState(subkey = RootRouteSubKey.PLAYLIST)
+val DefaultMainState = VMainState(subkey = RootRouteSubKey.PLAYLIST, vsLoaded = false)
 val DefaultTimeToPauseState =
         VTimeToPauseState(enabled = false, leftHour = 0u, leftMinute = 0u, modalOpen = false)
 val DefaultStorageListState = VStorageListState(items = emptyList())
@@ -117,8 +117,8 @@ class EaseViewModel : ViewModel(), IOnNotifyView {
     private val _playlistListState = MutableStateFlow(DefaultPlaylistListState)
     val playlistListState = _playlistListState.asStateFlow()
 
-    private val _rootSubKeyState = MutableStateFlow(DefaultRootSubKeyState)
-    val rootSubKeyState = _rootSubKeyState.asStateFlow()
+    private val _mainState = MutableStateFlow(DefaultMainState)
+    val mainState = _mainState.asStateFlow()
 
     private val _timeToPauseState = MutableStateFlow(DefaultTimeToPauseState)
     val timeToPauseState = _timeToPauseState.asStateFlow()
@@ -149,7 +149,7 @@ class EaseViewModel : ViewModel(), IOnNotifyView {
 
     override fun onNotifyView(v: RootViewModelState) {
         v.playlistList?.let { _playlistListState.value = it.copy() }
-        v.currentRouter?.let { _rootSubKeyState.value = it.copy() }
+        v.currentRouter?.let { _mainState.value = it.copy() }
         v.timeToPause?.let { _timeToPauseState.value = it.copy() }
         v.storageList?.let { _storageListState.value = it.copy() }
         v.currentPlaylist?.let { _currentPlaylistState.value = it.copy() }

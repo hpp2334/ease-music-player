@@ -43,6 +43,7 @@ import com.kutedev.easemusicplayer.core.UIBridge
 import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
+import com.kutedev.easemusicplayer.widgets.LoadingPage
 import com.kutedev.easemusicplayer.widgets.RoutesProvider
 import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
@@ -129,75 +130,84 @@ class MainActivity : ComponentActivity() {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                     ) { scaffoldPadding ->
-                        Column(
-                            modifier = Modifier
-                                .padding(
-                                    start = scaffoldPadding.calculateLeftPadding(LayoutDirection.Ltr),
-                                    end = scaffoldPadding.calculateRightPadding(LayoutDirection.Ltr),
-                                    top = scaffoldPadding.calculateTopPadding(),
-                                )
-                                .fillMaxSize()
-                        ) {
-
-                            Box(
-                                modifier = Modifier.weight(1f)
+                        LoadingPage(evm) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(
+                                        start = scaffoldPadding.calculateLeftPadding(LayoutDirection.Ltr),
+                                        end = scaffoldPadding.calculateRightPadding(LayoutDirection.Ltr),
+                                        top = scaffoldPadding.calculateTopPadding(),
+                                    )
+                                    .fillMaxSize()
                             ) {
-                                NavHost(
-                                    modifier = Modifier
-                                        .fillMaxSize(),
-                                    navController = controller,
-                                    startDestination = RoutesKey.HOME.toString(),
-                                    enterTransition = {
-                                        slideIn(animationSpec = tween(300), initialOffset = {
-                                            fullSize -> IntOffset(fullSize.width,0)
-                                        })
-                                    },
-                                    exitTransition = {
-                                        slideOut(animationSpec = tween(300), targetOffset = {
-                                                fullSize -> IntOffset(-fullSize.width,0)
-                                        })
-                                    },
-                                    popEnterTransition = {
-                                        slideIn(animationSpec = tween(300), initialOffset = {
-                                                fullSize -> IntOffset(fullSize.width, 0)
-                                        })
-                                    },
-                                    popExitTransition = {
-                                        slideOut(animationSpec = tween(300), targetOffset = {
-                                                fullSize -> IntOffset(-fullSize.width,0)
-                                        })
-                                    },
+                                Box(
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    composable(RoutesKey.HOME.toString()) {
-                                        HomePage(
-                                            ctx = applicationContext,
-                                            evm = evm,
-                                            scaffoldPadding = scaffoldPadding,
-                                        )
-                                        CreatePlaylistsDialog(evm = evm)
+                                    NavHost(
+                                        modifier = Modifier
+                                            .fillMaxSize(),
+                                        navController = controller,
+                                        startDestination = RoutesKey.HOME.toString(),
+                                        enterTransition = {
+                                            slideIn(
+                                                animationSpec = tween(300),
+                                                initialOffset = { fullSize ->
+                                                    IntOffset(fullSize.width, 0)
+                                                })
+                                        },
+                                        exitTransition = {
+                                            slideOut(
+                                                animationSpec = tween(300),
+                                                targetOffset = { fullSize ->
+                                                    IntOffset(-fullSize.width, 0)
+                                                })
+                                        },
+                                        popEnterTransition = {
+                                            slideIn(
+                                                animationSpec = tween(300),
+                                                initialOffset = { fullSize ->
+                                                    IntOffset(fullSize.width, 0)
+                                                })
+                                        },
+                                        popExitTransition = {
+                                            slideOut(
+                                                animationSpec = tween(300),
+                                                targetOffset = { fullSize ->
+                                                    IntOffset(-fullSize.width, 0)
+                                                })
+                                        },
+                                    ) {
+                                        composable(RoutesKey.HOME.toString()) {
+                                            HomePage(
+                                                ctx = applicationContext,
+                                                evm = evm,
+                                                scaffoldPadding = scaffoldPadding,
+                                            )
+                                            CreatePlaylistsDialog(evm = evm)
+                                        }
+                                        composable(RoutesKey.ADD_DEVICES.toString()) {
+                                            EditStoragesPage(
+                                                evm = evm,
+                                            )
+                                        }
+                                        composable(RoutesKey.PLAYLIST.toString()) {
+                                            PlaylistPage(
+                                                evm = evm,
+                                                scaffoldPadding = scaffoldPadding,
+                                            )
+                                            EditPlaylistsDialog(evm = evm)
+                                        }
+                                        composable(RoutesKey.IMPORT_MUSICS.toString()) {
+                                            ImportMusicsPage(evm = evm)
+                                        }
+                                        composable(RoutesKey.MUSIC_PLAYER.toString()) {
+                                            MusicPlayerPage(
+                                                evm = evm
+                                            )
+                                        }
                                     }
-                                    composable(RoutesKey.ADD_DEVICES.toString()) {
-                                        EditStoragesPage(
-                                            evm = evm,
-                                        )
-                                    }
-                                    composable(RoutesKey.PLAYLIST.toString()) {
-                                        PlaylistPage(
-                                            evm = evm,
-                                            scaffoldPadding = scaffoldPadding,
-                                        )
-                                        EditPlaylistsDialog(evm = evm)
-                                    }
-                                    composable(RoutesKey.IMPORT_MUSICS.toString()) {
-                                        ImportMusicsPage(evm = evm)
-                                    }
-                                    composable(RoutesKey.MUSIC_PLAYER.toString()) {
-                                        MusicPlayerPage(
-                                            evm = evm
-                                        )
-                                    }
+                                    TimeToPauseModal(evm = evm)
                                 }
-                                TimeToPauseModal(evm = evm)
                             }
                         }
                     }
