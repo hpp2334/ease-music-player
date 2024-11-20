@@ -1,5 +1,8 @@
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
-use ease_client_shared::backends::{music::MusicId, storage::StorageEntryLoc};
+use ease_client_shared::backends::{
+    music::MusicId,
+    storage::{DataSourceKey, StorageEntryLoc},
+};
 
 #[derive(Default, Clone)]
 pub struct ConnectorState {
@@ -18,9 +21,25 @@ impl ConnectorState {
         format!("http://127.0.0.1:{}/music/{}", self.port, id.as_ref())
     }
 
+    pub fn serve_music_cover_url(&self, id: MusicId) -> String {
+        format!("http://127.0.0.1:{}/music_cover/{}", self.port, id.as_ref())
+    }
+
     pub fn serve_asset_url_opt(&self, loc: Option<StorageEntryLoc>) -> String {
         if let Some(loc) = loc {
             self.serve_asset_url(loc)
+        } else {
+            Default::default()
+        }
+    }
+
+    pub fn serve_asset_url_opt_key(&self, key: Option<DataSourceKey>) -> String {
+        if let Some(key) = key {
+            match key {
+                DataSourceKey::Music { id } => self.serve_music_url(id),
+                DataSourceKey::Cover { id } => self.serve_music_cover_url(id),
+                DataSourceKey::AnyEntry { entry } => self.serve_asset_url(entry),
+            }
         } else {
             Default::default()
         }

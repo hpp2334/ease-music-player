@@ -85,7 +85,7 @@ pub(crate) fn playlist_list_vs(
             title: playlist.title().to_string(),
             count: playlist.music_count as i32,
             duration: get_display_duration(&duration),
-            cover_url: playlist.cover_url().to_string(),
+            cover_url: connector_state.serve_asset_url_opt_key(playlist.show_cover().clone()),
         });
     }
 
@@ -123,7 +123,7 @@ pub(crate) fn current_playlist_vs(
         items,
         title: playlist.title().to_string(),
         duration: get_display_duration(&playlist.duration()),
-        cover_url: connector_state.serve_asset_url_opt(playlist.cover().clone()),
+        cover_url: connector_state.serve_asset_url_opt_key(playlist.show_cover_url().clone()),
     };
 
     root.current_playlist = Some(current_playlist_state);

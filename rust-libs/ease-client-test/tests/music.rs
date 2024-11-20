@@ -616,27 +616,27 @@ async fn time_to_pause_3() {
     assert_eq!(state.left_minute, 0);
 }
 
-// #[tokio::test]
-// async fn music_cover_1() {
-//     let mut app = TestApp::new("test-dbs/music_cover_1", true).await;
-//     app.setup_preset(PresetDepth::Music).await;
+#[tokio::test]
+async fn music_cover_1() {
+    let mut app = TestApp::new("test-dbs/music_cover_1", true).await;
+    app.setup_preset(PresetDepth::Music).await;
 
-//     let a_music_id = app.get_first_music_id_from_latest_state();
-//     app.dispatch_click(PlaylistDetailWidget::Music { id: a_music_id });
-//     app.wait_network().await;
-//     let state = app.latest_state().current_music.unwrap();
-//     let cover_url = state.cover.clone();
-//     let picture = app.load_resource(&cover_url).await;
-//     assert_eq!(picture.len(), 15025);
+    let a_music_id = app.get_first_music_id_from_latest_state();
+    app.dispatch_click(PlaylistDetailWidget::Music { id: a_music_id });
+    app.wait_network().await;
+    let state = app.latest_state().current_music.unwrap();
+    let cover_url = state.cover.clone();
+    let picture = app.load_resource(&cover_url).await;
+    assert_eq!(picture.len(), 15025);
 
-//     let state = app.latest_state().playlist_list.unwrap();
-//     assert_eq!(state.playlist_list.len(), 1);
-//     let cover_url = state.playlist_list[0].cover_url.clone();
-//     let picture = app.load_resource(&cover_url).await;
-//     assert_eq!(picture.len(), 15025);
+    let state = app.latest_state().playlist_list.unwrap();
+    assert_eq!(state.playlist_list.len(), 1);
+    let cover_url = state.playlist_list[0].cover_url.clone();
+    let picture = app.load_resource(&cover_url).await;
+    assert_eq!(picture.len(), 15025);
 
-//     let state = app.latest_state().current_playlist.unwrap();
-//     let cover_url = state.cover_url.clone();
-//     let picture = app.load_resource(&cover_url).await;
-//     assert_eq!(picture.len(), 15025);
-// }
+    let state = app.latest_state().current_playlist.unwrap();
+    let cover_url = state.cover_url.clone();
+    let picture = app.load_resource(&cover_url).await;
+    assert_eq!(picture.len(), 15025);
+}

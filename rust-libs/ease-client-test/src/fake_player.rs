@@ -208,19 +208,29 @@ impl IPlayerDelegate for FakeMusicPlayerRef {
             let resp = reqwest::get(&url).await.unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             let bytes = resp.bytes().await.unwrap();
-            let buf_cursor = std::io::Cursor::new(bytes.to_vec());
 
-            let file = lofty::Probe::new(std::io::BufReader::new(buf_cursor))
-                .guess_file_type()
-                .unwrap()
-                .read()
-                .unwrap();
+            let file = lofty::Probe::new(std::io::BufReader::new(std::io::Cursor::new(
+                bytes.to_vec(),
+            )))
+            .guess_file_type()
+            .unwrap()
+            .read()
+            .unwrap();
             let music_properties = file.properties();
             let total_duration = music_properties.duration().as_millis() as u64;
             cloned_inner.send_player_event(PlayerDelegateEvent::Total {
                 id,
                 duration_ms: total_duration,
             });
+
+            let tag = id3::Tag::read_from2(std::io::Cursor::new(bytes.clone().to_vec())).ok();
+            let pic = tag
+                .map(|v| v.pictures().next().cloned())
+                .unwrap_or_default()
+                .map(|pic| pic.data);
+            if let Some(pic) = pic {
+                cloned_inner.send_player_event(PlayerDelegateEvent::Cover { id, buffer: pic });
+            }
         });
     }
 }

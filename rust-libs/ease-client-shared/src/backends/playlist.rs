@@ -7,7 +7,7 @@ use crate::define_id;
 use super::{
     music::{MusicAbstract, MusicId},
     music_duration::MusicDuration,
-    storage::{StorageEntry, StorageEntryLoc},
+    storage::{DataSourceKey, StorageEntry, StorageEntryLoc},
 };
 
 define_id!(PlaylistId);
@@ -17,7 +17,7 @@ pub struct PlaylistMeta {
     pub id: PlaylistId,
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
-    pub show_cover_url: String,
+    pub show_cover: Option<DataSourceKey>,
     pub created_time: Duration,
 }
 
@@ -54,8 +54,8 @@ impl PlaylistAbstract {
     pub fn cover(&self) -> &Option<StorageEntryLoc> {
         &self.meta.cover
     }
-    pub fn cover_url(&self) -> &str {
-        self.meta.show_cover_url.as_str()
+    pub fn show_cover(&self) -> &Option<DataSourceKey> {
+        &self.meta.show_cover
     }
 }
 
@@ -71,6 +71,9 @@ impl Playlist {
     }
     pub fn cover(&self) -> &Option<StorageEntryLoc> {
         &self.abstr.cover()
+    }
+    pub fn show_cover_url(&self) -> &Option<DataSourceKey> {
+        self.abstr.show_cover()
     }
     pub fn duration(&self) -> &Option<MusicDuration> {
         &self.abstr.duration

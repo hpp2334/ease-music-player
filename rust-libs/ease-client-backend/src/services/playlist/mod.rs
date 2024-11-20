@@ -4,6 +4,7 @@ use ease_client_shared::backends::{
     music::MusicAbstract,
     music_duration::MusicDuration,
     playlist::{Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta},
+    storage::DataSourceKey,
 };
 use ease_database::DbConnectionRef;
 
@@ -47,12 +48,12 @@ pub(crate) fn build_playlist_meta(
         } else {
             None
         };
-    let show_cover_url = if let Some(loc) = cover_loc.clone() {
-        get_serve_url_from_loc(cx, loc)
+    let show_cover = if let Some(loc) = cover_loc.clone() {
+        Some(DataSourceKey::AnyEntry { entry: loc })
     } else {
         let id = first_covers.get(&model.id).map(|c| c.clone());
         if let Some(id) = id {
-            get_serve_cover_url_from_music_id(cx, id)
+            Some(DataSourceKey::Cover { id })
         } else {
             Default::default()
         }
@@ -61,7 +62,7 @@ pub(crate) fn build_playlist_meta(
         id: model.id,
         title: model.title,
         cover: cover_loc,
-        show_cover_url,
+        show_cover,
         created_time: Duration::from_millis(model.created_time as u64),
     }
 }

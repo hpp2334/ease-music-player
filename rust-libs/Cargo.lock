@@ -632,6 +632,7 @@ dependencies = [
  "ease-client-backend",
  "ease-client-shared",
  "hyper",
+ "id3",
  "lofty 0.15.0",
  "misty-vm",
  "misty-vm-test",

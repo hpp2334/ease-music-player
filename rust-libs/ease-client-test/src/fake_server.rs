@@ -142,6 +142,7 @@ impl FakeServerRef {
 
     pub async fn load_resource(&self, url: impl ToString) -> Vec<u8> {
         let url = url.to_string();
+        assert!(!url.is_empty());
         tokio::spawn(async move {
             let client = reqwest::Client::builder().no_proxy().build().unwrap();
             let resp = client.get(&url).send().await.unwrap();

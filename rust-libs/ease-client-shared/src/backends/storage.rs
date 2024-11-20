@@ -7,10 +7,17 @@ use super::{music::MusicId, playlist::PlaylistId};
 
 define_id!(StorageId);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, uniffi::Record)]
 pub struct StorageEntryLoc {
     pub path: String,
     pub storage_id: StorageId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+pub enum DataSourceKey {
+    Music { id: MusicId },
+    Cover { id: MusicId },
+    AnyEntry { entry: StorageEntryLoc },
 }
 
 #[derive(
