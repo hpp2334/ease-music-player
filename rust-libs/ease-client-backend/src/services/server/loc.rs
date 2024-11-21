@@ -1,20 +1,25 @@
+use std::sync::Arc;
+
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use ease_client_shared::backends::{music::MusicId, storage::StorageEntryLoc};
 
 use crate::ctx::BackendContext;
 
-fn base_url(cx: &BackendContext) -> String {
+fn base_url(cx: &Arc<BackendContext>) -> String {
     let port = cx.get_server_port();
     format!("http://127.0.0.1:{}", port)
 }
 
-pub fn get_serve_url_from_loc(cx: &BackendContext, loc: StorageEntryLoc) -> String {
+pub fn get_serve_url_from_loc(cx: &Arc<BackendContext>, loc: StorageEntryLoc) -> String {
     let sp = URL_SAFE.encode(loc.path);
     let id: i64 = *loc.storage_id.as_ref();
     format!("{}/asset/{}?sp={}", base_url(cx), id, sp)
 }
 
-pub fn get_serve_url_from_opt_loc(cx: &BackendContext, loc: Option<StorageEntryLoc>) -> String {
+pub fn get_serve_url_from_opt_loc(
+    cx: &Arc<BackendContext>,
+    loc: Option<StorageEntryLoc>,
+) -> String {
     if let Some(loc) = loc {
         get_serve_url_from_loc(cx, loc)
     } else {
@@ -22,12 +27,12 @@ pub fn get_serve_url_from_opt_loc(cx: &BackendContext, loc: Option<StorageEntryL
     }
 }
 
-pub fn get_serve_url_from_music_id(cx: &BackendContext, id: MusicId) -> String {
+pub fn get_serve_url_from_music_id(cx: &Arc<BackendContext>, id: MusicId) -> String {
     let id: i64 = *id.as_ref();
     format!("{}/music/{}", base_url(cx), id)
 }
 
-pub fn get_serve_cover_url_from_music_id(cx: &BackendContext, id: MusicId) -> String {
+pub fn get_serve_cover_url_from_music_id(cx: &Arc<BackendContext>, id: MusicId) -> String {
     let id: i64 = *id.as_ref();
     format!("{}/music_cover/{}", base_url(cx), id)
 }

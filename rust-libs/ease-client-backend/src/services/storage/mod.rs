@@ -43,7 +43,7 @@ pub(crate) fn from_opt_storage_entry(loc: Option<StorageEntryLoc>) -> StorageEnt
 
 #[instrument]
 pub(crate) async fn load_storage_entry_data(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     loc: &StorageEntryLoc,
 ) -> BResult<Option<Vec<u8>>> {
     let loc = loc.clone();
@@ -84,7 +84,7 @@ pub fn build_storage(model: StorageModel, music_count: u32, playlist_count: u32)
 }
 
 pub fn get_storage_backend_by_arg(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: ArgUpsertStorage,
 ) -> BResult<Arc<dyn StorageBackend + Send + Sync>> {
     let connect_timeout = Duration::from_secs(5);
@@ -106,7 +106,7 @@ pub fn get_storage_backend_by_arg(
 }
 
 pub fn get_storage_backend(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     storage_id: StorageId,
 ) -> BResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
     let conn = get_conn(&cx)?;
@@ -140,7 +140,7 @@ pub fn get_storage_backend(
     Ok(Some(backend))
 }
 
-pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
+pub async fn list_storage(cx: &Arc<BackendContext>) -> BResult<Vec<Storage>> {
     let conn = get_conn(&cx)?;
     let models = db_load_storages(conn.get_ref())?;
 
@@ -166,7 +166,7 @@ pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
     Ok(storages)
 }
 
-pub async fn notify_storages(cx: &BackendContext) -> BResult<()> {
+pub async fn notify_storages(cx: &Arc<BackendContext>) -> BResult<()> {
     let storages = list_storage(cx).await?;
     cx.notify(ConnectorAction::Storages(storages));
     Ok(())

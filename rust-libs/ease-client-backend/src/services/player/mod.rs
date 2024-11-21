@@ -116,7 +116,7 @@ impl PlayerState {
     }
 }
 
-pub(crate) fn notify_player_current(cx: &BackendContext) -> BResult<()> {
+pub(crate) fn notify_player_current(cx: &Arc<BackendContext>) -> BResult<()> {
     let current = get_player_current(cx)?;
     cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Current {
         value: current,
@@ -124,7 +124,10 @@ pub(crate) fn notify_player_current(cx: &BackendContext) -> BResult<()> {
     Ok(())
 }
 
-pub(crate) async fn player_request_play(cx: &BackendContext, to_play: PlayerMedia) -> BResult<()> {
+pub(crate) async fn player_request_play(
+    cx: &Arc<BackendContext>,
+    to_play: PlayerMedia,
+) -> BResult<()> {
     let prev_music = {
         let current = cx.player_state().current.read().unwrap();
         current.clone()
@@ -168,7 +171,7 @@ pub(crate) async fn player_request_play(cx: &BackendContext, to_play: PlayerMedi
 }
 
 pub(crate) async fn player_request_play_adjacent<const IS_NEXT: bool>(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
 ) -> BResult<()> {
     let (music, can_play) = {
         let state = cx.player_state();
@@ -226,11 +229,11 @@ pub(crate) async fn player_request_play_adjacent<const IS_NEXT: bool>(
     Ok(())
 }
 
-pub(crate) fn player_clear_current(cx: &BackendContext) {
+pub(crate) fn player_clear_current(cx: &Arc<BackendContext>) {
     cx.player_state().current.write().unwrap().take();
 }
 
-pub(crate) async fn player_refresh_current(cx: &BackendContext) -> BResult<()> {
+pub(crate) async fn player_refresh_current(cx: &Arc<BackendContext>) -> BResult<()> {
     let current = cx.player_state().current.write().unwrap().clone();
 
     if current.is_none() {
@@ -271,7 +274,9 @@ pub(crate) async fn player_refresh_current(cx: &BackendContext) -> BResult<()> {
     return Ok(());
 }
 
-pub(crate) fn get_player_current(cx: &BackendContext) -> BResult<Option<PlayerCurrentPlaying>> {
+pub(crate) fn get_player_current(
+    cx: &Arc<BackendContext>,
+) -> BResult<Option<PlayerCurrentPlaying>> {
     let player_state = cx.player_state();
     let state = player_state.current.read().unwrap().clone();
     if state.is_none() {
@@ -294,7 +299,10 @@ pub(crate) fn get_player_current(cx: &BackendContext) -> BResult<Option<PlayerCu
     Ok(Some(current))
 }
 
-pub(crate) async fn on_connect_for_player(cx: &BackendContext, playmode: PlayMode) -> BResult<()> {
+pub(crate) async fn on_connect_for_player(
+    cx: &Arc<BackendContext>,
+    playmode: PlayMode,
+) -> BResult<()> {
     {
         let mut w = cx.player_state().playmode.write().unwrap();
         *w = playmode;

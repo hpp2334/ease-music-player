@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ease_client_shared::backends::{
     app::ArgInitializeApp,
     preference::PreferenceData,
@@ -67,7 +69,7 @@ fn load_app_meta(app_document_dir: &str) -> AppMeta {
     }
 }
 
-fn save_current_app_meta(cx: &BackendContext) {
+fn save_current_app_meta(cx: &Arc<BackendContext>) {
     save_persistent_data(
         &cx.get_app_document_dir(),
         "meta.json",
@@ -78,16 +80,16 @@ fn save_current_app_meta(cx: &BackendContext) {
     );
 }
 
-pub fn load_preference_data(cx: &BackendContext) -> PreferenceData {
+pub fn load_preference_data(cx: &Arc<BackendContext>) -> PreferenceData {
     load_persistent_data::<PreferenceData>(&cx.get_app_document_dir(), "preference.json")
         .unwrap_or_default()
 }
 
-pub fn save_preference_data(cx: &BackendContext, data: PreferenceData) {
+pub fn save_preference_data(cx: &Arc<BackendContext>, data: PreferenceData) {
     save_persistent_data(&cx.get_app_document_dir().as_ref(), "preference.json", data);
 }
 
-pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
+pub fn app_bootstrap(cx: &Arc<BackendContext>, arg: ArgInitializeApp) -> BResult<()> {
     cx.set_storage_path(&arg.storage_path);
     cx.set_app_document_dir(&arg.app_document_dir);
     cx.set_schema_version(arg.schema_version);
@@ -99,7 +101,7 @@ pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> 
     Ok(())
 }
 
-fn init_persistent_state(cx: &BackendContext) -> BResult<()> {
+fn init_persistent_state(cx: &Arc<BackendContext>) -> BResult<()> {
     let _ = tracing::span!(Level::INFO, "init_persistent_state").enter();
     let meta = load_app_meta(&cx.get_app_document_dir());
     let prev_version = meta.schema_version;
@@ -119,7 +121,7 @@ fn init_persistent_state(cx: &BackendContext) -> BResult<()> {
     Ok(())
 }
 
-fn upgrade_db_schema(cx: &BackendContext, prev_version: u32) -> BResult<()> {
+fn upgrade_db_schema(cx: &Arc<BackendContext>, prev_version: u32) -> BResult<()> {
     let conn = get_conn(cx)?;
     if prev_version < 1 {
         tracing::info!("start to upgrade to v1");

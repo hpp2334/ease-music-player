@@ -20,19 +20,19 @@ use ease_client_shared::backends::{
 };
 
 pub(crate) async fn cp_player_current(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     _arg: (),
 ) -> BResult<Option<PlayerCurrentPlaying>> {
     get_player_current(cx)
 }
 
-pub(crate) async fn cp_player_playmode(cx: &BackendContext, _arg: ()) -> BResult<PlayMode> {
+pub(crate) async fn cp_player_playmode(cx: &Arc<BackendContext>, _arg: ()) -> BResult<PlayMode> {
     let playmode = cx.player_state().playmode.read().unwrap();
     Ok(*playmode)
 }
 
 pub(crate) async fn cp_player_current_duration(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     _arg: (),
 ) -> BResult<std::time::Duration> {
     let cx = cx.clone();
@@ -46,7 +46,7 @@ pub(crate) async fn cp_player_current_duration(
         .await
 }
 
-pub(crate) async fn cp_play_music(cx: &BackendContext, arg: ArgPlayMusic) -> BResult<()> {
+pub(crate) async fn cp_play_music(cx: &Arc<BackendContext>, arg: ArgPlayMusic) -> BResult<()> {
     let playlist = get_playlist(cx, arg.playlist_id).await?;
     if playlist.is_none() {
         tracing::warn!("play music but playlist {:?} not found", arg.playlist_id);
@@ -70,7 +70,7 @@ pub(crate) async fn cp_play_music(cx: &BackendContext, arg: ArgPlayMusic) -> BRe
     Ok(())
 }
 
-pub(crate) async fn cp_pause_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
+pub(crate) async fn cp_pause_player(cx: &Arc<BackendContext>, _arg: ()) -> BResult<()> {
     let cx = cx.clone();
     cx.async_runtime()
         .clone()
@@ -81,15 +81,15 @@ pub(crate) async fn cp_pause_player(cx: &BackendContext, _arg: ()) -> BResult<()
     Ok(())
 }
 
-pub(crate) async fn cp_play_next(cx: &BackendContext, _arg: ()) -> BResult<()> {
+pub(crate) async fn cp_play_next(cx: &Arc<BackendContext>, _arg: ()) -> BResult<()> {
     player_request_play_adjacent::<true>(cx).await
 }
 
-pub(crate) async fn cp_play_previous(cx: &BackendContext, _arg: ()) -> BResult<()> {
+pub(crate) async fn cp_play_previous(cx: &Arc<BackendContext>, _arg: ()) -> BResult<()> {
     player_request_play_adjacent::<false>(cx).await
 }
 
-pub(crate) async fn cp_stop_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
+pub(crate) async fn cp_stop_player(cx: &Arc<BackendContext>, _arg: ()) -> BResult<()> {
     let cx = cx.clone();
     cx.async_runtime()
         .clone()
@@ -100,7 +100,7 @@ pub(crate) async fn cp_stop_player(cx: &BackendContext, _arg: ()) -> BResult<()>
     Ok(())
 }
 
-pub(crate) async fn cp_player_seek(cx: &BackendContext, arg: u64) -> BResult<()> {
+pub(crate) async fn cp_player_seek(cx: &Arc<BackendContext>, arg: u64) -> BResult<()> {
     let cx = cx.clone();
     cx.async_runtime()
         .clone()
@@ -111,7 +111,7 @@ pub(crate) async fn cp_player_seek(cx: &BackendContext, arg: u64) -> BResult<()>
     Ok(())
 }
 
-pub(crate) async fn cp_update_playmode(cx: &BackendContext, arg: PlayMode) -> BResult<()> {
+pub(crate) async fn cp_update_playmode(cx: &Arc<BackendContext>, arg: PlayMode) -> BResult<()> {
     {
         let mut playmode = cx.player_state().playmode.write().unwrap();
         *playmode = arg;
@@ -125,7 +125,7 @@ pub(crate) async fn cp_update_playmode(cx: &BackendContext, arg: PlayMode) -> BR
     Ok(())
 }
 
-pub(crate) async fn cp_resume_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
+pub(crate) async fn cp_resume_player(cx: &Arc<BackendContext>, _arg: ()) -> BResult<()> {
     let cx = cx.clone();
     cx.async_runtime()
         .clone()
@@ -137,7 +137,7 @@ pub(crate) async fn cp_resume_player(cx: &BackendContext, _arg: ()) -> BResult<(
 }
 
 pub(crate) async fn cp_on_player_event(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     event: PlayerDelegateEvent,
 ) -> BResult<()> {
     let cx = cx.clone();

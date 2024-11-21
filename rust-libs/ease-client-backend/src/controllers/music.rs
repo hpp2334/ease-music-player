@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ease_client_shared::backends::music::{ArgUpdateMusicLyric, Music, MusicId};
 use futures::try_join;
 
@@ -11,12 +13,12 @@ use crate::{
     },
 };
 
-pub(crate) async fn cr_get_music(cx: &BackendContext, id: MusicId) -> BResult<Option<Music>> {
+pub(crate) async fn cr_get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Option<Music>> {
     get_music(&cx, id).await
 }
 
 pub(crate) async fn cu_update_music_lyric(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: ArgUpdateMusicLyric,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;

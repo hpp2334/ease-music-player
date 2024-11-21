@@ -13,19 +13,18 @@ use misty_async::AsyncRuntime;
 
 use crate::services::player::{IPlayerDelegate, PlayerState};
 
-#[derive(Clone)]
 pub struct BackendContext {
-    storage_path: Arc<RwLock<String>>,
-    app_document_dir: Arc<RwLock<String>>,
-    schema_version: Arc<AtomicU32>,
-    server_port: Arc<AtomicU16>,
+    storage_path: RwLock<String>,
+    app_document_dir: RwLock<String>,
+    schema_version: AtomicU32,
+    server_port: AtomicU16,
     rt: Arc<AsyncRuntime>,
     player: Arc<dyn IPlayerDelegate>,
     player_state: Arc<PlayerState>,
-    connectors: Arc<(
+    connectors: (
         RwLock<HashMap<usize, Arc<dyn IConnectorNotifier>>>,
         AtomicUsize,
-    )>,
+    ),
 }
 impl Debug for BackendContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -41,10 +40,10 @@ impl Debug for BackendContext {
 impl BackendContext {
     pub fn new(rt: Arc<AsyncRuntime>, player: Arc<dyn IPlayerDelegate>) -> Self {
         Self {
-            storage_path: Arc::new(RwLock::new(String::new())),
-            app_document_dir: Arc::new(RwLock::new(String::new())),
-            schema_version: Arc::new(AtomicU32::new(0)),
-            server_port: Arc::new(AtomicU16::new(0)),
+            storage_path: RwLock::new(String::new()),
+            app_document_dir: RwLock::new(String::new()),
+            schema_version: AtomicU32::new(0),
+            server_port: AtomicU16::new(0),
             rt,
             player_state: Default::default(),
             player,

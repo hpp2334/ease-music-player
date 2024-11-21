@@ -13,22 +13,24 @@ pub(crate) mod utils;
 
 use ease_client_shared::backends::{
     app::ArgInitializeApp, connector::IConnectorNotifier, message::MessagePayload,
+    storage::DataSourceKey,
 };
+use ease_remote_storage::StreamFile;
 use error::BResult;
 use misty_async::{AsyncRuntime, IOnAsyncRuntime};
-use services::app::app_bootstrap;
 pub use services::player::{IPlayerDelegate, MusicToPlay};
+use services::{app::app_bootstrap, server::load_asset};
 
 uniffi::setup_scaffolding!();
 
 pub struct Backend {
-    cx: BackendContext,
+    cx: Arc<BackendContext>,
 }
 
 impl Backend {
     pub fn new(rt: Arc<AsyncRuntime>, player: Arc<dyn IPlayerDelegate>) -> Self {
         Self {
-            cx: BackendContext::new(rt, player),
+            cx: Arc::new(BackendContext::new(rt, player)),
         }
     }
 
@@ -69,6 +71,11 @@ impl Backend {
                 }
             })
             .detach();
+    }
+
+    pub async fn load_asset(&self, key: DataSourceKey) -> BResult<Option<StreamFile>> {
+        let cx = self.cx.clone();
+        load_asset(&self.cx, key).await
     }
 
     pub fn port(&self) -> u16 {

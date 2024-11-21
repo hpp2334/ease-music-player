@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ease_client_shared::backends::{
     music::MusicId,
     playlist::{
@@ -31,13 +33,16 @@ use crate::{
 };
 
 pub(crate) async fn cr_get_playlist(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: PlaylistId,
 ) -> BResult<Option<Playlist>> {
     get_playlist(cx, arg).await
 }
 
-pub(crate) async fn cu_update_playlist(cx: &BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
+pub(crate) async fn cu_update_playlist(
+    cx: &Arc<BackendContext>,
+    arg: ArgUpdatePlaylist,
+) -> BResult<()> {
     let conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
     let id = arg.id;
@@ -57,7 +62,7 @@ pub(crate) async fn cu_update_playlist(cx: &BackendContext, arg: ArgUpdatePlayli
 }
 
 pub(crate) async fn cc_create_playlist(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: ArgCreatePlaylist,
 ) -> BResult<PlaylistId> {
     let cx = cx.clone();
@@ -116,7 +121,7 @@ pub(crate) async fn cc_create_playlist(
 }
 
 pub(crate) async fn cu_add_musics_to_playlist(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: ArgAddMusicsToPlaylist,
 ) -> BResult<()> {
     let mut conn = get_conn(&cx)?;
@@ -165,7 +170,7 @@ pub(crate) async fn cu_add_musics_to_playlist(
 }
 
 pub(crate) async fn cd_remove_music_from_playlist(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: ArgRemoveMusicFromPlaylist,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
@@ -181,7 +186,7 @@ pub(crate) async fn cd_remove_music_from_playlist(
     Ok(())
 }
 
-pub(crate) async fn cd_remove_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<()> {
+pub(crate) async fn cd_remove_playlist(cx: &Arc<BackendContext>, arg: PlaylistId) -> BResult<()> {
     let conn = get_conn(&cx)?;
 
     db_remove_all_musics_in_playlist(conn.get_ref(), arg)?;

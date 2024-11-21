@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{Path, Query, State},
@@ -23,7 +23,7 @@ use crate::{
 };
 
 async fn get_stream_file_by_loc(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     loc: StorageEntryLoc,
 ) -> BResult<Option<StreamFile>> {
     let backend = get_storage_backend(&cx, loc.storage_id)?;
@@ -36,7 +36,7 @@ async fn get_stream_file_by_loc(
 }
 
 async fn get_stream_file_by_music_id(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     id: MusicId,
 ) -> BResult<Option<StreamFile>> {
     let loc = get_music_storage_entry_loc(&cx, id)?;
@@ -47,8 +47,8 @@ async fn get_stream_file_by_music_id(
     get_stream_file_by_loc(cx, loc).await
 }
 
-async fn get_stream_file_cover_by_music_id(
-    cx: &BackendContext,
+pub(crate) async fn get_stream_file_cover_by_music_id(
+    cx: &Arc<BackendContext>,
     id: MusicId,
 ) -> BResult<Option<StreamFile>> {
     let bytes = get_music_cover_bytes(&cx, id)?;
@@ -109,7 +109,10 @@ async fn handle_got_stream_file(res: BResult<Option<StreamFile>>) -> Response {
 }
 
 #[axum::debug_handler]
-async fn handle_music_download(State(cx): State<BackendContext>, Path(id): Path<i64>) -> Response {
+async fn handle_music_download(
+    State(cx): State<Arc<BackendContext>>,
+    Path(id): Path<i64>,
+) -> Response {
     let id = MusicId::wrap(id);
     let res = get_stream_file_by_music_id(&cx, id).await;
     handle_got_stream_file(res).await
@@ -117,7 +120,7 @@ async fn handle_music_download(State(cx): State<BackendContext>, Path(id): Path<
 
 #[axum::debug_handler]
 async fn handle_music_cover_download(
-    State(cx): State<BackendContext>,
+    State(cx): State<Arc<BackendContext>>,
     Path(id): Path<i64>,
 ) -> Response {
     let id = MusicId::wrap(id);
@@ -126,7 +129,7 @@ async fn handle_music_cover_download(
 }
 
 async fn handle_asset_download(
-    State(cx): State<BackendContext>,
+    State(cx): State<Arc<BackendContext>>,
     Path(id): Path<i64>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
@@ -144,7 +147,7 @@ async fn handle_asset_download(
     handle_got_stream_file(res).await
 }
 
-pub fn start_server(cx: &BackendContext) -> u16 {
+pub fn start_server(cx: &Arc<BackendContext>) -> u16 {
     let router_svc = Router::new()
         .route("/music/:id", axum::routing::get(handle_music_download))
         .route(

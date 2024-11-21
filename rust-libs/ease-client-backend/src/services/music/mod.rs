@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ease_client_shared::backends::{
     connector::ConnectorAction,
     music::{LyricLoadState, Music, MusicAbstract, MusicId, MusicLyric, MusicMeta},
@@ -24,7 +26,7 @@ use super::{
 };
 
 async fn load_lyric(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     loc: Option<StorageEntryLoc>,
     is_fallback: bool,
 ) -> Option<MusicLyric> {
@@ -88,7 +90,7 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     }
 }
 
-pub(crate) fn build_music_abstract(cx: &BackendContext, model: MusicModel) -> MusicAbstract {
+pub(crate) fn build_music_abstract(cx: &Arc<BackendContext>, model: MusicModel) -> MusicAbstract {
     let cover_url = if model
         .cover
         .as_ref()
@@ -107,7 +109,7 @@ pub(crate) fn build_music_abstract(cx: &BackendContext, model: MusicModel) -> Mu
 }
 
 pub fn get_music_storage_entry_loc(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     id: MusicId,
 ) -> BResult<Option<StorageEntryLoc>> {
     let conn = get_conn(cx)?;
@@ -123,7 +125,7 @@ pub fn get_music_storage_entry_loc(
     Ok(Some(m))
 }
 
-pub fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<Vec<u8>> {
+pub fn get_music_cover_bytes(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Vec<u8>> {
     let conn = get_conn(cx)?;
     let m = db_load_music(conn.get_ref(), id)?;
     if m.is_none() {
@@ -139,7 +141,7 @@ pub(crate) struct ArgUpdateMusicDuration {
     pub duration: MusicDuration,
 }
 pub(crate) async fn update_music_duration(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: ArgUpdateMusicDuration,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
@@ -155,7 +157,7 @@ pub(crate) struct ArgUpdateMusicCover {
     pub cover: Vec<u8>,
 }
 pub(crate) async fn update_music_cover(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: ArgUpdateMusicCover,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
@@ -166,7 +168,7 @@ pub(crate) async fn update_music_cover(
     Ok(())
 }
 
-pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Option<Music>> {
+pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Option<Music>> {
     let conn = get_conn(&cx)?;
     let model = db_load_music(conn.get_ref(), id)?;
     if model.is_none() {
@@ -214,7 +216,7 @@ pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Optio
     Ok(Some(music))
 }
 
-pub(crate) async fn notify_music(cx: &BackendContext, id: MusicId) -> BResult<()> {
+pub(crate) async fn notify_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<()> {
     let music = get_music(cx, id).await?;
     if let Some(music) = music {
         cx.notify(ConnectorAction::Music(music));

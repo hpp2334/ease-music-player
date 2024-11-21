@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use futures::try_join;
 
 use crate::{
@@ -9,7 +11,7 @@ use crate::{
     },
 };
 
-pub(crate) async fn ci_on_connect(cx: &BackendContext, _arg: ()) -> BResult<()> {
+pub(crate) async fn ci_on_connect(cx: &Arc<BackendContext>, _arg: ()) -> BResult<()> {
     let data = load_preference_data(cx);
 
     try_join! {

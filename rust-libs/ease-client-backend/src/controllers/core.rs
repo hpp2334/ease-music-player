@@ -1,6 +1,6 @@
 macro_rules! generate_dispatch_message {
     ($($m: ty, $h: expr),*) => {
-            pub(crate) async fn dispatch_message(cx: &crate::BackendContext, arg: ease_client_shared::backends::MessagePayload) -> crate::BResult<ease_client_shared::backends::MessagePayload> {
+            pub(crate) async fn dispatch_message(cx: &std::sync::Arc<crate::BackendContext>, arg: ease_client_shared::backends::MessagePayload) -> crate::BResult<ease_client_shared::backends::MessagePayload> {
             #[tracing::instrument]
             fn trace_request<M: ease_client_shared::backends::IMessage>(code: ease_client_shared::backends::generated::Code, arg: &<M as ease_client_shared::backends::IMessage>::Argument) {
                 tracing::trace!("request {:?}: {:?}", code, arg)

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ease_client_shared::backends::storage::{
     ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
     StorageEntry, StorageEntryLoc, StorageId, StorageType,
@@ -22,7 +24,7 @@ use crate::{
     },
 };
 
-pub async fn ccu_upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> BResult<()> {
+pub async fn ccu_upsert_storage(cx: &Arc<BackendContext>, arg: ArgUpsertStorage) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_upsert_storage(conn.get_ref(), arg)?;
 
@@ -32,7 +34,7 @@ pub async fn ccu_upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> B
     Ok(())
 }
 
-pub async fn cr_get_storage(cx: &BackendContext, id: StorageId) -> BResult<Option<Storage>> {
+pub async fn cr_get_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<Option<Storage>> {
     let conn = get_conn(&cx)?;
     let model = db_load_storage(conn.get_ref(), id)?;
     let storage = if let Some(model) = model {
@@ -45,7 +47,7 @@ pub async fn cr_get_storage(cx: &BackendContext, id: StorageId) -> BResult<Optio
     Ok(storage)
 }
 
-pub async fn cd_remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()> {
+pub async fn cd_remove_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
     db_remove_storage(conn.get_ref(), id)?;
@@ -59,7 +61,7 @@ pub async fn cd_remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()
 }
 
 pub async fn cr_test_storage(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: ArgUpsertStorage,
 ) -> BResult<StorageConnectionTestResult> {
     let backend = get_storage_backend_by_arg(&cx, arg)?;
@@ -80,7 +82,7 @@ pub async fn cr_test_storage(
 }
 
 pub async fn cr_list_storage_entry_children(
-    cx: &BackendContext,
+    cx: &Arc<BackendContext>,
     arg: StorageEntryLoc,
 ) -> BResult<ListStorageEntryChildrenResp> {
     let backend = get_storage_backend(&cx, arg.storage_id)?;
