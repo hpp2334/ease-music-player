@@ -30,12 +30,7 @@ impl AsyncViewModelContext {
     where
         Event: Any + Debug + Send + Sync + 'static,
     {
-        let weak_app = self._app.clone();
-        if let Some(app) = weak_app.upgrade() {
-            app.enqueue_emit(evt);
-        } else {
-            tracing::error!("Failed to upgrade weak app.");
-        }
+        self._app.push_pending_event(evt);
     }
 }
 
@@ -83,6 +78,16 @@ impl ViewModelContext {
         C: IToHost,
     {
         self._app.to_hosts.get::<C>()
+    }
+
+    pub async fn spawn_background<Fut, E>(&self, fut: Fut) -> Fut::Output
+    where
+        Fut: Future + Send + 'static,
+        Fut::Output: Send + 'static,
+        E: IntoVMError + 'static,
+    {
+        let task = self._app.async_executor.spawn(fut);
+        task.await
     }
 
     pub fn spawn<F, Fut, E>(&self, tasks: &AsyncTasks, f: F) -> AsyncTaskId

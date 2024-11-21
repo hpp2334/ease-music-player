@@ -18,9 +18,8 @@ use crate::{
 use super::{
     lyrics::parse_lrc,
     player::player_refresh_current,
-    server::loc::{
-        get_serve_cover_url_from_music_id, get_serve_url_from_music_id,
-    },
+    playlist::notify_all_playlist_abstracts,
+    server::loc::{get_serve_cover_url_from_music_id, get_serve_url_from_music_id},
     storage::{load_storage_entry_data, to_opt_storage_entry},
 };
 
@@ -139,14 +138,15 @@ pub(crate) struct ArgUpdateMusicDuration {
     pub id: MusicId,
     pub duration: MusicDuration,
 }
-pub(crate) fn update_music_duration(
+pub(crate) async fn update_music_duration(
     cx: &BackendContext,
     arg: ArgUpdateMusicDuration,
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_update_music_total_duration(conn.get_ref(), arg.id, arg.duration)?;
-    player_refresh_current(cx)?;
+    player_refresh_current(cx).await?;
     cx.notify(ConnectorAction::MusicTotalDurationChanged(arg.id));
+    notify_all_playlist_abstracts(&cx).await?;
     Ok(())
 }
 
@@ -154,11 +154,15 @@ pub(crate) struct ArgUpdateMusicCover {
     pub id: MusicId,
     pub cover: Vec<u8>,
 }
-pub(crate) fn update_music_cover(cx: &BackendContext, arg: ArgUpdateMusicCover) -> BResult<()> {
+pub(crate) async fn update_music_cover(
+    cx: &BackendContext,
+    arg: ArgUpdateMusicCover,
+) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_update_music_cover(conn.get_ref(), arg.id, arg.cover.clone())?;
-    player_refresh_current(cx)?;
+    player_refresh_current(cx).await?;
     cx.notify(ConnectorAction::MusicCoverChanged(arg.id));
+    notify_all_playlist_abstracts(&cx).await?;
     Ok(())
 }
 
@@ -208,4 +212,12 @@ pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Optio
         lyric,
     };
     Ok(Some(music))
+}
+
+pub(crate) async fn notify_music(cx: &BackendContext, id: MusicId) -> BResult<()> {
+    let music = get_music(cx, id).await?;
+    if let Some(music) = music {
+        cx.notify(ConnectorAction::Music(music));
+    }
+    Ok(())
 }

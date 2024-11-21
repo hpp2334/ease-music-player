@@ -5,6 +5,7 @@ use ease_client_shared::backends::{
         Playlist, PlaylistAbstract, PlaylistId,
     },
 };
+use futures::try_join;
 
 use crate::{
     ctx::BackendContext,
@@ -20,8 +21,12 @@ use crate::{
     },
     services::{
         player::player_refresh_current,
-        playlist::{build_playlist_abstract, get_playlist},
+        playlist::{
+            build_playlist_abstract, get_all_playlist_abstracts, get_playlist,
+            notify_all_playlist_abstracts, notify_playlist,
+        },
         server::loc::get_serve_url_from_music_id,
+        storage::notify_storages,
     },
 };
 
@@ -29,22 +34,7 @@ pub(crate) async fn cr_get_all_playlist_abstracts(
     cx: &BackendContext,
     _arg: (),
 ) -> BResult<Vec<PlaylistAbstract>> {
-    let rt = cx.async_runtime();
-    let cx = cx.clone();
-    rt.spawn(async move {
-        let conn = get_conn(&cx)?;
-        let models = db_load_playlists(conn.get_ref())?;
-        let first_covers = db_load_first_music_covers(conn.get_ref())?;
-
-        let mut ret: Vec<PlaylistAbstract> = Default::default();
-        for model in models {
-            let (abstr, _) = build_playlist_abstract(&cx, conn.get_ref(), model, &first_covers)?;
-            ret.push(abstr)
-        }
-
-        Ok(ret)
-    })
-    .await
+    get_all_playlist_abstracts(cx).await
 }
 
 pub(crate) async fn cr_get_playlist(
@@ -57,12 +47,19 @@ pub(crate) async fn cr_get_playlist(
 pub(crate) async fn cu_update_playlist(cx: &BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
     let conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
+    let id = arg.id;
     let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
-        id: Some(arg.id),
+        id: Some(id),
         title: arg.title,
         picture: arg.cover.clone(),
     };
     db_upsert_playlist(conn.get_ref(), arg, current_time_ms)?;
+
+    try_join! {
+        notify_playlist(cx, id),
+        notify_all_playlist_abstracts(cx),
+    }?;
+
     Ok(())
 }
 
@@ -70,6 +67,7 @@ pub(crate) async fn cc_create_playlist(
     cx: &BackendContext,
     arg: ArgCreatePlaylist,
 ) -> BResult<PlaylistId> {
+    let cx = cx.clone();
     let mut conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
 
@@ -103,10 +101,23 @@ pub(crate) async fn cc_create_playlist(
         Ok(playlist_id)
     })?;
 
-    for (id, _) in musics {
-        cx.player_delegate()
-            .request_total_duration(id, get_serve_url_from_music_id(cx, id));
+    let music_ids: Vec<MusicId> = musics.into_iter().map(|v| v.0).collect();
+    {
+        let cx = cx.clone();
+        cx.async_runtime()
+            .clone()
+            .spawn_on_main(async move {
+                for id in music_ids {
+                    cx.player_delegate()
+                        .request_total_duration(id, get_serve_url_from_music_id(&cx, id));
+                }
+            })
+            .await;
     }
+
+    try_join! {
+        notify_all_playlist_abstracts(&cx),
+    }?;
 
     Ok(playlist_id)
 }
@@ -135,12 +146,27 @@ pub(crate) async fn cu_add_musics_to_playlist(
         Ok::<_, BError>(musics)
     })?;
 
-    for (id, _) in musics {
-        cx.player_delegate()
-            .request_total_duration(id, get_serve_url_from_music_id(cx, id));
+    let music_ids: Vec<MusicId> = musics.into_iter().map(|v| v.0).collect();
+    {
+        let cx = cx.clone();
+        cx.async_runtime()
+            .clone()
+            .spawn_on_main(async move {
+                for id in music_ids {
+                    cx.player_delegate()
+                        .request_total_duration(id, get_serve_url_from_music_id(&cx, id));
+                }
+            })
+            .await;
     }
 
-    player_refresh_current(cx)?;
+    player_refresh_current(cx).await?;
+
+    try_join! {
+        notify_playlist(cx, playlist_id),
+        notify_all_playlist_abstracts(cx),
+        notify_storages(cx)
+    }?;
 
     Ok(())
 }
@@ -151,7 +177,14 @@ pub(crate) async fn cd_remove_music_from_playlist(
 ) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_remove_music_from_playlist(conn.get_ref(), arg.playlist_id, arg.music_id)?;
-    player_refresh_current(cx)?;
+    player_refresh_current(cx).await?;
+
+    try_join! {
+        notify_playlist(cx, arg.playlist_id),
+        notify_all_playlist_abstracts(cx),
+        notify_storages(cx),
+    }?;
+
     Ok(())
 }
 
@@ -161,7 +194,11 @@ pub(crate) async fn cd_remove_playlist(cx: &BackendContext, arg: PlaylistId) -> 
     db_remove_all_musics_in_playlist(conn.get_ref(), arg)?;
     db_remove_playlist(conn.get_ref(), arg)?;
 
-    player_refresh_current(cx)?;
+    player_refresh_current(cx).await?;
+
+    try_join! {
+        notify_all_playlist_abstracts(cx),
+    }?;
 
     Ok(())
 }

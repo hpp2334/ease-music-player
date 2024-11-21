@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use ease_client_shared::backends::{
+    connector::ConnectorAction,
     music::MusicAbstract,
     music_duration::MusicDuration,
     playlist::{Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta},
@@ -112,4 +113,34 @@ pub(crate) async fn get_playlist(
         Ok(Some(Playlist { abstr, musics }))
     })
     .await
+}
+
+pub(crate) async fn get_all_playlist_abstracts(
+    cx: &BackendContext,
+) -> BResult<Vec<PlaylistAbstract>> {
+    let conn = get_conn(&cx)?;
+    let models = db_load_playlists(conn.get_ref())?;
+    let first_covers = db_load_first_music_covers(conn.get_ref())?;
+
+    let mut ret: Vec<PlaylistAbstract> = Default::default();
+    for model in models {
+        let (abstr, _) = build_playlist_abstract(&cx, conn.get_ref(), model, &first_covers)?;
+        ret.push(abstr)
+    }
+
+    Ok(ret)
+}
+
+pub(crate) async fn notify_all_playlist_abstracts(cx: &BackendContext) -> BResult<()> {
+    let playlists = get_all_playlist_abstracts(cx).await?;
+    cx.notify(ConnectorAction::PlaylistAbstracts(playlists));
+    Ok(())
+}
+
+pub(crate) async fn notify_playlist(cx: &BackendContext, id: PlaylistId) -> BResult<()> {
+    let playlist = get_playlist(cx, id).await?;
+    if let Some(playlist) = playlist {
+        cx.notify(ConnectorAction::Playlist(playlist));
+    }
+    Ok(())
 }

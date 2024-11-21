@@ -124,7 +124,7 @@ pub(crate) fn notify_player_current(cx: &BackendContext) -> BResult<()> {
     Ok(())
 }
 
-pub(crate) fn player_request_play(cx: &BackendContext, to_play: PlayerMedia) -> BResult<()> {
+pub(crate) async fn player_request_play(cx: &BackendContext, to_play: PlayerMedia) -> BResult<()> {
     let prev_music = {
         let current = cx.player_state().current.read().unwrap();
         current.clone()
@@ -143,7 +143,7 @@ pub(crate) fn player_request_play(cx: &BackendContext, to_play: PlayerMedia) -> 
         let mut state = cx.player_state().current.write().unwrap();
         *state = Some(to_play.clone());
     }
-    {
+    let item = {
         let url = get_serve_url_from_music_id(cx, to_play.id);
         let item = MusicToPlay {
             id: to_play.id,
@@ -151,14 +151,23 @@ pub(crate) fn player_request_play(cx: &BackendContext, to_play: PlayerMedia) -> 
             url,
             cover_url: music.cover_url,
         };
-        cx.player_delegate().set_music_url(item);
+        item
+    };
+    {
+        let cx = cx.clone();
+        cx.async_runtime()
+            .clone()
+            .spawn_on_main(async move {
+                cx.player_delegate().set_music_url(item);
+                cx.player_delegate().resume();
+            })
+            .await;
     }
-    cx.player_delegate().resume();
     notify_player_current(cx)?;
     Ok(())
 }
 
-pub(crate) fn player_request_play_adjacent<const IS_NEXT: bool>(
+pub(crate) async fn player_request_play_adjacent<const IS_NEXT: bool>(
     cx: &BackendContext,
 ) -> BResult<()> {
     let (music, can_play) = {
@@ -212,7 +221,7 @@ pub(crate) fn player_request_play_adjacent<const IS_NEXT: bool>(
             index: adjacent_index,
         };
 
-        player_request_play(cx, to_play)?;
+        player_request_play(cx, to_play).await?;
     }
     Ok(())
 }
@@ -221,7 +230,7 @@ pub(crate) fn player_clear_current(cx: &BackendContext) {
     cx.player_state().current.write().unwrap().take();
 }
 
-pub(crate) fn player_refresh_current(cx: &BackendContext) -> BResult<()> {
+pub(crate) async fn player_refresh_current(cx: &BackendContext) -> BResult<()> {
     let current = cx.player_state().current.write().unwrap().clone();
 
     if current.is_none() {
@@ -230,34 +239,36 @@ pub(crate) fn player_refresh_current(cx: &BackendContext) -> BResult<()> {
 
     let current = current.unwrap();
 
-    let rt = cx.async_runtime();
-    let cx = cx.clone();
-    rt.spawn_local(async move {
-        let playlist = get_playlist(&cx, current.playlist_id).await?;
-        if let Some(playlist) = playlist {
-            let pos = playlist.musics.iter().position(|v| v.id() == current.id);
-            if let Some(pos) = pos {
-                let mut copied = current.clone();
-                copied.index = pos;
-                copied.queue = Arc::new(playlist.musics);
+    let playlist = get_playlist(&cx, current.playlist_id).await?;
+    if let Some(playlist) = playlist {
+        let pos = playlist.musics.iter().position(|v| v.id() == current.id);
+        if let Some(pos) = pos {
+            let mut copied = current.clone();
+            copied.index = pos;
+            copied.queue = Arc::new(playlist.musics);
 
-                {
-                    let mut w = cx.player_state().current.write().unwrap();
-                    *w = Some(copied);
-                }
-                notify_player_current(&cx)?;
-
-                return Ok::<_, BError>(());
+            {
+                let mut w = cx.player_state().current.write().unwrap();
+                *w = Some(copied);
             }
-        }
+            notify_player_current(&cx)?;
 
-        cx.player_delegate().stop();
-        player_clear_current(&cx);
-        notify_player_current(&cx)?;
-        return Ok(());
-    })
-    .detach();
-    Ok(())
+            return Ok::<_, BError>(());
+        }
+    }
+
+    {
+        let cx = cx.clone();
+        cx.async_runtime()
+            .clone()
+            .spawn_on_main(async move {
+                cx.player_delegate().stop();
+            })
+            .await
+    };
+    player_clear_current(&cx);
+    notify_player_current(&cx)?;
+    return Ok(());
 }
 
 pub(crate) fn get_player_current(cx: &BackendContext) -> BResult<Option<PlayerCurrentPlaying>> {
@@ -283,7 +294,7 @@ pub(crate) fn get_player_current(cx: &BackendContext) -> BResult<Option<PlayerCu
     Ok(Some(current))
 }
 
-pub(crate) fn on_connect_for_player(cx: &BackendContext, playmode: PlayMode) -> BResult<()> {
+pub(crate) async fn on_connect_for_player(cx: &BackendContext, playmode: PlayMode) -> BResult<()> {
     {
         let mut w = cx.player_state().playmode.write().unwrap();
         *w = playmode;
@@ -292,9 +303,17 @@ pub(crate) fn on_connect_for_player(cx: &BackendContext, playmode: PlayMode) -> 
     cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Current {
         value: get_player_current(cx)?,
     }));
-    cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playing {
-        value: cx.player_delegate().is_playing(),
-    }));
+    {
+        let cx = cx.clone();
+        cx.async_runtime()
+            .clone()
+            .spawn_on_main(async move {
+                cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playing {
+                    value: cx.player_delegate().is_playing(),
+                }));
+            })
+            .await;
+    }
     cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playmode {
         value: playmode,
     }));

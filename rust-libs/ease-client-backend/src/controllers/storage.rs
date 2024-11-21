@@ -1,7 +1,8 @@
 use ease_client_shared::backends::storage::{
-        ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
-        StorageEntry, StorageEntryLoc, StorageId, StorageType,
-    };
+    ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
+    StorageEntry, StorageEntryLoc, StorageId, StorageType,
+};
+use futures::try_join;
 
 use crate::{
     ctx::BackendContext,
@@ -12,39 +13,27 @@ use crate::{
         playlist::{db_get_musics_count_by_storage, db_remove_musics_in_playlists_by_storage},
         storage::{db_load_storage, db_load_storages, db_remove_storage, db_upsert_storage},
     },
-    services::storage::{build_storage, get_storage_backend, get_storage_backend_by_arg},
+    services::{
+        playlist::notify_all_playlist_abstracts,
+        storage::{
+            build_storage, get_storage_backend, get_storage_backend_by_arg, list_storage,
+            notify_storages,
+        },
+    },
 };
 
 pub async fn ccu_upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_upsert_storage(conn.get_ref(), arg)?;
+
+    try_join! {
+        notify_storages(cx),
+    }?;
     Ok(())
 }
 
 pub async fn cr_list_storage(cx: &BackendContext, _arg: ()) -> BResult<Vec<Storage>> {
-    let conn = get_conn(&cx)?;
-    let models = db_load_storages(conn.get_ref())?;
-
-    let mut storages: Vec<Storage> = Default::default();
-    for m in models.into_iter() {
-        let music_count = db_get_musics_count_by_storage(conn.get_ref(), m.id)?;
-        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), m.id)?;
-
-        storages.push(build_storage(m, music_count, playlist_count));
-    }
-
-    storages.sort_by(|lhs, rhs| {
-        let l_local = lhs.typ == StorageType::Local;
-        let r_local = rhs.typ == StorageType::Local;
-
-        if l_local != r_local {
-            l_local.cmp(&r_local)
-        } else {
-            lhs.id.cmp(&rhs.id)
-        }
-    });
-
-    Ok(storages)
+    list_storage(cx).await
 }
 
 pub async fn cr_get_storage(cx: &BackendContext, id: StorageId) -> BResult<Option<Storage>> {
@@ -64,6 +53,12 @@ pub async fn cd_remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()
     let conn = get_conn(&cx)?;
     db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
     db_remove_storage(conn.get_ref(), id)?;
+
+    try_join! {
+        notify_storages(cx),
+        notify_all_playlist_abstracts(cx),
+    }?;
+
     Ok(())
 }
 

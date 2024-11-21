@@ -12,7 +12,7 @@ pub enum EaseError {
     #[error("serde error")]
     SerdeJsonError(#[from] serde_json::Error),
     #[error("backend error: {0}")]
-    BackendChannelError(Box<dyn std::error::Error>),
+    BackendChannelError(Box<dyn std::error::Error + Send + Sync>),
     #[error("other error: {0}")]
     OtherError(String),
     #[error("client destroyed")]

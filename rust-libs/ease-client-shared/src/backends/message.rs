@@ -6,8 +6,8 @@ use super::generated::Code;
 
 pub trait IMessage {
     const CODE: Code;
-    type Argument: Debug + Serialize + DeserializeOwned + Send + 'static;
-    type Return: Debug + Serialize + DeserializeOwned + Send + 'static;
+    type Argument: Debug + Serialize + DeserializeOwned + Send + Sync + 'static;
+    type Return: Debug + Serialize + DeserializeOwned + Send + Sync + 'static;
 }
 
 #[derive(Deserialize, Serialize)]

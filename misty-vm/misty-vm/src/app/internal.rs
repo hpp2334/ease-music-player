@@ -46,6 +46,25 @@ impl WeakAppInternal {
             None
         }
     }
+
+    pub fn push_pending_event<Event>(&self, evt: Event)
+    where
+        Event: Any + Debug + 'static,
+    {
+        let app = unsafe { self.upgrade_unchecked() };
+        if let Some(app) = app {
+            app.push_pending_event(evt);
+        }
+    }
+
+    unsafe fn upgrade_unchecked(&self) -> Option<Arc<AppInternal>> {
+        let app = self.internal.upgrade();
+        if let Some(app) = app {
+            Some(app)
+        } else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Debug for AppInternal {

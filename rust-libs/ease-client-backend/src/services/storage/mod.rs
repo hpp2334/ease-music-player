@@ -5,12 +5,15 @@ use crate::{
     error::BResult,
     models::storage::{StorageEntryLocModel, StorageModel},
     repositories::{
-        core::get_conn, music::db_get_playlists_count_by_storage,
-        playlist::db_get_musics_count_by_storage, storage::db_load_storage,
+        core::get_conn,
+        music::db_get_playlists_count_by_storage,
+        playlist::db_get_musics_count_by_storage,
+        storage::{db_load_storage, db_load_storages},
     },
 };
-use ease_client_shared::backends::storage::{
-    ArgUpsertStorage, Storage, StorageEntryLoc, StorageId, StorageType,
+use ease_client_shared::backends::{
+    connector::ConnectorAction,
+    storage::{ArgUpsertStorage, Storage, StorageEntryLoc, StorageId, StorageType},
 };
 use ease_remote_storage::{BuildWebdavArg, LocalBackend, StorageBackend, Webdav};
 use num_traits::FromPrimitive;
@@ -135,4 +138,36 @@ pub fn get_storage_backend(
         },
     )?;
     Ok(Some(backend))
+}
+
+pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
+    let conn = get_conn(&cx)?;
+    let models = db_load_storages(conn.get_ref())?;
+
+    let mut storages: Vec<Storage> = Default::default();
+    for m in models.into_iter() {
+        let music_count = db_get_musics_count_by_storage(conn.get_ref(), m.id)?;
+        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), m.id)?;
+
+        storages.push(build_storage(m, music_count, playlist_count));
+    }
+
+    storages.sort_by(|lhs, rhs| {
+        let l_local = lhs.typ == StorageType::Local;
+        let r_local = rhs.typ == StorageType::Local;
+
+        if l_local != r_local {
+            l_local.cmp(&r_local)
+        } else {
+            lhs.id.cmp(&rhs.id)
+        }
+    });
+
+    Ok(storages)
+}
+
+pub async fn notify_storages(cx: &BackendContext) -> BResult<()> {
+    let storages = list_storage(cx).await?;
+    cx.notify(ConnectorAction::Storages(storages));
+    Ok(())
 }

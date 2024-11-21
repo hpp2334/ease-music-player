@@ -51,21 +51,18 @@ impl Backend {
 
     pub async fn request(&self, arg: MessagePayload) -> BResult<MessagePayload> {
         let cx = self.cx.clone();
-        let task = self.cx.async_runtime().spawn_local(async move {
-            let res = dispatch_message(&cx, arg).await;
-            if let Err(ref e) = &res {
-                tracing::error!("Backend request fail: {:?}", e);
-            }
-            res
-        });
-        task.await
+        let res = dispatch_message(&cx, arg).await;
+        if let Err(ref e) = &res {
+            tracing::error!("Backend request fail: {:?}", e);
+        }
+        res
     }
 
     pub fn request_from_host(&self, arg: MessagePayload) {
         let cx = self.cx.clone();
         self.cx
             .async_runtime()
-            .spawn_local(async move {
+            .spawn(async move {
                 let res = dispatch_message(&cx, arg).await;
                 if let Err(ref e) = &res {
                     tracing::error!("Backend request fail: {:?}", e);

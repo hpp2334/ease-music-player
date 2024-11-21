@@ -6,7 +6,6 @@ use ease_client::{
 };
 use ease_client_backend::{IPlayerDelegate, MusicToPlay};
 use ease_client_shared::backends::music::MusicId;
-use misty_vm::IAsyncRuntimeAdapter;
 
 macro_rules! generate_delegate {
    ($name:ident, $trait:ident, $foreign_trait:ident, { $($method:ident ( $($arg_name:ident : $arg_ty:ty),* ) $(-> $ret_ty:ty)?;)* }) => {

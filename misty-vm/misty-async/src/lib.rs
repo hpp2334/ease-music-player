@@ -74,6 +74,27 @@ impl AsyncRuntime {
         task
     }
 
+    pub fn spawn_on_main<Fut>(self: &Arc<Self>, fut: Fut) -> Task<Fut::Output>
+    where
+        Fut: Future + Send + 'static,
+        Fut::Output: Send + 'static,
+    {
+        let sender = self.locals_sender.clone();
+        let adapter = self.adapter.clone();
+        let local_notified = self.local_notified.clone();
+
+        let schedule = move |runnable| {
+            sender.send(LocalTask::Runnable(runnable)).unwrap();
+
+            if !local_notified.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                adapter.on_spawn_locals();
+            }
+        };
+        let (runnable, task) = async_task::spawn(fut, schedule);
+        runnable.schedule();
+        task
+    }
+
     pub fn spawn_local_runnable<Fut>(self: &Arc<Self>, fut: Fut) -> (Runnable, Task<Fut::Output>)
     where
         Fut: Future + 'static,

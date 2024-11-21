@@ -538,6 +538,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "ease-client-shared",
+ "futures",
  "getset",
  "misty-vm",
  "num-derive",

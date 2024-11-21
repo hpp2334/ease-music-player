@@ -35,9 +35,15 @@ pub(crate) async fn cp_player_current_duration(
     cx: &BackendContext,
     _arg: (),
 ) -> BResult<std::time::Duration> {
-    Ok(Duration::from_secs(
-        cx.player_delegate().get_current_duration_s(),
-    ))
+    let cx = cx.clone();
+    cx.async_runtime()
+        .clone()
+        .spawn_on_main(async move {
+            Ok(Duration::from_secs(
+                cx.player_delegate().get_current_duration_s(),
+            ))
+        })
+        .await
 }
 
 pub(crate) async fn cp_play_music(cx: &BackendContext, arg: ArgPlayMusic) -> BResult<()> {
@@ -59,31 +65,49 @@ pub(crate) async fn cp_play_music(cx: &BackendContext, arg: ArgPlayMusic) -> BRe
         index: current_index,
     };
 
-    player_request_play(cx, to_play)?;
+    player_request_play(cx, to_play).await?;
 
     Ok(())
 }
 
 pub(crate) async fn cp_pause_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
-    cx.player_delegate().pause();
+    let cx = cx.clone();
+    cx.async_runtime()
+        .clone()
+        .spawn_on_main(async move {
+            cx.player_delegate().pause();
+        })
+        .await;
     Ok(())
 }
 
 pub(crate) async fn cp_play_next(cx: &BackendContext, _arg: ()) -> BResult<()> {
-    player_request_play_adjacent::<true>(cx)
+    player_request_play_adjacent::<true>(cx).await
 }
 
 pub(crate) async fn cp_play_previous(cx: &BackendContext, _arg: ()) -> BResult<()> {
-    player_request_play_adjacent::<false>(cx)
+    player_request_play_adjacent::<false>(cx).await
 }
 
 pub(crate) async fn cp_stop_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
-    cx.player_delegate().stop();
+    let cx = cx.clone();
+    cx.async_runtime()
+        .clone()
+        .spawn_on_main(async move {
+            cx.player_delegate().stop();
+        })
+        .await;
     Ok(())
 }
 
 pub(crate) async fn cp_player_seek(cx: &BackendContext, arg: u64) -> BResult<()> {
-    cx.player_delegate().seek(arg);
+    let cx = cx.clone();
+    cx.async_runtime()
+        .clone()
+        .spawn_on_main(async move {
+            cx.player_delegate().seek(arg);
+        })
+        .await;
     Ok(())
 }
 
@@ -102,7 +126,13 @@ pub(crate) async fn cp_update_playmode(cx: &BackendContext, arg: PlayMode) -> BR
 }
 
 pub(crate) async fn cp_resume_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
-    cx.player_delegate().resume();
+    let cx = cx.clone();
+    cx.async_runtime()
+        .clone()
+        .spawn_on_main(async move {
+            cx.player_delegate().resume();
+        })
+        .await;
     Ok(())
 }
 
@@ -110,21 +140,29 @@ pub(crate) async fn cp_on_player_event(
     cx: &BackendContext,
     event: PlayerDelegateEvent,
 ) -> BResult<()> {
+    let cx = cx.clone();
+    let rt = cx.async_runtime().clone();
     match event {
         PlayerDelegateEvent::Complete => {
             let play_mode = *cx.player_state().playmode.read().unwrap();
             match play_mode {
                 PlayMode::Single => {
-                    cx.player_delegate().pause();
-                    cx.player_delegate().seek(0);
+                    rt.spawn_on_main(async move {
+                        cx.player_delegate().pause();
+                        cx.player_delegate().seek(0);
+                    })
+                    .await;
                 }
                 PlayMode::SingleLoop => {
-                    cx.player_delegate().pause();
-                    cx.player_delegate().seek(0);
-                    cx.player_delegate().resume();
+                    rt.spawn_on_main(async move {
+                        cx.player_delegate().pause();
+                        cx.player_delegate().seek(0);
+                        cx.player_delegate().resume();
+                    })
+                    .await;
                 }
                 PlayMode::List | PlayMode::ListLoop => {
-                    player_request_play_adjacent::<true>(cx)?;
+                    player_request_play_adjacent::<true>(&cx).await?;
                 }
             }
         }
@@ -143,18 +181,21 @@ pub(crate) async fn cp_on_player_event(
         }
         PlayerDelegateEvent::Loading | PlayerDelegateEvent::Loaded => {}
         PlayerDelegateEvent::Stop => {
-            player_clear_current(cx);
-            notify_player_current(cx)?;
+            player_clear_current(&cx);
+            notify_player_current(&cx)?;
         }
-        PlayerDelegateEvent::Total { id, duration_ms } => update_music_duration(
-            cx,
-            ArgUpdateMusicDuration {
-                id,
-                duration: MusicDuration::new(Duration::from_millis(duration_ms)),
-            },
-        )?,
+        PlayerDelegateEvent::Total { id, duration_ms } => {
+            update_music_duration(
+                &cx,
+                ArgUpdateMusicDuration {
+                    id,
+                    duration: MusicDuration::new(Duration::from_millis(duration_ms)),
+                },
+            )
+            .await?
+        }
         PlayerDelegateEvent::Cover { id, buffer } => {
-            update_music_cover(cx, ArgUpdateMusicCover { id, cover: buffer })?
+            update_music_cover(&cx, ArgUpdateMusicCover { id, cover: buffer }).await?
         }
     }
     Ok(())
