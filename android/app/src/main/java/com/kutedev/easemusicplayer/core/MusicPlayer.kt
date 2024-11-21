@@ -177,8 +177,8 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
     override fun setMusicUrl(item: MusicToPlay) {
         val player = _internal ?: return
 
-        val coverURI = if (item.coverUrl.isNotEmpty()) {
-            Uri.parse(item.coverUrl)
+        val coverURI = if (item.hasCover) {
+            null
         } else {
             Uri.parse(DEFAULT_COVER_BASE64)
         }

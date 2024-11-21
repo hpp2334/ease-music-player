@@ -32,7 +32,7 @@ async fn create_playlist_full_1() {
     assert_eq!(state.mode, CreatePlaylistMode::Full);
     assert_eq!(state.music_count, 1);
     assert_eq!(state.recommend_playlist_names.len(), 0);
-    let picture = app.load_resource(&state.picture).await;
+    let picture = app.load_resource_by_key(state.picture.unwrap()).await;
     assert_eq!(picture.len(), 82580);
 
     app.dispatch_change_text(PlaylistCreateWidget::Name, "ABC");
@@ -42,7 +42,7 @@ async fn create_playlist_full_1() {
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     assert_eq!(state.playlist_list[0].title, "ABC".to_string());
-    assert_ne!(state.playlist_list[0].cover_url, "")
+    assert_ne!(state.playlist_list[0].cover.clone(), None)
 }
 
 #[tokio::test]
@@ -77,7 +77,7 @@ async fn create_playlist_full_2() {
     assert_eq!(state.mode, CreatePlaylistMode::Full);
     assert_eq!(state.music_count, 1);
     assert_eq!(state.recommend_playlist_names, vec!["musics".to_string()]);
-    assert_eq!(state.picture, "");
+    assert_eq!(state.picture, None);
 
     app.dispatch_change_text(PlaylistCreateWidget::Name, "ABC");
     app.dispatch_click(PlaylistCreateWidget::FinishCreate);
@@ -86,7 +86,7 @@ async fn create_playlist_full_2() {
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     assert_eq!(state.playlist_list[0].title, "ABC".to_string());
-    assert_eq!(state.playlist_list[0].cover_url, "".to_string())
+    assert_eq!(state.playlist_list[0].cover.clone(), None)
 }
 
 #[tokio::test]
@@ -106,7 +106,7 @@ async fn create_playlist_empty_1() {
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     assert_eq!(state.playlist_list[0].title, "ABC".to_string());
-    assert_eq!(state.playlist_list[0].cover_url, "")
+    assert_eq!(state.playlist_list[0].cover.clone(), None)
 }
 
 #[tokio::test]
@@ -134,6 +134,6 @@ async fn create_playlist_only_cover_1() {
     assert_eq!(state.mode, CreatePlaylistMode::Full);
     assert_eq!(state.music_count, 0);
     assert_eq!(state.recommend_playlist_names.len(), 0);
-    let picture = app.load_resource(&state.picture).await;
+    let picture = app.load_resource_by_key(state.picture.unwrap()).await;
     assert_eq!(picture.len(), 82580);
 }

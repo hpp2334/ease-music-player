@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -37,12 +36,13 @@ import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.MainBodyWidget
 import uniffi.ease_client.MusicControlWidget
+import uniffi.ease_client_shared.DataSourceKey
 
 @Composable
 private fun MiniPlayerCore(
     isPlaying: Boolean,
     title: String,
-    coverUrl: String,
+    cover: DataSourceKey?,
     currentDurationMS: ULong,
     totalDuration: String,
     totalDurationMS: ULong,
@@ -62,7 +62,7 @@ private fun MiniPlayerCore(
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
                 .size(60.dp),
-            coverUrl = coverUrl,
+            coverDataSourceKey = cover,
         )
         Box(modifier = Modifier.width(16.dp))
         Column(
@@ -152,7 +152,7 @@ fun MiniPlayer(
     MiniPlayerCore(
         isPlaying = state.playing,
         title = state.title,
-        coverUrl = state.cover,
+        cover = state.cover,
         currentDurationMS = state.currentDurationMs,
         totalDuration = state.totalDuration,
         totalDurationMS = state.totalDurationMs,
@@ -171,7 +171,7 @@ private fun MiniPlayerPreview() {
     MiniPlayerCore(
         isPlaying = true,
         title = "Very very very very very long music title",
-        coverUrl = "",
+        cover = null,
         currentDurationMS = 10uL,
         totalDuration = "00:06",
         totalDurationMS = 60uL,

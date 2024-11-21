@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.components
 
+import EaseImage
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -9,29 +10,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.Dp
-import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.R
+import uniffi.ease_client_shared.DataSourceKey
 
 @Composable
 fun MusicCover(
     modifier: Modifier,
-    coverUrl: String,
+    coverDataSourceKey: DataSourceKey?
 ) {
     Box(
         modifier = modifier,
     ) {
-        if (coverUrl.isEmpty()) {
+        if (coverDataSourceKey == null) {
             Image(
                 modifier = Modifier.fillMaxSize(),
                 painter = painterResource(id = R.drawable.cover_default_image), // Replace with actual image resource
                 contentDescription = null,
             )
         } else {
-            AsyncImage(
+            EaseImage(
                 modifier = Modifier.background(MaterialTheme.colorScheme.onSurfaceVariant).fillMaxSize(),
-                model = coverUrl,
-                contentDescription = null,
+                dataSourceKey = coverDataSourceKey,
                 contentScale = ContentScale.FillWidth,
             )
         }

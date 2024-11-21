@@ -21,7 +21,7 @@ async fn create_playlist_cover_1() {
     app.dispatch_click(StorageImportWidget::Import);
     app.wait_network().await;
     let state = app.latest_state().create_playlist.unwrap();
-    let picture = app.load_resource(state.picture).await;
+    let picture = app.load_resource_by_key(state.picture.unwrap()).await;
     assert_eq!(picture.len(), 82580);
     app.dispatch_click(PlaylistCreateWidget::FinishCreate);
     app.wait_network().await;
@@ -34,7 +34,7 @@ async fn create_playlist_cover_1() {
     app.dispatch_click(PlaylistEditWidget::ClearCover);
     app.dispatch_click(PlaylistEditWidget::FinishEdit);
     let state = app.latest_state().edit_playlist.unwrap();
-    assert_eq!(state.picture, "");
+    assert_eq!(state.picture, None);
 }
 
 #[tokio::test]
@@ -54,13 +54,13 @@ async fn edit_playlist_cover_1() {
     app.dispatch_click(StorageImportWidget::Import);
     app.wait_network().await;
     let state = app.latest_state().edit_playlist.unwrap();
-    let picture = app.load_resource(state.picture).await;
+    let picture = app.load_resource_by_key(state.picture.unwrap()).await;
     assert_eq!(picture.len(), 82580);
 
     app.dispatch_click(PlaylistEditWidget::ClearCover);
     app.dispatch_click(PlaylistEditWidget::FinishEdit);
     let state = app.latest_state().edit_playlist.unwrap();
-    assert_eq!(state.picture, "");
+    assert_eq!(state.picture, None);
 }
 
 #[tokio::test]
@@ -91,7 +91,7 @@ async fn edit_playlist_cover_2() {
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     let picture = app
-        .load_resource(state.playlist_list[0].cover_url.clone())
+        .load_resource_by_key(state.playlist_list[0].cover.clone().unwrap())
         .await;
     assert_eq!(picture.len(), 82580);
 
@@ -100,7 +100,7 @@ async fn edit_playlist_cover_2() {
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     let picture = app
-        .load_resource(state.playlist_list[0].cover_url.clone())
+        .load_resource_by_key(state.playlist_list[0].cover.clone().unwrap())
         .await;
     assert_eq!(picture.len(), 82580);
 }

@@ -8,7 +8,7 @@ use ease_client::{build_client, Action, ViewAction};
 use ease_client_backend::Backend;
 use ease_client_shared::backends::{
     app::ArgInitializeApp, encode_message_payload, generated::Code, player::PlayerDelegateEvent,
-    MessagePayload,
+    storage::DataSourceKey, MessagePayload,
 };
 use misty_vm::{AppPods, AsyncRuntime, IAsyncRuntimeAdapter, LocalBoxFuture};
 use once_cell::sync::Lazy;
@@ -191,6 +191,29 @@ pub fn api_backend_play_previous() {
 }
 
 #[uniffi::export]
+pub fn api_flush_backend_spawned_local() {
+    let _guard = RT.enter();
+    if let Some(backend) = BACKEND.try_backend() {
+        backend.flush_spawned_locals();
+    }
+}
+
+#[uniffi::export]
+pub async fn api_load_asset(key: DataSourceKey) -> Option<Vec<u8>> {
+    RT.spawn(async move {
+        if let Some(backend) = BACKEND.try_backend() {
+            let file = backend.load_asset(key).await;
+            if let Ok(Some(file)) = file {
+                return file.bytes().await.ok().map(|v| v.to_vec());
+            }
+        }
+        None
+    })
+    .await
+    .unwrap()
+}
+
+#[uniffi::export]
 pub fn api_build_client(
     permission: Arc<dyn IPermissionServiceForeign>,
     router: Arc<dyn IRouterServiceForeign>,
@@ -241,13 +264,5 @@ pub fn api_flush_spawned_locals(handle: u64) {
     let client = CLIENTS.try_get(handle);
     if let Some(client) = client {
         client.flush_spawned();
-    }
-}
-
-#[uniffi::export]
-pub fn api_flush_backend_spawned_local() {
-    let _guard = RT.enter();
-    if let Some(backend) = BACKEND.try_backend() {
-        backend.flush_spawned_locals();
     }
 }

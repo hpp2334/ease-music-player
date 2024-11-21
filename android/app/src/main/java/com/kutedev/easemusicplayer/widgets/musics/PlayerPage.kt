@@ -71,9 +71,9 @@ import uniffi.ease_client.MusicControlAction
 import uniffi.ease_client.MusicControlWidget
 import uniffi.ease_client.MusicDetailWidget
 import uniffi.ease_client.MusicLyricWidget
-import uniffi.ease_client.TimeToPauseWidget
 import uniffi.ease_client.VLyricLine
 import uniffi.ease_client.ViewAction
+import uniffi.ease_client_shared.DataSourceKey
 import uniffi.ease_client_shared.LyricLoadState
 import uniffi.ease_client_shared.PlayMode
 import kotlin.math.absoluteValue
@@ -254,7 +254,7 @@ private fun MusicSlider(
 
 
 @Composable
-private fun CoverImage(url: String) {
+private fun CoverImage(dataSourceKey: DataSourceKey?) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -270,7 +270,7 @@ private fun CoverImage(url: String) {
                 )
                 .clip(RoundedCornerShape(20.dp))
                 .size(300.dp),
-            coverUrl = url,
+            coverDataSourceKey = dataSourceKey,
         )
     }
 }
@@ -383,9 +383,9 @@ private fun MusicLyric(
 private fun MusicPlayerBody(
     onPrev: () -> Unit,
     onNext: () -> Unit,
-    cover: String,
-    prevCover: String,
-    nextCover: String,
+    cover: DataSourceKey?,
+    prevCover: DataSourceKey?,
+    nextCover: DataSourceKey?,
     canPrev: Boolean,
     canNext: Boolean,
     lyricIndex: Int,
@@ -483,7 +483,7 @@ private fun MusicPlayerBody(
                         .offset(x = -widgetWidthDp + deltaDp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CoverImage(url = prevCover)
+                    CoverImage(dataSourceKey = prevCover)
                 }
             }
             if (canNext) {
@@ -492,7 +492,7 @@ private fun MusicPlayerBody(
                         .offset(x = widgetWidthDp + deltaDp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CoverImage(url = nextCover)
+                    CoverImage(dataSourceKey = nextCover)
                 }
             }
         }
@@ -502,7 +502,7 @@ private fun MusicPlayerBody(
             contentAlignment = Alignment.Center,
         ) {
             if (!showLyric) {
-                CoverImage(url = cover)
+                CoverImage(dataSourceKey = cover)
             } else {
                 MusicLyric(
                     lyricIndex = lyricIndex,
@@ -761,9 +761,9 @@ private fun MusicPlayerBodyPreview() {
                 },
                 onNext = {
                 },
-                cover = "",
-                prevCover = "",
-                nextCover = "",
+                cover = null,
+                prevCover = null,
+                nextCover = null,
                 canPrev = canPrev,
                 canNext = canNext,
                 lyricIndex = 0,

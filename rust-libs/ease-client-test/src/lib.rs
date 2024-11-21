@@ -14,7 +14,7 @@ use ease_client_backend::Backend;
 use ease_client_shared::backends::app::ArgInitializeApp;
 use ease_client_shared::backends::music::MusicId;
 use ease_client_shared::backends::playlist::{CreatePlaylistMode, PlaylistId};
-use ease_client_shared::backends::storage::{StorageId, StorageType};
+use ease_client_shared::backends::storage::{DataSourceKey, StorageId, StorageType};
 use ease_client_shared::backends::MessagePayload;
 use event_loop::EventLoop;
 use fake_permission::FakePermissionService;
@@ -334,6 +334,15 @@ impl TestApp {
 
     pub async fn load_resource(&self, url: impl ToString) -> Vec<u8> {
         self.server.load_resource(url).await
+    }
+
+    pub async fn load_resource_by_key(&self, key: DataSourceKey) -> Vec<u8> {
+        let v = self.backend.load_asset(key.into()).await.unwrap();
+        if let Some(v) = v {
+            v.bytes().await.unwrap().to_vec()
+        } else {
+            Default::default()
+        }
     }
 
     async fn wait(&self, mut ms: u64) {

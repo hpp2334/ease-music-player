@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     music::{MusicAbstract, MusicId},
     playlist::PlaylistId,
+    storage::DataSourceKey,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -21,9 +22,9 @@ pub struct PlayerCurrentPlaying {
     pub mode: PlayMode,
     pub can_prev: bool,
     pub can_next: bool,
-    pub cover: String,
-    pub prev_cover: String,
-    pub next_cover: String,
+    pub cover: Option<DataSourceKey>,
+    pub prev_cover: Option<DataSourceKey>,
+    pub next_cover: Option<DataSourceKey>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]

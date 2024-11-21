@@ -4,7 +4,7 @@ use ease_client_shared::backends::{
     connector::ConnectorAction,
     music::{LyricLoadState, Music, MusicAbstract, MusicId, MusicLyric, MusicMeta},
     music_duration::MusicDuration,
-    storage::StorageEntryLoc,
+    storage::{DataSourceKey, StorageEntryLoc},
 };
 
 use crate::{
@@ -91,19 +91,19 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
 }
 
 pub(crate) fn build_music_abstract(cx: &Arc<BackendContext>, model: MusicModel) -> MusicAbstract {
-    let cover_url = if model
+    let cover = if model
         .cover
         .as_ref()
         .map(|v| !v.is_empty())
         .unwrap_or_default()
     {
-        get_serve_cover_url_from_music_id(&cx, model.id)
+        Some(DataSourceKey::Cover { id: model.id })
     } else {
         Default::default()
     };
 
     MusicAbstract {
-        cover_url,
+        cover,
         meta: build_music_meta(model),
     }
 }
@@ -200,17 +200,17 @@ pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<
     }
 
     let lyric: Option<MusicLyric> = load_lyric(&cx, lyric_loc, using_fallback).await;
-    let cover_url = if model.cover.unwrap_or_default().is_empty() {
+    let cover = if model.cover.unwrap_or_default().is_empty() {
         Default::default()
     } else {
-        get_serve_cover_url_from_music_id(&cx, model.id)
+        Some(DataSourceKey::Cover { id: model.id })
     };
 
     let music: Music = Music {
         meta,
         loc,
         url,
-        cover_url,
+        cover,
         lyric,
     };
     Ok(Some(music))

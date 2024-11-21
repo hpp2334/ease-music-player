@@ -625,18 +625,18 @@ async fn music_cover_1() {
     app.dispatch_click(PlaylistDetailWidget::Music { id: a_music_id });
     app.wait_network().await;
     let state = app.latest_state().current_music.unwrap();
-    let cover_url = state.cover.clone();
-    let picture = app.load_resource(&cover_url).await;
+    let cover = state.cover.clone().unwrap();
+    let picture = app.load_resource_by_key(cover).await;
     assert_eq!(picture.len(), 15025);
 
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
-    let cover_url = state.playlist_list[0].cover_url.clone();
-    let picture = app.load_resource(&cover_url).await;
+    let cover = state.playlist_list[0].cover.clone().unwrap();
+    let picture = app.load_resource_by_key(cover).await;
     assert_eq!(picture.len(), 15025);
 
     let state = app.latest_state().current_playlist.unwrap();
-    let cover_url = state.cover_url.clone();
-    let picture = app.load_resource(&cover_url).await;
+    let cover = state.cover.clone().unwrap();
+    let picture = app.load_resource_by_key(cover).await;
     assert_eq!(picture.len(), 15025);
 }

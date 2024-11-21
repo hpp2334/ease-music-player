@@ -95,38 +95,10 @@ impl ViewStateVM {
         vsb!(self, cx, root, self.time_to_pause, time_to_pause_vs);
         vsb!(self, cx, root, self.current_music, current_music_lyric_vs);
         // Playlist
-        vsb!(
-            self,
-            cx,
-            root,
-            self.all_playlist,
-            self.connector,
-            playlist_list_vs
-        );
-        vsb!(
-            self,
-            cx,
-            root,
-            self.current_playlist,
-            self.connector,
-            current_playlist_vs
-        );
-        vsb!(
-            self,
-            cx,
-            root,
-            self.edit_playlist,
-            self.connector,
-            edit_playlist_vs
-        );
-        vsb!(
-            self,
-            cx,
-            root,
-            self.create_playlist,
-            self.connector,
-            create_playlist_vs
-        );
+        vsb!(self, cx, root, self.all_playlist, playlist_list_vs);
+        vsb!(self, cx, root, self.current_playlist, current_playlist_vs);
+        vsb!(self, cx, root, self.edit_playlist, edit_playlist_vs);
+        vsb!(self, cx, root, self.create_playlist, create_playlist_vs);
         // Main
         vsb!(self, cx, root, self.router, main_vs);
         // Storage

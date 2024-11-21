@@ -169,7 +169,7 @@ private fun FullImportBlock(
                 text = stringResource(R.string.playlists_dialog_cover),
             )
             ImportCover(
-                url = state.picture,
+                dataSourceKey = state.picture,
                 onAdd = {
                     bridge.dispatchClick(PlaylistCreateWidget.Cover);
                 },
@@ -317,7 +317,7 @@ fun EditPlaylistsDialog(
                 text = stringResource(R.string.playlists_dialog_cover),
             )
             ImportCover(
-                url = state.picture,
+                dataSourceKey = state.picture,
                 onAdd = {
                     bridge.dispatchClick(PlaylistEditWidget.Cover);
                 },

@@ -40,7 +40,7 @@ val DefaultCurrentPlaylistState =
                 items = emptyList(),
                 title = "",
                 duration = "",
-                coverUrl = ""
+                cover = null,
         )
 val DefaultCurrentMusicState =
         VCurrentMusicState(
@@ -53,9 +53,9 @@ val DefaultCurrentMusicState =
                 canChangePosition = false,
                 canPlayNext = false,
                 canPlayPrevious = false,
-                previousCover = "",
-                nextCover = "",
-                cover = "",
+                previousCover = null,
+                nextCover = null,
+                cover = null,
                 playMode = PlayMode.SINGLE,
                 playing = false,
                 lyricIndex = 0,
@@ -102,14 +102,14 @@ val DefaultCreatePlaylistState =
         VCreatePlaylistState(
                 mode = CreatePlaylistMode.FULL,
                 name = "",
-                picture = "",
+                picture = null,
                 musicCount = 0u,
                 recommendPlaylistNames = emptyList(),
                 fullImported = false,
                 modalOpen = false,
                 canSubmit = false
         )
-val DefaultEditPlaylistState = VEditPlaylistState(name = "", picture = "", modalOpen = false)
+val DefaultEditPlaylistState = VEditPlaylistState(name = "", picture = null, modalOpen = false)
 val DefaultCurrentMusicLyricState =
         VCurrentMusicLyricState(lyricLines = listOf(), loadState = LyricLoadState.LOADING)
 

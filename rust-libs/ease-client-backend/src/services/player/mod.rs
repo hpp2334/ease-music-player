@@ -5,6 +5,7 @@ use ease_client_shared::backends::{
     music::{MusicAbstract, MusicId},
     player::{ConnectorPlayerAction, PlayMode, PlayerCurrentPlaying},
     playlist::PlaylistId,
+    storage::DataSourceKey,
 };
 
 use crate::{
@@ -19,7 +20,7 @@ pub struct MusicToPlay {
     pub id: MusicId,
     pub title: String,
     pub url: String,
-    pub cover_url: String,
+    pub has_cover: bool,
 }
 
 pub trait IPlayerDelegate: Send + Sync + 'static {
@@ -74,16 +75,16 @@ impl PlayerState {
         }
     }
 
-    pub fn cover(&self) -> String {
+    pub fn cover(&self) -> Option<DataSourceKey> {
         if let Some(PlayerMedia { queue, index, .. }) = self.current.read().unwrap().as_ref() {
             if let Some(music) = queue.get(*index) {
-                return music.cover_url.clone();
+                return music.cover.clone();
             }
         }
-        String::new()
+        Default::default()
     }
 
-    pub fn prev_cover(&self) -> String {
+    pub fn prev_cover(&self) -> Option<DataSourceKey> {
         if let Some(PlayerMedia { queue, index, .. }) = self.current.read().unwrap().as_ref() {
             if self.can_play_previous() {
                 let prev_index = if *index == 0 {
@@ -92,14 +93,14 @@ impl PlayerState {
                     *index - 1
                 };
                 if let Some(music) = queue.get(prev_index) {
-                    return music.cover_url.clone();
+                    return music.cover.clone();
                 }
             }
         }
-        String::new()
+        Default::default()
     }
 
-    pub fn next_cover(&self) -> String {
+    pub fn next_cover(&self) -> Option<DataSourceKey> {
         if let Some(PlayerMedia { queue, index, .. }) = self.current.read().unwrap().as_ref() {
             if self.can_play_next() {
                 let next_index = if *index + 1 >= queue.len() {
@@ -108,11 +109,11 @@ impl PlayerState {
                     *index + 1
                 };
                 if let Some(music) = queue.get(next_index) {
-                    return music.cover_url.clone();
+                    return music.cover.clone();
                 }
             }
         }
-        String::new()
+        Default::default()
     }
 }
 
@@ -152,7 +153,7 @@ pub(crate) async fn player_request_play(
             id: to_play.id,
             title: music.title().to_string(),
             url,
-            cover_url: music.cover_url,
+            has_cover: music.cover.is_some(),
         };
         item
     };
@@ -294,7 +295,7 @@ pub(crate) fn get_player_current(
         can_next: player_state.can_play_next(),
         prev_cover: player_state.prev_cover(),
         next_cover: player_state.next_cover(),
-        cover: state.queue[state.index].cover_url.clone(),
+        cover: state.queue[state.index].cover.clone(),
     };
     Ok(Some(current))
 }

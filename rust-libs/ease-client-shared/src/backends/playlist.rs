@@ -72,7 +72,7 @@ impl Playlist {
     pub fn cover(&self) -> &Option<StorageEntryLoc> {
         &self.abstr.cover()
     }
-    pub fn show_cover_url(&self) -> &Option<DataSourceKey> {
+    pub fn show_cover(&self) -> &Option<DataSourceKey> {
         self.abstr.show_cover()
     }
     pub fn duration(&self) -> &Option<MusicDuration> {

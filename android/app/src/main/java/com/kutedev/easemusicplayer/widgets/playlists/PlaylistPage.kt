@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.widgets.playlists
 
+import EaseImage
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.DecayAnimationSpec
 import androidx.compose.animation.core.tween
@@ -55,7 +56,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.CustomAnchoredDraggableState
@@ -75,6 +75,7 @@ import uniffi.ease_client.PlaylistDetailWidget
 import uniffi.ease_client.RoutesKey
 import uniffi.ease_client.VCurrentMusicState
 import uniffi.ease_client.VPlaylistMusicItem
+import uniffi.ease_client_shared.DataSourceKey
 import uniffi.ease_client_shared.MusicId
 import kotlin.math.roundToInt
 
@@ -104,7 +105,7 @@ private fun RemovePlaylistDialog(
 
 @Composable
 private fun PlaylistHeader(
-    coverUrl: String,
+    cover: DataSourceKey?,
     title: String,
     duration: String,
     items: List<VPlaylistMusicItem>,
@@ -123,7 +124,7 @@ private fun PlaylistHeader(
             .height(157.dp)
             .fillMaxWidth()
     ) {
-        if (coverUrl.isEmpty()) {
+        if (cover == null) {
             Image(
                 modifier = Modifier
                     .fillMaxSize(),
@@ -135,11 +136,10 @@ private fun PlaylistHeader(
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
-                AsyncImage(
+                EaseImage(
                     modifier = Modifier
                         .fillMaxSize(),
-                    model = coverUrl,
-                    contentDescription = null,
+                    dataSourceKey = cover,
                     contentScale = ContentScale.FillWidth
                 )
                 Box(
@@ -451,7 +451,7 @@ fun PlaylistPage(
     ) {
         Column {
             PlaylistHeader(
-                coverUrl = state.coverUrl,
+                cover = state.cover,
                 title = state.title,
                 duration = state.duration,
                 items = items,

@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.widgets.playlists
 
+import EaseImage
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -34,7 +35,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
@@ -127,7 +127,7 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
             Box(
                 modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant).size(136.dp)
             ) {
-                if (playlist.coverUrl.isEmpty()) {
+                if (playlist.cover == null) {
                     Image(
                         modifier = Modifier.fillMaxSize(),
                         painter = painterResource(id = R.drawable.cover_default_image),
@@ -135,10 +135,9 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
                         contentScale = ContentScale.FillWidth
                     )
                 } else {
-                    AsyncImage(
+                    EaseImage(
                         modifier = Modifier.fillMaxSize(),
-                        model = playlist.coverUrl,
-                        contentDescription = null,
+                        dataSourceKey = playlist.cover!!,
                         contentScale = ContentScale.FillWidth
                     )
                 }

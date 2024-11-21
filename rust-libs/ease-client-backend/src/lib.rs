@@ -15,7 +15,7 @@ use ease_client_shared::backends::{
     app::ArgInitializeApp, connector::IConnectorNotifier, message::MessagePayload,
     storage::DataSourceKey,
 };
-use ease_remote_storage::StreamFile;
+pub use ease_remote_storage::StreamFile;
 use error::BResult;
 use misty_async::{AsyncRuntime, IOnAsyncRuntime};
 pub use services::player::{IPlayerDelegate, MusicToPlay};
@@ -74,7 +74,6 @@ impl Backend {
     }
 
     pub async fn load_asset(&self, key: DataSourceKey) -> BResult<Option<StreamFile>> {
-        let cx = self.cx.clone();
         load_asset(&self.cx, key).await
     }
 

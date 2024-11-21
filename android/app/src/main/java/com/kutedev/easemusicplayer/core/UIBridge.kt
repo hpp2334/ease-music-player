@@ -8,11 +8,16 @@ import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.result.ActivityResultLauncher
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.navigation.NavHostController
 import com.google.common.util.concurrent.MoreExecutors
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import uniffi.ease_client_android.IPermissionServiceForeign
 import uniffi.ease_client_android.IRouterServiceForeign
 import uniffi.ease_client_android.IToastServiceForeign
@@ -40,8 +45,10 @@ import uniffi.ease_client_android.IAsyncAdapterForeign
 import uniffi.ease_client_android.apiBuildClient
 import uniffi.ease_client_android.apiDestroyClient
 import uniffi.ease_client_android.apiEmitViewAction
+import uniffi.ease_client_android.apiLoadAsset
 import uniffi.ease_client_android.apiStartClient
 import uniffi.ease_client_shared.ArgInitializeApp
+import uniffi.ease_client_shared.DataSourceKey
 
 
 interface IOnNotifyView {
@@ -126,7 +133,45 @@ private class PermissionService : IPermissionServiceForeign {
             this.requestPermissionLauncher?.launch(READ_EXTERNAL_STORAGE)
         }
     }
+}
 
+class BitmapDataSources {
+    class K(key: DataSourceKey) {
+        private val _key = key;
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is K) return false
+
+            if (this._key is DataSourceKey.Music && other._key is DataSourceKey.Music) {
+                return this._key.id == other._key.id
+            }
+            if (this._key is DataSourceKey.Cover && other._key is DataSourceKey.Cover) {
+                return this._key.id == other._key.id
+            }
+            if (this._key is DataSourceKey.AnyEntry && other._key is DataSourceKey.AnyEntry) {
+                return this._key.entry.storageId == other._key.entry.storageId && this._key.entry.path == other._key.entry.path;
+            }
+            return false;
+        }
+    }
+
+    private val _map = HashMap<K, ImageBitmap?>()
+
+    suspend fun load(key: DataSourceKey): ImageBitmap? {
+        val cached = this._map[K(key)]
+        if (cached != null) {
+            return null
+        }
+
+        val data = apiLoadAsset(key)
+        val decoded = data?.let {
+            val bitmap = android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)
+            bitmap?.asImageBitmap()
+        }
+        this._map[K(key)] = decoded
+        return decoded
+    }
 }
 
 class UIBridge {
@@ -141,6 +186,7 @@ class UIBridge {
     private val _permissionService = PermissionService()
     private var _playerController: MediaController? = null
     private var _executingAction = false
+    val bitmapDataSources = BitmapDataSources()
 
     fun onBackendConnected() {
         apiStartClient(this._handle)

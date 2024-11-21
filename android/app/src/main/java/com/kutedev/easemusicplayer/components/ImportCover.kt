@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.components
 
+import EaseImage
 import android.provider.CalendarContract.Colors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,16 +30,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import com.kutedev.easemusicplayer.R
+import uniffi.ease_client_shared.DataSourceKey
 
 @Composable
 fun ImportCover(
-    url: String,
+    dataSourceKey: DataSourceKey?,
     onAdd: () -> Unit,
     onRemove: () -> Unit,
 ) {
-    if (url.isNotEmpty()) {
+    if (dataSourceKey != null) {
         Box(
             modifier = Modifier
                 .size(90.dp)
@@ -50,9 +51,8 @@ fun ImportCover(
                     .width(80.dp)
                     .height(80.dp)
             ) {
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
+                EaseImage(
+                    dataSourceKey = dataSourceKey,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.FillWidth
                 )
@@ -104,27 +104,5 @@ fun ImportCover(
                 )
             }
         }
-    }
-}
-
-@Preview
-@Composable
-private fun ImportCoverPreview() {
-    var url by remember { mutableStateOf("") }
-
-    Box(
-        modifier = Modifier
-            .offset(20.dp, 20.dp)
-            .size(300.dp),
-    ) {
-        ImportCover(
-            url = url,
-            onAdd = {
-                url = "https://upload.wikimedia.org/wikipedia/commons/b/b6/WikiWiki.jpg"
-            },
-            onRemove = {
-                url = ""
-            }
-        )
     }
 }

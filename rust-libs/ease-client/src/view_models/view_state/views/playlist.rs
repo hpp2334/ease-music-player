@@ -1,6 +1,7 @@
 use ease_client_shared::backends::{
     music::MusicId,
     playlist::{CreatePlaylistMode, PlaylistId},
+    storage::DataSourceKey,
 };
 use serde::Serialize;
 
@@ -22,7 +23,7 @@ pub struct VPlaylistAbstractItem {
     pub title: String,
     pub count: i32,
     pub duration: String,
-    pub cover_url: String,
+    pub cover: Option<DataSourceKey>,
 }
 
 #[derive(Debug, Clone, Serialize, uniffi::Record)]
@@ -43,12 +44,12 @@ pub struct VCurrentPlaylistState {
     pub items: Vec<VPlaylistMusicItem>,
     pub title: String,
     pub duration: String,
-    pub cover_url: String,
+    pub cover: Option<DataSourceKey>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, uniffi::Record)]
 pub struct VEditPlaylistState {
-    pub picture: String,
+    pub picture: Option<DataSourceKey>,
     pub name: String,
     pub modal_open: bool,
 }
@@ -57,7 +58,7 @@ pub struct VEditPlaylistState {
 pub struct VCreatePlaylistState {
     pub mode: CreatePlaylistMode,
     pub name: String,
-    pub picture: String,
+    pub picture: Option<DataSourceKey>,
     pub music_count: u32,
     pub recommend_playlist_names: Vec<String>,
     pub full_imported: bool,
@@ -65,10 +66,7 @@ pub struct VCreatePlaylistState {
     pub can_submit: bool,
 }
 
-pub(crate) fn playlist_list_vs(
-    (state, connector_state): (&AllPlaylistState, &ConnectorState),
-    root: &mut RootViewModelState,
-) {
+pub(crate) fn playlist_list_vs((state): (&AllPlaylistState), root: &mut RootViewModelState) {
     let mut list: Vec<_> = { state.playlists.iter().map(|item| item.clone()).collect() };
     list.sort_by(|lhs, rhs| {
         rhs.created_time()
@@ -85,7 +83,7 @@ pub(crate) fn playlist_list_vs(
             title: playlist.title().to_string(),
             count: playlist.music_count as i32,
             duration: get_display_duration(&duration),
-            cover_url: connector_state.serve_asset_url_opt_key(playlist.show_cover().clone()),
+            cover: playlist.show_cover().clone(),
         });
     }
 
@@ -95,7 +93,7 @@ pub(crate) fn playlist_list_vs(
 }
 
 pub(crate) fn current_playlist_vs(
-    (current_playlist, connector_state): (&CurrentPlaylistState, &ConnectorState),
+    current_playlist: &CurrentPlaylistState,
     root: &mut RootViewModelState,
 ) {
     let playlist = current_playlist.playlist.clone();
@@ -123,35 +121,37 @@ pub(crate) fn current_playlist_vs(
         items,
         title: playlist.title().to_string(),
         duration: get_display_duration(&playlist.duration()),
-        cover_url: connector_state.serve_asset_url_opt_key(playlist.show_cover_url().clone()),
+        cover: playlist.show_cover().clone(),
     };
 
     root.current_playlist = Some(current_playlist_state);
 }
 
-pub(crate) fn edit_playlist_vs(
-    (edit_playlist, connector_state): (&EditPlaylistState, &ConnectorState),
-    root: &mut RootViewModelState,
-) {
+pub(crate) fn edit_playlist_vs(edit_playlist: &EditPlaylistState, root: &mut RootViewModelState) {
     root.edit_playlist = Some(VEditPlaylistState {
-        picture: connector_state.serve_asset_url_opt(edit_playlist.cover.clone()),
+        picture: edit_playlist
+            .cover
+            .clone()
+            .map(|loc| DataSourceKey::AnyEntry { entry: loc }),
         name: edit_playlist.playlist_name.clone(),
         modal_open: edit_playlist.modal_open,
     });
 }
 
 pub(crate) fn create_playlist_vs(
-    (create_playlist, connector_state): (&CreatePlaylistState, &ConnectorState),
+    create_playlist: &CreatePlaylistState,
     root: &mut RootViewModelState,
 ) {
     let mode = create_playlist.mode;
-    let cover = connector_state.serve_asset_url_opt(create_playlist.cover.clone());
+    let cover = create_playlist.cover.clone();
     let music_count = create_playlist.entries.len();
 
     root.create_playlist = Some(VCreatePlaylistState {
         mode,
         music_count: music_count as u32,
-        picture: cover,
+        picture: cover
+            .clone()
+            .map(|loc| DataSourceKey::AnyEntry { entry: loc }),
         recommend_playlist_names: create_playlist.recommend_playlist_names.clone(),
         name: decode_component_or_origin(create_playlist.playlist_name.clone()),
         full_imported: create_playlist.mode == CreatePlaylistMode::Full

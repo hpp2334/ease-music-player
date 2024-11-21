@@ -1,10 +1,11 @@
-
 use serde::{Deserialize, Serialize};
 
 use crate::define_id;
 
 use super::{
-    lyric::Lyrics, music_duration::MusicDuration, storage::StorageEntryLoc,
+    lyric::Lyrics,
+    music_duration::MusicDuration,
+    storage::{DataSourceKey, StorageEntryLoc},
 };
 
 define_id!(MusicId);
@@ -19,7 +20,7 @@ pub struct MusicMeta {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MusicAbstract {
     pub meta: MusicMeta,
-    pub cover_url: String,
+    pub cover: Option<DataSourceKey>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
@@ -43,7 +44,7 @@ pub struct Music {
     pub meta: MusicMeta,
     pub loc: StorageEntryLoc,
     pub url: String,
-    pub cover_url: String,
+    pub cover: Option<DataSourceKey>,
     pub lyric: Option<MusicLyric>,
 }
 
@@ -60,7 +61,7 @@ impl Music {
     pub fn music_abstract(&self) -> MusicAbstract {
         MusicAbstract {
             meta: self.meta.clone(),
-            cover_url: self.cover_url.clone(),
+            cover: self.cover.clone(),
         }
     }
 }

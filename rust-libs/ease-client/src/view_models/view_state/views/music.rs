@@ -2,6 +2,7 @@ use ease_client_shared::backends::{
     music::{LyricLoadState, MusicId},
     music_duration::MusicDuration,
     player::PlayMode,
+    storage::DataSourceKey,
 };
 use serde::Serialize;
 
@@ -23,9 +24,9 @@ pub struct VCurrentMusicState {
     pub can_change_position: bool,
     pub can_play_next: bool,
     pub can_play_previous: bool,
-    pub previous_cover: String,
-    pub next_cover: String,
-    pub cover: String,
+    pub previous_cover: Option<DataSourceKey>,
+    pub next_cover: Option<DataSourceKey>,
+    pub cover: Option<DataSourceKey>,
     pub play_mode: PlayMode,
     pub playing: bool,
     pub lyric_index: i32,
