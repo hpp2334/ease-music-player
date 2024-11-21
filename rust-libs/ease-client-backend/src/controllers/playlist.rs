@@ -30,13 +30,6 @@ use crate::{
     },
 };
 
-pub(crate) async fn cr_get_all_playlist_abstracts(
-    cx: &BackendContext,
-    _arg: (),
-) -> BResult<Vec<PlaylistAbstract>> {
-    get_all_playlist_abstracts(cx).await
-}
-
 pub(crate) async fn cr_get_playlist(
     cx: &BackendContext,
     arg: PlaylistId,

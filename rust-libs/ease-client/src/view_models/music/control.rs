@@ -8,7 +8,10 @@ use misty_vm::{
     AppBuilderContext, AsyncTaskPod, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext,
 };
 
-use super::{common::MusicCommonVM, lyric::MusicLyricVM, state::CurrentMusicState};
+use super::{
+    common::MusicCommonVM, lyric::MusicLyricVM, state::CurrentMusicState,
+    time_to_pause::TimeToPauseVM,
+};
 use crate::{
     actions::{event::ViewAction, Widget},
     view_models::main::router::RouterVM,
@@ -28,6 +31,7 @@ pub enum MusicControlWidget {
     PlayNext,
     Stop,
     Playmode,
+    TimeToPause,
 }
 
 #[derive(Debug, uniffi::Enum)]
@@ -241,6 +245,9 @@ impl ViewModel for MusicControlVM {
                         }
                         MusicControlWidget::Playmode => {
                             self.update_playmode_to_next(cx)?;
+                        }
+                        MusicControlWidget::TimeToPause => {
+                            TimeToPauseVM::of(cx).open(cx);
                         }
                     },
                     _ => {}

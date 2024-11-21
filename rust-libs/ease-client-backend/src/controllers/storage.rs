@@ -32,10 +32,6 @@ pub async fn ccu_upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> B
     Ok(())
 }
 
-pub async fn cr_list_storage(cx: &BackendContext, _arg: ()) -> BResult<Vec<Storage>> {
-    list_storage(cx).await
-}
-
 pub async fn cr_get_storage(cx: &BackendContext, id: StorageId) -> BResult<Option<Storage>> {
     let conn = get_conn(&cx)?;
     let model = db_load_storage(conn.get_ref(), id)?;

@@ -3,7 +3,6 @@ package com.kutedev.easemusicplayer.widgets.musics
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
@@ -72,6 +71,7 @@ import uniffi.ease_client.MusicControlAction
 import uniffi.ease_client.MusicControlWidget
 import uniffi.ease_client.MusicDetailWidget
 import uniffi.ease_client.MusicLyricWidget
+import uniffi.ease_client.TimeToPauseWidget
 import uniffi.ease_client.VLyricLine
 import uniffi.ease_client.ViewAction
 import uniffi.ease_client_shared.LyricLoadState
@@ -522,7 +522,8 @@ private fun MusicPanel(
 ) {
     val bridge = UIBridgeController.current
     val state by evm.currentMusicState.collectAsState()
-    var isOpen by remember { mutableStateOf(false) }
+    val timeToPauseState by evm.timeToPauseState.collectAsState()
+    val isTimeToPauseOpen = timeToPauseState.enabled
     val modeDrawable = when (state.playMode) {
         PlayMode.SINGLE -> R.drawable.icon_mode_one
         PlayMode.SINGLE_LOOP -> R.drawable.icon_mode_repeatone
@@ -536,9 +537,9 @@ private fun MusicPanel(
     ) {
         EaseIconButton(
             sizeType = EaseIconButtonSize.Medium,
-            buttonType = if (isOpen) { EaseIconButtonType.Primary } else { EaseIconButtonType.Default },
+            buttonType = if (isTimeToPauseOpen) { EaseIconButtonType.Primary } else { EaseIconButtonType.Default },
             overrideColors = EaseIconButtonColors(
-                iconTint = if (isOpen) {
+                iconTint = if (isTimeToPauseOpen) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurface
@@ -547,7 +548,7 @@ private fun MusicPanel(
             ),
             painter = painterResource(id = R.drawable.icon_timelapse),
             onClick = {
-                isOpen = true;
+                bridge.dispatchClick(MusicControlWidget.TIME_TO_PAUSE)
             }
         )
         EaseIconButton(
