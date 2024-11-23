@@ -190,9 +190,11 @@ private fun MusicSlider(
                 .fillMaxWidth()
                 .height(sliderContainerHeight)
                 .onSizeChanged { size ->
-                    sliderWidth = size.width;
+                    if (sliderWidth != size.width) {
+                        sliderWidth = size.width;
+                    }
                 }
-                .pointerInput(Unit) {
+                .pointerInput(totalDurationMS, sliderWidth) {
                     detectTapGestures { offset ->
                         var nextMS = (offset.x.toDouble() / sliderWidth.toDouble() * totalDurationMS.toDouble()).toLong()
                         nextMS = nextMS.coerceIn(0L, totalDurationMS.toLong())

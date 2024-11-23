@@ -13,13 +13,12 @@ use crate::{
     error::{BError, BResult},
 };
 
-use super::{playlist::get_playlist, server::loc::get_serve_url_from_music_id};
+use super::playlist::get_playlist;
 
 #[derive(Debug, uniffi::Record)]
 pub struct MusicToPlay {
     pub id: MusicId,
     pub title: String,
-    pub url: String,
     pub has_cover: bool,
 }
 
@@ -31,7 +30,7 @@ pub trait IPlayerDelegate: Send + Sync + 'static {
     fn seek(&self, arg: u64);
     fn set_music_url(&self, item: MusicToPlay);
     fn get_current_duration_s(&self) -> u64;
-    fn request_total_duration(&self, id: MusicId, url: String);
+    fn request_total_duration(&self, id: MusicId);
 }
 
 #[derive(Clone)]
@@ -148,11 +147,9 @@ pub(crate) async fn player_request_play(
         *state = Some(to_play.clone());
     }
     let item = {
-        let url = get_serve_url_from_music_id(cx, to_play.id);
         let item = MusicToPlay {
             id: to_play.id,
             title: music.title().to_string(),
-            url,
             has_cover: music.cover.is_some(),
         };
         item

@@ -125,30 +125,6 @@ impl StreamFile {
         }
     }
 
-    pub async fn chunk_small(self) -> StorageBackendResult<Bytes> {
-        const N: usize = 6_000_000;
-        match self.inner {
-            StreamFileInner::Response(mut response) => {
-                let mut ret: Vec<u8> = Default::default();
-                while let Some(buf) = response.chunk().await? {
-                    ret.append(&mut buf.to_vec());
-
-                    if ret.len() >= N {
-                        break;
-                    }
-                }
-                return Ok(Bytes::from(ret));
-            }
-            StreamFileInner::Total(buf) => {
-                return if buf.len() < N {
-                    Ok(buf)
-                } else {
-                    Ok(Bytes::copy_from_slice(&buf[0..N]))
-                }
-            }
-        }
-    }
-
     pub async fn bytes(self) -> StorageBackendResult<Bytes> {
         match self.inner {
             StreamFileInner::Response(response) => Ok(response.bytes().await?),

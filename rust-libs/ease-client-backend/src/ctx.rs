@@ -11,13 +11,15 @@ use std::{
 use ease_client_shared::backends::connector::{ConnectorAction, IConnectorNotifier};
 use misty_async::AsyncRuntime;
 
-use crate::services::player::{IPlayerDelegate, PlayerState};
+use crate::services::{
+    player::{IPlayerDelegate, PlayerState},
+    server::AssetServer,
+};
 
 pub struct BackendContext {
     storage_path: RwLock<String>,
     app_document_dir: RwLock<String>,
     schema_version: AtomicU32,
-    server_port: AtomicU16,
     rt: Arc<AsyncRuntime>,
     player: Arc<dyn IPlayerDelegate>,
     player_state: Arc<PlayerState>,
@@ -32,7 +34,6 @@ impl Debug for BackendContext {
             .field("storage_path", &self.storage_path)
             .field("app_document_dir", &self.app_document_dir)
             .field("schema_version", &self.schema_version)
-            .field("server_port", &self.server_port)
             .finish()
     }
 }
@@ -43,7 +44,6 @@ impl BackendContext {
             storage_path: RwLock::new(String::new()),
             app_document_dir: RwLock::new(String::new()),
             schema_version: AtomicU32::new(0),
-            server_port: AtomicU16::new(0),
             rt,
             player_state: Default::default(),
             player,
@@ -105,15 +105,6 @@ impl BackendContext {
     pub fn get_schema_version(&self) -> u32 {
         self.schema_version
             .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub fn set_server_port(&self, v: u16) {
-        self.server_port
-            .store(v, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    pub fn get_server_port(&self) -> u16 {
-        self.server_port.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn notify(&self, payload: ConnectorAction) {

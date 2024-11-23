@@ -20,11 +20,7 @@ use crate::{
     },
 };
 
-use super::{
-    music::build_music_abstract,
-    server::loc::{get_serve_cover_url_from_music_id, get_serve_url_from_loc},
-    storage::to_opt_storage_entry,
-};
+use super::{music::build_music_abstract, storage::to_opt_storage_entry};
 
 fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<MusicDuration> {
     let mut sum: Duration = Default::default();

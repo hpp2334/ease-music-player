@@ -23,7 +23,7 @@ pub use fake_server::ReqInteceptor;
 use fake_server::*;
 use misty_vm::{AppPod, AsyncRuntime};
 use misty_vm_test::TestAsyncRuntimeAdapter;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use view_state::ViewStateServiceRef;
 
 mod backend_host;
@@ -121,7 +121,9 @@ impl TestApp {
         let backend_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
 
         let (tx, mut rx) = mpsc::channel::<MessagePayload>(10);
-        let player = FakeMusicPlayerRef::new(tx);
+        let (res_tx, mut res_rx) =
+            mpsc::channel::<(DataSourceKey, oneshot::Sender<Option<Vec<u8>>>)>(100);
+        let player = FakeMusicPlayerRef::new(tx, res_tx.clone());
         let backend = Arc::new(Backend::new(
             AsyncRuntime::new(backend_async_runtime_adapter.clone()),
             Arc::new(player.clone()),
@@ -134,6 +136,20 @@ impl TestApp {
             tokio::spawn(async move {
                 while let Some(v) = rx.recv().await {
                     backend.request(v).await.unwrap();
+                }
+            });
+        }
+        {
+            let backend = backend.clone();
+            tokio::spawn(async move {
+                while let Some((key, tx)) = res_rx.recv().await {
+                    let v = backend.asset_server().load(key.into()).await.unwrap();
+                    let bytes = if let Some(v) = v {
+                        Some(v.bytes().await.unwrap().to_vec())
+                    } else {
+                        None
+                    };
+                    tx.send(bytes).unwrap();
                 }
             });
         }
@@ -332,12 +348,8 @@ impl TestApp {
         self.server.set_inteceptor_req(v);
     }
 
-    pub async fn load_resource(&self, url: impl ToString) -> Vec<u8> {
-        self.server.load_resource(url).await
-    }
-
     pub async fn load_resource_by_key(&self, key: DataSourceKey) -> Vec<u8> {
-        let v = self.backend.load_asset(key.into()).await.unwrap();
+        let v = self.backend.asset_server().load(key.into()).await.unwrap();
         if let Some(v) = v {
             v.bytes().await.unwrap().to_vec()
         } else {

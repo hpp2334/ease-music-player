@@ -43,7 +43,6 @@ pub struct MusicLyric {
 pub struct Music {
     pub meta: MusicMeta,
     pub loc: StorageEntryLoc,
-    pub url: String,
     pub cover: Option<DataSourceKey>,
     pub lyric: Option<MusicLyric>,
 }

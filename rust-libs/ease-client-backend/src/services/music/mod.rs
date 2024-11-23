@@ -21,7 +21,6 @@ use super::{
     lyrics::parse_lrc,
     player::player_refresh_current,
     playlist::notify_all_playlist_abstracts,
-    server::loc::{get_serve_cover_url_from_music_id, get_serve_url_from_music_id},
     storage::{load_storage_entry_data, to_opt_storage_entry},
 };
 
@@ -177,7 +176,6 @@ pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<
 
     let model = model.unwrap();
     let meta = build_music_meta(model.clone());
-    let url = get_serve_url_from_music_id(&cx, meta.id);
     let loc = StorageEntryLoc {
         storage_id: model.storage_id,
         path: model.path,
@@ -209,7 +207,6 @@ pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<
     let music: Music = Music {
         meta,
         loc,
-        url,
         cover,
         lyric,
     };

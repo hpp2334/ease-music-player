@@ -18,23 +18,15 @@ use tracing::subscriber::set_global_default;
 
 use crate::{
     backend_host::BackendHost,
+    error::AndroidFfiError,
     foreigns::{
-        IAsyncAdapterForeign, IPermissionServiceForeign, IPlayerDelegateForeign,
-        IRouterServiceForeign, IToastServiceForeign, IViewStateServiceForeign,
-        PermissionServiceDelegate, PlayerDelegate, RouterServiceDelegate, ToastServiceDelegate,
-        ViewStateServiceDelegate,
+        AssetLoadDelegate, IAssetLoadDelegateForeign, IAsyncAdapterForeign,
+        IPermissionServiceForeign, IPlayerDelegateForeign, IRouterServiceForeign,
+        IToastServiceForeign, IViewStateServiceForeign, PermissionServiceDelegate, PlayerDelegate,
+        RouterServiceDelegate, ToastServiceDelegate, ViewStateServiceDelegate,
     },
+    inst::{BACKEND, CLIENTS, RT},
 };
-
-static BACKEND: Lazy<Arc<BackendHost>> = Lazy::new(|| BackendHost::new());
-static CLIENTS: Lazy<AppPods> = Lazy::new(|| AppPods::new());
-static RT: Lazy<Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap()
-});
 
 pub struct AsyncAdapterDelegate {
     inner: Arc<dyn IAsyncAdapterForeign>,
@@ -202,7 +194,7 @@ pub fn api_flush_backend_spawned_local() {
 pub async fn api_load_asset(key: DataSourceKey) -> Option<Vec<u8>> {
     RT.spawn(async move {
         if let Some(backend) = BACKEND.try_backend() {
-            let file = backend.load_asset(key).await;
+            let file = backend.asset_server().load(key).await;
             if let Ok(Some(file)) = file {
                 return file.bytes().await.ok().map(|v| v.to_vec());
             }
@@ -211,6 +203,28 @@ pub async fn api_load_asset(key: DataSourceKey) -> Option<Vec<u8>> {
     })
     .await
     .unwrap()
+}
+
+#[uniffi::export]
+pub fn api_open_asset(
+    key: DataSourceKey,
+    offset: u64,
+    listener: Arc<dyn IAssetLoadDelegateForeign>,
+) -> u64 {
+    let _guard = RT.enter();
+    let backend = BACKEND.backend();
+    backend
+        .asset_server()
+        .open(key, offset as usize, AssetLoadDelegate::new(listener))
+}
+
+#[uniffi::export]
+pub fn api_close_asset(id: u64) {
+    let _guard = RT.enter();
+    let backend = BACKEND.try_backend();
+    if let Some(backend) = backend {
+        backend.asset_server().close(id);
+    }
 }
 
 #[uniffi::export]

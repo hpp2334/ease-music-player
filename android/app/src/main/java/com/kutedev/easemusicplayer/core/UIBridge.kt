@@ -154,14 +154,22 @@ class BitmapDataSources {
             }
             return false;
         }
+
+        override fun hashCode(): Int {
+            return _key.hashCode()
+        }
     }
 
     private val _map = HashMap<K, ImageBitmap?>()
 
+    fun get(key: DataSourceKey): ImageBitmap? {
+        return this._map[K(key)]
+    }
+
     suspend fun load(key: DataSourceKey): ImageBitmap? {
         val cached = this._map[K(key)]
         if (cached != null) {
-            return null
+            return cached
         }
 
         val data = apiLoadAsset(key)

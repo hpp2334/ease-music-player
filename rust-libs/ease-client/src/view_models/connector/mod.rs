@@ -9,7 +9,6 @@ use ease_client_shared::backends::{
     playlist::*,
     storage::*,
 };
-use futures::{select, try_join};
 use misty_vm::{
     AppBuilderContext, AsyncTasks, AsyncViewModelContext, IToHost, Model, ViewModel,
     ViewModelContext,
@@ -41,16 +40,6 @@ impl Connector {
         }
     }
 
-    pub fn serve_asset_url(&self, cx: &ViewModelContext, loc: StorageEntryLoc) -> String {
-        let state = cx.model_get(&self.state);
-        state.serve_asset_url(loc)
-    }
-
-    pub fn serve_music_url(&self, cx: &ViewModelContext, id: MusicId) -> String {
-        let state = cx.model_get(&self.state);
-        state.serve_music_url(id)
-    }
-
     pub fn storage_path(&self, cx: &ViewModelContext) -> String {
         ConnectorHostService::of(cx).storage_path()
     }
@@ -60,7 +49,6 @@ impl Connector {
         let handle = host.connect(Arc::new(ConnectorNotifier { cx: cx.weak() }));
         {
             let mut state = cx.model_mut(&self.state);
-            state.port = host.port();
             state.connector_handle = handle;
         }
 

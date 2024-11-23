@@ -63,9 +63,6 @@ impl IConnectorHost for BackendHost {
         })
     }
 
-    fn port(&self) -> u16 {
-        self.backend().port()
-    }
     fn storage_path(&self) -> String {
         self.backend().storage_path()
     }

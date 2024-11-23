@@ -16,18 +16,14 @@ use crate::{
         core::get_conn,
         music::{db_add_music, ArgDBAddMusic},
         playlist::{
-            db_batch_add_music_to_playlist, db_load_first_music_covers, db_load_playlists,
-            db_remove_all_musics_in_playlist, db_remove_music_from_playlist, db_remove_playlist,
-            db_upsert_playlist, ArgDBUpsertPlaylist,
+            db_batch_add_music_to_playlist, db_remove_all_musics_in_playlist,
+            db_remove_music_from_playlist, db_remove_playlist, db_upsert_playlist,
+            ArgDBUpsertPlaylist,
         },
     },
     services::{
         player::player_refresh_current,
-        playlist::{
-            build_playlist_abstract, get_all_playlist_abstracts, get_playlist,
-            notify_all_playlist_abstracts, notify_playlist,
-        },
-        server::loc::get_serve_url_from_music_id,
+        playlist::{get_playlist, notify_all_playlist_abstracts, notify_playlist},
         storage::notify_storages,
     },
 };
@@ -106,8 +102,7 @@ pub(crate) async fn cc_create_playlist(
             .clone()
             .spawn_on_main(async move {
                 for id in music_ids {
-                    cx.player_delegate()
-                        .request_total_duration(id, get_serve_url_from_music_id(&cx, id));
+                    cx.player_delegate().request_total_duration(id);
                 }
             })
             .await;
@@ -151,8 +146,7 @@ pub(crate) async fn cu_add_musics_to_playlist(
             .clone()
             .spawn_on_main(async move {
                 for id in music_ids {
-                    cx.player_delegate()
-                        .request_total_duration(id, get_serve_url_from_music_id(&cx, id));
+                    cx.player_delegate().request_total_duration(id);
                 }
             })
             .await;

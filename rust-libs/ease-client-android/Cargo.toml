@@ -19,3 +19,4 @@ tracing = "0.1"
 serde_bytes = "0.11.14"
 uniffi = "=0.28.3"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
+thiserror = "1.0.57"

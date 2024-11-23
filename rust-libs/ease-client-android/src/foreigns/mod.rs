@@ -4,7 +4,7 @@ use ease_client::{
     IPermissionService, IRouterService, IToastService, IViewStateService, RootViewModelState,
     RoutesKey,
 };
-use ease_client_backend::{IPlayerDelegate, MusicToPlay};
+use ease_client_backend::{AssetLoadStatus, IAssetLoadDelegate, IPlayerDelegate, MusicToPlay};
 use ease_client_shared::backends::music::MusicId;
 
 macro_rules! generate_delegate {
@@ -56,7 +56,12 @@ generate_delegate!(PlayerDelegate, IPlayerDelegate, IPlayerDelegateForeign, {
    seek(arg: u64);
    set_music_url(item: MusicToPlay);
    get_current_duration_s() -> u64;
-   request_total_duration(id: MusicId, url: String);
+   request_total_duration(id: MusicId);
+});
+
+generate_delegate!(AssetLoadDelegate, IAssetLoadDelegate, IAssetLoadDelegateForeign, {
+    on_status(status: AssetLoadStatus);
+    on_chunk(chunk: Vec<u8>);
 });
 
 #[uniffi::export(with_foreign)]

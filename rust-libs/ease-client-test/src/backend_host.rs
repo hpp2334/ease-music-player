@@ -2,9 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use ease_client::{to_host::connector::IConnectorHost, EaseError, EaseResult};
 use ease_client_backend::{error::BResult, Backend};
-use ease_client_shared::backends::{
-    connector::IConnectorNotifier, MessagePayload,
-};
+use ease_client_shared::backends::{connector::IConnectorNotifier, MessagePayload};
 use misty_vm::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
 
@@ -74,9 +72,6 @@ impl IConnectorHost for BackendHost {
         })
     }
 
-    fn port(&self) -> u16 {
-        self.backend().port()
-    }
     fn storage_path(&self) -> String {
         self.backend().storage_path()
     }

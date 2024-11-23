@@ -12,10 +12,7 @@ use crate::{
     ctx::BackendContext,
     error::BResult,
     repositories::{core::get_conn, storage::db_upsert_storage},
-    services::player::on_connect_for_player,
 };
-
-use super::server::start_server;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AppMeta {
@@ -93,9 +90,6 @@ pub fn app_bootstrap(cx: &Arc<BackendContext>, arg: ArgInitializeApp) -> BResult
     cx.set_storage_path(&arg.storage_path);
     cx.set_app_document_dir(&arg.app_document_dir);
     cx.set_schema_version(arg.schema_version);
-    let port = start_server(&cx);
-    cx.set_server_port(port);
-
     // Init
     init_persistent_state(&cx)?;
     Ok(())

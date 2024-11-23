@@ -18,7 +18,7 @@ fun EaseImage(
     contentScale: ContentScale
 ) {
     val bridge = UIBridgeController.current
-    var bitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var bitmap by remember { mutableStateOf(bridge.bitmapDataSources.get(dataSourceKey)) }
 
     LaunchedEffect(dataSourceKey) {
         val data = bridge.bitmapDataSources.load(dataSourceKey)

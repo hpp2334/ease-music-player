@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use async_task::{Runnable, Task};
+pub use async_task::{Runnable, Task};
 
 pub use futures::future::{BoxFuture, LocalBoxFuture};
 
