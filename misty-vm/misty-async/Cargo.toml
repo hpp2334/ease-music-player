@@ -1,0 +1,14 @@
+[package]
+name = "misty-async"
+version = "0.2.0"
+edition = "2021"
+description = "A rust library for building widget"
+license = "MIT OR Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures = "0.3.30"
+async-task = "4.7.1"
+flume = { version = "0.11.1" }
+tokio = { version = "1", features = [] }

@@ -1,29 +1,49 @@
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use ease_client::modules::timer::to_host::TimerService;
+use backend_host::BackendHost;
+use ease_client::to_host::connector::IConnectorHost;
 use ease_client::{
-    build_state_manager, build_view_manager, modules::*, MistyController, MistyResourceId,
-    MistyServiceManager, RootViewModelState,
+    build_client, Action, IRouterService, IToastService, PlaylistCreateWidget,
+    PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey, StorageImportWidget,
+    StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
 };
-
+use ease_client_backend::Backend;
+use ease_client_shared::backends::app::ArgInitializeApp;
+use ease_client_shared::backends::music::MusicId;
+use ease_client_shared::backends::playlist::{CreatePlaylistMode, PlaylistId};
+use ease_client_shared::backends::storage::{DataSourceKey, StorageId, StorageType};
+use ease_client_shared::backends::MessagePayload;
+use event_loop::EventLoop;
+use fake_permission::FakePermissionService;
 use fake_player::*;
 pub use fake_server::ReqInteceptor;
 use fake_server::*;
-use fake_timer::*;
-use misty_vm_test::TestAppContainer;
+use misty_vm::{AppPod, AsyncRuntime};
+use misty_vm_test::TestAsyncRuntimeAdapter;
+use tokio::sync::{mpsc, oneshot};
+use view_state::ViewStateServiceRef;
 
+mod backend_host;
+mod event_loop;
+mod fake_permission;
 mod fake_player;
 mod fake_server;
-mod fake_timer;
-mod rt;
+mod view_state;
 
 pub struct TestApp {
-    app: misty_vm_test::TestApp<RootViewModelState>,
+    app: AppPod,
+    backend: Arc<Backend>,
     server: FakeServerRef,
     player: FakeMusicPlayerRef,
-    timer: FakeTimerServiceRef,
+    view_state: ViewStateServiceRef,
+    permission: FakePermissionService,
+    ui_async_runtime: Arc<TestAsyncRuntimeAdapter>,
+    backend_async_runtime: Arc<TestAsyncRuntimeAdapter>,
+    event_loop: EventLoop,
+    last_wait_req_session: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -45,7 +65,7 @@ static SETUP_SUBCRIBER_ONCE: AtomicBool = AtomicBool::new(false);
 static SCHEMA_VERSION: u32 = 1;
 
 fn setup_subscriber() {
-    let has_setup = SETUP_SUBCRIBER_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst);
+    let has_setup = SETUP_SUBCRIBER_ONCE.swap(true, std::sync::atomic::Ordering::Relaxed);
     if has_setup {
         return;
     }
@@ -56,14 +76,20 @@ fn setup_subscriber() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 }
 
+struct FakeRouterService;
+impl IRouterService for FakeRouterService {
+    fn naviagate(&self, _key: RoutesKey) {}
+    fn pop(&self) {}
+}
+
 impl TestApp {
-    pub fn new(test_dir: &str, cleanup: bool) -> Self {
+    pub async fn new(test_dir: &str, cleanup: bool) -> Self {
         let test_dir = if test_dir.ends_with("/") {
             test_dir.to_string()
         } else {
             test_dir.to_string() + "/"
         };
-        // std::env::set_var("RUST_BACKTRACE", "1");
+        std::env::set_var("RUST_BACKTRACE", "1");
         setup_subscriber();
 
         let mut cwd = std::env::current_dir().unwrap();
@@ -81,26 +107,6 @@ impl TestApp {
             std::fs::create_dir_all(&test_dir).unwrap();
         }
 
-        let app_container = TestAppContainer::<RootViewModelState>::new(|changed, state| {
-            state.merge_from(&changed);
-        });
-        let mut timer = FakeTimerServiceRef::new();
-        let player = FakeMusicPlayerRef::new(app_container.clone());
-        timer.bind_music_player(player.clone());
-        let service_manager = MistyServiceManager::builder()
-            .add(MusicPlayerService::new(player.clone()))
-            .add(ToastService::new(FakeToastServiceImpl))
-            .add(TimerService::new(timer.clone()))
-            .build();
-        let state_manager = build_state_manager();
-        let view_manager = build_view_manager();
-        let inner = misty_vm_test::TestApp::new(
-            view_manager,
-            service_manager,
-            state_manager,
-            app_container,
-        );
-
         let storage_path = {
             let dir = std::env::current_dir().unwrap();
             let dir = dir.to_string_lossy().to_string();
@@ -110,67 +116,162 @@ impl TestApp {
                 dir
             }
         };
+        let event_loop: EventLoop = EventLoop::new();
+        let ui_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
+        let backend_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
 
-        inner.app().call_controller(
-            controller_initialize_app,
-            ArgInitializeApp {
+        let (tx, mut rx) = mpsc::channel::<MessagePayload>(10);
+        let (res_tx, mut res_rx) =
+            mpsc::channel::<(DataSourceKey, oneshot::Sender<Option<Vec<u8>>>)>(100);
+        let player = FakeMusicPlayerRef::new(tx, res_tx.clone());
+        let backend = Arc::new(Backend::new(
+            AsyncRuntime::new(backend_async_runtime_adapter.clone()),
+            Arc::new(player.clone()),
+        ));
+        backend_async_runtime_adapter.bind(backend.clone());
+        let backend_host = BackendHost::new();
+        backend_host.set_backend(backend.clone());
+        {
+            let backend = backend_host.clone();
+            tokio::spawn(async move {
+                while let Some(v) = rx.recv().await {
+                    backend.request(v).await.unwrap();
+                }
+            });
+        }
+        {
+            let backend = backend.clone();
+            tokio::spawn(async move {
+                while let Some((key, tx)) = res_rx.recv().await {
+                    let v = backend.asset_server().load(key.into()).await.unwrap();
+                    let bytes = if let Some(v) = v {
+                        Some(v.bytes().await.unwrap().to_vec())
+                    } else {
+                        None
+                    };
+                    tx.send(bytes).unwrap();
+                }
+            });
+        }
+        backend
+            .init(ArgInitializeApp {
                 app_document_dir: test_dir.to_string(),
                 schema_version: SCHEMA_VERSION,
                 storage_path,
-            },
-        );
+            })
+            .unwrap();
 
-        TestApp {
-            app: inner,
+        let pod = AppPod::new();
+        let view_state = ViewStateServiceRef::new();
+        let permission = FakePermissionService::new(event_loop.clone());
+        let app = build_client(
+            backend_host,
+            Arc::new(permission.clone()),
+            Arc::new(FakeRouterService),
+            Arc::new(FakeToastServiceImpl),
+            Arc::new(view_state.clone()),
+            AsyncRuntime::new(ui_async_runtime_adapter.clone()),
+        );
+        ui_async_runtime_adapter.bind(Arc::new(pod.clone()));
+        pod.set(app.clone());
+
+        app.emit(Action::Init);
+
+        let ret = Self {
+            app: pod,
+            backend,
             server: FakeServerRef::setup("test-files"),
             player,
-            timer,
-        }
+            permission,
+            ui_async_runtime: ui_async_runtime_adapter,
+            backend_async_runtime: backend_async_runtime_adapter,
+            view_state,
+            event_loop,
+            last_wait_req_session: Default::default(),
+        };
+        ret.wait_network().await;
+        ret
     }
 
-    fn create_empty_playlist(&self) {
-        self.call_controller(controller_prepare_create_playlist, ());
-        self.call_controller(
-            controller_update_create_playlist_name,
-            "Default Playlist".to_string(),
-        );
-        self.call_controller(controller_finish_create_playlist, ());
+    pub fn permission(&self) -> &FakePermissionService {
+        &self.permission
     }
 
-    pub fn setup_preset(&mut self, depth: PresetDepth) {
-        self.call_controller(
-            controller_upsert_storage,
-            ArgUpsertStorage {
-                id: None,
-                addr: self.server.addr(),
-                alias: Some("Temp".to_string()),
-                username: Default::default(),
-                password: Default::default(),
-                is_anonymous: true,
-                typ: StorageType::Webdav,
+    pub fn emit(&self, action: Action) {
+        self.app.get().emit(action);
+        self.event_loop.flush(&self.app.get());
+    }
+
+    pub fn dispatch_click(&self, widget: impl Into<Widget>) {
+        self.emit(Action::View(ViewAction::Widget(WidgetAction {
+            widget: widget.into(),
+            typ: WidgetActionType::Click,
+        })));
+    }
+
+    pub fn dispatch_change_text(&self, widget: impl Into<Widget>, text: impl ToString) {
+        self.emit(Action::View(ViewAction::Widget(WidgetAction {
+            widget: widget.into(),
+            typ: WidgetActionType::ChangeText {
+                text: text.to_string(),
             },
-        );
+        })));
+    }
+
+    async fn create_empty_playlist(&self) {
+        self.dispatch_click(PlaylistListWidget::Add);
+        self.dispatch_click(PlaylistCreateWidget::Tab {
+            value: CreatePlaylistMode::Empty,
+        });
+        self.dispatch_change_text(PlaylistCreateWidget::Name, "Default Playlist");
+        self.dispatch_click(PlaylistCreateWidget::FinishCreate);
+        self.wait_network().await;
+    }
+
+    pub async fn setup_preset(&mut self, depth: PresetDepth) {
+        self.dispatch_click(StorageListWidget::Create);
+        self.dispatch_change_text(StorageUpsertWidget::Address, self.server.addr());
+        self.dispatch_change_text(StorageUpsertWidget::Alias, "Temp");
+        self.dispatch_click(StorageUpsertWidget::Type {
+            value: StorageType::Webdav,
+        });
+        self.dispatch_click(StorageUpsertWidget::Finish);
+        self.wait_network().await;
+
         if depth as i32 >= PresetDepth::Playlist as i32 {
-            self.create_empty_playlist();
+            self.create_empty_playlist().await;
         }
         if depth as i32 >= PresetDepth::Music as i32 {
             let playlist_id = self.get_first_playlist_id_from_latest_state();
-            self.call_controller(controller_change_current_playlist, playlist_id);
+            self.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
             let storage_id = self.get_first_storage_id_from_latest_state();
-            self.call_controller(controller_prepare_import_entries_in_current_playlist, ());
-            self.call_controller(controller_select_storage_in_import, storage_id);
-            self.wait_network();
+            self.wait_network().await;
+            self.dispatch_click(PlaylistDetailWidget::Import);
+            self.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+            for _ in 0..10 {
+                self.wait_network().await;
+                let state = self.latest_state();
+                let entries = state.current_storage_entries.unwrap();
+                if !entries.entries.is_empty() {
+                    break;
+                }
+                tracing::info!("wait storage entries to be not empty");
+            }
             let state = self.latest_state();
             let entries = state.current_storage_entries.unwrap();
-            self.call_controller(controller_select_entry, entries.entries[4].path.clone());
-            self.call_controller(controller_select_entry, entries.entries[5].path.clone());
-            self.call_controller(controller_finish_selected_entries_in_import, ());
+            self.dispatch_click(StorageImportWidget::StorageEntry {
+                path: entries.entries[4].path.clone(),
+            });
+            self.dispatch_click(StorageImportWidget::StorageEntry {
+                path: entries.entries[5].path.clone(),
+            });
+            self.dispatch_click(StorageImportWidget::Import);
+            self.wait_network().await;
         }
     }
 
     pub fn latest_state(&self) -> RootViewModelState {
-        self.wait(100);
-        self.app.state()
+        self.view_state.state()
     }
 
     pub fn get_first_storage_id_from_latest_state(&self) -> StorageId {
@@ -217,38 +318,64 @@ impl TestApp {
         self.player.last_bytes()
     }
 
-    pub fn call_controller<Arg, E: std::fmt::Debug>(
-        &self,
-        controller: impl MistyController<Arg, E>,
-        arg: Arg,
-    ) {
-        self.app.app().call_controller(controller, arg);
+    pub async fn advance_timer(&self, mut duration_s: u64) {
+        self.wait_network().await;
+        loop {
+            let t = duration_s.min(1);
+            duration_s -= t;
+
+            if t == 0 {
+                break;
+            }
+
+            self.advance_timer_impl(t);
+            self.wait_network().await;
+        }
     }
 
-    pub fn advance_timer(&self, duration_s: u64) {
-        self.timer.advance_timer(duration_s);
+    fn advance_timer_impl(&self, duration_s: u64) {
+        let duration = Duration::from_secs(duration_s);
+        self.player.advance(duration);
+        self.backend_async_runtime.advance(duration);
+        self.ui_async_runtime.advance(duration);
     }
 
-    pub fn wait_network(&self) {
-        self.wait(200);
+    pub async fn wait_network(&self) {
+        self.wait(100).await;
     }
 
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {
         self.server.set_inteceptor_req(v);
     }
 
-    pub fn load_resource(&self, id: u64) -> Vec<u8> {
-        self.app
-            .app()
-            .get_resource(MistyResourceId::wrap(id))
-            .unwrap()
+    pub async fn load_resource_by_key(&self, key: DataSourceKey) -> Vec<u8> {
+        let v = self.backend.asset_server().load(key.into()).await.unwrap();
+        if let Some(v) = v {
+            v.bytes().await.unwrap().to_vec()
+        } else {
+            Default::default()
+        }
     }
 
-    fn wait(&self, ms: u64) {
-        std::thread::sleep(Duration::from_millis(ms));
+    async fn wait(&self, mut ms: u64) {
+        tokio::time::sleep(Duration::from_millis(0)).await;
+        loop {
+            let t = ms.min(4);
+            ms -= t;
+
+            if t == 0 {
+                break;
+            }
+            self.advance_timer_impl(0);
+            self.event_loop.flush(&self.app.get());
+            tokio::time::sleep(Duration::from_millis(t)).await;
+        }
     }
 }
 
 impl Drop for TestApp {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        let app = self.app.get();
+        app.emit(Action::Destroy);
+    }
 }

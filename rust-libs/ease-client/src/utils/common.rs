@@ -1,4 +1,4 @@
-use crate::modules::music::repository::MusicDuration;
+use ease_client_shared::backends::music_duration::MusicDuration;
 
 pub fn get_display_duration(duration: &Option<MusicDuration>) -> String {
     if duration.is_none() {
@@ -20,4 +20,10 @@ pub fn decode_component_or_origin(s: String) -> String {
     } else {
         s
     }
+}
+
+pub fn trim_extension_name(name: impl ToString) -> String {
+    name.to_string()
+        .rsplit_once('.')
+        .map_or(name.to_string(), |(base, _)| base.to_string())
 }

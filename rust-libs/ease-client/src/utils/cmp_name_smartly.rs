@@ -1,5 +1,3 @@
-
-
 use unicode_segmentation::UnicodeSegmentation;
 
 enum NameToken {

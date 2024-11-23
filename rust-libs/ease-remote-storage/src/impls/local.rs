@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use tokio::io::AsyncReadExt;
 
-use crate::{Backend, BackendResult, Entry, StreamFile};
+use crate::{Entry, StorageBackend, StorageBackendResult, StreamFile};
 
 pub struct LocalBackend;
 
@@ -15,7 +15,7 @@ impl LocalBackend {
         Self
     }
 
-    async fn list_impl(&self, dir: &str) -> BackendResult<Vec<Entry>> {
+    async fn list_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
         let dir = if std::env::consts::OS == "windows" {
             dir.replace('/', "\\")
         } else if std::env::consts::OS == "android" {
@@ -52,7 +52,7 @@ impl LocalBackend {
         Ok(ret)
     }
 
-    async fn get_impl(&self, p: &str) -> BackendResult<StreamFile> {
+    async fn get_impl(&self, p: &str) -> StorageBackendResult<StreamFile> {
         let p = if std::env::consts::OS == "windows" {
             p.replace('/', "\\")
         } else if std::env::consts::OS == "android" {
@@ -78,15 +78,15 @@ pub fn set_global_local_storage_path(p: String) {
 }
 
 #[async_trait]
-impl Backend for LocalBackend {
-    async fn list(&self, dir: &str) -> BackendResult<Vec<Entry>> {
+impl StorageBackend for LocalBackend {
+    async fn list(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
         self.list_impl(dir).await
     }
     async fn remove(&self, _p: &str) {
         unimplemented!()
     }
 
-    async fn get(&self, p: &str) -> BackendResult<StreamFile> {
+    async fn get(&self, p: &str) -> StorageBackendResult<StreamFile> {
         self.get_impl(p).await
     }
     fn default_url(&self) -> String {
@@ -97,7 +97,7 @@ impl Backend for LocalBackend {
 
 #[cfg(test)]
 mod test {
-    use crate::{Backend, LocalBackend};
+    use crate::{LocalBackend, StorageBackend};
 
     #[tokio::test]
     async fn test_list_dir() {

@@ -1,82 +1,106 @@
-use ease_client::modules::*;
+use ease_client::{
+    PlaylistCreateWidget, PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget,
+    StorageImportWidget,
+};
 use ease_client_test::{PresetDepth, TestApp};
 
-#[test]
-fn create_playlist_cover_1() {
-    let mut app = TestApp::new("test-dbs/create_playlist_cover_1", true);
-    app.setup_preset(PresetDepth::Storage);
+#[tokio::test]
+async fn create_playlist_cover_1() {
+    let mut app = TestApp::new("test-dbs/create_playlist_cover_1", true).await;
+    app.setup_preset(PresetDepth::Storage).await;
 
-    app.call_controller(controller_prepare_edit_playlist_cover, ());
-    app.wait_network();
+    app.dispatch_click(PlaylistListWidget::Add);
+    app.dispatch_click(PlaylistCreateWidget::Cover);
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
     let entry = state.entries[6].clone();
     assert_eq!(entry.name, "firefox.png");
     assert_eq!(entry.can_check, true);
 
-    app.call_controller(controller_select_entry, entry.path);
-    app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
-    let state = app.latest_state().edit_playlist.unwrap();
-    let picture = app.load_resource(state.picture.unwrap());
+    app.dispatch_click(StorageImportWidget::StorageEntry { path: entry.path });
+    app.dispatch_click(StorageImportWidget::Import);
+    app.wait_network().await;
+    let state = app.latest_state().create_playlist.unwrap();
+    let picture = app.load_resource_by_key(state.picture.unwrap()).await;
     assert_eq!(picture.len(), 82580);
+    app.dispatch_click(PlaylistCreateWidget::FinishCreate);
+    app.wait_network().await;
 
-    app.call_controller(controller_clear_edit_playlist_state, ());
+    app.dispatch_click(PlaylistListWidget::Item {
+        id: app.latest_state().playlist_list.unwrap().playlist_list[0].id,
+    });
+    app.wait_network().await;
+    app.dispatch_click(PlaylistDetailWidget::Edit);
+    app.dispatch_click(PlaylistEditWidget::ClearCover);
+    app.dispatch_click(PlaylistEditWidget::FinishEdit);
     let state = app.latest_state().edit_playlist.unwrap();
     assert_eq!(state.picture, None);
 }
 
-#[test]
-fn edit_playlist_cover_1() {
-    let mut app = TestApp::new("test-dbs/edit_playlist_cover_1", true);
-    app.setup_preset(PresetDepth::Music);
+#[tokio::test]
+async fn edit_playlist_cover_1() {
+    let mut app = TestApp::new("test-dbs/edit_playlist_cover_1", true).await;
+    app.setup_preset(PresetDepth::Music).await;
 
-    app.call_controller(controller_prepare_edit_playlist_cover, ());
-    app.wait_network();
+    app.dispatch_click(PlaylistDetailWidget::Edit);
+    app.dispatch_click(PlaylistEditWidget::Cover);
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
     let entry = state.entries[6].clone();
     assert_eq!(entry.name, "firefox.png");
     assert_eq!(entry.can_check, true);
 
-    app.call_controller(controller_select_entry, entry.path);
-    app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.dispatch_click(StorageImportWidget::StorageEntry { path: entry.path });
+    app.dispatch_click(StorageImportWidget::Import);
+    app.wait_network().await;
     let state = app.latest_state().edit_playlist.unwrap();
-    let picture = app.load_resource(state.picture.unwrap());
+    let picture = app.load_resource_by_key(state.picture.unwrap()).await;
     assert_eq!(picture.len(), 82580);
 
-    app.call_controller(controller_clear_edit_playlist_state, ());
+    app.dispatch_click(PlaylistEditWidget::ClearCover);
+    app.dispatch_click(PlaylistEditWidget::FinishEdit);
     let state = app.latest_state().edit_playlist.unwrap();
     assert_eq!(state.picture, None);
 }
 
-#[test]
-fn edit_playlist_cover_2() {
-    let mut app = TestApp::new("test-dbs/edit_playlist_cover_2", true);
-    app.setup_preset(PresetDepth::Music);
+#[tokio::test]
+async fn edit_playlist_cover_2() {
+    let mut app = TestApp::new("test-dbs/edit_playlist_cover_2", true).await;
+    app.setup_preset(PresetDepth::Music).await;
 
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
-    app.call_controller(controller_prepare_edit_playlist, state.playlist_list[0].id);
-    app.call_controller(controller_prepare_edit_playlist_cover, ());
-    app.wait_network();
+    app.dispatch_click(PlaylistListWidget::Item {
+        id: state.playlist_list[0].id,
+    });
+    app.wait_network().await;
+    app.dispatch_click(PlaylistDetailWidget::Edit);
+    app.dispatch_click(PlaylistEditWidget::Cover);
+    app.wait_network().await;
     let state = app.latest_state().current_storage_entries.unwrap();
     let entry = state.entries[6].clone();
     assert_eq!(entry.name, "firefox.png");
     assert_eq!(entry.can_check, true);
 
-    app.call_controller(controller_select_entry, entry.path);
-    app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
-    app.call_controller(controller_finish_edit_playlist, ());
+    app.dispatch_click(StorageImportWidget::StorageEntry { path: entry.path });
+    app.dispatch_click(StorageImportWidget::Import);
+    app.wait_network().await;
+    app.dispatch_click(PlaylistEditWidget::FinishEdit);
+    app.wait_network().await;
+
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
-    let picture = app.load_resource(state.playlist_list[0].picture.unwrap());
+    let picture = app
+        .load_resource_by_key(state.playlist_list[0].cover.clone().unwrap())
+        .await;
     assert_eq!(picture.len(), 82580);
 
     // reload
-    let app = TestApp::new("test-dbs/edit_playlist_cover_2", false);
+    let app = TestApp::new("test-dbs/edit_playlist_cover_2", false).await;
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
-    let picture = app.load_resource(state.playlist_list[0].picture.unwrap());
+    let picture = app
+        .load_resource_by_key(state.playlist_list[0].cover.clone().unwrap())
+        .await;
     assert_eq!(picture.len(), 82580);
 }

@@ -1,23 +1,30 @@
-use ease_client::modules::*;
+use ease_client::{
+    view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget,
+    PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget, ViewAction,
+};
+use ease_client_shared::backends::{
+    playlist::CreatePlaylistMode,
+    storage::{CurrentStorageStateType, StorageType},
+};
 use ease_client_test::{PresetDepth, ReqInteceptor, TestApp};
 
-fn create_playlist(app: &TestApp, name: &str) {
-    app.call_controller(controller_prepare_create_playlist, ());
-    app.call_controller(
-        controller_update_create_playlist_mode,
-        CreatePlaylistMode::Empty,
-    );
-    app.call_controller(controller_update_create_playlist_name, name.to_string());
-    app.call_controller(controller_finish_create_playlist, ());
+async fn create_playlist(app: &TestApp, name: &str) {
+    app.dispatch_click(PlaylistListWidget::Add);
+    app.dispatch_click(PlaylistCreateWidget::Tab {
+        value: CreatePlaylistMode::Empty,
+    });
+    app.dispatch_change_text(PlaylistCreateWidget::Name, name);
+    app.dispatch_click(PlaylistCreateWidget::FinishCreate);
+    app.wait_network().await;
 }
 
-#[test]
-fn playlist_crud_1() {
-    let app = TestApp::new("test-dbs/playlist_crud_1", true);
+#[tokio::test]
+async fn playlist_crud_1() {
+    let mut app = TestApp::new("test-dbs/playlist_crud_1", true).await;
 
-    create_playlist(&app, "Playlist A");
-    app.advance_timer(1);
-    create_playlist(&app, "Playlist B");
+    create_playlist(&mut app, "Playlist A").await;
+    app.advance_timer(1).await;
+    create_playlist(&mut app, "Playlist B").await;
     let state = app.latest_state();
     let list = state.playlist_list.clone().unwrap_or_default();
     assert_eq!(list.playlist_list.len(), 2);
@@ -27,14 +34,14 @@ fn playlist_crud_1() {
     let id = item.id.clone();
     assert_eq!(item.title, "Playlist A");
 
-    app.advance_timer(1);
+    app.advance_timer(1).await;
 
-    app.call_controller(controller_prepare_edit_playlist, id);
-    app.call_controller(
-        controller_update_edit_playlist_name,
-        "Playlist C".to_string(),
-    );
-    app.call_controller(controller_finish_edit_playlist, ());
+    app.dispatch_click(PlaylistListWidget::Item { id });
+    app.wait_network().await;
+    app.dispatch_click(PlaylistDetailWidget::Edit);
+    app.dispatch_change_text(PlaylistEditWidget::Name, "Playlist C");
+    app.dispatch_click(PlaylistEditWidget::FinishEdit);
+    app.wait_network().await;
     let state = app.latest_state();
     let list = state.playlist_list.clone().unwrap_or_default();
     assert_eq!(list.playlist_list.len(), 2);
@@ -43,7 +50,10 @@ fn playlist_crud_1() {
     let item = list.playlist_list[1].clone();
     assert_eq!(item.title, "Playlist C");
 
-    app.call_controller(controller_remove_playlist, item.id.clone());
+    app.dispatch_click(PlaylistListWidget::Item { id: item.id });
+    app.wait_network().await;
+    app.dispatch_click(PlaylistDetailWidget::Remove);
+    app.wait_network().await;
     let state = app.latest_state();
     let list = state.playlist_list.clone().unwrap_or_default();
     assert_eq!(list.playlist_list.len(), 1);
@@ -51,48 +61,68 @@ fn playlist_crud_1() {
     assert_eq!(item.title, "Playlist B");
 }
 
-#[test]
-fn playlist_import_select_non_music_1() {
-    let mut app = TestApp::new("test-dbs/playlist_import_select_non_music_1", true);
-    app.setup_preset(PresetDepth::Playlist);
+#[tokio::test]
+async fn playlist_import_select_non_music_1() {
+    let mut app = TestApp::new("test-dbs/playlist_import_select_non_music_1", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
-    app.call_controller(controller_change_current_playlist, playlist_id);
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
 
     let storage_id = app.get_first_storage_id_from_latest_state();
-    app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
-    app.call_controller(controller_select_storage_in_import, storage_id);
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.wait_network().await;
+    app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+    app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
+    assert!(!entries.can_undo);
     assert_eq!(entries.entries.len(), 7);
     let item = &entries.entries[2];
     assert_eq!(item.path, "/README.md");
     assert_eq!(item.can_check, false);
     assert_eq!(item.checked, false);
 
-    app.call_controller(controller_select_entry, entries.entries[2].path.clone());
+    app.dispatch_click(StorageImportWidget::StorageEntry {
+        path: entries.entries[2].path.clone(),
+    });
+    app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
+    assert!(!entries.can_undo);
     let item = &entries.entries[2];
     assert_eq!(item.path, "/README.md");
     assert_eq!(item.can_check, false);
     assert_eq!(item.checked, false);
     assert_eq!(entries.selected_count, 0);
+
+    app.emit(Action::View(ViewAction::StorageImport(
+        StorageImportAction::Undo,
+    )));
+    app.wait_network().await;
+    let state = app.latest_state();
+    let entries = state.current_storage_entries.unwrap();
+    assert!(!entries.can_undo);
+    assert_eq!(entries.entries.len(), 7);
 }
 
-#[test]
-fn playlist_import_musics_1() {
-    let mut app = TestApp::new("test-dbs/playlist_import_musics_1", true);
-    app.setup_preset(PresetDepth::Playlist);
+#[tokio::test]
+async fn playlist_import_musics_1() {
+    let mut app = TestApp::new("test-dbs/playlist_import_musics_1", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
-    app.call_controller(controller_change_current_playlist, playlist_id);
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
 
     let storage_id = app.get_first_storage_id_from_latest_state();
-    app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
-    app.call_controller(controller_select_storage_in_import, storage_id);
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.wait_network().await;
+    app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+    app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
     assert_eq!(entries.entries.len(), 7);
@@ -120,8 +150,9 @@ fn playlist_import_musics_1() {
     assert_eq!(item.is_folder, false);
     assert_eq!(item.can_check, true);
     assert_eq!(item.checked, false);
-
-    app.call_controller(controller_select_entry, entries.entries[4].path.clone());
+    app.dispatch_click(StorageImportWidget::StorageEntry {
+        path: entries.entries[4].path.clone(),
+    });
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
     let item = &entries.entries[4];
@@ -132,8 +163,8 @@ fn playlist_import_musics_1() {
     assert_eq!(item.checked, true);
     assert_eq!(entries.selected_count, 1);
 
-    app.call_controller(controller_finish_selected_entries_in_import, ());
-    app.wait_network();
+    app.dispatch_click(StorageImportWidget::Import);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_playlist.clone().unwrap();
     assert_eq!(state.duration, "00:00:24");
@@ -142,63 +173,69 @@ fn playlist_import_musics_1() {
     assert_eq!(item.title, "angelical-pad-143276");
 }
 
-#[test]
-fn playlist_import_musics_2() {
-    let mut app = TestApp::new("test-dbs/playlist_import_musics_2", true);
-    app.setup_preset(PresetDepth::Playlist);
+#[tokio::test]
+async fn playlist_import_musics_2() {
+    let mut app = TestApp::new("test-dbs/playlist_import_musics_2", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
-    app.call_controller(controller_change_current_playlist, playlist_id);
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
 
     let storage_id = app.get_first_storage_id_from_latest_state();
-    app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
-    app.call_controller(controller_select_storage_in_import, storage_id);
-    app.wait_network();
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+    app.wait_network().await;
 
-    app.call_controller(controller_toggle_all_checked_entries, ());
+    app.dispatch_click(StorageImportWidget::ToggleAll);
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
     assert_eq!(entries.selected_count, 2);
 
-    app.call_controller(controller_toggle_all_checked_entries, ());
+    app.dispatch_click(StorageImportWidget::ToggleAll);
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
     assert_eq!(entries.selected_count, 0);
 }
-
-#[test]
-fn playlist_import_musics_3() {
-    let mut app = TestApp::new("test-dbs/playlist_import_musics_3", true);
-    app.setup_preset(PresetDepth::Music);
-    app.call_controller(
-        controller_change_current_playlist,
-        app.get_first_playlist_id_from_latest_state(),
-    );
+#[tokio::test]
+async fn playlist_import_musics_3() {
+    let mut app = TestApp::new("test-dbs/playlist_import_musics_3", true).await;
+    app.setup_preset(PresetDepth::Music).await;
+    app.dispatch_click(PlaylistListWidget::Item {
+        id: app.get_first_playlist_id_from_latest_state(),
+    });
+    app.wait_network().await;
 
     let state = app.latest_state();
     let state = state.current_playlist.unwrap();
     assert_eq!(state.items.len(), 2);
 
-    app.call_controller(
-        controller_remove_music_from_current_playlist,
-        app.get_first_music_id_from_latest_state(),
-    );
+    app.dispatch_click(PlaylistDetailWidget::RemoveMusic {
+        id: app.get_first_music_id_from_latest_state(),
+    });
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_playlist.unwrap();
     assert_eq!(state.items.len(), 1);
 }
 
-#[test]
-fn playlist_import_from_local_1() {
-    let mut app = TestApp::new("test-dbs/playlist_import_from_local_1", true);
-    app.setup_preset(PresetDepth::Playlist);
+#[tokio::test]
+async fn playlist_import_from_local_1() {
+    let mut app = TestApp::new("test-dbs/playlist_import_from_local_1", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
-    app.call_controller(controller_change_current_playlist, playlist_id);
-    app.call_controller(controller_update_storage_permission, true);
+    app.permission().update_permission(true);
+
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
+
+    app.dispatch_click(PlaylistDetailWidget::Edit);
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.wait_network().await;
 
     let state = app.latest_state();
     let state = state.storage_list.unwrap();
@@ -206,12 +243,13 @@ fn playlist_import_from_local_1() {
     assert_eq!(state.items[1].typ, StorageType::Local);
 
     let storage_id = state.items[1].clone().storage_id.clone();
-    app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
-    app.call_controller(controller_select_storage_in_import, storage_id);
+    app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+    app.wait_network().await;
 
     let cwd = std::env::current_dir().unwrap().join("test-files");
     let cwd = cwd.to_string_lossy().to_string().replace('\\', "/");
-    app.call_controller(controller_locate_entry, cwd);
+    app.dispatch_click(StorageImportWidget::StorageEntry { path: cwd });
+    app.wait_network().await;
     let state = app.latest_state();
     let entries = state.current_storage_entries.unwrap();
     assert_eq!(entries.entries.len(), 7);
@@ -221,8 +259,11 @@ fn playlist_import_from_local_1() {
     assert_eq!(item.can_check, false);
     assert_eq!(item.checked, false);
 
-    app.call_controller(controller_select_entry, entries.entries[4].path.clone());
-    app.call_controller(controller_finish_selected_entries_in_import, ());
+    app.dispatch_click(StorageImportWidget::StorageEntry {
+        path: entries.entries[4].path.clone(),
+    });
+    app.dispatch_click(StorageImportWidget::Import);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_playlist.clone().unwrap();
     assert_eq!(state.duration, "00:00:24");
@@ -230,52 +271,58 @@ fn playlist_import_from_local_1() {
     let item = state.items[0].clone();
     assert_eq!(item.title, "angelical-pad-143276");
 
-    app.call_controller(controller_play_all_musics, ());
+    app.dispatch_click(PlaylistDetailWidget::PlayAll);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_music.clone().unwrap();
     assert_eq!(state.current_duration, "00:00:00");
     assert_eq!(state.total_duration, "00:00:24");
 }
 
-#[test]
-fn playlist_import_need_permission() {
-    let mut app = TestApp::new("test-dbs/playlist_import_need_permission", true);
-    app.setup_preset(PresetDepth::Playlist);
+#[tokio::test]
+async fn playlist_import_need_permission() {
+    let mut app = TestApp::new("test-dbs/playlist_import_need_permission", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
-    app.call_controller(controller_change_current_playlist, playlist_id);
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
 
     // local storage id
     let state = app.latest_state();
     let state = state.storage_list.unwrap();
     let storage_id = state.items[1].clone().storage_id.clone();
-    app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
-    app.call_controller(controller_select_storage_in_import, storage_id);
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+    app.wait_network().await;
 
     let state = app.latest_state();
     let state = state.current_storage_entries.unwrap();
     assert_eq!(state.state_type, CurrentStorageStateType::NeedPermission);
 
-    app.call_controller(controller_update_storage_permission, true);
-    app.call_controller(controller_refresh_current_storage_in_import, ());
+    app.permission().update_permission(true);
+    app.dispatch_click(StorageImportWidget::Error);
+    app.wait_network().await;
     let state = app.latest_state();
     let state = state.current_storage_entries.unwrap();
     assert_eq!(state.state_type, CurrentStorageStateType::OK);
 }
 
-#[test]
-fn playlist_import_authentication() {
-    let mut app = TestApp::new("test-dbs/playlist_import_authentication", true);
-    app.setup_preset(PresetDepth::Playlist);
+#[tokio::test]
+async fn playlist_import_authentication() {
+    let mut app = TestApp::new("test-dbs/playlist_import_authentication", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
-    app.call_controller(controller_change_current_playlist, playlist_id);
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
     app.set_inteceptor_req(Some(ReqInteceptor::AuthenticationFailed));
-    app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.wait_network().await;
 
     let state = app.latest_state();
     let state = state.current_storage_entries.unwrap();
@@ -285,40 +332,47 @@ fn playlist_import_authentication() {
     );
 }
 
-#[test]
-fn playlist_import_other_error() {
-    let mut app = TestApp::new("test-dbs/playlist_import_other_error", true);
-    app.setup_preset(PresetDepth::Playlist);
+#[tokio::test]
+async fn playlist_import_other_error() {
+    let mut app = TestApp::new("test-dbs/playlist_import_other_error", true).await;
+    app.setup_preset(PresetDepth::Playlist).await;
 
     let state = app.latest_state();
     let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
 
-    app.call_controller(controller_change_current_playlist, playlist_id);
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
     app.set_inteceptor_req(Some(ReqInteceptor::InternalError));
-    app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
+    app.dispatch_click(PlaylistDetailWidget::Import);
+    app.wait_network().await;
 
     let state = app.latest_state();
     let state = state.current_storage_entries.unwrap();
     assert_eq!(state.state_type, CurrentStorageStateType::UnknownError);
 }
 
-#[test]
-fn playlist_full_reimport_discarded_bug() {
-    let mut app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", true);
-    app.setup_preset(PresetDepth::Storage);
+#[tokio::test]
+async fn playlist_full_reimport_discarded_bug() {
+    let mut app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", true).await;
+    app.setup_preset(PresetDepth::Storage).await;
 
-    let create_playlist_and_import_music = || {
-        create_playlist(&app, "A");
+    let create_playlist_and_import_music = || async {
+        create_playlist(&app, "A").await;
 
         let state = app.latest_state();
         let playlist_id = state.playlist_list.unwrap().playlist_list[0].id.clone();
-        app.call_controller(controller_change_current_playlist, playlist_id);
+        app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+        app.wait_network().await;
 
         let storage_id = app.get_first_storage_id_from_latest_state();
-        app.call_controller(controller_prepare_import_entries_in_current_playlist, ());
-        app.call_controller(controller_select_storage_in_import, storage_id);
+        app.dispatch_click(PlaylistDetailWidget::Import);
+        app.wait_network().await;
+        app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+        app.wait_network().await;
         let entries = app.latest_state().current_storage_entries.unwrap();
-        app.call_controller(controller_select_entry, entries.entries[4].path.clone());
+        app.dispatch_click(StorageImportWidget::StorageEntry {
+            path: entries.entries[4].path.clone(),
+        });
         let state = app.latest_state();
         let entries = state.current_storage_entries.unwrap();
         let item = &entries.entries[4];
@@ -329,8 +383,8 @@ fn playlist_full_reimport_discarded_bug() {
         assert_eq!(item.checked, true);
         assert_eq!(entries.selected_count, 1);
 
-        app.call_controller(controller_finish_selected_entries_in_import, ());
-        app.wait_network();
+        app.dispatch_click(StorageImportWidget::Import);
+        app.wait_network().await;
         let state = app.latest_state();
         let state = state.current_playlist.clone().unwrap();
         assert_eq!(state.duration, "00:00:24");
@@ -341,12 +395,15 @@ fn playlist_full_reimport_discarded_bug() {
         return playlist_id;
     };
 
-    let playlist_id = create_playlist_and_import_music();
-    app.call_controller(controller_remove_playlist, playlist_id);
-    create_playlist_and_import_music();
+    let playlist_id = create_playlist_and_import_music().await;
+    app.dispatch_click(PlaylistListWidget::Item { id: playlist_id });
+    app.wait_network().await;
+    app.dispatch_click(PlaylistDetailWidget::Remove);
+    app.wait_network().await;
+    create_playlist_and_import_music().await;
 
     // reload
-    let app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", false);
+    let app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", false).await;
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     assert_eq!(state.playlist_list[0].count, 1);
