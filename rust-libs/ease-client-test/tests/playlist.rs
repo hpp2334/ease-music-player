@@ -1,6 +1,7 @@
 use ease_client::{
     view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget,
-    PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget, ViewAction,
+    PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget,
+    StorageListWidget, ViewAction,
 };
 use ease_client_shared::backends::{
     playlist::CreatePlaylistMode,
@@ -407,4 +408,48 @@ async fn playlist_full_reimport_discarded_bug() {
     let state = app.latest_state().playlist_list.unwrap();
     assert_eq!(state.playlist_list.len(), 1);
     assert_eq!(state.playlist_list[0].count, 1);
+}
+
+#[tokio::test]
+async fn playlist_full_import_storage_count_bug() {
+    let mut app = TestApp::new("test-dbs/playlist_full_import_storage_count_bug", true).await;
+    app.setup_preset(PresetDepth::Storage).await;
+
+    app.dispatch_click(PlaylistListWidget::Add);
+    app.dispatch_click(PlaylistCreateWidget::Tab {
+        value: CreatePlaylistMode::Full,
+    });
+    app.dispatch_click(PlaylistCreateWidget::Import);
+    app.wait_network().await;
+    let storage_id = app.get_first_storage_id_from_latest_state();
+    app.dispatch_click(StorageImportWidget::StorageItem { id: storage_id });
+    app.wait_network().await;
+    let entries = app.latest_state().current_storage_entries.unwrap();
+    app.dispatch_click(StorageImportWidget::StorageEntry {
+        path: entries.entries[4].path.clone(),
+    });
+    let entries = app.latest_state().current_storage_entries.unwrap();
+    let item = &entries.entries[4];
+    assert_eq!(item.name, "angelical-pad-143276.mp3");
+    assert_eq!(item.path, "/angelical-pad-143276.mp3");
+    assert_eq!(item.is_folder, false);
+    assert_eq!(item.can_check, true);
+    assert_eq!(item.checked, true);
+    assert_eq!(entries.selected_count, 1);
+    app.dispatch_click(StorageImportWidget::Import);
+    app.wait_network().await;
+
+    app.dispatch_change_text(PlaylistCreateWidget::Name, "ABC");
+    app.dispatch_click(PlaylistCreateWidget::FinishCreate);
+    app.wait_network().await;
+    let state = app.latest_state().playlist_list.unwrap();
+    assert_eq!(state.playlist_list.len(), 1);
+    assert_eq!(state.playlist_list[0].title, "ABC");
+
+    app.dispatch_click(StorageListWidget::Item {
+        id: app.get_first_storage_id_from_latest_state(),
+    });
+    let state = app.latest_state().edit_storage.unwrap();
+    assert_eq!(state.music_count, 1);
+    assert_eq!(state.playlist_count, 1);
 }

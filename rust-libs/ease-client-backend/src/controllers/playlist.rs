@@ -110,6 +110,7 @@ pub(crate) async fn cc_create_playlist(
 
     try_join! {
         notify_all_playlist_abstracts(&cx),
+        notify_storages(&cx),
     }?;
 
     Ok(playlist_id)
