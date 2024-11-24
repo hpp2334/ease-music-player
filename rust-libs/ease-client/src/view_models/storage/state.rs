@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ease_client_shared::backends::storage::{
     ArgUpsertStorage, CurrentStorageImportType, CurrentStorageStateType, Storage,
-    StorageConnectionTestResult, StorageEntry, StorageId,
+    StorageConnectionTestResult, StorageEntry, StorageEntryType, StorageId, StorageType,
 };
 use serde::Serialize;
 
@@ -15,6 +15,7 @@ pub enum FormFieldStatus {
 
 #[derive(Debug, Default, Clone, Serialize, uniffi::Record)]
 pub struct EditStorageFormValidated {
+    pub alias: FormFieldStatus,
     pub address: FormFieldStatus,
     pub username: FormFieldStatus,
     pub password: FormFieldStatus,
@@ -30,6 +31,7 @@ pub struct AllStorageState {
 pub struct EditStorageState {
     pub is_create: bool,
     pub info: ArgUpsertStorage,
+    pub backup: HashMap<StorageType, ArgUpsertStorage>,
     pub validated: EditStorageFormValidated,
     pub test: StorageConnectionTestResult,
     pub music_count: u32,
@@ -49,7 +51,8 @@ pub struct CurrentStorageState {
 
 impl EditStorageFormValidated {
     pub fn is_valid(&self) -> bool {
-        self.address == FormFieldStatus::Ok
+        self.alias == FormFieldStatus::Ok
+            && self.address == FormFieldStatus::Ok
             && self.username == FormFieldStatus::Ok
             && self.password == FormFieldStatus::Ok
     }

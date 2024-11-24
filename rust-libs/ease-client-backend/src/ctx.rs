@@ -14,6 +14,7 @@ use misty_async::AsyncRuntime;
 use crate::services::{
     player::{IPlayerDelegate, PlayerState},
     server::AssetServer,
+    storage::StorageState,
 };
 
 pub struct BackendContext {
@@ -23,6 +24,7 @@ pub struct BackendContext {
     rt: Arc<AsyncRuntime>,
     player: Arc<dyn IPlayerDelegate>,
     player_state: Arc<PlayerState>,
+    storage_state: Arc<StorageState>,
     connectors: (
         RwLock<HashMap<usize, Arc<dyn IConnectorNotifier>>>,
         AtomicUsize,
@@ -47,6 +49,7 @@ impl BackendContext {
             rt,
             player_state: Default::default(),
             player,
+            storage_state: Default::default(),
             connectors: Default::default(),
         }
     }
@@ -73,6 +76,9 @@ impl BackendContext {
     }
     pub fn player_delegate(&self) -> &Arc<dyn IPlayerDelegate> {
         &self.player
+    }
+    pub fn storage_state(&self) -> &Arc<StorageState> {
+        &self.storage_state
     }
 
     pub fn current_time(&self) -> Duration {

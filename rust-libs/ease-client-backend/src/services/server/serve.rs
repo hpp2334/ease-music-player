@@ -25,7 +25,7 @@ pub(crate) async fn get_stream_file_by_loc(
         return Ok(None);
     }
     let backend = backend.unwrap();
-    let stream_file = backend.get(&loc.path).await?;
+    let stream_file = backend.get(loc.path).await?;
     Ok(Some(stream_file))
 }
 

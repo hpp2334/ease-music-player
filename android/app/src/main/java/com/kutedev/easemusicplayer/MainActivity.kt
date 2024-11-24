@@ -55,6 +55,7 @@ import com.kutedev.easemusicplayer.widgets.playlists.CreatePlaylistsDialog
 import com.kutedev.easemusicplayer.widgets.playlists.EditPlaylistsDialog
 import uniffi.ease_client.MainAction
 import uniffi.ease_client.RoutesKey
+import uniffi.ease_client.StorageUpsertAction
 import uniffi.ease_client.ViewAction
 
 inline fun <reified T> MainActivity.registerViewModel(bridge: UIBridge)
@@ -79,7 +80,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        super.onCreate(null)
         enableEdgeToEdge()
 
         LocalBroadcastManager.getInstance(this).registerReceiver(uiReceiver, IntentFilter(
@@ -118,6 +119,17 @@ class MainActivity : ComponentActivity() {
         vmDestroyers.clear()
         uiBridge!!.onActivityDestroy()
         LocalBroadcastManager.getInstance(this).unregisterReceiver(uiReceiver)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        intent?.data?.let { uri ->
+            println(uri)
+            val code = uri.getQueryParameter("code")
+            if (code != null) {
+                uiBridge?.dispatchAction(ViewAction.StorageUpsert(StorageUpsertAction.OAuth(code)))
+            }
+        }
     }
 
     @Composable

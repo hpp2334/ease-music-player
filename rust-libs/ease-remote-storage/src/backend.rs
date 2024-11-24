@@ -3,6 +3,7 @@ use std::io::ErrorKind;
 use async_stream::stream;
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures_util::future::BoxFuture;
 use reqwest::StatusCode;
 
 #[derive(Debug, Clone)]
@@ -35,6 +36,8 @@ pub enum StorageBackendError {
     TokioIO(#[from] tokio::io::Error),
     #[error("Url Parse Error")]
     UrlParseError(String),
+    #[error("Serde Json Error: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
@@ -63,12 +66,9 @@ impl StorageBackendError {
     }
 }
 
-#[async_trait]
 pub trait StorageBackend {
-    async fn list(&self, dir: &str) -> StorageBackendResult<Vec<Entry>>;
-    async fn remove(&self, p: &str);
-    async fn get(&self, p: &str) -> StorageBackendResult<StreamFile>;
-    fn default_url(&self) -> String;
+    fn list(&self, dir: String) -> BoxFuture<StorageBackendResult<Vec<Entry>>>;
+    fn get(&self, p: String) -> BoxFuture<StorageBackendResult<StreamFile>>;
 }
 
 impl StreamFile {

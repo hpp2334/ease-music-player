@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use futures_util::future::BoxFuture;
 use once_cell::sync::Lazy;
 use tokio::io::AsyncReadExt;
 
@@ -15,11 +16,11 @@ impl LocalBackend {
         Self
     }
 
-    async fn list_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
+    async fn list_impl(&self, dir: String) -> StorageBackendResult<Vec<Entry>> {
         let dir = if std::env::consts::OS == "windows" {
             dir.replace('/', "\\")
         } else if std::env::consts::OS == "android" {
-            ANDROID_PREFIX_PATH.to_string() + dir
+            ANDROID_PREFIX_PATH.to_string() + dir.as_str()
         } else {
             dir.to_string()
         };
@@ -52,11 +53,11 @@ impl LocalBackend {
         Ok(ret)
     }
 
-    async fn get_impl(&self, p: &str) -> StorageBackendResult<StreamFile> {
+    async fn get_impl(&self, p: String) -> StorageBackendResult<StreamFile> {
         let p = if std::env::consts::OS == "windows" {
             p.replace('/', "\\")
         } else if std::env::consts::OS == "android" {
-            ANDROID_PREFIX_PATH.to_string() + p
+            ANDROID_PREFIX_PATH.to_string() + p.as_str()
         } else {
             p.to_string()
         };
@@ -69,29 +70,12 @@ impl LocalBackend {
     }
 }
 
-static LOCAL_STORAGE_PATH: Lazy<Mutex<Option<String>>> =
-    Lazy::new(|| Mutex::new(Some("/".to_string())));
-
-pub fn set_global_local_storage_path(p: String) {
-    let mut guard = LOCAL_STORAGE_PATH.lock().unwrap();
-    *guard = Some(p);
-}
-
-#[async_trait]
 impl StorageBackend for LocalBackend {
-    async fn list(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
-        self.list_impl(dir).await
+    fn list(&self, dir: String) -> BoxFuture<StorageBackendResult<Vec<Entry>>> {
+        Box::pin(self.list_impl(dir))
     }
-    async fn remove(&self, _p: &str) {
-        unimplemented!()
-    }
-
-    async fn get(&self, p: &str) -> StorageBackendResult<StreamFile> {
-        self.get_impl(p).await
-    }
-    fn default_url(&self) -> String {
-        let p = { LOCAL_STORAGE_PATH.lock().unwrap().clone().unwrap() };
-        p
+    fn get(&self, p: String) -> BoxFuture<StorageBackendResult<StreamFile>> {
+        Box::pin(self.get_impl(p))
     }
 }
 
@@ -107,7 +91,7 @@ mod test {
             .unwrap()
             .join("test/assets/case_list");
         let cwd = cwd.to_string_lossy().to_string();
-        let list = backend.list(&cwd).await.unwrap();
+        let list = backend.list(cwd).await.unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].name, "a.txt");
         assert_eq!(list[1].name, "b.log.txt");
@@ -122,7 +106,7 @@ mod test {
             .join("test/assets/case_list");
         let cwd = cwd.to_string_lossy().to_string();
         let cwd = cwd.replace("\\", "/");
-        let list = backend.list(&cwd).await.unwrap();
+        let list = backend.list(cwd).await.unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].name, "a.txt");
         assert_eq!(list[1].name, "b.log.txt");

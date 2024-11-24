@@ -29,6 +29,9 @@ impl FakePermissionService {
     }
 }
 impl IPermissionService for FakePermissionService {
+    fn open_url(&self, _url: String) {
+        // noop
+    }
     fn have_storage_permission(&self) -> bool {
         self._value.load(std::sync::atomic::Ordering::Relaxed)
     }

@@ -48,6 +48,24 @@ fun SimpleFormText(
 }
 
 @Composable
+fun FormWidget(
+    label: String,
+    block: @Composable () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+    ) {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            letterSpacing = 1.sp,
+        )
+        block()
+    }
+}
+
+@Composable
 fun FormText(
     label: String,
     value: String,
@@ -58,15 +76,9 @@ fun FormText(
     var passwordVisibleState = remember { mutableStateOf(false) }
     val passwordVisible = passwordVisibleState.value
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
+    FormWidget(
+        label = label
     ) {
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            letterSpacing = 1.sp,
-        )
         if (!isPassword) {
             TextField(
                 modifier = Modifier
@@ -109,19 +121,15 @@ fun FormText(
     }
 }
 
-
 @Composable
 fun FormSwitch(
     label: String,
     value: Boolean,
     onChange: (value: Boolean) -> Unit,
 ) {
-    Column {
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            letterSpacing = 1.sp,
-        )
+    FormWidget(
+        label = label
+    ) {
         Switch(
             checked = value,
             onCheckedChange = onChange

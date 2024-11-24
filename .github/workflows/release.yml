@@ -36,7 +36,6 @@ jobs:
         with:
           ndk-version: r28-beta2
           add-to-path: false
-          local-cache: true
       - name: Set Up JDK
         uses: actions/setup-java@v4
         with:

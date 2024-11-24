@@ -1,4 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use crate::{
     ctx::BackendContext,
@@ -15,9 +19,16 @@ use ease_client_shared::backends::{
     connector::ConnectorAction,
     storage::{ArgUpsertStorage, Storage, StorageEntryLoc, StorageId, StorageType},
 };
-use ease_remote_storage::{BuildWebdavArg, LocalBackend, StorageBackend, Webdav};
+use ease_remote_storage::{
+    BuildOneDriveArg, BuildWebdavArg, LocalBackend, OneDriveBackend, StorageBackend, Webdav,
+};
 use num_traits::FromPrimitive;
 use tracing::instrument;
+
+#[derive(Default)]
+pub(crate) struct StorageState {
+    cache: RwLock<HashMap<StorageId, Arc<dyn StorageBackend + Send + Sync + 'static>>>,
+}
 
 pub(crate) fn to_opt_storage_entry(
     path: Option<String>,
@@ -52,7 +63,7 @@ pub(crate) async fn load_storage_entry_data(
         cx.async_runtime()
             .spawn(async move {
                 tracing::trace!("start load");
-                let ret = match backend.get(&loc.path).await {
+                let ret = match backend.get(loc.path).await {
                     Ok(data) => {
                         let data = data.bytes().await.unwrap();
                         let data = data.to_vec();
@@ -83,7 +94,7 @@ pub fn build_storage(model: StorageModel, music_count: u32, playlist_count: u32)
     }
 }
 
-pub fn get_storage_backend_by_arg(
+pub fn build_storage_backend_by_arg(
     cx: &Arc<BackendContext>,
     arg: ArgUpsertStorage,
 ) -> BResult<Arc<dyn StorageBackend + Send + Sync>> {
@@ -101,14 +112,31 @@ pub fn get_storage_backend_by_arg(
             };
             Arc::new(Webdav::new(arg))
         }
+        StorageType::OneDrive => {
+            let arg = BuildOneDriveArg { code: arg.password };
+            Arc::new(OneDriveBackend::new(arg))
+        }
     };
     Ok(ret)
+}
+
+pub(crate) fn evict_storage_backend_cache(cx: &Arc<BackendContext>, storage_id: StorageId) {
+    let mut w = cx.storage_state().cache.write().unwrap();
+    w.remove(&storage_id);
 }
 
 pub fn get_storage_backend(
     cx: &Arc<BackendContext>,
     storage_id: StorageId,
 ) -> BResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
+    {
+        let state = cx.storage_state().cache.read().unwrap();
+        let cached = state.get(&storage_id);
+        if let Some(cached) = cached {
+            return Ok(Some(cached.clone()));
+        }
+    }
+
     let conn = get_conn(&cx)?;
     let model = db_load_storage(conn.get_ref(), storage_id)?;
     let (music_count, playlist_count) = if let Some(model) = model.as_ref() {
@@ -125,7 +153,7 @@ pub fn get_storage_backend(
     }
     let storage = model.unwrap();
     let storage = build_storage(storage, music_count, playlist_count);
-    let backend = get_storage_backend_by_arg(
+    let backend = build_storage_backend_by_arg(
         &cx,
         ArgUpsertStorage {
             id: None,
@@ -137,6 +165,11 @@ pub fn get_storage_backend(
             typ: storage.typ,
         },
     )?;
+
+    {
+        let mut state = cx.storage_state().cache.write().unwrap();
+        state.insert(storage_id, backend.clone());
+    }
     Ok(Some(backend))
 }
 

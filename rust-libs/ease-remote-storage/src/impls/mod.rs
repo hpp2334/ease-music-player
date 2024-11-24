@@ -1,6 +1,8 @@
 mod local;
+mod onedrive;
 mod webdav;
 
-pub use local::{set_global_local_storage_path, LocalBackend};
+pub use local::LocalBackend;
 
+pub use onedrive::{BuildOneDriveArg, OneDriveBackend};
 pub use webdav::{BuildWebdavArg, Webdav};

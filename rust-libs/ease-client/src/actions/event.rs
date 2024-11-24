@@ -5,7 +5,7 @@ use crate::view_models::{
     music::{
         common::MusicCommonAction, control::MusicControlAction, time_to_pause::TimeToPauseAction,
     },
-    storage::import::StorageImportAction,
+    storage::{import::StorageImportAction, upsert::StorageUpsertAction},
 };
 
 use super::WidgetAction;
@@ -27,5 +27,6 @@ pub enum ViewAction {
     TimeToPause(TimeToPauseAction),
     Router(RouterAction),
     Main(MainAction),
+    StorageUpsert(StorageUpsertAction),
     Widget(WidgetAction),
 }

@@ -245,7 +245,7 @@ impl Connector {
         Ok(())
     }
 
-    async fn request<S: IMessage>(
+    pub(crate) async fn request<S: IMessage>(
         &self,
         cx: &ViewModelContext,
         arg: <S as IMessage>::Argument,

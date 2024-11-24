@@ -174,14 +174,17 @@ pub(crate) fn current_storage_entries_vs(
     });
 
     let storage_items: Vec<VCurrentStorageEntriesStateStorageItem> = storages_state
-        .storages
+        .storage_ids
         .iter()
-        .map(|(_id, v)| VCurrentStorageEntriesStateStorageItem {
-            id: v.id.clone(),
-            name: resolve_storage_name(v),
-            subtitle: v.addr.clone(),
-            selected: Some(v.id.clone()) == state.current_storage_id,
-            is_local: v.typ == StorageType::Local,
+        .map(|id| {
+            let v = storages_state.storages.get(id).unwrap();
+            VCurrentStorageEntriesStateStorageItem {
+                id: v.id.clone(),
+                name: resolve_storage_name(v),
+                subtitle: v.addr.clone(),
+                selected: Some(v.id.clone()) == state.current_storage_id,
+                is_local: v.typ == StorageType::Local,
+            }
         })
         .collect();
 

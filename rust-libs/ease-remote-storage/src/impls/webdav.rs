@@ -3,6 +3,7 @@ use crate::StorageBackendError;
 
 use async_trait::async_trait;
 
+use futures_util::future::BoxFuture;
 use reqwest::header::HeaderValue;
 use reqwest::StatusCode;
 
@@ -236,12 +237,12 @@ impl Webdav {
         Ok(ret)
     }
 
-    async fn list_with_retry_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
-        let r = self.list_impl(dir).await;
+    async fn list_with_retry_impl(&self, dir: String) -> StorageBackendResult<Vec<Entry>> {
+        let r = self.list_impl(dir.as_str()).await;
         if !is_auth_error(&r) {
             return r;
         }
-        return self.list_impl(dir).await;
+        return self.list_impl(dir.as_str()).await;
     }
 
     async fn get_impl(&self, p: &str) -> StorageBackendResult<StreamFile> {
@@ -261,12 +262,12 @@ impl Webdav {
         Ok(res)
     }
 
-    async fn get_with_retry_impl(&self, p: &str) -> StorageBackendResult<StreamFile> {
-        let r = self.get_impl(p).await;
+    async fn get_with_retry_impl(&self, p: String) -> StorageBackendResult<StreamFile> {
+        let r = self.get_impl(p.as_str()).await;
         if !is_auth_error(&r) {
             return r;
         }
-        return self.get_impl(p).await;
+        return self.get_impl(p.as_str()).await;
     }
 
     fn build_client(&self) -> StorageBackendResult<reqwest::Client> {
@@ -278,20 +279,13 @@ impl Webdav {
     }
 }
 
-#[async_trait]
 impl StorageBackend for Webdav {
-    async fn list(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
-        self.list_with_retry_impl(dir).await
-    }
-    async fn remove(&self, _p: &str) {
-        unimplemented!()
+    fn list(&self, dir: String) -> BoxFuture<StorageBackendResult<Vec<Entry>>> {
+        Box::pin(self.list_with_retry_impl(dir))
     }
 
-    async fn get(&self, p: &str) -> StorageBackendResult<StreamFile> {
-        self.get_with_retry_impl(p).await
-    }
-    fn default_url(&self) -> String {
-        return "/".to_string();
+    fn get(&self, p: String) -> BoxFuture<StorageBackendResult<StreamFile>> {
+        Box::pin(self.get_with_retry_impl(p))
     }
 }
 
@@ -366,7 +360,7 @@ mod test {
             is_anonymous: true,
             connect_timeout: Duration::from_secs(10),
         });
-        let list = backend.list("/").await.unwrap();
+        let list = backend.list("/".to_string()).await.unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].path, "/a.txt");
         assert_eq!(list[1].path, "/b.log.txt");
@@ -383,14 +377,14 @@ mod test {
             is_anonymous: true,
             connect_timeout: Duration::from_secs(10),
         });
-        let mut list = backend.list("/").await.unwrap();
+        let mut list = backend.list("/".to_string()).await.unwrap();
         assert_eq!(list.len(), 1);
 
         let item = list.pop().unwrap();
         assert_eq!(item.path, "/a.bin");
         assert_eq!(item.size, Some(3));
 
-        let file = backend.get(&item.path).await.unwrap();
+        let file = backend.get(item.path).await.unwrap();
         assert_eq!(file.size(), Some(3));
 
         let stream = file.into_stream();
@@ -412,7 +406,7 @@ mod test {
             is_anonymous: true,
             connect_timeout: Duration::from_secs(10),
         });
-        let list = backend.list("/").await.unwrap();
+        let list = backend.list("/".to_string()).await.unwrap();
         assert_eq!(list.len(), 2);
         let item = &list[0];
         assert_eq!(item.path, "/b-folder");
@@ -421,13 +415,13 @@ mod test {
         assert_eq!(item.path, "/a.bin");
         assert_eq!(item.size, Some(3));
 
-        let list = backend.list("/b-folder").await.unwrap();
+        let list = backend.list("/b-folder".to_string()).await.unwrap();
         assert_eq!(list.len(), 1);
         let item = &list[0];
         assert_eq!(item.path, "/b-folder/b.bin");
         assert_eq!(item.size, Some(3));
 
-        let file = backend.get(&item.path).await.unwrap();
+        let file = backend.get(item.path.to_string()).await.unwrap();
         assert_eq!(file.size(), Some(3));
 
         let stream = file.into_stream();

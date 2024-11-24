@@ -4,6 +4,7 @@ use ease_client_shared::backends::storage::{
     ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
     StorageEntry, StorageEntryLoc, StorageId, StorageType,
 };
+use ease_remote_storage::OneDriveBackend;
 use futures::try_join;
 
 use crate::{
@@ -18,15 +19,20 @@ use crate::{
     services::{
         playlist::notify_all_playlist_abstracts,
         storage::{
-            build_storage, get_storage_backend, get_storage_backend_by_arg, list_storage,
-            notify_storages,
+            build_storage, build_storage_backend_by_arg, evict_storage_backend_cache,
+            get_storage_backend, list_storage, notify_storages,
         },
     },
 };
 
 pub async fn ccu_upsert_storage(cx: &Arc<BackendContext>, arg: ArgUpsertStorage) -> BResult<()> {
     let conn = get_conn(&cx)?;
+    let id = arg.id;
     db_upsert_storage(conn.get_ref(), arg)?;
+
+    if let Some(id) = id {
+        evict_storage_backend_cache(cx, id);
+    }
 
     try_join! {
         notify_storages(cx),
@@ -47,10 +53,17 @@ pub async fn cr_get_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<
     Ok(storage)
 }
 
+pub async fn cr_get_refresh_token(cx: &Arc<BackendContext>, code: String) -> BResult<String> {
+    let refresh_token = OneDriveBackend::request_refresh_token(code).await?;
+    Ok(refresh_token)
+}
+
 pub async fn cd_remove_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<()> {
     let conn = get_conn(&cx)?;
     db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
     db_remove_storage(conn.get_ref(), id)?;
+
+    evict_storage_backend_cache(cx, id);
 
     try_join! {
         notify_storages(cx),
@@ -64,8 +77,8 @@ pub async fn cr_test_storage(
     cx: &Arc<BackendContext>,
     arg: ArgUpsertStorage,
 ) -> BResult<StorageConnectionTestResult> {
-    let backend = get_storage_backend_by_arg(&cx, arg)?;
-    let res = backend.get("/").await;
+    let backend = build_storage_backend_by_arg(&cx, arg)?;
+    let res = backend.list("/".to_string()).await;
 
     match res {
         Ok(_) => Ok(StorageConnectionTestResult::Success),
@@ -91,8 +104,8 @@ pub async fn cr_list_storage_entry_children(
     }
     let backend = backend.unwrap();
 
-    let p = arg.path.as_str();
-    let res = backend.list(&p).await;
+    let p = arg.path;
+    let res = backend.list(p).await;
 
     match res {
         Ok(entries) => {

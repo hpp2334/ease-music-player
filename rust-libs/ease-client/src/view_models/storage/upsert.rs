@@ -4,12 +4,15 @@ use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
     view_models::{connector::Connector, main::router::RouterVM},
-    RoutesKey,
+    PermissionService, RoutesKey,
 };
-use ease_client_shared::backends::storage::{
-    ArgUpsertStorage, StorageConnectionTestResult, StorageId, StorageType,
+use ease_client_shared::backends::{
+    generated::GetRefreshTokenMsg,
+    storage::{
+        onedrive_oauth_url, ArgUpsertStorage, StorageConnectionTestResult, StorageId, StorageType,
+    },
 };
-use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
 use super::state::{AllStorageState, EditStorageState, FormFieldStatus};
 
@@ -23,7 +26,14 @@ pub enum StorageUpsertWidget {
     Password,
     Remove,
     Test,
+    ConnectAccount,
+    DisconnectAccount,
     Finish,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum StorageUpsertAction {
+    OAuth { code: String },
 }
 
 pub(crate) struct StorageUpsertVM {
@@ -53,6 +63,7 @@ impl StorageUpsertVM {
             is_anonymous: true,
             typ: StorageType::Webdav,
         };
+        edit.backup.clear();
         edit.validated = Default::default();
         edit.test = StorageConnectionTestResult::None;
         edit.is_create = true;
@@ -86,6 +97,7 @@ impl StorageUpsertVM {
             is_anonymous: storage.is_anonymous,
             typ: storage.typ.clone(),
         };
+        edit.backup.clear();
         edit.test = StorageConnectionTestResult::None;
         edit.music_count = storage.music_count;
         edit.playlist_count = storage.playlist_count;
@@ -136,6 +148,37 @@ impl StorageUpsertVM {
         Ok(())
     }
 
+    fn on_oauth(&self, cx: &ViewModelContext, code: String) {
+        let edit = self.edit.clone();
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+            let refresh_token = Connector::of(&cx)
+                .request::<GetRefreshTokenMsg>(&cx, code)
+                .await?;
+
+            let mut state = cx.model_mut(&edit);
+            if state.info.typ == StorageType::OneDrive {
+                state.info.password = refresh_token;
+            }
+            Ok(())
+        });
+    }
+
+    fn connect_account(&self, cx: &ViewModelContext) {
+        let arg = cx.model_get(&self.edit).info.clone();
+
+        match arg.typ {
+            StorageType::Local | StorageType::Webdav => {}
+            StorageType::OneDrive => {
+                PermissionService::of(cx).open_url(onedrive_oauth_url());
+            }
+        }
+    }
+
+    fn disconnect_account(&self, cx: &ViewModelContext) {
+        let mut state = cx.model_mut(&self.edit);
+        state.info.password = Default::default();
+    }
+
     fn finish(&self, cx: &ViewModelContext) -> EaseResult<()> {
         let arg = self.validate(cx);
         let arg = if let Some(arg) = arg {
@@ -152,41 +195,74 @@ impl StorageUpsertVM {
     }
 
     fn validate(&self, cx: &ViewModelContext) -> Option<ArgUpsertStorage> {
-        let mut state = cx.model_mut(&self.edit);
-        let ret: ArgUpsertStorage = {
-            let mut ret: ArgUpsertStorage = Default::default();
-            let form = state.info.clone();
-            ret.id = form.id;
-            ret.typ = form.typ;
-            ret.is_anonymous = form.is_anonymous;
-            ret.alias = form.alias.trim().to_string();
-            ret.addr = form.addr.trim().to_string();
+        let typ = cx.model_get(&self.edit).info.typ;
 
-            if !form.is_anonymous {
-                ret.username = form.username.trim().to_string();
-                ret.password = form.password.trim().to_string();
-            }
-            ret
-        };
+        match typ {
+            StorageType::Local | StorageType::Webdav => {
+                let mut state = cx.model_mut(&self.edit);
+                let ret: ArgUpsertStorage = {
+                    let mut ret: ArgUpsertStorage = Default::default();
+                    let form = state.info.clone();
+                    ret.id = form.id;
+                    ret.typ = form.typ;
+                    ret.is_anonymous = form.is_anonymous;
+                    ret.alias = form.alias.trim().to_string();
+                    ret.addr = form.addr.trim().to_string();
 
-        let validated = &mut state.validated;
-        *validated = Default::default();
-        if ret.addr.is_empty() {
-            validated.address = FormFieldStatus::CannotBeEmpty;
-        }
-        if !ret.is_anonymous {
-            if ret.username.is_empty() {
-                validated.username = FormFieldStatus::CannotBeEmpty;
-            }
-            if ret.password.is_empty() {
-                validated.password = FormFieldStatus::CannotBeEmpty;
-            }
-        }
+                    if !form.is_anonymous {
+                        ret.username = form.username.trim().to_string();
+                        ret.password = form.password.trim().to_string();
+                    }
+                    ret
+                };
 
-        if !validated.is_valid() {
-            None
-        } else {
-            Some(ret)
+                let validated = &mut state.validated;
+                *validated = Default::default();
+                if ret.addr.is_empty() {
+                    validated.address = FormFieldStatus::CannotBeEmpty;
+                }
+                if !ret.is_anonymous {
+                    if ret.username.is_empty() {
+                        validated.username = FormFieldStatus::CannotBeEmpty;
+                    }
+                    if ret.password.is_empty() {
+                        validated.password = FormFieldStatus::CannotBeEmpty;
+                    }
+                }
+
+                if !validated.is_valid() {
+                    None
+                } else {
+                    Some(ret)
+                }
+            }
+            StorageType::OneDrive => {
+                let mut state = cx.model_mut(&self.edit);
+                let ret: ArgUpsertStorage = {
+                    let mut ret: ArgUpsertStorage = Default::default();
+                    let form = state.info.clone();
+                    ret.id = form.id;
+                    ret.typ = form.typ;
+                    ret.alias = form.alias.trim().to_string();
+                    ret.password = form.password.trim().to_string();
+                    ret
+                };
+
+                let validated = &mut state.validated;
+                *validated = Default::default();
+                if ret.alias.is_empty() {
+                    validated.alias = FormFieldStatus::CannotBeEmpty;
+                }
+                if ret.password.is_empty() {
+                    validated.password = FormFieldStatus::CannotBeEmpty;
+                }
+
+                if !validated.is_valid() {
+                    None
+                } else {
+                    Some(ret)
+                }
+            }
         }
     }
 }
@@ -201,7 +277,22 @@ impl ViewModel for StorageUpsertVM {
                     (Widget::StorageUpsert(action), WidgetActionType::Click) => match action {
                         StorageUpsertWidget::Type { value } => {
                             let mut form = cx.model_mut(&self.edit);
-                            form.info.typ = *value;
+                            let old_typ = form.info.typ;
+                            let old_info = form.info.clone();
+
+                            if old_typ != *value {
+                                form.backup.insert(old_typ, old_info.clone());
+                                let to_restore = form.backup.get(value);
+
+                                if let Some(to_restore) = to_restore {
+                                    form.info = to_restore.clone();
+                                } else {
+                                    form.info = Default::default();
+                                    form.info.alias = old_info.alias.clone();
+                                }
+                                form.info.typ = *value;
+                                form.validated = Default::default();
+                            }
                         }
                         StorageUpsertWidget::IsAnonymous => {
                             let mut form = cx.model_mut(&self.edit);
@@ -213,6 +304,12 @@ impl ViewModel for StorageUpsertVM {
                         }
                         StorageUpsertWidget::Test => {
                             self.test(cx)?;
+                        }
+                        StorageUpsertWidget::ConnectAccount => {
+                            self.connect_account(cx);
+                        }
+                        StorageUpsertWidget::DisconnectAccount => {
+                            self.disconnect_account(cx);
                         }
                         StorageUpsertWidget::Finish => {
                             self.finish(cx)?;
@@ -243,6 +340,11 @@ impl ViewModel for StorageUpsertVM {
                         }
                     }
                     _ => {}
+                },
+                ViewAction::StorageUpsert(action) => match action {
+                    StorageUpsertAction::OAuth { code } => {
+                        self.on_oauth(cx, code.to_string());
+                    }
                 },
                 _ => {}
             },

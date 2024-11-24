@@ -66,4 +66,9 @@
     <string name="music_lyric_no_desc">找不到歌词</string>
     <string name="music_lyric_try_add_desc">点击尝试添加</string>
     <string name="music_lyric_fail">加载歌词失败</string>
+    <string name="storage_edit_oauth">OAuth</string>
+    <string name="storage_edit_onedrive_connect">连接你的账户</string>
+    <string name="storage_edit_onedrive_disconnect">断开账户连接</string>
+    <string name="storage_edit_onedrive_should_auth">需要连接你的账户</string>
+    <string name="storage_edit_onedrive_alias_not_empty">名字不能为空</string>
 </resources>

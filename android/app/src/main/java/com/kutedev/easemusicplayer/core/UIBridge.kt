@@ -5,7 +5,10 @@ import android.Manifest.permission.READ_EXTERNAL_STORAGE
 import android.Manifest.permission.READ_MEDIA_AUDIO
 import android.annotation.SuppressLint
 import android.content.ComponentName
+import android.content.Intent
+import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.ui.graphics.ImageBitmap
@@ -116,6 +119,12 @@ private class PermissionService : IPermissionServiceForeign {
     fun setContext(context: android.content.Context, requestPermissionLauncher: ActivityResultLauncher<String>) {
         this.context = context
         this.requestPermissionLauncher = requestPermissionLauncher
+    }
+
+    override fun openUrl(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        intent.flags = FLAG_ACTIVITY_NEW_TASK
+        context?.startActivity(intent)
     }
 
     override fun haveStoragePermission(): Boolean {

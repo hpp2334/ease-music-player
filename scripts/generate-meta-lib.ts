@@ -187,7 +187,6 @@ export function generateMetas() {
             s += `use crate::backends::${module}::*;\n`
         }
         s += '\n'
-
         s += `#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, Copy)]\n`
         s += `pub enum Code {\n`
         for (const meta of metas) {

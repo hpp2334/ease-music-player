@@ -46,13 +46,16 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.components.EaseTextButton
+import com.kutedev.easemusicplayer.components.EaseTextButtonSize
+import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
+import com.kutedev.easemusicplayer.components.FormWidget
 import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
 import uniffi.ease_client.FormFieldStatus
 import uniffi.ease_client.StorageUpsertWidget
-import uniffi.ease_client.Widget
 import uniffi.ease_client_shared.StorageConnectionTestResult
 import uniffi.ease_client_shared.StorageType
 
@@ -150,6 +153,118 @@ private fun StorageBlock(
 }
 
 
+@Composable
+private fun WebdavConfig(
+    evm: EaseViewModel,
+) {
+    val context = LocalContext.current
+    val bridge = UIBridgeController.current
+    val state by evm.editStorageState.collectAsState();
+    val form = state.info;
+    val validated = state.validated;
+    val isAnonymous = form.isAnonymous;
+
+    FormSwitch(
+        label = stringResource(id = R.string.storage_edit_anonymous),
+        value = isAnonymous,
+        onChange = { bridge.dispatchClick(StorageUpsertWidget.IsAnonymous); }
+    )
+    FormText(
+        label = stringResource(id = R.string.storage_edit_alias),
+        value = form.alias,
+        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
+    )
+    FormText(
+        label = stringResource(id = R.string.storage_edit_addr),
+        value = form.addr,
+        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Address, value) },
+        error = if (validated.address == FormFieldStatus.CANNOT_BE_EMPTY) {
+            R.string.storage_edit_form_address
+        } else {
+            null
+        }
+    )
+    if (!isAnonymous) {
+        FormText(
+            label = stringResource(id = R.string.storage_edit_username),
+            value = form.username,
+            onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Username, value) },
+            error = if (validated.username == FormFieldStatus.CANNOT_BE_EMPTY) {
+                R.string.storage_edit_form_username
+            } else {
+                null
+            }
+        )
+        FormText(
+            label = stringResource(id = R.string.storage_edit_password),
+            value = form.password,
+            isPassword = true,
+            onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Password, value) },
+            error = if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
+                R.string.storage_edit_form_password
+            } else {
+                null
+            }
+        )
+    }
+}
+
+@Composable
+private fun OneDriveConfig(
+    evm: EaseViewModel,
+) {
+    val bridge = UIBridgeController.current
+    val state by evm.editStorageState.collectAsState();
+    val connected = state.info.password.isNotEmpty()
+    val form = state.info;
+    val validated = state.validated
+
+    FormText(
+        label = stringResource(id = R.string.storage_edit_alias),
+        value = form.alias,
+        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
+        error = if (validated.alias == FormFieldStatus.CANNOT_BE_EMPTY) {
+            R.string.storage_edit_onedrive_alias_not_empty
+        } else {
+            null
+        }
+    )
+    FormWidget(
+        label = stringResource(R.string.storage_edit_oauth)
+    ) {
+        if (!connected) {
+            EaseTextButton(
+                text = stringResource(R.string.storage_edit_onedrive_connect),
+                type = EaseTextButtonType.PrimaryVariant,
+                size = EaseTextButtonSize.Medium,
+                onClick = {
+                    bridge.dispatchClick(StorageUpsertWidget.ConnectAccount)
+                },
+            )
+            if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
+                Text(
+                    modifier = Modifier.padding(
+                        horizontal = 0.dp,
+                        vertical = 2.dp,
+                    ),
+                    text = stringResource(R.string.storage_edit_onedrive_should_auth),
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        if (connected) {
+            EaseTextButton(
+                text = stringResource(R.string.storage_edit_onedrive_disconnect),
+                type = EaseTextButtonType.Error,
+                size = EaseTextButtonSize.Medium,
+                onClick = {
+                    bridge.dispatchClick(StorageUpsertWidget.DisconnectAccount)
+                },
+            )
+        }
+    }
+}
 
 @Composable
 fun EditStoragesPage(
@@ -164,10 +279,8 @@ fun EditStoragesPage(
     }
     val state by evm.editStorageState.collectAsState();
     val form = state.info;
-    val validated = state.validated;
 
     val isCreated = state.isCreated;
-    val isAnonymous = form.isAnonymous;
     val storageType = form.typ;
     val testing = state.test;
 
@@ -273,7 +386,9 @@ fun EditStoragesPage(
                     .imePadding()
                     .padding(30.dp, 12.dp)
             ) {
-                Row {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     StorageBlock(
                         title = "WebDAV",
                         isActive = storageType == StorageType.WEBDAV,
@@ -281,50 +396,20 @@ fun EditStoragesPage(
                             bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.WEBDAV))
                         }
                     )
+                    StorageBlock(
+                        title = "OneDrive",
+                        isActive = storageType == StorageType.ONE_DRIVE,
+                        onSelect = {
+                            bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.ONE_DRIVE))
+                        }
+                    )
                 }
                 Box(modifier = Modifier.height(30.dp))
-                FormSwitch(
-                    label = stringResource(id = R.string.storage_edit_anonymous),
-                    value = isAnonymous,
-                    onChange = { bridge.dispatchClick(StorageUpsertWidget.IsAnonymous); }
-                )
-                FormText(
-                    label = stringResource(id = R.string.storage_edit_alias),
-                    value = form.alias,
-                    onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
-                )
-                FormText(
-                    label = stringResource(id = R.string.storage_edit_addr),
-                    value = form.addr,
-                    onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Address, value) },
-                    error = if (validated.address == FormFieldStatus.CANNOT_BE_EMPTY) {
-                        R.string.storage_edit_form_address
-                    } else {
-                        null
-                    }
-                )
-                if (!isAnonymous) {
-                    FormText(
-                        label = stringResource(id = R.string.storage_edit_username),
-                        value = form.username,
-                        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Username, value) },
-                        error = if (validated.username == FormFieldStatus.CANNOT_BE_EMPTY) {
-                            R.string.storage_edit_form_username
-                        } else {
-                            null
-                        }
-                    )
-                    FormText(
-                        label = stringResource(id = R.string.storage_edit_password),
-                        value = form.password,
-                        isPassword = true,
-                        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Password, value) },
-                        error = if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
-                            R.string.storage_edit_form_password
-                        } else {
-                            null
-                        }
-                    )
+                if (storageType == StorageType.WEBDAV) {
+                    WebdavConfig(evm)
+                }
+                if (storageType == StorageType.ONE_DRIVE) {
+                    OneDriveConfig(evm)
                 }
             }
         }

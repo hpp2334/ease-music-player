@@ -13,4 +13,6 @@ pub mod playlist;
 pub mod preference;
 pub mod storage;
 
+mod env;
+
 pub use message::{decode_message_payload, encode_message_payload, IMessage, MessagePayload};

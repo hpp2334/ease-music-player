@@ -66,4 +66,9 @@
     <string name="music_lyric_no_desc">No Lyric.</string>
     <string name="music_lyric_try_add_desc">Try add one.</string>
     <string name="music_lyric_fail">Failed to load lyric.</string>
+    <string name="storage_edit_oauth">OAuth</string>
+    <string name="storage_edit_onedrive_connect">Connect your account</string>
+    <string name="storage_edit_onedrive_disconnect">Disconnect</string>
+    <string name="storage_edit_onedrive_should_auth">Should connect your account</string>
+    <string name="storage_edit_onedrive_alias_not_empty">Alias should not be empty</string>
 </resources>

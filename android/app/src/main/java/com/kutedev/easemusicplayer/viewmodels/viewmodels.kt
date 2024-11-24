@@ -90,9 +90,10 @@ val DefaultEditStorageState =
                         ),
                 validated =
                         EditStorageFormValidated(
+                                alias = FormFieldStatus.OK,
                                 address = FormFieldStatus.OK,
                                 username = FormFieldStatus.OK,
-                                password = FormFieldStatus.OK
+                                password = FormFieldStatus.OK,
                         ),
                 test = StorageConnectionTestResult.NONE,
                 musicCount = 0u,

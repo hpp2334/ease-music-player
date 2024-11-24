@@ -1,7 +1,7 @@
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
-use crate::define_id;
+use crate::{backends::env::EASEM_ONEDRIVE_ID, define_id};
 
 use super::{music::MusicId, playlist::PlaylistId};
 
@@ -31,12 +31,14 @@ pub enum DataSourceKey {
     PartialEq,
     Eq,
     Default,
+    Hash,
     uniffi::Enum,
 )]
 pub enum StorageType {
     Local,
     #[default]
     Webdav,
+    OneDrive,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,4 +146,13 @@ impl ListStorageEntryChildrenResp {
             ListStorageEntryChildrenResp::Unknown => false,
         }
     }
+}
+
+pub fn onedrive_oauth_url() -> String {
+    let base_url = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+    let client_id: &str = EASEM_ONEDRIVE_ID;
+    let redirect_uri = "easem://oauth2redirect/";
+    let scope = urlencoding::encode("Files.Read offline_access").to_string();
+
+    format!("{base_url}?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&scope={scope}")
 }

@@ -31,6 +31,7 @@ macro_rules! generate_delegate {
 }
 
 generate_delegate!(PermissionServiceDelegate, IPermissionService, IPermissionServiceForeign, {
+   open_url(url: String);
    have_storage_permission() -> bool;
    request_storage_permission();
 });
