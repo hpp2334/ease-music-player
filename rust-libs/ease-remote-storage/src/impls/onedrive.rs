@@ -89,11 +89,14 @@ fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
     return false;
 }
 
-fn build_client() -> StorageBackendResult<reqwest::Client> {
+fn build_client() -> StorageBackendResult<reqwest_middleware::ClientWithMiddleware> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .no_proxy()
         .build()?;
+    let client = reqwest_middleware::ClientBuilder::new(client)
+        .with(reqwest_tracing::TracingMiddleware::default())
+        .build();
     Ok(client)
 }
 
@@ -261,7 +264,7 @@ impl OneDriveBackend {
         return self.get_impl(p.as_str()).await;
     }
 
-    fn build_client(&self) -> StorageBackendResult<reqwest::Client> {
+    fn build_client(&self) -> StorageBackendResult<reqwest_middleware::ClientWithMiddleware> {
         build_client()
     }
 }

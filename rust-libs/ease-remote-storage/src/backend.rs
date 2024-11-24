@@ -30,6 +30,8 @@ pub struct StreamFile {
 pub enum StorageBackendError {
     #[error(transparent)]
     RequestFail(#[from] reqwest::Error),
+    #[error(transparent)]
+    RequestMiddlewareFail(#[from] reqwest_middleware::Error),
     #[error("Parse XML Fail")]
     ParseXMLFail,
     #[error(transparent)]
