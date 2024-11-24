@@ -107,7 +107,7 @@ class RouterService : IRouterServiceForeign {
 
     override fun pop() {
         if (_navigatorController != null) {
-            _navigatorController!!.popBackStack()
+            _navigatorController!!.navigateUp()
         }
     }
 }

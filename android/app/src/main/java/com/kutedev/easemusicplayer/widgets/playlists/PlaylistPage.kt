@@ -436,13 +436,8 @@ fun PlaylistPage(
     val state = evm.currentPlaylistState.collectAsState().value
     val currentMusicState = evm.currentMusicState.collectAsState().value
     var removeDialogOpen by remember { mutableStateOf(false) }
-    val id = state.id
 
     val items = state.items
-
-    if (id == null) {
-        return
-    }
 
     Box(
         modifier = Modifier
