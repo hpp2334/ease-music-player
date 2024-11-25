@@ -250,30 +250,40 @@ impl OneDriveBackend {
         return self.list_impl(dir.as_str()).await;
     }
 
-    async fn get_impl(&self, p: &str) -> StorageBackendResult<StreamFile> {
+    async fn get_impl(&self, p: &str, byte_offset: u64) -> StorageBackendResult<StreamFile> {
         let _url = ONEDRIVE_ROOT_API.to_string() + "/root:" + p + ":/content";
         let url = reqwest::Url::parse(_url.as_str())
             .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
-        let base_headers = self.build_base_header_map().await;
+
+        let mut headers = self.build_base_header_map().await;
+        headers.insert(
+            reqwest::header::RANGE,
+            HeaderValue::from_str(format!("bytes={}-", byte_offset).as_str()).unwrap(),
+        );
 
         let resp = self
             .build_client()?
             .get(url.clone())
-            .headers(base_headers)
+            .headers(headers)
             .send()
             .await?;
-        let res = resp.error_for_status().map(|resp| StreamFile::new(resp))?;
+        let byte_offset = if resp.headers().get(reqwest::header::CONTENT_RANGE).is_some() {
+            0
+        } else {
+            byte_offset
+        };
+        let res = resp.error_for_status().map(|resp| StreamFile::new(resp, byte_offset))?;
         Ok(res)
     }
 
-    async fn get_with_retry_impl(&self, p: String) -> StorageBackendResult<StreamFile> {
+    async fn get_with_retry_impl(&self, p: String, byte_offset: u64) -> StorageBackendResult<StreamFile> {
         self.try_ensure_refresh_token_by_refresh_token().await?;
-        let r = self.get_impl(p.as_str()).await;
+        let r = self.get_impl(p.as_str(), byte_offset).await;
         if !is_auth_error(&r) {
             return r;
         }
         self.refresh_token_by_refresh_token().await?;
-        return self.get_impl(p.as_str()).await;
+        return self.get_impl(p.as_str(), byte_offset).await;
     }
 
     fn build_client(&self) -> StorageBackendResult<reqwest::Client> {
@@ -286,8 +296,8 @@ impl StorageBackend for OneDriveBackend {
         Box::pin(self.list_with_retry_impl(dir))
     }
 
-    fn get(&self, p: String) -> BoxFuture<StorageBackendResult<StreamFile>> {
-        Box::pin(self.get_with_retry_impl(p))
+    fn get(&self, p: String, byte_offset: u64) -> BoxFuture<StorageBackendResult<StreamFile>> {
+        Box::pin(self.get_with_retry_impl(p, byte_offset))
     }
 }
 

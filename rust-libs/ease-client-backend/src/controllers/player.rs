@@ -197,6 +197,11 @@ pub(crate) async fn cp_on_player_event(
         PlayerDelegateEvent::Cover { id, buffer } => {
             update_music_cover(&cx, ArgUpdateMusicCover { id, cover: buffer }).await?
         }
+        PlayerDelegateEvent::Error { msg } => {
+            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Error {
+                value: msg,
+            }));
+        }
     }
     Ok(())
 }

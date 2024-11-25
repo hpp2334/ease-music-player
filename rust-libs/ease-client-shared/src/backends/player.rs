@@ -38,6 +38,7 @@ pub enum PlayerDelegateEvent {
     Seek,
     Total { id: MusicId, duration_ms: u64 },
     Cover { id: MusicId, buffer: Vec<u8> },
+    Error { msg: String },
 }
 
 #[derive(
@@ -67,4 +68,5 @@ pub enum ConnectorPlayerAction {
     Seeked,
     Current { value: Option<PlayerCurrentPlaying> },
     Playmode { value: PlayMode },
+    Error { value: String },
 }

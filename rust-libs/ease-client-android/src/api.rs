@@ -194,7 +194,7 @@ pub fn api_flush_backend_spawned_local() {
 pub async fn api_load_asset(key: DataSourceKey) -> Option<Vec<u8>> {
     RT.spawn(async move {
         if let Some(backend) = BACKEND.try_backend() {
-            let file = backend.asset_server().load(key).await;
+            let file = backend.asset_server().load(key, 0).await;
             if let Ok(Some(file)) = file {
                 return file.bytes().await.ok().map(|v| v.to_vec());
             }

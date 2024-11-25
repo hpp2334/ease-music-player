@@ -245,29 +245,46 @@ impl Webdav {
         return self.list_impl(dir.as_str()).await;
     }
 
-    async fn get_impl(&self, p: &str) -> StorageBackendResult<StreamFile> {
+    async fn get_impl(&self, p: &str, byte_offset: u64) -> StorageBackendResult<StreamFile> {
         let mut url = reqwest::Url::parse(&self.addr)
             .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
         url.set_path(p);
 
+        let mut headers = self.build_base_header_map(reqwest::Method::GET, &url);
+        headers.insert(
+            reqwest::header::RANGE,
+            HeaderValue::from_str(format!("bytes={}-", byte_offset).as_str()).unwrap(),
+        );
+
         let resp = self
             .build_client()?
             .get(url.clone())
-            .headers(self.build_base_header_map(reqwest::Method::GET, &url))
+            .headers(headers)
             .send()
             .await?;
+        let byte_offset = if resp.headers().get(reqwest::header::CONTENT_RANGE).is_some() {
+            0
+        } else {
+            byte_offset
+        };
         self.post_handle_response(&resp);
 
-        let res = resp.error_for_status().map(|resp| StreamFile::new(resp))?;
+        let res = resp
+            .error_for_status()
+            .map(|resp| StreamFile::new(resp, byte_offset))?;
         Ok(res)
     }
 
-    async fn get_with_retry_impl(&self, p: String) -> StorageBackendResult<StreamFile> {
-        let r = self.get_impl(p.as_str()).await;
+    async fn get_with_retry_impl(
+        &self,
+        p: String,
+        byte_offset: u64,
+    ) -> StorageBackendResult<StreamFile> {
+        let r = self.get_impl(p.as_str(), byte_offset).await;
         if !is_auth_error(&r) {
             return r;
         }
-        return self.get_impl(p.as_str()).await;
+        return self.get_impl(p.as_str(), byte_offset).await;
     }
 
     fn build_client(&self) -> StorageBackendResult<reqwest::Client> {
@@ -284,8 +301,8 @@ impl StorageBackend for Webdav {
         Box::pin(self.list_with_retry_impl(dir))
     }
 
-    fn get(&self, p: String) -> BoxFuture<StorageBackendResult<StreamFile>> {
-        Box::pin(self.get_with_retry_impl(p))
+    fn get(&self, p: String, byte_offset: u64) -> BoxFuture<StorageBackendResult<StreamFile>> {
+        Box::pin(self.get_with_retry_impl(p, byte_offset))
     }
 }
 
@@ -384,7 +401,7 @@ mod test {
         assert_eq!(item.path, "/a.bin");
         assert_eq!(item.size, Some(3));
 
-        let file = backend.get(item.path).await.unwrap();
+        let file = backend.get(item.path, 0).await.unwrap();
         assert_eq!(file.size(), Some(3));
 
         let stream = file.into_stream();
@@ -421,7 +438,7 @@ mod test {
         assert_eq!(item.path, "/b-folder/b.bin");
         assert_eq!(item.size, Some(3));
 
-        let file = backend.get(item.path.to_string()).await.unwrap();
+        let file = backend.get(item.path.to_string(), 0).await.unwrap();
         assert_eq!(file.size(), Some(3));
 
         let stream = file.into_stream();
@@ -430,5 +447,45 @@ mod test {
         assert_eq!(chunk.is_some(), true);
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [49, 50, 51]);
+    }
+
+    #[tokio::test]
+    async fn test_file_content_1_partial_stream() {
+        let server = setup_server("test/assets/case_content").await;
+
+        let backend = Webdav::new(BuildWebdavArg {
+            addr: server.addr(),
+            username: Default::default(),
+            password: Default::default(),
+            is_anonymous: true,
+            connect_timeout: Duration::from_secs(10),
+        });
+        let file = backend.get("/a.bin".to_string(), 2).await.unwrap();
+        assert_eq!(file.size(), Some(1));
+
+        let stream = file.into_stream();
+        pin_mut!(stream);
+        let chunk = stream.next().await;
+        assert_eq!(chunk.is_some(), true);
+        let chunk = chunk.unwrap().unwrap();
+        assert_eq!(chunk.as_ref(), [51]);
+    }
+
+    #[tokio::test]
+    async fn test_file_content_1_partial_bytes() {
+        let server = setup_server("test/assets/case_content").await;
+
+        let backend = Webdav::new(BuildWebdavArg {
+            addr: server.addr(),
+            username: Default::default(),
+            password: Default::default(),
+            is_anonymous: true,
+            connect_timeout: Duration::from_secs(10),
+        });
+        let file = backend.get("/a.bin".to_string(), 2).await.unwrap();
+        assert_eq!(file.size(), Some(1));
+
+        let chunk = file.bytes().await.unwrap();
+        assert_eq!(chunk.as_ref(), [51]);
     }
 }

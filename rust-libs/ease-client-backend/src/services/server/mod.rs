@@ -49,11 +49,21 @@ impl AssetServer {
         })
     }
 
-    pub async fn load(self: &Arc<Self>, key: DataSourceKey) -> BResult<Option<StreamFile>> {
+    pub async fn load(
+        self: &Arc<Self>,
+        key: DataSourceKey,
+        byte_offset: u64,
+    ) -> BResult<Option<StreamFile>> {
         match key {
-            DataSourceKey::Music { id } => get_stream_file_by_music_id(&self.cx, id).await,
-            DataSourceKey::Cover { id } => get_stream_file_cover_by_music_id(&self.cx, id).await,
-            DataSourceKey::AnyEntry { entry } => get_stream_file_by_loc(&self.cx, entry).await,
+            DataSourceKey::Music { id } => {
+                get_stream_file_by_music_id(&self.cx, id, byte_offset).await
+            }
+            DataSourceKey::Cover { id } => {
+                get_stream_file_cover_by_music_id(&self.cx, id, byte_offset).await
+            }
+            DataSourceKey::AnyEntry { entry } => {
+                get_stream_file_by_loc(&self.cx, entry, byte_offset).await
+            }
         }
     }
 
@@ -71,28 +81,25 @@ impl AssetServer {
         let this = self.clone();
         let task = {
             cx.async_runtime().clone().spawn(async move {
-                let file = this.load(key).await.expect("failed to load file");
+                let file = this.load(key, offset as u64).await;
+
+                if let Err(e) = &file {
+                    listener.on_status(AssetLoadStatus::Error(e.to_string()));
+                    return;
+                }
+                let file = file.unwrap();
 
                 if file.is_none() {
                     listener.on_status(AssetLoadStatus::NotFound);
                     return;
                 }
 
-                let mut to_skip = offset;
-
                 let file = file.unwrap();
                 let mut stream = Box::pin(file.into_stream());
                 while let Some(chunk) = stream.next().await {
                     match chunk {
                         Ok(bytes) => {
-                            let to_skip_this_chunk = to_skip.min(bytes.len());
-                            to_skip -= to_skip_this_chunk;
-
-                            if to_skip_this_chunk == 0 {
-                                listener.on_chunk(bytes.to_vec());
-                            } else if to_skip_this_chunk < bytes.len() {
-                                listener.on_chunk(bytes[to_skip_this_chunk..].to_vec());
-                            }
+                            listener.on_chunk(bytes.to_vec());
                         }
                         Err(err) => {
                             listener.on_status(AssetLoadStatus::Error(err.to_string()));

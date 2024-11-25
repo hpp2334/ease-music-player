@@ -249,6 +249,11 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
             ) {
                 BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Seek)
             }
+
+            override fun onPlayerError(error: PlaybackException) {
+                super.onPlayerError(error)
+                BackendBridge.sendPlayerEvent(PlayerDelegateEvent.Error(error.toString()))
+            }
         })
     }
 

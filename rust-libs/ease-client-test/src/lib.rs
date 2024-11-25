@@ -143,7 +143,7 @@ impl TestApp {
             let backend = backend.clone();
             tokio::spawn(async move {
                 while let Some((key, tx)) = res_rx.recv().await {
-                    let v = backend.asset_server().load(key.into()).await.unwrap();
+                    let v = backend.asset_server().load(key.into(), 0).await.unwrap();
                     let bytes = if let Some(v) = v {
                         Some(v.bytes().await.unwrap().to_vec())
                     } else {
@@ -350,7 +350,12 @@ impl TestApp {
     }
 
     pub async fn load_resource_by_key(&self, key: DataSourceKey) -> Vec<u8> {
-        let v = self.backend.asset_server().load(key.into()).await.unwrap();
+        let v = self
+            .backend
+            .asset_server()
+            .load(key.into(), 0)
+            .await
+            .unwrap();
         if let Some(v) = v {
             v.bytes().await.unwrap().to_vec()
         } else {

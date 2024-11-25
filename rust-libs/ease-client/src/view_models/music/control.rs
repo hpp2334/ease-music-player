@@ -19,7 +19,7 @@ use super::{
 use crate::{
     actions::{event::ViewAction, Widget},
     view_models::main::router::RouterVM,
-    RoutesKey,
+    RoutesKey, ToastService,
 };
 use crate::{
     actions::{Action, WidgetActionType},
@@ -223,6 +223,9 @@ impl MusicControlVM {
             ConnectorPlayerAction::Playing { value } => {
                 let mut state = cx.model_mut(&self.current);
                 state.playing = *value;
+            }
+            ConnectorPlayerAction::Error { value } => {
+                ToastService::of(cx).error(value.to_string());
             }
         };
         self.request_sync_current_duration(&cx);

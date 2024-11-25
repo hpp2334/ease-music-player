@@ -1,9 +1,9 @@
-use std::sync::Mutex;
+use std::{io::SeekFrom, sync::Mutex};
 
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 use once_cell::sync::Lazy;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::{Entry, StorageBackend, StorageBackendResult, StreamFile};
 
@@ -53,7 +53,7 @@ impl LocalBackend {
         Ok(ret)
     }
 
-    async fn get_impl(&self, p: String) -> StorageBackendResult<StreamFile> {
+    async fn get_impl(&self, p: String, byte_offset: u64) -> StorageBackendResult<StreamFile> {
         let p = if std::env::consts::OS == "windows" {
             p.replace('/', "\\")
         } else if std::env::consts::OS == "android" {
@@ -65,8 +65,9 @@ impl LocalBackend {
         let mut file = tokio::fs::File::open(path).await?;
 
         let mut buf: Vec<u8> = Default::default();
+        file.seek(SeekFrom::Start(byte_offset as u64)).await?;
         file.read_to_end(&mut buf).await?;
-        Ok(StreamFile::new_from_bytes(buf.as_slice(), &p))
+        Ok(StreamFile::new_from_bytes(buf.as_slice(), &p, 0))
     }
 }
 
@@ -74,13 +75,15 @@ impl StorageBackend for LocalBackend {
     fn list(&self, dir: String) -> BoxFuture<StorageBackendResult<Vec<Entry>>> {
         Box::pin(self.list_impl(dir))
     }
-    fn get(&self, p: String) -> BoxFuture<StorageBackendResult<StreamFile>> {
-        Box::pin(self.get_impl(p))
+    fn get(&self, p: String, byte_offset: u64) -> BoxFuture<StorageBackendResult<StreamFile>> {
+        Box::pin(self.get_impl(p, byte_offset))
     }
 }
 
 #[cfg(test)]
 mod test {
+    use futures_util::{pin_mut, StreamExt};
+
     use crate::{LocalBackend, StorageBackend};
 
     #[tokio::test]
@@ -110,5 +113,37 @@ mod test {
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].name, "a.txt");
         assert_eq!(list[1].name, "b.log.txt");
+    }
+
+    #[tokio::test]
+    async fn test_partial_bytes() {
+        let backend = LocalBackend::new();
+
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .join("test/assets/case_list/b.log.txt");
+        let cwd = cwd.to_string_lossy().to_string();
+        let file = backend.get(cwd, 3).await.unwrap();
+        let bytes = file.bytes().await.unwrap();
+
+        assert_eq!(String::from_utf8_lossy(bytes.as_ref()), "og.txt");
+    }
+
+    #[tokio::test]
+    async fn test_partial_stream() {
+        let backend = LocalBackend::new();
+
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .join("test/assets/case_list/b.log.txt");
+        let cwd = cwd.to_string_lossy().to_string();
+        let file = backend.get(cwd, 3).await.unwrap();
+
+        let stream = file.into_stream();
+        pin_mut!(stream);
+        let chunk = stream.next().await;
+        assert_eq!(chunk.is_some(), true);
+        let chunk = chunk.unwrap().unwrap();
+        assert_eq!(String::from_utf8_lossy(chunk.as_ref()), "og.txt");
     }
 }

@@ -63,7 +63,7 @@ pub(crate) async fn load_storage_entry_data(
         cx.async_runtime()
             .spawn(async move {
                 tracing::trace!("start load");
-                let ret = match backend.get(loc.path).await {
+                let ret = match backend.get(loc.path, 0).await {
                     Ok(data) => {
                         let data = data.bytes().await.unwrap();
                         let data = data.to_vec();
