@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use ease_client_shared::backends::music::{ArgUpdateMusicLyric, Music, MusicId};
 use futures::try_join;
@@ -8,7 +8,7 @@ use crate::{
     error::BResult,
     repositories::{core::get_conn, music::db_update_music_lyric},
     services::{
-        music::{get_music, notify_music},
+        music::{disable_time_to_pause, enable_time_to_pause, get_music, notify_music},
         storage::from_opt_storage_entry,
     },
 };
@@ -29,5 +29,18 @@ pub(crate) async fn cu_update_music_lyric(
         notify_music(cx, arg.id)
     }?;
 
+    Ok(())
+}
+
+pub(crate) async fn cu_enable_time_to_pause(
+    cx: &Arc<BackendContext>,
+    arg: std::time::Duration,
+) -> BResult<()> {
+    enable_time_to_pause(cx, arg);
+    Ok(())
+}
+
+pub(crate) async fn cu_disable_time_to_pause(cx: &Arc<BackendContext>, _arg: ()) -> BResult<()> {
+    disable_time_to_pause(cx);
     Ok(())
 }

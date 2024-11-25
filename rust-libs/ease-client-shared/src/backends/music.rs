@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 use crate::define_id;
@@ -81,4 +83,11 @@ impl MusicAbstract {
 pub struct ArgUpdateMusicLyric {
     pub id: MusicId,
     pub lyric_loc: Option<StorageEntryLoc>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TimeToPauseInfo {
+    pub enabled: bool,
+    pub expired: Duration,
+    pub left: Duration,
 }

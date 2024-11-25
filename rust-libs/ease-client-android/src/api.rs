@@ -10,7 +10,7 @@ use ease_client_shared::backends::{
     app::ArgInitializeApp, encode_message_payload, generated::Code, player::PlayerDelegateEvent,
     storage::DataSourceKey, MessagePayload,
 };
-use misty_vm::{AppPods, AsyncRuntime, IAsyncRuntimeAdapter, LocalBoxFuture};
+use misty_vm::{AppPods, AsyncRuntime, BoxFuture, IAsyncRuntimeAdapter, LocalBoxFuture};
 use once_cell::sync::Lazy;
 
 use tokio::runtime::Runtime;
@@ -60,7 +60,7 @@ impl IAsyncRuntimeAdapter for AsyncAdapterDelegate {
             .unwrap()
     }
 
-    fn sleep(&self, duration: Duration) -> LocalBoxFuture<()> {
+    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
         Box::pin(tokio::time::sleep(duration))
     }
 }

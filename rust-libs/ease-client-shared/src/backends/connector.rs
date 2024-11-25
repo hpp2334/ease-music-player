@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    music::{Music, MusicId},
+    music::{Music, MusicId, TimeToPauseInfo},
     player::ConnectorPlayerAction,
     playlist::{Playlist, PlaylistAbstract},
     storage::Storage,
@@ -16,6 +16,7 @@ pub enum ConnectorAction {
     Player(ConnectorPlayerAction),
     MusicTotalDurationChanged(MusicId),
     MusicCoverChanged(MusicId),
+    TimeToPause(TimeToPauseInfo),
 }
 
 pub trait IConnectorNotifier: Send + Sync + 'static {

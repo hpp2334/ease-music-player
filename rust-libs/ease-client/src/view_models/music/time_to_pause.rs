@@ -1,10 +1,15 @@
 use std::time::Duration;
 
-use misty_vm::{AppBuilderContext, Model, ViewModel, ViewModelContext};
+use ease_client_shared::backends::{
+    connector::ConnectorAction,
+    generated::{DisableTimeToPauseMsg, EnableTimeToPauseMsg},
+};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
+    view_models::connector::Connector,
 };
 
 use super::{common::MusicCommonVM, control::MusicControlVM, state::TimeToPauseState};
@@ -22,11 +27,15 @@ pub enum TimeToPauseAction {
 
 pub(crate) struct TimeToPauseVM {
     timer: Model<TimeToPauseState>,
+    tasks: AsyncTasks,
 }
 
 impl TimeToPauseVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
-        Self { timer: cx.model() }
+        Self {
+            timer: cx.model(),
+            tasks: Default::default(),
+        }
     }
 
     pub(crate) fn tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
@@ -34,8 +43,12 @@ impl TimeToPauseVM {
     }
 
     pub(crate) fn pause(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        let mut edit = cx.model_mut(&self.timer);
-        edit.enabled = false;
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+            Connector::of(&cx)
+                .request::<DisableTimeToPauseMsg>(&cx, ())
+                .await?;
+            Ok(())
+        });
         Ok(())
     }
 
@@ -55,17 +68,15 @@ impl TimeToPauseVM {
         minute: u8,
         second: u8,
     ) -> EaseResult<()> {
-        {
-            let mut state = cx.model_mut(&self.timer);
-            let s_time = cx.get_time();
-            let t_time = s_time
-                + Duration::from_secs(hour as u64 * 3600)
-                + Duration::from_secs(minute as u64 * 60)
-                + Duration::from_secs(second as u64);
-            state.expired_time = t_time;
-            state.enabled = true;
-        }
-        self.update_timer(cx)?;
+        let delay = Duration::from_secs(hour as u64 * 3600)
+            + Duration::from_secs(minute as u64 * 60)
+            + Duration::from_secs(second as u64);
+        cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
+            Connector::of(&cx)
+                .request::<EnableTimeToPauseMsg>(&cx, delay)
+                .await?;
+            Ok(())
+        });
         Ok(())
     }
 
@@ -74,10 +85,7 @@ impl TimeToPauseVM {
         let s_time = cx.get_time().min(state.expired_time);
         state.left = state.expired_time - s_time;
 
-        if state.left.is_zero() {
-            state.enabled = false;
-            MusicControlVM::of(cx).request_pause(cx)?;
-        } else {
+        if !state.left.is_zero() {
             drop(state);
             MusicCommonVM::of(cx).schedule_tick(cx)?;
         }
@@ -111,6 +119,18 @@ impl ViewModel for TimeToPauseVM {
                         self.update_modal_open(cx, false);
                     }
                 },
+                _ => {}
+            },
+            Action::Connector(action) => match action {
+                ConnectorAction::TimeToPause(info) => {
+                    {
+                        let mut state = cx.model_mut(&self.timer);
+                        state.enabled = info.enabled;
+                        state.expired_time = info.expired;
+                        state.left = info.left;
+                    }
+                    MusicCommonVM::of(cx).schedule_tick(cx)?;
+                }
                 _ => {}
             },
             _ => {}

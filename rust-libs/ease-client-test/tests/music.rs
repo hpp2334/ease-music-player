@@ -549,6 +549,8 @@ async fn time_to_pause_1() {
             second: 3,
         },
     )));
+    app.wait_network().await;
+
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.playing, true);
     let state = app.latest_state().time_to_pause.unwrap();
@@ -591,6 +593,7 @@ async fn time_to_pause_2() {
     assert_eq!(state.left_minute, 2);
 
     app.dispatch_click(TimeToPauseWidget::Delete);
+    app.wait_network().await;
     let state = app.latest_state().current_music.unwrap();
     assert_eq!(state.playing, true);
     let state = app.latest_state().time_to_pause.unwrap();

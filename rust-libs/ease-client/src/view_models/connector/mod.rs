@@ -40,7 +40,7 @@ impl Connector {
         }
     }
 
-    pub fn storage_path(&self, cx: &ViewModelContext) -> String {
+    pub(crate) fn storage_path(&self, cx: &ViewModelContext) -> String {
         ConnectorHostService::of(cx).storage_path()
     }
 
