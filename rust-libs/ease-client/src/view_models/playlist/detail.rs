@@ -1,4 +1,5 @@
 use ease_client_shared::backends::{
+    generated::{AddMusicsToPlaylistMsg, GetPlaylistMsg},
     music::MusicId,
     playlist::{ArgAddMusicsToPlaylist, Playlist, PlaylistAbstract, PlaylistId},
     storage::{CurrentStorageImportType, StorageEntry, StorageId},
@@ -77,7 +78,9 @@ impl PlaylistDetailVM {
 
         RouterVM::of(&cx).navigate(&cx, RoutesKey::Playlist);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            let playlist = Connector::of(&cx).get_playlist(&cx, id).await?;
+            let playlist = Connector::of(&cx)
+                .request::<GetPlaylistMsg>(&cx, id)
+                .await?;
 
             {
                 let mut state = cx.model_mut(&current);
@@ -98,7 +101,7 @@ impl PlaylistDetailVM {
     ) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx)
-                .add_musics_to_playlist(
+                .request::<AddMusicsToPlaylistMsg>(
                     &cx,
                     ArgAddMusicsToPlaylist {
                         id: playlist_id,

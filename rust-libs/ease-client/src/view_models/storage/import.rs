@@ -1,8 +1,11 @@
 use std::collections::HashSet;
 
-use ease_client_shared::backends::storage::{
-    CurrentStorageImportType, CurrentStorageStateType, ListStorageEntryChildrenResp, StorageEntry,
-    StorageEntryLoc, StorageEntryType, StorageId, StorageType,
+use ease_client_shared::backends::{
+    generated::ListStorageEntryChildrenMsg,
+    storage::{
+        CurrentStorageImportType, CurrentStorageStateType, ListStorageEntryChildrenResp,
+        StorageEntry, StorageEntryLoc, StorageEntryType, StorageId, StorageType,
+    },
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
@@ -211,7 +214,7 @@ impl StorageImportVM {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let connector = Connector::of(&cx);
             let res = connector
-                .list_storage_entry_children(
+                .request::<ListStorageEntryChildrenMsg>(
                     &cx,
                     StorageEntryLoc {
                         path: current_path,

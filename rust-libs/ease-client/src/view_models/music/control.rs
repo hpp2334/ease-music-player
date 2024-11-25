@@ -1,5 +1,9 @@
 use ease_client_shared::backends::{
     connector::ConnectorAction,
+    generated::{
+        GetMusicMsg, PausePlayerMsg, PlayMusicMsg, PlayNextMsg, PlayPreviousMsg,
+        PlayerCurrentDurationMsg, PlayerSeekMsg, ResumePlayerMsg, StopPlayerMsg, UpdatePlaymodeMsg,
+    },
     music::MusicId,
     player::{ArgPlayMusic, ConnectorPlayerAction, PlayMode},
     playlist::Playlist,
@@ -61,7 +65,7 @@ impl MusicControlVM {
         let playlist_id = playlist.id();
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx)
-                .player_play(&cx, ArgPlayMusic { id, playlist_id })
+                .request::<PlayMusicMsg>(&cx, ArgPlayMusic { id, playlist_id })
                 .await?;
             Ok(())
         });
@@ -77,7 +81,9 @@ impl MusicControlVM {
     fn request_sync_current_duration(&self, cx: &ViewModelContext) {
         let current = self.current.clone();
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            let duration = Connector::of(&cx).player_current_duration(&cx).await?;
+            let duration = Connector::of(&cx)
+                .request::<PlayerCurrentDurationMsg>(&cx, ())
+                .await?;
 
             {
                 let mut current = cx.model_mut(&current);
@@ -98,7 +104,7 @@ impl MusicControlVM {
         }
 
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).player_play_next(&cx).await?;
+            Connector::of(&cx).request::<PlayNextMsg>(&cx, ()).await?;
             Ok(())
         });
     }
@@ -112,14 +118,18 @@ impl MusicControlVM {
         }
 
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).player_play_previous(&cx).await?;
+            Connector::of(&cx)
+                .request::<PlayPreviousMsg>(&cx, ())
+                .await?;
             Ok(())
         });
     }
 
     fn request_resume(&self, cx: &ViewModelContext) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).player_resume(&cx).await?;
+            Connector::of(&cx)
+                .request::<ResumePlayerMsg>(&cx, ())
+                .await?;
             Ok(())
         });
         Ok(())
@@ -127,7 +137,9 @@ impl MusicControlVM {
 
     pub(crate) fn request_pause(&self, cx: &ViewModelContext) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).player_pause(&cx).await?;
+            Connector::of(&cx)
+                .request::<PausePlayerMsg>(&cx, ())
+                .await?;
             Ok(())
         });
         Ok(())
@@ -135,7 +147,7 @@ impl MusicControlVM {
 
     fn request_stop(&self, cx: &ViewModelContext) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).player_stop(&cx).await?;
+            Connector::of(&cx).request::<StopPlayerMsg>(&cx, ()).await?;
             Ok(())
         });
         Ok(())
@@ -143,7 +155,9 @@ impl MusicControlVM {
 
     fn request_seek(&self, cx: &ViewModelContext, arg: u64) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).player_seek(&cx, arg).await?;
+            Connector::of(&cx)
+                .request::<PlayerSeekMsg>(&cx, arg)
+                .await?;
             Ok(())
         });
         Ok(())
@@ -160,7 +174,9 @@ impl MusicControlVM {
         state.play_mode = play_mode;
 
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).update_playmode(&cx, play_mode).await?;
+            Connector::of(&cx)
+                .request::<UpdatePlaymodeMsg>(&cx, play_mode)
+                .await?;
             Ok(())
         });
         Ok(())
@@ -182,7 +198,7 @@ impl MusicControlVM {
 
                 if let Some(id) = id {
                     cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-                        let music = Connector::of(&cx).get_music(&cx, id).await?;
+                        let music = Connector::of(&cx).request::<GetMusicMsg>(&cx, id).await?;
 
                         if let Some(music) = music {
                             if music.id() == id {

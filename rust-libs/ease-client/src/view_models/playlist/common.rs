@@ -1,5 +1,6 @@
 use ease_client_shared::backends::{
     connector::ConnectorAction,
+    generated::RemovePlaylistMsg,
     playlist::{Playlist, PlaylistAbstract, PlaylistId},
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
@@ -29,7 +30,9 @@ impl PlaylistCommonVM {
 
     pub(crate) fn remove(&self, cx: &ViewModelContext, id: PlaylistId) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).remove_playlist(&cx, id).await?;
+            Connector::of(&cx)
+                .request::<RemovePlaylistMsg>(&cx, id)
+                .await?;
             Ok(())
         });
         Ok(())

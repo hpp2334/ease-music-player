@@ -1,10 +1,9 @@
 use std::collections::HashSet;
 
 use ease_client_shared::backends::{
+    generated::CreatePlaylistMsg,
     playlist::{ArgCreatePlaylist, CreatePlaylistMode},
-    storage::{
-        CurrentStorageImportType, StorageEntry, StorageEntryType,
-    },
+    storage::{CurrentStorageImportType, StorageEntry, StorageEntryType},
 };
 use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
@@ -139,7 +138,9 @@ impl PlaylistCreateVM {
             }
         };
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).create_playlist(&cx, arg).await?;
+            Connector::of(&cx)
+                .request::<CreatePlaylistMsg>(&cx, arg)
+                .await?;
             Ok(())
         });
         Ok(())

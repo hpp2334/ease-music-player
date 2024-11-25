@@ -7,7 +7,7 @@ use crate::{
     PermissionService, RoutesKey,
 };
 use ease_client_shared::backends::{
-    generated::GetRefreshTokenMsg,
+    generated::{GetRefreshTokenMsg, RemoveStorageMsg, TestStorageMsg, UpsertStorageMsg},
     storage::{
         onedrive_oauth_url, ArgUpsertStorage, StorageConnectionTestResult, StorageId, StorageType,
     },
@@ -113,7 +113,9 @@ impl StorageUpsertVM {
 
         RouterVM::of(cx).pop(cx);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).remove_storage(&cx, id).await?;
+            Connector::of(&cx)
+                .request::<RemoveStorageMsg>(&cx, id)
+                .await?;
             Ok(())
         });
         Ok(())
@@ -129,7 +131,9 @@ impl StorageUpsertVM {
 
         let edit_model = self.edit.clone();
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            let res = Connector::of(&cx).test_storage(&cx, arg).await?;
+            let res = Connector::of(&cx)
+                .request::<TestStorageMsg>(&cx, arg)
+                .await?;
 
             {
                 let mut edit = cx.model_mut(&edit_model);
@@ -188,7 +192,9 @@ impl StorageUpsertVM {
         };
         RouterVM::of(cx).pop(cx);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).upsert_storage(&cx, arg).await?;
+            Connector::of(&cx)
+                .request::<UpsertStorageMsg>(&cx, arg)
+                .await?;
             Ok(())
         });
         Ok(())
