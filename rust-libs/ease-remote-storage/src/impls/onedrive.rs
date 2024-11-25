@@ -135,8 +135,15 @@ impl OneDriveBackend {
         return header_map;
     }
 
-    async fn refresh_token_by_refresh_token(&self) -> StorageBackendResult<()> {   
+    async fn try_ensure_refresh_token_by_refresh_token(&self) -> StorageBackendResult<()> {
         let mut w= self.auth.write().await;
+        if w.is_none() {
+            self.refresh_token_by_refresh_token_impl(&mut w).await?;
+        }
+        Ok(())
+    }
+
+    async fn refresh_token_by_refresh_token_impl(&self, w: &mut Option<Auth>) -> StorageBackendResult<()> {
         let client_id = EASEM_ONEDRIVE_ID;
         let refresh_token = self.refresh_token.clone();
         let body = 
@@ -156,6 +163,12 @@ impl OneDriveBackend {
             access_token: value.access_token,
             refresh_token: value.refresh_token,
         });
+        Ok(())
+    }
+
+    async fn refresh_token_by_refresh_token(&self) -> StorageBackendResult<()> {
+        let mut w= self.auth.write().await;
+        self.refresh_token_by_refresh_token_impl(&mut w).await?;
         Ok(())
     }
 
@@ -228,6 +241,7 @@ impl OneDriveBackend {
     }
 
     async fn list_with_retry_impl(&self, dir: String) -> StorageBackendResult<Vec<Entry>> {
+        self.try_ensure_refresh_token_by_refresh_token().await?;
         let r = self.list_impl(dir.as_str()).await;
         if !is_auth_error(&r) {
             return r;
@@ -253,6 +267,7 @@ impl OneDriveBackend {
     }
 
     async fn get_with_retry_impl(&self, p: String) -> StorageBackendResult<StreamFile> {
+        self.try_ensure_refresh_token_by_refresh_token().await?;
         let r = self.get_impl(p.as_str()).await;
         if !is_auth_error(&r) {
             return r;
