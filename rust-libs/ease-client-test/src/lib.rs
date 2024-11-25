@@ -6,7 +6,7 @@ use std::time::Duration;
 use backend_host::BackendHost;
 use ease_client::to_host::connector::IConnectorHost;
 use ease_client::{
-    build_client, Action, IRouterService, IToastService, PlaylistCreateWidget,
+    build_client, Action, IRouterService, IToastService, MainAction, PlaylistCreateWidget,
     PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey, StorageImportWidget,
     StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
 };
@@ -176,6 +176,7 @@ impl TestApp {
         pod.set(app.clone());
 
         app.emit(Action::Init);
+        app.emit(Action::View(ViewAction::Main(MainAction::OnMainWinShown)));
 
         let ret = Self {
             app: pod,

@@ -440,6 +440,7 @@ impl ViewModel for StorageImportVM {
                 },
                 ViewAction::Main(action) => match action {
                     MainAction::PermissionChanged => self.reload(cx),
+                    _ => {}
                 },
                 _ => {}
             },

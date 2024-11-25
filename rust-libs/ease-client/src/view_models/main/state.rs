@@ -12,4 +12,5 @@ pub enum RootRouteSubKey {
 pub struct MainState {
     pub subkey: RootRouteSubKey,
     pub vs_loaded: bool,
+    pub visible_count: i32,
 }

@@ -21,6 +21,7 @@ import com.kutedev.easemusicplayer.utils.nextTickOnMain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import uniffi.ease_client.MainAction
 import uniffi.ease_client_android.IPermissionServiceForeign
 import uniffi.ease_client_android.IRouterServiceForeign
 import uniffi.ease_client_android.IToastServiceForeign
@@ -240,9 +241,11 @@ class UIBridge {
     }
 
     fun onActivityStart() {
+        dispatchAction(ViewAction.Main(MainAction.ON_MAIN_WIN_SHOWN))
     }
 
     fun onActivityStop() {
+        dispatchAction(ViewAction.Main(MainAction.ON_MAIN_WIN_HIDDEN))
     }
 
     fun onActivityDestroy() {

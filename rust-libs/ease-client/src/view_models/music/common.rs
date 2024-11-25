@@ -12,7 +12,7 @@ use misty_vm::{AppBuilderContext, AsyncTaskPod, AsyncTasks, Model, ViewModel, Vi
 use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
-    view_models::connector::Connector,
+    view_models::{connector::Connector, main::MainBodyVM},
 };
 
 use super::{
@@ -90,6 +90,11 @@ impl MusicCommonVM {
     }
 
     fn tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        if !MainBodyVM::of(cx).visible(cx) {
+            self.tick_task.cancel(&self.tasks);
+            return Ok(());
+        }
+
         let is_playing = cx.model_get(&self.current).playing;
         let time_to_pause_enabled = cx.model_get(&self.time_to_pause).enabled;
 

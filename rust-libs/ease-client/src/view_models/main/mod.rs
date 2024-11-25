@@ -8,7 +8,7 @@ use crate::{
     RoutesKey,
 };
 
-use super::music::time_to_pause::TimeToPauseVM;
+use super::music::{common::MusicCommonVM, control::MusicControlVM, time_to_pause::TimeToPauseVM};
 
 pub mod router;
 pub mod state;
@@ -23,6 +23,8 @@ pub enum MainBodyWidget {
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum MainAction {
     PermissionChanged,
+    OnMainWinShown,
+    OnMainWinHidden,
 }
 
 pub(crate) struct MainBodyVM {
@@ -32,6 +34,32 @@ pub(crate) struct MainBodyVM {
 impl MainBodyVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self { store: cx.model() }
+    }
+
+    pub fn visible(&self, cx: &ViewModelContext) -> bool {
+        let state = cx.model_get(&self.store);
+        state.visible_count > 0 && state.vs_loaded
+    }
+
+    fn update_visible(&self, cx: &ViewModelContext, value: bool) -> EaseResult<()> {
+        {
+            let mut state = cx.model_mut(&self.store);
+            if value {
+                state.visible_count += 1;
+            } else {
+                assert!(state.visible_count >= 1);
+                state.visible_count -= 1;
+            }
+        }
+        self.trigger_tick(cx)?;
+        Ok(())
+    }
+
+    fn trigger_tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        if self.visible(cx) {
+            MusicCommonVM::of(cx).schedule_tick(cx)?;
+        }
+        Ok(())
     }
 }
 
@@ -56,11 +84,23 @@ impl ViewModel for MainBodyVM {
                     },
                     _ => {}
                 },
+                ViewAction::Main(action) => match action {
+                    MainAction::OnMainWinShown => {
+                        self.update_visible(cx, true)?;
+                    }
+                    MainAction::OnMainWinHidden => {
+                        self.update_visible(cx, false)?;
+                    }
+                    _ => {}
+                },
                 _ => {}
             },
             Action::VsLoaded => {
-                let mut state = cx.model_mut(&self.store);
-                state.vs_loaded = true;
+                {
+                    let mut state = cx.model_mut(&self.store);
+                    state.vs_loaded = true;
+                }
+                self.trigger_tick(cx)?;
             }
             _ => {}
         }
