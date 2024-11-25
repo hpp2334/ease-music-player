@@ -1,11 +1,17 @@
-use std::sync::Arc;
+use std::{
+    sync::{atomic::AtomicBool, Arc, RwLock},
+    time::Duration,
+};
 
 use ease_client_shared::backends::{
     connector::ConnectorAction,
-    music::{LyricLoadState, Music, MusicAbstract, MusicId, MusicLyric, MusicMeta},
+    music::{
+        LyricLoadState, Music, MusicAbstract, MusicId, MusicLyric, MusicMeta, TimeToPauseInfo,
+    },
     music_duration::MusicDuration,
     storage::{DataSourceKey, StorageEntryLoc},
 };
+use misty_async::Task;
 
 use crate::{
     ctx::BackendContext,
@@ -23,6 +29,13 @@ use super::{
     playlist::notify_all_playlist_abstracts,
     storage::{load_storage_entry_data, to_opt_storage_entry},
 };
+
+#[derive(Debug, Default)]
+pub struct TimeToPauseState {
+    enabled: AtomicBool,
+    expired: RwLock<Duration>,
+    task: RwLock<Option<Task<()>>>,
+}
 
 async fn load_lyric(
     cx: &Arc<BackendContext>,
@@ -218,5 +231,69 @@ pub(crate) async fn notify_music(cx: &Arc<BackendContext>, id: MusicId) -> BResu
     if let Some(music) = music {
         cx.notify(ConnectorAction::Music(music));
     }
+    Ok(())
+}
+
+pub(crate) fn enable_time_to_pause(cx: &Arc<BackendContext>, delay: Duration) {
+    let state = cx.time_to_pause_state().clone();
+    state.task.write().unwrap().take();
+    state
+        .enabled
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    *state.expired.write().unwrap() = cx.async_runtime().get_time() + delay;
+    let task = {
+        let cx = cx.clone();
+        cx.async_runtime().clone().spawn(async move {
+            cx.async_runtime().sleep(delay).await;
+            state
+                .enabled
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            sync_notify_time_to_pause(&cx);
+            {
+                let cx = cx.clone();
+                cx.async_runtime()
+                    .clone()
+                    .spawn_on_main(async move {
+                        cx.player_delegate().pause();
+                    })
+                    .await
+            }
+        })
+    };
+    {
+        let mut w = cx.time_to_pause_state().task.write().unwrap();
+        *w = Some(task);
+    }
+    sync_notify_time_to_pause(cx);
+}
+
+pub(crate) fn disable_time_to_pause(cx: &Arc<BackendContext>) {
+    cx.time_to_pause_state().task.write().unwrap().take();
+    cx.time_to_pause_state()
+        .enabled
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    sync_notify_time_to_pause(cx);
+}
+
+pub(crate) fn sync_notify_time_to_pause(cx: &Arc<BackendContext>) {
+    let state = cx.time_to_pause_state().clone();
+    let enabled = state.enabled.load(std::sync::atomic::Ordering::Relaxed);
+    let expired = state.expired.read().unwrap().clone();
+    let current_time = cx.async_runtime().get_time();
+    let left = if current_time < expired {
+        expired - current_time
+    } else {
+        Duration::ZERO
+    };
+
+    cx.notify(ConnectorAction::TimeToPause(TimeToPauseInfo {
+        enabled,
+        expired,
+        left,
+    }));
+}
+
+pub(crate) async fn notify_time_to_pause(cx: &Arc<BackendContext>) -> BResult<()> {
+    sync_notify_time_to_pause(cx);
     Ok(())
 }

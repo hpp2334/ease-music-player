@@ -11,7 +11,7 @@ use std::{
 
 use async_task::{Runnable, Task};
 use futures::future::LocalBoxFuture;
-use misty_async::{AsyncRuntime, IAsyncRuntimeAdapter};
+use misty_async::{AsyncRuntime, BoxFuture, IAsyncRuntimeAdapter};
 
 use crate::internal::{AppInternal, WeakAppInternal};
 
@@ -84,7 +84,7 @@ impl IAsyncRuntimeAdapter for DefaultAsyncRuntimeAdapter {
         todo!()
     }
 
-    fn sleep(&self, duration: Duration) -> LocalBoxFuture<()> {
+    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
         todo!()
     }
 

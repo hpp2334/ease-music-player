@@ -9,22 +9,30 @@ use std::{
 };
 
 use ease_client_shared::backends::connector::{ConnectorAction, IConnectorNotifier};
+use getset::Getters;
 use misty_async::AsyncRuntime;
 
 use crate::services::{
+    music::TimeToPauseState,
     player::{IPlayerDelegate, PlayerState},
     server::AssetServer,
     storage::StorageState,
 };
 
+#[derive(Getters)]
 pub struct BackendContext {
     storage_path: RwLock<String>,
     app_document_dir: RwLock<String>,
     schema_version: AtomicU32,
     rt: Arc<AsyncRuntime>,
-    player: Arc<dyn IPlayerDelegate>,
+    #[getset(get = "pub(crate)")]
+    player_delegate: Arc<dyn IPlayerDelegate>,
+    #[getset(get = "pub(crate)")]
     player_state: Arc<PlayerState>,
+    #[getset(get = "pub(crate)")]
     storage_state: Arc<StorageState>,
+    #[getset(get = "pub(crate)")]
+    time_to_pause_state: Arc<TimeToPauseState>,
     connectors: (
         RwLock<HashMap<usize, Arc<dyn IConnectorNotifier>>>,
         AtomicUsize,
@@ -48,8 +56,9 @@ impl BackendContext {
             schema_version: AtomicU32::new(0),
             rt,
             player_state: Default::default(),
-            player,
+            player_delegate: player,
             storage_state: Default::default(),
+            time_to_pause_state: Default::default(),
             connectors: Default::default(),
         }
     }
@@ -69,16 +78,6 @@ impl BackendContext {
 
     pub fn async_runtime(&self) -> &Arc<AsyncRuntime> {
         &self.rt
-    }
-
-    pub fn player_state(&self) -> &Arc<PlayerState> {
-        &self.player_state
-    }
-    pub fn player_delegate(&self) -> &Arc<dyn IPlayerDelegate> {
-        &self.player
-    }
-    pub fn storage_state(&self) -> &Arc<StorageState> {
-        &self.storage_state
     }
 
     pub fn current_time(&self) -> Duration {

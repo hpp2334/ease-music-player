@@ -4,6 +4,7 @@ use crate::{
     view_models::{connector::Connector, storage::import::StorageImportVM},
 };
 use ease_client_shared::backends::{
+    generated::UpdateMusicLyricMsg,
     music::ArgUpdateMusicLyric,
     storage::{CurrentStorageImportType, StorageEntryLoc},
 };
@@ -43,7 +44,7 @@ impl MusicLyricVM {
 
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx)
-                .update_music_lyric(&cx, ArgUpdateMusicLyric { id, lyric_loc: loc })
+                .request::<UpdateMusicLyricMsg>(&cx, ArgUpdateMusicLyric { id, lyric_loc: loc })
                 .await?;
 
             Ok(())

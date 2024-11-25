@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use misty_vm::{App, AppPod, IAsyncRuntimeAdapter, IOnAsyncRuntime, LocalBoxFuture};
+use misty_vm::{App, AppPod, BoxFuture, IAsyncRuntimeAdapter, IOnAsyncRuntime, LocalBoxFuture};
 
 use crate::timer::FakeTimers;
 
@@ -111,7 +111,7 @@ impl IAsyncRuntimeAdapter for TestAsyncRuntimeAdapter {
         self.is_same_thread()
     }
 
-    fn sleep(&self, duration: Duration) -> LocalBoxFuture<()> {
+    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
         self.check_same_thread();
         let timer = self.store.timers.sleep(duration);
         Box::pin(timer)

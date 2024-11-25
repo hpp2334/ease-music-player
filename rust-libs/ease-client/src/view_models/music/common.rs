@@ -2,16 +2,17 @@ use std::{sync::atomic::AtomicBool, time::Duration};
 
 use ease_client_shared::backends::{
     connector::ConnectorAction,
+    generated::RemoveMusicFromPlaylistMsg,
     music::{Music, MusicId},
     player::PlayerCurrentPlaying,
-    playlist::PlaylistId,
+    playlist::{ArgRemoveMusicFromPlaylist, PlaylistId},
 };
 use misty_vm::{AppBuilderContext, AsyncTaskPod, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
-    view_models::connector::Connector,
+    view_models::{connector::Connector, main::MainBodyVM},
 };
 
 use super::{
@@ -51,7 +52,15 @@ impl MusicCommonVM {
     ) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let connector = Connector::of(&cx);
-            connector.remove_music(&cx, id, playlist_id).await?;
+            connector
+                .request::<RemoveMusicFromPlaylistMsg>(
+                    &cx,
+                    ArgRemoveMusicFromPlaylist {
+                        music_id: id,
+                        playlist_id,
+                    },
+                )
+                .await?;
             Ok(())
         });
         Ok(())
@@ -81,6 +90,11 @@ impl MusicCommonVM {
     }
 
     fn tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        if !MainBodyVM::of(cx).visible(cx) {
+            self.tick_task.cancel(&self.tasks);
+            return Ok(());
+        }
+
         let is_playing = cx.model_get(&self.current).playing;
         let time_to_pause_enabled = cx.model_get(&self.time_to_pause).enabled;
 

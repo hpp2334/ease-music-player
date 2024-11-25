@@ -19,7 +19,7 @@ enum LocalTask {
 pub trait IAsyncRuntimeAdapter: Send + Sync + 'static {
     fn is_main_thread(&self) -> bool;
     fn on_spawn_locals(&self);
-    fn sleep(&self, duration: Duration) -> LocalBoxFuture<()>;
+    fn sleep(&self, duration: Duration) -> BoxFuture<()>;
     fn get_time(&self) -> Duration;
 }
 
@@ -125,7 +125,7 @@ impl AsyncRuntime {
         task
     }
 
-    pub fn sleep(self: &Arc<Self>, duration: Duration) -> LocalBoxFuture<()> {
+    pub fn sleep(self: &Arc<Self>, duration: Duration) -> BoxFuture<()> {
         self.adapter.sleep(duration)
     }
 

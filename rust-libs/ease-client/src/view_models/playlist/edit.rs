@@ -1,4 +1,5 @@
 use ease_client_shared::backends::{
+    generated::UpdatePlaylistMsg,
     playlist::{ArgUpdatePlaylist, Playlist},
     storage::{CurrentStorageImportType, StorageEntryLoc},
 };
@@ -81,7 +82,9 @@ impl PlaylistEditVM {
             }
         };
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            Connector::of(&cx).update_playlist(&cx, arg).await?;
+            Connector::of(&cx)
+                .request::<UpdatePlaylistMsg>(&cx, arg)
+                .await?;
             Ok(())
         });
         self.update_modal_open(cx, false);
