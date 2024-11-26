@@ -12,7 +12,7 @@ use crate::{
     view_models::connector::Connector,
 };
 
-use super::{common::MusicCommonVM, control::MusicControlVM, state::TimeToPauseState};
+use super::{common::MusicCommonVM, state::TimeToPauseState};
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum TimeToPauseWidget {

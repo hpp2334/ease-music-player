@@ -1,15 +1,14 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
-use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use ease_client_shared::backends::{
     music::MusicId,
-    storage::{StorageEntryLoc, StorageId},
+    storage::StorageEntryLoc,
 };
 use ease_remote_storage::StreamFile;
 
 use crate::{
     ctx::BackendContext,
-    error::{BError, BResult},
+    error::BResult,
     services::{
         music::{get_music_cover_bytes, get_music_storage_entry_loc},
         storage::get_storage_backend,

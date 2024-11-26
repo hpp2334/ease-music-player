@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     sync::{
-        atomic::{AtomicU16, AtomicU32, AtomicUsize},
+        atomic::{AtomicU32, AtomicUsize},
         Arc, RwLock,
     },
     time::Duration,
@@ -15,7 +15,6 @@ use misty_async::AsyncRuntime;
 use crate::services::{
     music::TimeToPauseState,
     player::{IPlayerDelegate, PlayerState},
-    server::AssetServer,
     storage::StorageState,
 };
 

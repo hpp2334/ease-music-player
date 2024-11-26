@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ease_client_shared::backends::storage::{
     ArgUpsertStorage, CurrentStorageImportType, CurrentStorageStateType, Storage,
-    StorageConnectionTestResult, StorageEntry, StorageEntryType, StorageId, StorageType,
+    StorageConnectionTestResult, StorageEntry, StorageId, StorageType,
 };
 use serde::Serialize;
 

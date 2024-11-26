@@ -1,6 +1,6 @@
-use std::{any::Any, fmt::Debug, sync::Arc};
+use std::{any::Any, sync::Arc};
 
-use misty_async::{AsyncRuntime, IAsyncRuntimeAdapter};
+use misty_async::AsyncRuntime;
 
 use crate::{
     async_task::DefaultAsyncRuntimeAdapter, models::Models, to_host::ToHostsBuilder,

@@ -1,7 +1,6 @@
 use std::{
-    cell::{Ref, RefCell},
+    cell::RefCell,
     collections::HashMap,
-    future::Future,
     hash::Hash,
     ops::DerefMut,
     rc::Rc,
@@ -9,11 +8,9 @@ use std::{
     time::Duration,
 };
 
-use async_task::{Runnable, Task};
-use futures::future::LocalBoxFuture;
-use misty_async::{AsyncRuntime, BoxFuture, IAsyncRuntimeAdapter};
+use async_task::Task;
+use misty_async::{BoxFuture, IAsyncRuntimeAdapter};
 
-use crate::internal::{AppInternal, WeakAppInternal};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct AsyncTaskId(u64);

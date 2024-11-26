@@ -1,7 +1,6 @@
 use std::io::ErrorKind;
 
 use async_stream::stream;
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use reqwest::StatusCode;

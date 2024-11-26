@@ -7,12 +7,9 @@ use serde::Serialize;
 
 use crate::{
     utils::common::{decode_component_or_origin, get_display_duration},
-    view_models::{
-        connector::state::ConnectorState,
-        playlist::state::{
+    view_models::playlist::state::{
             AllPlaylistState, CreatePlaylistState, CurrentPlaylistState, EditPlaylistState,
         },
-    },
 };
 
 use super::models::RootViewModelState;
@@ -66,7 +63,7 @@ pub struct VCreatePlaylistState {
     pub can_submit: bool,
 }
 
-pub(crate) fn playlist_list_vs((state): (&AllPlaylistState), root: &mut RootViewModelState) {
+pub(crate) fn playlist_list_vs(state: &AllPlaylistState, root: &mut RootViewModelState) {
     let mut list: Vec<_> = { state.playlists.iter().map(|item| item.clone()).collect() };
     list.sort_by(|lhs, rhs| {
         rhs.created_time()

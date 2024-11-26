@@ -1,8 +1,8 @@
 use std::{
     future::Future,
     sync::{
-        atomic::{AtomicBool, AtomicU64},
-        Arc, RwLock,
+        atomic::AtomicBool,
+        Arc,
     },
     time::Duration,
 };

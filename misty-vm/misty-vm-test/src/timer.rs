@@ -1,7 +1,5 @@
-use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll, Waker};

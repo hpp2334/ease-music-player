@@ -1,15 +1,13 @@
 use std::{
-    future::Future,
-    pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicI64},
+        atomic::AtomicBool,
         Arc, Mutex,
     },
     thread::ThreadId,
     time::Duration,
 };
 
-use misty_vm::{App, AppPod, BoxFuture, IAsyncRuntimeAdapter, IOnAsyncRuntime, LocalBoxFuture};
+use misty_vm::{BoxFuture, IAsyncRuntimeAdapter, IOnAsyncRuntime};
 
 use crate::timer::FakeTimers;
 

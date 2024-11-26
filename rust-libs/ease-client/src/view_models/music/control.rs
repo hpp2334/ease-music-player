@@ -9,7 +9,7 @@ use ease_client_shared::backends::{
     playlist::Playlist,
 };
 use misty_vm::{
-    AppBuilderContext, AsyncTaskPod, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext,
+    AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext,
 };
 
 use super::{

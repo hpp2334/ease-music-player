@@ -13,7 +13,6 @@ pub(crate) mod utils;
 
 use ease_client_shared::backends::{
     app::ArgInitializeApp, connector::IConnectorNotifier, message::MessagePayload,
-    storage::DataSourceKey,
 };
 pub use ease_remote_storage::StreamFile;
 use error::BResult;

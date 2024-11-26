@@ -2,7 +2,6 @@ mod serve;
 
 use std::{
     collections::HashMap,
-    default,
     sync::{atomic::AtomicU64, Arc, RwLock},
 };
 

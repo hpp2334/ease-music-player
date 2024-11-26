@@ -1,4 +1,4 @@
-use std::{sync::atomic::AtomicBool, time::Duration};
+use std::time::Duration;
 
 use ease_client_shared::backends::{
     connector::ConnectorAction,
@@ -17,7 +17,6 @@ use crate::{
 
 use super::{
     control::MusicControlVM,
-    lyric::MusicLyricVM,
     state::{CurrentMusicState, TimeToPauseState},
     time_to_pause::TimeToPauseVM,
 };

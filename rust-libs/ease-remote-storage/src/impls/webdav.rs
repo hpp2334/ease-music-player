@@ -1,7 +1,6 @@
 use crate::backend::{Entry, StorageBackend, StorageBackendResult, StreamFile};
 use crate::StorageBackendError;
 
-use async_trait::async_trait;
 
 use futures_util::future::BoxFuture;
 use reqwest::header::HeaderValue;

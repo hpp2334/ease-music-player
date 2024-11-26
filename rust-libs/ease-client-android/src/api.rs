@@ -10,15 +10,11 @@ use ease_client_shared::backends::{
     app::ArgInitializeApp, encode_message_payload, generated::Code, player::PlayerDelegateEvent,
     storage::DataSourceKey, MessagePayload,
 };
-use misty_vm::{AppPods, AsyncRuntime, BoxFuture, IAsyncRuntimeAdapter, LocalBoxFuture};
-use once_cell::sync::Lazy;
+use misty_vm::{AsyncRuntime, BoxFuture, IAsyncRuntimeAdapter};
 
-use tokio::runtime::Runtime;
 use tracing::subscriber::set_global_default;
 
 use crate::{
-    backend_host::BackendHost,
-    error::AndroidFfiError,
     foreigns::{
         AssetLoadDelegate, IAssetLoadDelegateForeign, IAsyncAdapterForeign,
         IPermissionServiceForeign, IPlayerDelegateForeign, IRouterServiceForeign,

@@ -1,13 +1,11 @@
 use std::{
     any::Any,
-    convert::Infallible,
     fmt::Debug,
     future::Future,
-    sync::{Arc, Weak},
+    sync::Arc,
     time::Duration,
 };
 
-use misty_async::AsyncRuntime;
 
 use crate::{
     async_task::{AsyncTaskId, AsyncTaskPod, AsyncTasks},
