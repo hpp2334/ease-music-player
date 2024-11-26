@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::ToPrimitive;
 use serde::{Deserialize, Serialize};
@@ -68,5 +70,13 @@ pub enum ConnectorPlayerAction {
     Seeked,
     Current { value: Option<PlayerCurrentPlaying> },
     Playmode { value: PlayMode },
+    Loaded,
+    Loading,
     Error { value: String },
+}
+
+#[derive(Debug, Serialize, Deserialize, uniffi::Record)]
+pub struct PlayerDurations {
+    pub current: Duration,
+    pub buffer: Duration,
 }

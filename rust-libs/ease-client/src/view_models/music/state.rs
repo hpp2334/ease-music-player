@@ -10,6 +10,7 @@ use misty_vm::AsyncTaskId;
 pub struct CurrentMusicState {
     pub music: Option<PlayerCurrentPlaying>,
     pub current_duration: Duration,
+    pub buffer_duration: Duration,
     pub playing: bool,
     pub play_mode: PlayMode,
     pub lyric: Option<MusicLyric>,

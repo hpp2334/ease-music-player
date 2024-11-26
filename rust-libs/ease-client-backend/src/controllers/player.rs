@@ -13,7 +13,7 @@ use crate::{
     services::{music::update_music_duration, player::PlayerMedia, playlist::get_playlist},
 };
 use ease_client_shared::backends::player::{
-    ConnectorPlayerAction, PlayMode, PlayerCurrentPlaying, PlayerDelegateEvent,
+    ConnectorPlayerAction, PlayMode, PlayerCurrentPlaying, PlayerDelegateEvent, PlayerDurations,
 };
 use ease_client_shared::backends::{
     connector::ConnectorAction, music_duration::MusicDuration, player::ArgPlayMusic,
@@ -31,18 +31,14 @@ pub(crate) async fn cp_player_playmode(cx: &Arc<BackendContext>, _arg: ()) -> BR
     Ok(*playmode)
 }
 
-pub(crate) async fn cp_player_current_duration(
+pub(crate) async fn cp_player_durations(
     cx: &Arc<BackendContext>,
     _arg: (),
-) -> BResult<std::time::Duration> {
+) -> BResult<PlayerDurations> {
     let cx = cx.clone();
     cx.async_runtime()
         .clone()
-        .spawn_on_main(async move {
-            Ok(Duration::from_secs(
-                cx.player_delegate().get_current_duration_s(),
-            ))
-        })
+        .spawn_on_main(async move { Ok(cx.player_delegate().get_durations()) })
         .await
 }
 
@@ -179,7 +175,12 @@ pub(crate) async fn cp_on_player_event(
         PlayerDelegateEvent::Seek => {
             cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Seeked));
         }
-        PlayerDelegateEvent::Loading | PlayerDelegateEvent::Loaded => {}
+        PlayerDelegateEvent::Loading => {
+            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Loading));
+        }
+        PlayerDelegateEvent::Loaded => {
+            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Loaded));
+        }
         PlayerDelegateEvent::Stop => {
             player_clear_current(&cx);
             notify_player_current(&cx)?;

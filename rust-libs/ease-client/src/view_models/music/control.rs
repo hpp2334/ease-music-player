@@ -2,7 +2,7 @@ use ease_client_shared::backends::{
     connector::ConnectorAction,
     generated::{
         GetMusicMsg, PausePlayerMsg, PlayMusicMsg, PlayNextMsg, PlayPreviousMsg,
-        PlayerCurrentDurationMsg, PlayerSeekMsg, ResumePlayerMsg, StopPlayerMsg, UpdatePlaymodeMsg,
+        PlayerDurationsMsg, PlayerSeekMsg, ResumePlayerMsg, StopPlayerMsg, UpdatePlaymodeMsg,
     },
     music::MusicId,
     player::{ArgPlayMusic, ConnectorPlayerAction, PlayMode},
@@ -81,13 +81,14 @@ impl MusicControlVM {
     fn request_sync_current_duration(&self, cx: &ViewModelContext) {
         let current = self.current.clone();
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
-            let duration = Connector::of(&cx)
-                .request::<PlayerCurrentDurationMsg>(&cx, ())
+            let durations = Connector::of(&cx)
+                .request::<PlayerDurationsMsg>(&cx, ())
                 .await?;
 
             {
                 let mut current = cx.model_mut(&current);
-                current.current_duration = duration;
+                current.current_duration = durations.current;
+                current.buffer_duration = durations.buffer;
             }
             MusicLyricVM::of(&cx).sync_lyric_index(&cx)?;
 
@@ -226,6 +227,14 @@ impl MusicControlVM {
             }
             ConnectorPlayerAction::Error { value } => {
                 ToastService::of(cx).error(value.to_string());
+            }
+            ConnectorPlayerAction::Loading => {
+                let mut state = cx.model_mut(&self.current);
+                state.loading = true;
+            }
+            ConnectorPlayerAction::Loaded => {
+                let mut state = cx.model_mut(&self.current);
+                state.loading = false;
             }
         };
         self.request_sync_current_duration(&cx);

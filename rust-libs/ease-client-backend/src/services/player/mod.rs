@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use ease_client_shared::backends::{
     connector::ConnectorAction,
     music::{MusicAbstract, MusicId},
-    player::{ConnectorPlayerAction, PlayMode, PlayerCurrentPlaying},
+    player::{ConnectorPlayerAction, PlayMode, PlayerCurrentPlaying, PlayerDurations},
     playlist::PlaylistId,
     storage::DataSourceKey,
 };
@@ -29,7 +29,7 @@ pub trait IPlayerDelegate: Send + Sync + 'static {
     fn stop(&self);
     fn seek(&self, arg: u64);
     fn set_music_url(&self, item: MusicToPlay);
-    fn get_current_duration_s(&self) -> u64;
+    fn get_durations(&self) -> PlayerDurations;
     fn request_total_duration(&self, id: MusicId);
 }
 

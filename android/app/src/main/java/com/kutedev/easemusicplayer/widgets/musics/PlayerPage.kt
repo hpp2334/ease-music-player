@@ -151,6 +151,7 @@ private fun MusicPlayerHeader(
 private fun MusicSlider(
     currentDuration: String,
     _currentDurationMS: ULong,
+    bufferDurationMS: ULong,
     totalDuration: String,
     totalDurationMS: ULong,
     onChangeMusicPosition: (ms: ULong) -> Unit,
@@ -168,6 +169,7 @@ private fun MusicSlider(
     }
 
     val durationRate = if (totalDurationMS == 0UL) { 0f } else { (currentDurationMS.toDouble() / totalDurationMS.toDouble()).toFloat() };
+    val bufferRate = if (totalDurationMS == 0UL) { 0f } else { (bufferDurationMS.toDouble() / totalDurationMS.toDouble()).toFloat() };
     var sliderWidth by remember { mutableIntStateOf(0) }
     val sliderWidthDp = with(LocalDensity.current) {
         sliderWidth.toDp()
@@ -214,13 +216,18 @@ private fun MusicSlider(
                     }
                 )
         ) {
-            Row(modifier = Modifier
+            Box(modifier = Modifier
                 .fillMaxWidth()
                 .height(sliderHeight)
                 .offset(0.dp, (sliderContainerHeight - sliderHeight) / 2)
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
+                Box(modifier = Modifier
+                    .fillMaxWidth(bufferRate)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.secondary)
+                )
                 Box(modifier = Modifier
                     .fillMaxWidth(durationRate)
                     .fillMaxHeight()
@@ -567,6 +574,7 @@ private fun MusicPanel(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
+                disabled = state.loading,
                 onClick = {
                     bridge.dispatchClick(MusicControlWidget.PLAY)
                 }
@@ -659,6 +667,7 @@ fun MusicPlayerPage(
                 MusicSlider(
                     currentDuration = currentMusicState.currentDuration,
                     _currentDurationMS = currentMusicState.currentDurationMs,
+                    bufferDurationMS = currentMusicState.bufferDurationMs,
                     totalDuration = currentMusicState.totalDuration,
                     totalDurationMS = currentMusicState.totalDurationMs,
                     onChangeMusicPosition = { nextMS ->
@@ -700,6 +709,9 @@ private fun MusicSliderPreview() {
     var currentMS by remember {
         mutableStateOf(60uL * 1000uL)
     }
+    val bufferMS by remember {
+        mutableStateOf(70uL * 1000uL)
+    }
 
     Box(
         contentAlignment = Alignment.Center,
@@ -710,6 +722,7 @@ private fun MusicSliderPreview() {
         MusicSlider(
             currentDuration = formatMS(currentMS),
             _currentDurationMS = currentMS,
+            bufferDurationMS = bufferMS,
             totalDuration = formatMS(totalMS),
             totalDurationMS = totalMS,
             onChangeMusicPosition = {nextMS ->

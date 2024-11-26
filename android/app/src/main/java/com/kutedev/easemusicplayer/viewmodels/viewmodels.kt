@@ -50,6 +50,7 @@ val DefaultCurrentMusicState =
                 totalDuration = "",
                 currentDurationMs = 0UL,
                 totalDurationMs = 0UL,
+                bufferDurationMs = 0UL,
                 canChangePosition = false,
                 canPlayNext = false,
                 canPlayPrevious = false,

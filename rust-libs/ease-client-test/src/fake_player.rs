@@ -5,7 +5,7 @@ use std::time::Duration;
 use ease_client_backend::{IPlayerDelegate, MusicToPlay};
 use ease_client_shared::backends::generated::Code;
 use ease_client_shared::backends::music::MusicId;
-use ease_client_shared::backends::player::PlayerDelegateEvent;
+use ease_client_shared::backends::player::{PlayerDelegateEvent, PlayerDurations};
 use ease_client_shared::backends::storage::DataSourceKey;
 use ease_client_shared::backends::{encode_message_payload, MessagePayload};
 use lofty::AudioFile;
@@ -119,12 +119,16 @@ impl IPlayerDelegate for FakeMusicPlayerRef {
         self.inner.playing.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    fn get_current_duration_s(&self) -> u64 {
+    fn get_durations(&self) -> PlayerDurations {
         let v = self
             .inner
             .current_duration
             .load(std::sync::atomic::Ordering::SeqCst);
-        Duration::from_millis(v).as_secs()
+
+        PlayerDurations {
+            current: Duration::from_millis(v),
+            buffer: Duration::ZERO,
+        }
     }
 
     fn resume(&self) {

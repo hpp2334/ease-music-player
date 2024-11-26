@@ -46,6 +46,7 @@ private fun MiniPlayerCore(
     currentDurationMS: ULong,
     totalDuration: String,
     totalDurationMS: ULong,
+    loading: Boolean,
     canNext: Boolean,
     onClick: () -> Unit,
     onPlay: () -> Unit,
@@ -90,6 +91,7 @@ private fun MiniPlayerCore(
                         EaseIconButton(
                             sizeType = EaseIconButtonSize.Medium,
                             buttonType = EaseIconButtonType.Default,
+                            disabled = loading,
                             painter = painterResource(R.drawable.icon_play),
                             onClick = onPlay,
                         )
@@ -157,6 +159,7 @@ fun MiniPlayer(
         totalDuration = state.totalDuration,
         totalDurationMS = state.totalDurationMs,
         canNext = state.canPlayNext,
+        loading = state.loading,
         onClick = { bridge.dispatchClick(MainBodyWidget.MiniPlayer) },
         onPlay = { bridge.dispatchClick(MusicControlWidget.PLAY) },
         onPause = { bridge.dispatchClick(MusicControlWidget.PAUSE) },
@@ -176,6 +179,7 @@ private fun MiniPlayerPreview() {
         totalDuration = "00:06",
         totalDurationMS = 60uL,
         canNext = false,
+        loading = false,
         onClick = {},
         onPlay = {},
         onPause = {},

@@ -5,7 +5,7 @@ use ease_client::{
     RoutesKey,
 };
 use ease_client_backend::{AssetLoadStatus, IAssetLoadDelegate, IPlayerDelegate, MusicToPlay};
-use ease_client_shared::backends::music::MusicId;
+use ease_client_shared::backends::{music::MusicId, player::PlayerDurations};
 
 macro_rules! generate_delegate {
    ($name:ident, $trait:ident, $foreign_trait:ident, { $($method:ident ( $($arg_name:ident : $arg_ty:ty),* ) $(-> $ret_ty:ty)?;)* }) => {
@@ -56,7 +56,7 @@ generate_delegate!(PlayerDelegate, IPlayerDelegate, IPlayerDelegateForeign, {
    stop();
    seek(arg: u64);
    set_music_url(item: MusicToPlay);
-   get_current_duration_s() -> u64;
+   get_durations() -> PlayerDurations;
    request_total_duration(id: MusicId);
 });
 
