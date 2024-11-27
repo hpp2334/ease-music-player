@@ -4,7 +4,7 @@ use ease_client::{
     IPermissionService, IRouterService, IToastService, IViewStateService, RootViewModelState,
     RoutesKey,
 };
-use ease_client_backend::{AssetLoadStatus, IPlayerDelegate, MusicToPlay};
+use ease_client_backend::{IPlayerDelegate, MusicToPlay};
 use ease_client_shared::backends::{music::MusicId, player::PlayerDurations};
 
 macro_rules! generate_delegate {

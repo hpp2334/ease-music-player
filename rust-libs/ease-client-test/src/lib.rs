@@ -155,7 +155,7 @@ impl TestApp {
                             match read {
                                 AssetChunkRead::Chunk(v) => match v {
                                     AssetChunk::Buffer(buf) => {
-                                        dst.extend_from_slice(buf.as_slice());
+                                        dst.extend(buf);
                                     }
                                     AssetChunk::Status(status) => {
                                         if status == AssetLoadStatus::Loaded {
@@ -168,11 +168,16 @@ impl TestApp {
                                         }
                                     }
                                 },
+                                AssetChunkRead::None => {
+                                    tokio::time::sleep(Duration::from_millis(20)).await;
+                                }
                                 _ => {
                                     panic!("{:?}", read);
                                 }
                             }
                         }
+
+                        backend.asset_loader().close(handle);
 
                         let bytes = if exist { Some(dst) } else { None };
                         tx.send(bytes).unwrap();

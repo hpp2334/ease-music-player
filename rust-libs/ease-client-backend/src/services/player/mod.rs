@@ -94,7 +94,7 @@ impl PlayerState {
         Default::default()
     }
 
-    pub fn prev_cover(&self) -> Option<DataSourceKey> {
+    pub fn prev_music(&self) -> Option<MusicAbstract> {
         if let Some(PlayerMedia { queue, index, .. }) = self.current.read().unwrap().as_ref() {
             if self.can_play_previous() {
                 let prev_index = if *index == 0 {
@@ -103,14 +103,14 @@ impl PlayerState {
                     *index - 1
                 };
                 if let Some(music) = queue.get(prev_index) {
-                    return music.cover.clone();
+                    return Some(music.clone());
                 }
             }
         }
         Default::default()
     }
 
-    pub fn next_cover(&self) -> Option<DataSourceKey> {
+    pub fn next_music(&self) -> Option<MusicAbstract> {
         if let Some(PlayerMedia { queue, index, .. }) = self.current.read().unwrap().as_ref() {
             if self.can_play_next() {
                 let next_index = if *index + 1 >= queue.len() {
@@ -119,7 +119,7 @@ impl PlayerState {
                     *index + 1
                 };
                 if let Some(music) = queue.get(next_index) {
-                    return music.cover.clone();
+                    return Some(music.clone());
                 }
             }
         }
@@ -132,6 +132,14 @@ pub(crate) fn notify_player_current(cx: &Arc<BackendContext>) -> BResult<()> {
     cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Current {
         value: current,
     }));
+    Ok(())
+}
+
+fn preload_next_music(cx: &Arc<BackendContext>) -> BResult<()> {
+    if let Some(music) = cx.player_state().next_music() {
+        cx.asset_server()
+            .schedule_preload(cx, DataSourceKey::Music { id: music.id() })?;
+    }
     Ok(())
 }
 
@@ -173,6 +181,7 @@ pub(crate) async fn player_request_play(
             .await;
     }
     notify_player_current(cx)?;
+    preload_next_music(cx)?;
     Ok(())
 }
 
@@ -298,8 +307,14 @@ pub(crate) fn get_player_current(
         mode: playmode,
         can_prev: player_state.can_play_previous(),
         can_next: player_state.can_play_next(),
-        prev_cover: player_state.prev_cover(),
-        next_cover: player_state.next_cover(),
+        prev_cover: player_state
+            .prev_music()
+            .map(|v| v.cover)
+            .unwrap_or_default(),
+        next_cover: player_state
+            .next_music()
+            .map(|v| v.cover)
+            .unwrap_or_default(),
         cover: state.queue[state.index].cover.clone(),
     };
     Ok(Some(current))

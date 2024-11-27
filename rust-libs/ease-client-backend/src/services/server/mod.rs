@@ -53,6 +53,7 @@ struct AssetChunks {
 #[derive(Debug, Serialize, Deserialize, uniffi::Enum)]
 pub enum AssetChunk {
     Status(AssetLoadStatus),
+    #[serde(with = "serde_bytes")]
     Buffer(Vec<u8>),
 }
 
@@ -68,7 +69,7 @@ struct OpenedAsset {
     reader: Arc<RwLock<AssetChunksReader>>,
 }
 
-pub(crate) struct AssetServer {
+pub struct AssetServer {
     alloc: AtomicU64,
     opened_assets: RwLock<HashMap<u64, OpenedAsset>>,
     chunks_cache: RwLock<LruCache<AssetChunksCacheKey, Arc<AssetChunks>>>,
@@ -81,11 +82,24 @@ pub struct AssetLoader {
 }
 
 impl AssetChunksSource {
+    fn def(key: &String) -> redb::TableDefinition<u64, Vec<u8>> {
+        redb::TableDefinition::new(&key)
+    }
+
     fn read_chunk(&self, index: u64) -> BResult<Option<AssetChunk>> {
         let db = self.db.begin_read()?;
-        let table_definition: redb::TableDefinition<u64, Vec<u8>> =
-            redb::TableDefinition::new(&self.key);
-        let table = db.open_table(table_definition)?;
+        let table_definition = Self::def(&self.key);
+        let table = db.open_table(table_definition);
+        if let Err(e) = &table {
+            match e {
+                redb::TableError::TableDoesNotExist(_) => {
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
+        let table = table.unwrap();
+
         let data = table.get(index)?;
 
         if let Some(data) = data {
@@ -97,20 +111,21 @@ impl AssetChunksSource {
     }
 
     fn add_chunk(&self, index: u64, chunk: AssetChunk) -> BResult<()> {
-        let db = self.db.begin_write()?;
-        let table_definition: redb::TableDefinition<u64, Vec<u8>> =
-            redb::TableDefinition::new(&self.key);
-        let mut table = db.open_table(table_definition)?;
-        let data = rmp_serde::to_vec(&chunk).unwrap();
-        table.insert(index, data)?;
+        let w_txn = self.db.begin_write()?;
+        let table_definition = Self::def(&self.key);
+        {
+            let mut table = w_txn.open_table(table_definition)?;
+            let data = rmp_serde::to_vec(&chunk).unwrap();
+            table.insert(index, data)?;
+        }
+        w_txn.commit()?;
 
         Ok(())
     }
 
     fn remove(&self) -> BResult<()> {
         let db = self.db.begin_write()?;
-        let table_definition: redb::TableDefinition<u64, Vec<u8>> =
-            redb::TableDefinition::new(&self.key);
+        let table_definition = Self::def(&self.key);
         db.delete_table(table_definition)?;
         Ok(())
     }
@@ -120,23 +135,23 @@ impl AssetChunksReader {
     fn read(&mut self) -> BResult<AssetChunkRead> {
         loop {
             let index = self.chunk_index;
-            self.chunk_index += 1;
             let chunk = self.chunks.source.read_chunk(index)?;
 
             if let Some(chunk) = chunk {
+                self.chunk_index += 1;
                 match chunk {
                     AssetChunk::Status(asset_load_status) => {
                         return Ok(AssetChunkRead::Chunk(AssetChunk::Status(asset_load_status)));
                     }
-                    AssetChunk::Buffer(vec) => {
-                        let len = vec.len() as u64;
+                    AssetChunk::Buffer(chunk) => {
+                        let len = chunk.len() as u64;
                         let offset = len.min(self.init_remaining);
                         self.init_remaining -= offset;
                         if offset == 0 {
-                            return Ok(AssetChunkRead::Chunk(AssetChunk::Buffer(vec)));
+                            return Ok(AssetChunkRead::Chunk(AssetChunk::Buffer(chunk)));
                         } else if offset < len {
                             return Ok(AssetChunkRead::Chunk(AssetChunk::Buffer(
-                                vec[(offset as usize)..].to_vec(),
+                                chunk[(offset as usize)..].to_vec(),
                             )));
                         }
                     }
@@ -182,6 +197,12 @@ impl AssetChunks {
             chunks: self.clone(),
         };
         Arc::new(RwLock::new(reader))
+    }
+}
+
+impl Drop for AssetChunks {
+    fn drop(&mut self) {
+        self.source.remove().unwrap();
     }
 }
 
@@ -262,6 +283,59 @@ impl AssetServer {
         Ok(())
     }
 
+    pub fn schedule_preload(
+        self: &Arc<Self>,
+        cx: &Arc<BackendContext>,
+        key: DataSourceKey,
+    ) -> BResult<()> {
+        let (task, _) = self.trigger_preload(cx, key, 0);
+        if let Some(task) = task {
+            task.detach();
+        }
+        Ok(())
+    }
+
+    fn trigger_preload(
+        self: &Arc<Self>,
+        cx: &Arc<BackendContext>,
+        key: DataSourceKey,
+        byte_offset: u64,
+    ) -> (Option<Task<()>>, Arc<AssetChunks>) {
+        let source = AssetChunksSource {
+            key: serde_json::to_string(&key).unwrap(),
+            db: self.db.read().unwrap().clone().unwrap(),
+        };
+        let (existed, created) = {
+            let key = AssetChunksCacheKey {
+                key: key.clone(),
+                byte_offset,
+            };
+            let mut w = self.chunks_cache.write().unwrap();
+            if let Some(existed) = w.get(&key) {
+                (Some(existed.clone()), None)
+            } else {
+                let created = w.get_or_insert(key, || AssetChunks::new(source)).clone();
+                (None, Some(created))
+            }
+        };
+
+        if let Some(chunks) = created {
+            let this = self.clone();
+            let task = {
+                let chunks = chunks.clone();
+                let cx = cx.clone();
+                cx.async_runtime().clone().spawn(async move {
+                    this.preload_impl(&cx, chunks, key, byte_offset)
+                        .await
+                        .unwrap();
+                })
+            };
+            (Some(task), chunks)
+        } else {
+            (None, existed.unwrap())
+        }
+    }
+
     pub fn poll(self: &Arc<Self>, handle: u64) -> AssetChunkRead {
         let assets = self.opened_assets.read().unwrap();
         let asset = assets.get(&handle);
@@ -284,27 +358,24 @@ impl AssetServer {
             .alloc
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        let source = AssetChunksSource {
-            key: serde_json::to_string(&key).unwrap(),
-            db: self.db.read().unwrap().clone().unwrap(),
-        };
-        let (chunks, use_chunks) = {
+        let to_reuse = {
             let mut w = self.chunks_cache.write().unwrap();
-            let chunks = w.get_or_insert(
-                AssetChunksCacheKey {
-                    key: key.clone(),
-                    byte_offset: 0,
-                },
-                || AssetChunks::new(source),
-            );
-            if chunks.bytes() >= byte_offset {
-                (chunks.clone(), true)
+            let chunks = w.get(&AssetChunksCacheKey {
+                key: key.clone(),
+                byte_offset: 0,
+            });
+            if let Some(chunks) = chunks {
+                if chunks.bytes() > byte_offset {
+                    Some(chunks.clone())
+                } else {
+                    None
+                }
             } else {
-                (chunks.clone(), false)
+                None
             }
         };
 
-        if use_chunks {
+        if let Some(chunks) = to_reuse {
             let mut w = self.opened_assets.write().unwrap();
             w.insert(
                 id,
@@ -316,22 +387,14 @@ impl AssetServer {
             return id;
         }
 
-        let this = self.clone();
-        let task = {
-            let chunks = chunks.clone();
-            cx.async_runtime().clone().spawn(async move {
-                this.preload_impl(&cx, chunks, key, byte_offset)
-                    .await
-                    .unwrap();
-            })
-        };
+        let (task, chunks) = self.trigger_preload(&cx, key, byte_offset);
         {
             let mut w = self.opened_assets.write().unwrap();
             w.insert(
                 id,
                 OpenedAsset {
-                    _task: Some(task),
-                    reader: chunks.reader(byte_offset),
+                    _task: task,
+                    reader: chunks.reader(0),
                 },
             );
         }

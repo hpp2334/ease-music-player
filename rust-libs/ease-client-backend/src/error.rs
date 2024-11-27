@@ -16,6 +16,8 @@ pub enum BError {
     RedbTableError(#[from] redb::TableError),
     #[error("redb storage error: {0:?}")]
     RedbStorageError(#[from] redb::StorageError),
+    #[error("redb commit error: {0:?}")]
+    RedbCommitError(#[from] redb::CommitError),
 }
 
 pub type BResult<T> = Result<T, BError>;

@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use crate::services::music::{update_music_cover, ArgUpdateMusicCover, ArgUpdateMusicDuration};
 use crate::services::player::{
-    get_player_current, notify_player_current, player_clear_current, player_request_play,
-    player_request_play_adjacent,
+    get_player_current, notify_player_current, on_player_event, player_clear_current,
+    player_request_play, player_request_play_adjacent,
 };
 use crate::services::preference::save_preference_playmode;
 use crate::{
@@ -136,73 +136,5 @@ pub(crate) async fn cp_on_player_event(
     cx: &Arc<BackendContext>,
     event: PlayerDelegateEvent,
 ) -> BResult<()> {
-    let cx = cx.clone();
-    let rt = cx.async_runtime().clone();
-    match event {
-        PlayerDelegateEvent::Complete => {
-            let play_mode = *cx.player_state().playmode.read().unwrap();
-            match play_mode {
-                PlayMode::Single => {
-                    rt.spawn_on_main(async move {
-                        cx.player_delegate().pause();
-                        cx.player_delegate().seek(0);
-                    })
-                    .await;
-                }
-                PlayMode::SingleLoop => {
-                    rt.spawn_on_main(async move {
-                        cx.player_delegate().pause();
-                        cx.player_delegate().seek(0);
-                        cx.player_delegate().resume();
-                    })
-                    .await;
-                }
-                PlayMode::List | PlayMode::ListLoop => {
-                    player_request_play_adjacent::<true>(&cx).await?;
-                }
-            }
-        }
-        PlayerDelegateEvent::Pause => {
-            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playing {
-                value: false,
-            }));
-        }
-        PlayerDelegateEvent::Play => {
-            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playing {
-                value: true,
-            }));
-        }
-        PlayerDelegateEvent::Seek => {
-            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Seeked));
-        }
-        PlayerDelegateEvent::Loading => {
-            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Loading));
-        }
-        PlayerDelegateEvent::Loaded => {
-            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Loaded));
-        }
-        PlayerDelegateEvent::Stop => {
-            player_clear_current(&cx);
-            notify_player_current(&cx)?;
-        }
-        PlayerDelegateEvent::Total { id, duration_ms } => {
-            update_music_duration(
-                &cx,
-                ArgUpdateMusicDuration {
-                    id,
-                    duration: MusicDuration::new(Duration::from_millis(duration_ms)),
-                },
-            )
-            .await?
-        }
-        PlayerDelegateEvent::Cover { id, buffer } => {
-            update_music_cover(&cx, ArgUpdateMusicCover { id, cover: buffer }).await?
-        }
-        PlayerDelegateEvent::Error { msg } => {
-            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Error {
-                value: msg,
-            }));
-        }
-    }
-    Ok(())
+    on_player_event(cx, event).await
 }

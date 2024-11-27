@@ -5,7 +5,7 @@ use std::{
 };
 
 use ease_client::{build_client, Action, ViewAction};
-use ease_client_backend::Backend;
+use ease_client_backend::{AssetChunkRead, Backend};
 use ease_client_shared::backends::{
     app::ArgInitializeApp, encode_message_payload, generated::Code, player::PlayerDelegateEvent,
     storage::DataSourceKey, MessagePayload,
@@ -206,6 +206,13 @@ pub fn api_open_asset(key: DataSourceKey, offset: u64) -> u64 {
     let _guard = RT.enter();
     let backend = BACKEND.backend();
     backend.asset_loader().open(key, offset)
+}
+
+#[uniffi::export]
+pub fn api_poll_asset(handle: u64) -> AssetChunkRead {
+    let _guard = RT.enter();
+    let backend = BACKEND.backend();
+    backend.asset_loader().poll(handle)
 }
 
 #[uniffi::export]
