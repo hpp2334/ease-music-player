@@ -46,8 +46,9 @@ enum class EaseIconButtonType {
 }
 
 data class EaseIconButtonColors(
-    val buttonBg: Color,
-    val iconTint: Color,
+    val buttonBg: Color? = null,
+    val buttonDisabledBg: Color? = null,
+    val iconTint: Color? = null,
 )
 
 @Composable
@@ -73,7 +74,7 @@ fun EaseIconButton(
             if (!isVariant) {
                 Color.Transparent
             } else {
-                MaterialTheme.colorScheme.surfaceVariant
+                overrideColors?.buttonDisabledBg ?: MaterialTheme.colorScheme.surfaceVariant
             }
         } else {
             overrideColors?.buttonBg

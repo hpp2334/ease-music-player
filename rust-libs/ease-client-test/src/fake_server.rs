@@ -17,7 +17,6 @@ pub struct FakeServerInner {
     addr: String,
     tx: Option<tokio::sync::oneshot::Sender<()>>,
     req_inteceptor: Arc<Mutex<Option<ReqInteceptor>>>,
-    req_session: Arc<AtomicUsize>,
 }
 
 pub struct FakeServerRef {
@@ -98,13 +97,10 @@ impl FakeServerInner {
             server.await.unwrap();
         });
 
-        // std::thread::sleep(Duration::from_millis(200));
-
         FakeServerInner {
             addr: format!("http://127.0.0.1:{}", port),
             tx: Some(tx_abort_server),
             req_inteceptor: cloned_req_inteceptor,
-            req_session,
         }
     }
 
@@ -133,22 +129,5 @@ impl FakeServerRef {
     }
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {
         self.inner.set_inteceptor_req(v);
-    }
-    pub fn req_session(&self) -> usize {
-        self.inner
-            .req_session
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    pub async fn load_resource(&self, url: impl ToString) -> Vec<u8> {
-        let url = url.to_string();
-        assert!(!url.is_empty());
-        tokio::spawn(async move {
-            let client = reqwest::Client::builder().no_proxy().build().unwrap();
-            let resp = client.get(&url).send().await.unwrap();
-            resp.bytes().await.unwrap().to_vec()
-        })
-        .await
-        .unwrap()
     }
 }

@@ -17,22 +17,21 @@ use ease_client_shared::backends::{
 pub use ease_remote_storage::StreamFile;
 use error::BResult;
 use misty_async::{AsyncRuntime, IOnAsyncRuntime};
+use services::app::app_bootstrap;
 pub use services::player::{IPlayerDelegate, MusicToPlay};
-pub use services::server::{AssetLoadStatus, IAssetLoadDelegate};
-use services::{app::app_bootstrap, server::AssetServer};
+use services::server::AssetLoader;
+pub use services::server::{AssetChunkData, AssetChunkRead, AssetLoadStatus};
 
 uniffi::setup_scaffolding!();
 
 pub struct Backend {
     cx: Arc<BackendContext>,
-    asset_server: Arc<AssetServer>,
 }
 
 impl Backend {
     pub fn new(rt: Arc<AsyncRuntime>, player: Arc<dyn IPlayerDelegate>) -> Self {
         let cx = Arc::new(BackendContext::new(rt, player));
-        let asset_server = AssetServer::new(cx.clone());
-        Self { cx, asset_server }
+        Self { cx }
     }
 
     pub fn init(&self, arg: ArgInitializeApp) -> BResult<()> {
@@ -74,8 +73,8 @@ impl Backend {
             .detach();
     }
 
-    pub fn asset_server(&self) -> &Arc<AssetServer> {
-        &self.asset_server
+    pub fn asset_loader(&self) -> AssetLoader {
+        AssetLoader::new(self.cx.clone(), self.cx.asset_server().clone())
     }
 
     pub fn storage_path(&self) -> String {

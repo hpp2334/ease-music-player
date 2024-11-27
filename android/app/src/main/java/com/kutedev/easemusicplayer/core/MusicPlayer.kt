@@ -35,12 +35,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
-import uniffi.ease_client_android.IAssetLoadDelegateForeign
 import uniffi.ease_client_android.IPlayerDelegateForeign
 import uniffi.ease_client_android.apiBackendPlayNext
 import uniffi.ease_client_android.apiBackendPlayPrevious
 import uniffi.ease_client_android.apiCloseAsset
 import uniffi.ease_client_android.apiOpenAsset
+import uniffi.ease_client_android.apiPollAsset
+import uniffi.ease_client_backend.AssetChunkData
+import uniffi.ease_client_backend.AssetChunkRead
 import uniffi.ease_client_backend.AssetLoadStatus
 import uniffi.ease_client_backend.MusicToPlay
 import uniffi.ease_client_shared.DataSourceKey
@@ -108,12 +110,35 @@ private class EaseMusicDataSource : BaseDataSource(true) {
 
     private var _currentDataSpec: DataSpec? = null
 
-    private var _sessionId: ULong = 0UL
     private var _currentStatus: AssetLoadStatus = AssetLoadStatus.Pending
     private val _byteQueue = ByteQueue()
 
+    fun poll() {
+        val result = apiPollAsset(this._handle!!)
+        when (result) {
+            is AssetChunkRead.Chunk -> {
+                when (result.v1) {
+                    is AssetChunkData.Buffer -> {
+                        _byteQueue.put(result.v1.v1)
+                    }
+                    is AssetChunkData.Status -> {
+                        this._currentStatus = result.v1.v1
+                    }
+                }
+            }
+            AssetChunkRead.None -> {}
+            AssetChunkRead.NotOpen -> {
+                this._currentStatus = AssetLoadStatus.NotFound
+            }
+        }
+    }
+
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         try {
+            if (_byteQueue.isEmpty() && this._handle != null) {
+                poll()
+            }
+
             val status = this._currentStatus
             if (status is AssetLoadStatus.NotFound) {
                 throw IOException("Not Found")
@@ -152,23 +177,8 @@ private class EaseMusicDataSource : BaseDataSource(true) {
 
         _currentDataSpec = dataSpec
 
-        val sessionId = ++_sessionId
-
         try {
-            val self = this
-            this._handle = apiOpenAsset(key, dataSpec.position.toULong(), object : IAssetLoadDelegateForeign {
-                override fun onStatus(status: AssetLoadStatus) {
-                    if (sessionId == _sessionId) {
-                        self._currentStatus = status
-                    }
-                }
-
-                override fun onChunk(chunk: ByteArray) {
-                    if (sessionId == _sessionId) {
-                        self._byteQueue.put(chunk)
-                    }
-                }
-            })
+            this._handle = apiOpenAsset(key, dataSpec.position.toULong())
             return C.LENGTH_UNSET.toLong()
         } catch (e: Exception) {
             println(e)

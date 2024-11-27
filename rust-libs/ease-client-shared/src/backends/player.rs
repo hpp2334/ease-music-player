@@ -38,9 +38,18 @@ pub enum PlayerDelegateEvent {
     Pause,
     Stop,
     Seek,
-    Total { id: MusicId, duration_ms: u64 },
-    Cover { id: MusicId, buffer: Vec<u8> },
-    Error { msg: String },
+    Total {
+        id: MusicId,
+        duration_ms: u64,
+    },
+    Cover {
+        id: MusicId,
+        #[serde(with = "serde_bytes")]
+        buffer: Vec<u8>,
+    },
+    Error {
+        msg: String,
+    },
 }
 
 #[derive(

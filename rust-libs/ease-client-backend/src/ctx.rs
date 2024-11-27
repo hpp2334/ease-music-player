@@ -15,6 +15,7 @@ use misty_async::AsyncRuntime;
 use crate::services::{
     music::TimeToPauseState,
     player::{IPlayerDelegate, PlayerState},
+    server::AssetServer,
     storage::StorageState,
 };
 
@@ -32,6 +33,8 @@ pub struct BackendContext {
     storage_state: Arc<StorageState>,
     #[getset(get = "pub(crate)")]
     time_to_pause_state: Arc<TimeToPauseState>,
+    #[getset(get = "pub(crate)")]
+    asset_server: Arc<AssetServer>,
     connectors: (
         RwLock<HashMap<usize, Arc<dyn IConnectorNotifier>>>,
         AtomicUsize,
@@ -58,6 +61,7 @@ impl BackendContext {
             player_delegate: player,
             storage_state: Default::default(),
             time_to_pause_state: Default::default(),
+            asset_server: AssetServer::new(),
             connectors: Default::default(),
         }
     }

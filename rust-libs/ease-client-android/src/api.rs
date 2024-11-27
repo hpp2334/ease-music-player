@@ -5,7 +5,7 @@ use std::{
 };
 
 use ease_client::{build_client, Action, ViewAction};
-use ease_client_backend::Backend;
+use ease_client_backend::{AssetChunkRead, Backend};
 use ease_client_shared::backends::{
     app::ArgInitializeApp, encode_message_payload, generated::Code, player::PlayerDelegateEvent,
     storage::DataSourceKey, MessagePayload,
@@ -16,10 +16,10 @@ use tracing::subscriber::set_global_default;
 
 use crate::{
     foreigns::{
-        AssetLoadDelegate, IAssetLoadDelegateForeign, IAsyncAdapterForeign,
-        IPermissionServiceForeign, IPlayerDelegateForeign, IRouterServiceForeign,
-        IToastServiceForeign, IViewStateServiceForeign, PermissionServiceDelegate, PlayerDelegate,
-        RouterServiceDelegate, ToastServiceDelegate, ViewStateServiceDelegate,
+        IAsyncAdapterForeign, IPermissionServiceForeign, IPlayerDelegateForeign,
+        IRouterServiceForeign, IToastServiceForeign, IViewStateServiceForeign,
+        PermissionServiceDelegate, PlayerDelegate, RouterServiceDelegate, ToastServiceDelegate,
+        ViewStateServiceDelegate,
     },
     inst::{BACKEND, CLIENTS, RT},
 };
@@ -190,7 +190,7 @@ pub fn api_flush_backend_spawned_local() {
 pub async fn api_load_asset(key: DataSourceKey) -> Option<Vec<u8>> {
     RT.spawn(async move {
         if let Some(backend) = BACKEND.try_backend() {
-            let file = backend.asset_server().load(key, 0).await;
+            let file = backend.asset_loader().load(key, 0).await;
             if let Ok(Some(file)) = file {
                 return file.bytes().await.ok().map(|v| v.to_vec());
             }
@@ -202,16 +202,17 @@ pub async fn api_load_asset(key: DataSourceKey) -> Option<Vec<u8>> {
 }
 
 #[uniffi::export]
-pub fn api_open_asset(
-    key: DataSourceKey,
-    offset: u64,
-    listener: Arc<dyn IAssetLoadDelegateForeign>,
-) -> u64 {
+pub fn api_open_asset(key: DataSourceKey, offset: u64) -> u64 {
     let _guard = RT.enter();
     let backend = BACKEND.backend();
-    backend
-        .asset_server()
-        .open(key, offset as usize, AssetLoadDelegate::new(listener))
+    backend.asset_loader().open(key, offset)
+}
+
+#[uniffi::export]
+pub fn api_poll_asset(handle: u64) -> AssetChunkRead {
+    let _guard = RT.enter();
+    let backend = BACKEND.backend();
+    backend.asset_loader().poll(handle)
 }
 
 #[uniffi::export]
@@ -219,7 +220,7 @@ pub fn api_close_asset(id: u64) {
     let _guard = RT.enter();
     let backend = BACKEND.try_backend();
     if let Some(backend) = backend {
-        backend.asset_server().close(id);
+        backend.asset_loader().close(id);
     }
 }
 

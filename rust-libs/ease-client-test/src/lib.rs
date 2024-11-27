@@ -10,7 +10,7 @@ use ease_client::{
     PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey, StorageImportWidget,
     StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
 };
-use ease_client_backend::Backend;
+use ease_client_backend::{AssetChunkData, AssetChunkRead, AssetLoadStatus, Backend};
 use ease_client_shared::backends::app::ArgInitializeApp;
 use ease_client_shared::backends::music::MusicId;
 use ease_client_shared::backends::playlist::{CreatePlaylistMode, PlaylistId};
@@ -143,13 +143,45 @@ impl TestApp {
             let backend = backend.clone();
             tokio::spawn(async move {
                 while let Some((key, tx)) = res_rx.recv().await {
-                    let v = backend.asset_server().load(key.into(), 0).await.unwrap();
-                    let bytes = if let Some(v) = v {
-                        Some(v.bytes().await.unwrap().to_vec())
-                    } else {
-                        None
-                    };
-                    tx.send(bytes).unwrap();
+                    let backend = backend.clone();
+                    let key = key.clone();
+                    tokio::spawn(async move {
+                        let handle = backend.asset_loader().open(key, 0);
+                        let mut dst: Vec<u8> = Default::default();
+                        let mut exist = true;
+
+                        loop {
+                            let read = backend.asset_loader().poll(handle);
+                            match read {
+                                AssetChunkRead::Chunk(v) => match v {
+                                    AssetChunkData::Buffer(buf) => {
+                                        dst.extend(buf);
+                                    }
+                                    AssetChunkData::Status(status) => {
+                                        if status == AssetLoadStatus::Loaded {
+                                            break;
+                                        } else if status == AssetLoadStatus::NotFound {
+                                            exist = false;
+                                            break;
+                                        } else {
+                                            panic!("{:?}", status)
+                                        }
+                                    }
+                                },
+                                AssetChunkRead::None => {
+                                    tokio::time::sleep(Duration::from_millis(20)).await;
+                                }
+                                _ => {
+                                    panic!("{:?}", read);
+                                }
+                            }
+                        }
+
+                        backend.asset_loader().close(handle);
+
+                        let bytes = if exist { Some(dst) } else { None };
+                        tx.send(bytes).unwrap();
+                    });
                 }
             });
         }
@@ -352,7 +384,7 @@ impl TestApp {
     pub async fn load_resource_by_key(&self, key: DataSourceKey) -> Vec<u8> {
         let v = self
             .backend
-            .asset_server()
+            .asset_loader()
             .load(key.into(), 0)
             .await
             .unwrap();

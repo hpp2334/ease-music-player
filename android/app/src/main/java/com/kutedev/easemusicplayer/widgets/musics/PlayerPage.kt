@@ -575,6 +575,11 @@ private fun MusicPanel(
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
                 disabled = state.loading,
+                overrideColors = if (state.loading) {
+                    EaseIconButtonColors(
+                        buttonDisabledBg = MaterialTheme.colorScheme.secondary,
+                    )
+                } else { null },
                 onClick = {
                     bridge.dispatchClick(MusicControlWidget.PLAY)
                 }
