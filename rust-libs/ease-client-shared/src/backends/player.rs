@@ -10,13 +10,13 @@ use super::{
     storage::DataSourceKey,
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct ArgPlayMusic {
     pub id: MusicId,
     pub playlist_id: PlaylistId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct PlayerCurrentPlaying {
     pub abstr: MusicAbstract,
     pub playlist_id: PlaylistId,
@@ -29,7 +29,7 @@ pub struct PlayerCurrentPlaying {
     pub next_cover: Option<DataSourceKey>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, uniffi::Enum)]
 pub enum PlayerDelegateEvent {
     Complete,
     Loading,
@@ -63,6 +63,8 @@ pub enum PlayerDelegateEvent {
     Deserialize,
     FromPrimitive,
     ToPrimitive,
+    bitcode::Encode,
+    bitcode::Decode,
     uniffi::Enum,
 )]
 pub enum PlayMode {
@@ -84,7 +86,7 @@ pub enum ConnectorPlayerAction {
     Error { value: String },
 }
 
-#[derive(Debug, Serialize, Deserialize, uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, uniffi::Record)]
 pub struct PlayerDurations {
     pub current: Duration,
     pub buffer: Duration,

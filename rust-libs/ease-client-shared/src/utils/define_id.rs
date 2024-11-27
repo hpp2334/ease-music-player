@@ -1,7 +1,19 @@
 #[macro_export]
 macro_rules! define_id {
     ($s:ident) => {
-        #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Copy, uniffi::Record)]
+        #[derive(
+            Debug,
+            Clone,
+            Hash,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Copy,
+            bitcode::Encode,
+            bitcode::Decode,
+            uniffi::Record,
+        )]
         pub struct $s {
             value: i64,
         }

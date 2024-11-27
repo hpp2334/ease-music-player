@@ -7,13 +7,35 @@ use super::{music::MusicId, playlist::PlaylistId};
 
 define_id!(StorageId);
 
-#[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq, uniffi::Record)]
+#[derive(
+    Debug,
+    Serialize,
+    Deserialize,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    bitcode::Encode,
+    bitcode::Decode,
+    uniffi::Record,
+)]
 pub struct StorageEntryLoc {
     pub path: String,
     pub storage_id: StorageId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq, uniffi::Enum)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Hash,
+    PartialEq,
+    Eq,
+    bitcode::Encode,
+    bitcode::Decode,
+    uniffi::Enum,
+)]
 pub enum DataSourceKey {
     Music { id: MusicId },
     Cover { id: MusicId },
@@ -32,6 +54,8 @@ pub enum DataSourceKey {
     Eq,
     Default,
     Hash,
+    bitcode::Encode,
+    bitcode::Decode,
     uniffi::Enum,
 )]
 pub enum StorageType {
@@ -41,7 +65,7 @@ pub enum StorageType {
     OneDrive,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct StorageEntry {
     pub storage_id: StorageId,
     pub name: String,
@@ -50,7 +74,18 @@ pub struct StorageEntry {
     pub is_dir: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, uniffi::Record)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Default,
+    bitcode::Encode,
+    bitcode::Decode,
+    uniffi::Record,
+)]
 pub struct ArgUpsertStorage {
     pub id: Option<StorageId>,
     pub addr: String,
@@ -61,7 +96,19 @@ pub struct ArgUpsertStorage {
     pub typ: StorageType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, uniffi::Enum)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    Default,
+    bitcode::Encode,
+    bitcode::Decode,
+    uniffi::Enum,
+)]
 pub enum StorageConnectionTestResult {
     #[default]
     None,
@@ -81,7 +128,7 @@ pub enum StorageEntryType {
     Other,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct Storage {
     pub id: StorageId,
     pub addr: String,
@@ -129,7 +176,7 @@ impl StorageEntry {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub enum ListStorageEntryChildrenResp {
     Ok(Vec<StorageEntry>),
     AuthenticationFailed,

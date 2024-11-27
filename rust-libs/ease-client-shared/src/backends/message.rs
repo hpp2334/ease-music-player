@@ -6,8 +6,8 @@ use super::generated::Code;
 
 pub trait IMessage {
     const CODE: Code;
-    type Argument: Debug + Serialize + DeserializeOwned + Send + Sync + 'static;
-    type Return: Debug + Serialize + DeserializeOwned + Send + Sync + 'static;
+    type Argument: Debug + bitcode::Encode + bitcode::DecodeOwned + Send + Sync + 'static;
+    type Return: Debug + bitcode::Encode + bitcode::DecodeOwned + Send + Sync + 'static;
 }
 
 #[derive(Deserialize, Serialize)]
@@ -30,16 +30,16 @@ macro_rules! define_message {
 
 pub fn decode_message_payload<T>(arg: Vec<u8>) -> T
 where
-    T: Serialize + DeserializeOwned,
+    T: bitcode::Encode + bitcode::DecodeOwned,
 {
-    let ret = rmp_serde::from_slice(arg.as_slice()).unwrap();
+    let ret = bitcode::decode(arg.as_slice()).unwrap();
     ret
 }
 
 pub fn encode_message_payload<T>(arg: T) -> Vec<u8>
 where
-    T: Serialize + DeserializeOwned,
+    T: bitcode::Encode + bitcode::DecodeOwned,
 {
-    let ret = rmp_serde::to_vec(&arg).unwrap();
+    let ret = bitcode::encode(&arg);
     ret
 }

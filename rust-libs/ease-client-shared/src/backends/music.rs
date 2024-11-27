@@ -12,20 +12,32 @@ use super::{
 
 define_id!(MusicId);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
 pub struct MusicMeta {
     pub id: MusicId,
     pub title: String,
     pub duration: Option<MusicDuration>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct MusicAbstract {
     pub meta: MusicMeta,
     pub cover: Option<DataSourceKey>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+    uniffi::Enum,
+)]
 pub enum LyricLoadState {
     Loading,
     #[default]
@@ -34,14 +46,14 @@ pub enum LyricLoadState {
     Loaded,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
 pub struct MusicLyric {
     pub loc: StorageEntryLoc,
     pub data: Lyrics,
     pub loaded_state: LyricLoadState,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
 pub struct Music {
     pub meta: MusicMeta,
     pub loc: StorageEntryLoc,
@@ -79,7 +91,7 @@ impl MusicAbstract {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct ArgUpdateMusicLyric {
     pub id: MusicId,
     pub lyric_loc: Option<StorageEntryLoc>,

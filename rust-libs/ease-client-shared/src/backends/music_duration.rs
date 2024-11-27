@@ -1,6 +1,6 @@
 use std::{ops::Deref, time::Duration};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, bitcode::Encode, bitcode::Decode)]
 pub struct MusicDuration(Duration);
 
 impl Deref for MusicDuration {

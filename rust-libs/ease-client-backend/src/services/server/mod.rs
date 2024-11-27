@@ -11,14 +11,13 @@ use ease_remote_storage::StreamFile;
 use futures::StreamExt;
 use lru::LruCache;
 use misty_async::Task;
-use serde::{Deserialize, Serialize};
 use serve::{
     get_stream_file_by_loc, get_stream_file_by_music_id, get_stream_file_cover_by_music_id,
 };
 
 use crate::{ctx::BackendContext, error::BResult};
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Default, bitcode::Encode, bitcode::Decode, PartialEq, Eq, uniffi::Enum)]
 pub enum AssetLoadStatus {
     #[default]
     Pending,
@@ -50,14 +49,13 @@ struct AssetChunks {
     source: AssetChunksSource,
 }
 
-#[derive(Debug, Serialize, Deserialize, uniffi::Enum)]
+#[derive(Debug, bitcode::Encode, bitcode::Decode, uniffi::Enum)]
 pub enum AssetChunkData {
     Status(AssetLoadStatus),
-    #[serde(with = "serde_bytes")]
     Buffer(Vec<u8>),
 }
 
-#[derive(Debug, Serialize, Deserialize, uniffi::Enum)]
+#[derive(Debug, bitcode::Encode, bitcode::Decode, uniffi::Enum)]
 pub enum AssetChunkRead {
     NotOpen,
     None,
@@ -103,7 +101,7 @@ impl AssetChunksSource {
         let data = table.get(index)?;
 
         if let Some(data) = data {
-            let data = rmp_serde::from_read(std::io::Cursor::new(data.value())).unwrap();
+            let data = bitcode::decode(&data.value()).unwrap();
             Ok(Some(data))
         } else {
             Ok(None)
@@ -115,7 +113,7 @@ impl AssetChunksSource {
         let table_definition = Self::def(&self.key);
         {
             let mut table = w_txn.open_table(table_definition)?;
-            let data = rmp_serde::to_vec(&chunk).unwrap();
+            let data = bitcode::encode(&chunk);
             table.insert(index, data)?;
         }
         w_txn.commit()?;

@@ -12,7 +12,7 @@ use super::{
 
 define_id!(PlaylistId);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
 pub struct PlaylistMeta {
     pub id: PlaylistId,
     pub title: String,
@@ -21,14 +21,14 @@ pub struct PlaylistMeta {
     pub created_time: Duration,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
 pub struct PlaylistAbstract {
     pub meta: PlaylistMeta,
     pub music_count: usize,
     pub duration: Option<MusicDuration>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
 pub struct Playlist {
     pub abstr: PlaylistAbstract,
     pub musics: Vec<MusicAbstract>,
@@ -80,26 +80,26 @@ impl Playlist {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct ArgUpdatePlaylist {
     pub id: PlaylistId,
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct ArgCreatePlaylist {
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
     pub entries: Vec<(StorageEntry, String)>,
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct ArgAddMusicsToPlaylist {
     pub id: PlaylistId,
     pub entries: Vec<(StorageEntry, String)>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct ArgRemoveMusicFromPlaylist {
     pub playlist_id: PlaylistId,
     pub music_id: MusicId,

@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Eq, Default, Serialize, Deserialize, Clone)]
+#[derive(
+    Debug, PartialEq, Eq, Default, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone,
+)]
 pub struct LrcMetadata {
     pub artist: String,
     pub album: String,
@@ -13,7 +15,7 @@ pub struct LrcMetadata {
     pub offset: String,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
 pub struct Lyrics {
     pub metdata: LrcMetadata,
     pub lines: Vec<(Duration, String)>,
