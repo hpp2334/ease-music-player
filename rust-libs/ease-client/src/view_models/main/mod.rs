@@ -51,14 +51,6 @@ impl MainBodyVM {
                 state.visible_count -= 1;
             }
         }
-        self.trigger_tick(cx)?;
-        Ok(())
-    }
-
-    fn trigger_tick(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        if self.visible(cx) {
-            MusicCommonVM::of(cx).schedule_tick(cx)?;
-        }
         Ok(())
     }
 }
@@ -96,11 +88,8 @@ impl ViewModel for MainBodyVM {
                 _ => {}
             },
             Action::VsLoaded => {
-                {
-                    let mut state = cx.model_mut(&self.store);
-                    state.vs_loaded = true;
-                }
-                self.trigger_tick(cx)?;
+                let mut state = cx.model_mut(&self.store);
+                state.vs_loaded = true;
             }
             _ => {}
         }

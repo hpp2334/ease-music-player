@@ -13,6 +13,7 @@ use crate::{
     actions::Action,
     error::{EaseError, EaseResult},
     view_models::{connector::Connector, main::MainBodyVM},
+    MainAction, ViewAction,
 };
 
 use super::{
@@ -135,6 +136,18 @@ impl ViewModel for MusicCommonVM {
                 ConnectorAction::Music(music) => {
                     self.sync_music(cx, music)?;
                 }
+                _ => {}
+            },
+            Action::VsLoaded => {
+                self.tick(cx)?;
+            }
+            Action::View(action) => match action {
+                ViewAction::Main(action) => match action {
+                    MainAction::OnMainWinShown => {
+                        self.tick(cx)?;
+                    }
+                    _ => {}
+                },
                 _ => {}
             },
             _ => {}

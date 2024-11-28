@@ -6,7 +6,7 @@
   "scripts": {
     "build:jni": "bun run ./scripts/build-jni-libs.ts",
     "build:apk": "EBUILD=1 bun run build:jni && bun run ./scripts/build-apk.ts",
-    "test": "cd ./rust-libs && cargo test"
+    "test": "cd ./rust-libs && cargo nextest run"
   },
   "keywords": [],
   "author": "",
