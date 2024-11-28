@@ -26,7 +26,7 @@ pub enum AssetLoadStatus {
     Error(String),
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 struct AssetChunksCacheKey {
     key: DataSourceKey,
     byte_offset: u64,
@@ -254,7 +254,7 @@ impl AssetServer {
         chunks: Arc<RwLock<AssetChunks>>,
         key: DataSourceKey,
         byte_offset: u64,
-    ) -> BResult<()> {
+    ) -> BResult<bool> {
         let file = self.load(&cx, key.clone(), byte_offset).await;
 
         if let Err(e) = &file {
@@ -264,7 +264,7 @@ impl AssetServer {
                 .push(AssetChunkData::Status(AssetLoadStatus::Error(
                     e.to_string(),
                 )))?;
-            return Ok(());
+            return Ok(false);
         }
         let file = file.unwrap();
 
@@ -273,7 +273,7 @@ impl AssetServer {
                 .write()
                 .unwrap()
                 .push(AssetChunkData::Status(AssetLoadStatus::NotFound))?;
-            return Ok(());
+            return Ok(false);
         }
 
         let file = file.unwrap();
@@ -290,7 +290,7 @@ impl AssetServer {
                     chunks.write().unwrap().push(AssetChunkData::Status(
                         AssetLoadStatus::Error(err.to_string()),
                     ))?;
-                    return Ok(());
+                    return Ok(false);
                 }
             }
         }
@@ -299,7 +299,7 @@ impl AssetServer {
             .write()
             .unwrap()
             .push(AssetChunkData::Status(AssetLoadStatus::Loaded))?;
-        Ok(())
+        Ok(true)
     }
 
     pub fn schedule_preload(
@@ -324,16 +324,19 @@ impl AssetServer {
             key: serde_json::to_string(&key).unwrap(),
             db: self.db.read().unwrap().clone().unwrap(),
         };
+
+        let cached_key = AssetChunksCacheKey {
+            key: key.clone(),
+            byte_offset,
+        };
         let (existed, created) = {
-            let key = AssetChunksCacheKey {
-                key: key.clone(),
-                byte_offset,
-            };
             let mut w = self.chunks_cache.write().unwrap();
-            if let Some(existed) = w.get(&key) {
+            if let Some(existed) = w.get(&cached_key) {
                 (Some(existed.clone()), None)
             } else {
-                let created = w.get_or_insert(key, || AssetChunks::new(source)).clone();
+                let created = w
+                    .get_or_insert(cached_key.clone(), || AssetChunks::new(source))
+                    .clone();
                 (None, Some(created))
             }
         };
@@ -344,9 +347,13 @@ impl AssetServer {
                 let chunks = chunks.clone();
                 let cx = cx.clone();
                 cx.async_runtime().clone().spawn(async move {
-                    this.preload_impl(&cx, chunks, key, byte_offset)
+                    let success = this
+                        .preload_impl(&cx, chunks, key, byte_offset)
                         .await
                         .unwrap();
+                    if !success {
+                        this.chunks_cache.write().unwrap().pop_entry(&cached_key);
+                    }
                 })
             };
             (Some(task), chunks)
