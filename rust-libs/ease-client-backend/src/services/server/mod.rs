@@ -32,6 +32,7 @@ struct AssetChunksCacheKey {
     byte_offset: u64,
 }
 
+#[derive(Clone)]
 struct AssetChunksSource {
     key: String,
     db: Arc<redb::Database>,
@@ -40,12 +41,12 @@ struct AssetChunksSource {
 struct AssetChunksReader {
     init_remaining: u64,
     chunk_index: u64,
-    chunks: Arc<AssetChunks>,
+    chunks: Arc<RwLock<AssetChunks>>,
 }
 
 struct AssetChunks {
-    chunk_index: AtomicU64,
-    bytes: AtomicU64,
+    chunk_index: u64,
+    bytes: u64,
     source: AssetChunksSource,
 }
 
@@ -70,7 +71,7 @@ struct OpenedAsset {
 pub struct AssetServer {
     alloc: AtomicU64,
     opened_assets: RwLock<HashMap<u64, OpenedAsset>>,
-    chunks_cache: RwLock<LruCache<AssetChunksCacheKey, Arc<AssetChunks>>>,
+    chunks_cache: RwLock<LruCache<AssetChunksCacheKey, Arc<RwLock<AssetChunks>>>>,
     db: RwLock<Option<Arc<redb::Database>>>,
 }
 
@@ -130,10 +131,19 @@ impl AssetChunksSource {
 }
 
 impl AssetChunksReader {
+    fn new(chunks: &Arc<RwLock<AssetChunks>>, byte_offset: u64) -> Arc<RwLock<AssetChunksReader>> {
+        let reader = AssetChunksReader {
+            init_remaining: byte_offset,
+            chunk_index: 0,
+            chunks: chunks.clone(),
+        };
+        Arc::new(RwLock::new(reader))
+    }
+
     fn read(&mut self) -> BResult<AssetChunkRead> {
         loop {
             let index = self.chunk_index;
-            let chunk = self.chunks.source.read_chunk(index)?;
+            let chunk = self.chunks.read().unwrap().source.read_chunk(index)?;
 
             if let Some(chunk) = chunk {
                 self.chunk_index += 1;
@@ -164,39 +174,29 @@ impl AssetChunksReader {
 }
 
 impl AssetChunks {
-    fn new(source: AssetChunksSource) -> Arc<Self> {
-        Arc::new(Self {
-            chunk_index: AtomicU64::new(0),
-            bytes: AtomicU64::new(0),
+    fn new(source: AssetChunksSource) -> Arc<RwLock<Self>> {
+        Arc::new(RwLock::new(Self {
+            chunk_index: 0,
+            bytes: 0,
             source,
-        })
+        }))
     }
 
-    fn push(&self, chunk: AssetChunkData) -> BResult<()> {
+    fn push(&mut self, chunk: AssetChunkData) -> BResult<()> {
         let byte = match &chunk {
             AssetChunkData::Buffer(buf) => buf.len() as u64,
             _ => 0,
         };
-        let index = self
-            .chunk_index
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        let index = self.chunk_index;
+        self.chunk_index += 1;
         self.source.add_chunk(index, chunk)?;
-        self.bytes
-            .fetch_add(byte, std::sync::atomic::Ordering::Relaxed);
+        self.bytes += byte;
         Ok(())
     }
 
     fn bytes(&self) -> u64 {
-        self.bytes.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn reader(self: &Arc<Self>, byte_offset: u64) -> Arc<RwLock<AssetChunksReader>> {
-        let reader = AssetChunksReader {
-            init_remaining: byte_offset,
-            chunk_index: 0,
-            chunks: self.clone(),
-        };
-        Arc::new(RwLock::new(reader))
+        self.bytes
     }
 }
 
@@ -251,22 +251,28 @@ impl AssetServer {
     async fn preload_impl(
         self: &Arc<Self>,
         cx: &Arc<BackendContext>,
-        chunks: Arc<AssetChunks>,
+        chunks: Arc<RwLock<AssetChunks>>,
         key: DataSourceKey,
         byte_offset: u64,
     ) -> BResult<()> {
         let file = self.load(&cx, key.clone(), byte_offset).await;
 
         if let Err(e) = &file {
-            chunks.push(AssetChunkData::Status(AssetLoadStatus::Error(
-                e.to_string(),
-            )))?;
+            chunks
+                .write()
+                .unwrap()
+                .push(AssetChunkData::Status(AssetLoadStatus::Error(
+                    e.to_string(),
+                )))?;
             return Ok(());
         }
         let file = file.unwrap();
 
         if file.is_none() {
-            chunks.push(AssetChunkData::Status(AssetLoadStatus::NotFound))?;
+            chunks
+                .write()
+                .unwrap()
+                .push(AssetChunkData::Status(AssetLoadStatus::NotFound))?;
             return Ok(());
         }
 
@@ -275,18 +281,24 @@ impl AssetServer {
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    chunks.push(AssetChunkData::Buffer(bytes.to_vec()))?;
+                    chunks
+                        .write()
+                        .unwrap()
+                        .push(AssetChunkData::Buffer(bytes.to_vec()))?;
                 }
                 Err(err) => {
-                    chunks.push(AssetChunkData::Status(AssetLoadStatus::Error(
-                        err.to_string(),
-                    )))?;
+                    chunks.write().unwrap().push(AssetChunkData::Status(
+                        AssetLoadStatus::Error(err.to_string()),
+                    ))?;
                     return Ok(());
                 }
             }
         }
 
-        chunks.push(AssetChunkData::Status(AssetLoadStatus::Loaded))?;
+        chunks
+            .write()
+            .unwrap()
+            .push(AssetChunkData::Status(AssetLoadStatus::Loaded))?;
         Ok(())
     }
 
@@ -307,7 +319,7 @@ impl AssetServer {
         cx: &Arc<BackendContext>,
         key: DataSourceKey,
         byte_offset: u64,
-    ) -> (Option<Task<()>>, Arc<AssetChunks>) {
+    ) -> (Option<Task<()>>, Arc<RwLock<AssetChunks>>) {
         let source = AssetChunksSource {
             key: serde_json::to_string(&key).unwrap(),
             db: self.db.read().unwrap().clone().unwrap(),
@@ -372,7 +384,7 @@ impl AssetServer {
                 byte_offset: 0,
             });
             if let Some(chunks) = chunks {
-                if chunks.bytes() > byte_offset {
+                if chunks.read().unwrap().bytes() > byte_offset {
                     Some(chunks.clone())
                 } else {
                     None
@@ -388,7 +400,7 @@ impl AssetServer {
                 id,
                 OpenedAsset {
                     _task: None,
-                    reader: chunks.reader(byte_offset),
+                    reader: AssetChunksReader::new(&chunks, byte_offset),
                 },
             );
             return id;
@@ -401,7 +413,7 @@ impl AssetServer {
                 id,
                 OpenedAsset {
                     _task: task,
-                    reader: chunks.reader(0),
+                    reader: AssetChunksReader::new(&chunks, 0),
                 },
             );
         }
