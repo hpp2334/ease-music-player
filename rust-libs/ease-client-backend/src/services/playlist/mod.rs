@@ -35,7 +35,7 @@ fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<MusicDuration> {
 }
 
 pub(crate) fn build_playlist_meta(
-    cx: &Arc<BackendContext>,
+    _cx: &Arc<BackendContext>,
     model: PlaylistModel,
     first_covers: &FirstMusicCovers,
 ) -> PlaylistMeta {

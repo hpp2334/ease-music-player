@@ -1,6 +1,5 @@
 use std::{
     any::{Any, TypeId},
-    error::Error,
     marker::PhantomData,
     rc::Rc,
 };

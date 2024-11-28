@@ -14,7 +14,6 @@ use crate::{
 };
 
 use super::{
-    connector::state::ConnectorState,
     main::state::MainState,
     music::state::{CurrentMusicState, TimeToPauseState},
     playlist::state::{
@@ -45,7 +44,6 @@ macro_rules! vsb {
 }
 
 pub struct ViewStateVM {
-    connector: Model<ConnectorState>,
     // Music
     current_music: Model<CurrentMusicState>,
     time_to_pause: Model<TimeToPauseState>,
@@ -65,7 +63,6 @@ pub struct ViewStateVM {
 impl ViewStateVM {
     pub fn new(cx: &mut AppBuilderContext) -> Self {
         Self {
-            connector: cx.model(),
             current_music: cx.model(),
             time_to_pause: cx.model(),
             all_playlist: cx.model(),
@@ -119,7 +116,7 @@ impl ViewModel for ViewStateVM {
     type Event = Action;
     type Error = EaseError;
 
-    fn on_event(&self, cx: &ViewModelContext, _event: &Action) -> EaseResult<()> {
+    fn on_event(&self, _cx: &ViewModelContext, _event: &Action) -> EaseResult<()> {
         // noop
         Ok(())
     }

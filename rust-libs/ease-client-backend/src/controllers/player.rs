@@ -1,22 +1,20 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use crate::services::music::{update_music_cover, ArgUpdateMusicCover, ArgUpdateMusicDuration};
 use crate::services::player::{
-    get_player_current, notify_player_current, on_player_event, player_clear_current,
+    get_player_current, notify_player_current, on_player_event,
     player_request_play, player_request_play_adjacent,
 };
 use crate::services::preference::save_preference_playmode;
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    services::{music::update_music_duration, player::PlayerMedia, playlist::get_playlist},
+    services::{player::PlayerMedia, playlist::get_playlist},
 };
 use ease_client_shared::backends::player::{
     ConnectorPlayerAction, PlayMode, PlayerCurrentPlaying, PlayerDelegateEvent, PlayerDurations,
 };
 use ease_client_shared::backends::{
-    connector::ConnectorAction, music_duration::MusicDuration, player::ArgPlayMusic,
+    connector::ConnectorAction, player::ArgPlayMusic,
 };
 
 pub(crate) async fn cp_player_current(

@@ -7,7 +7,6 @@ use view_state::views::music::*;
 async fn music_lyric_1() {
     let mut app = TestApp::new("test-dbs/music_lyric_1", true).await;
     app.setup_preset(PresetDepth::Music).await;
-    app.wait_network().await;
     let a_music_id = app.get_first_music_id_from_latest_state();
     let state = app.latest_state().current_playlist.unwrap();
     assert_eq!(state.duration, "00:00:30");

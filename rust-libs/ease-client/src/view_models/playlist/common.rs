@@ -3,7 +3,7 @@ use ease_client_shared::backends::{
     generated::RemovePlaylistMsg,
     playlist::{Playlist, PlaylistAbstract, PlaylistId},
 };
-use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::Action,
@@ -52,11 +52,6 @@ impl PlaylistCommonVM {
             playlist
         };
         Ok(playlist)
-    }
-
-    pub(crate) fn has_playlist(&self, cx: &ViewModelContext, id: PlaylistId) -> bool {
-        let store = cx.model_get(&self.store);
-        store.playlists.iter().any(|v| v.id() == id)
     }
 
     fn sync_playlists(&self, cx: &ViewModelContext, playlists: Vec<PlaylistAbstract>) {

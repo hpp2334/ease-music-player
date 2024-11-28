@@ -12,3 +12,7 @@ members = [
     "ease-client-android-ffi-builder",
     "ease-client-android",
 ]
+
+[profile.bench]
+debug = true
+opt-level = 3

@@ -7,7 +7,6 @@ use misty_vm::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
 
 type Mp = (MessagePayload, oneshot::Sender<BResult<MessagePayload>>);
-type Mrx = mpsc::Receiver<Mp>;
 type Mtx = mpsc::Sender<Mp>;
 
 pub struct BackendHost {

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use super::generated::Code;
 

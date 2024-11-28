@@ -69,7 +69,7 @@ pub(crate) async fn load_storage_entry_data(
                         let data = data.to_vec();
                         Ok(Some(data))
                     }
-                    Err(e) => Ok(None),
+                    Err(_) => Ok(None),
                 };
                 tracing::trace!("end load");
                 ret
@@ -95,7 +95,7 @@ pub fn build_storage(model: StorageModel, music_count: u32, playlist_count: u32)
 }
 
 pub fn build_storage_backend_by_arg(
-    cx: &Arc<BackendContext>,
+    _cx: &Arc<BackendContext>,
     arg: ArgUpsertStorage,
 ) -> BResult<Arc<dyn StorageBackend + Send + Sync>> {
     let connect_timeout = Duration::from_secs(5);

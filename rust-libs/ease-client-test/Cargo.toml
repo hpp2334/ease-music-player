@@ -24,7 +24,3 @@ tracing = "0.1"
 tracing-subscriber = "0.3.0"
 async-trait = "0.1"
 id3 = "1.8.0"
-
-[profile.bench]
-debug = true
-opt-level = 3

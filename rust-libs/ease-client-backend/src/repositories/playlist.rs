@@ -96,18 +96,6 @@ pub fn db_load_playlists(conn: DbConnectionRef) -> BResult<Vec<PlaylistModel>> {
     Ok(playlist_models)
 }
 
-pub fn db_load_playlist_music_count(conn: DbConnectionRef) -> BResult<HashMap<PlaylistId, u64>> {
-    let list = conn.query::<(PlaylistId, u64)>(
-        r#"
-        SELECT playlist_id, COUNT(music_id) FROM playlist_music;
-    "#,
-        [],
-    )?;
-
-    let map = list.into_iter().map(|v| (v.0, v.1)).collect();
-    Ok(map)
-}
-
 pub type FirstMusicCovers = HashMap<PlaylistId, MusicId>;
 
 #[instrument]

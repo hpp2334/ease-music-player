@@ -53,7 +53,7 @@ pub async fn cr_get_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<
     Ok(storage)
 }
 
-pub async fn cr_get_refresh_token(cx: &Arc<BackendContext>, code: String) -> BResult<String> {
+pub async fn cr_get_refresh_token(_cx: &Arc<BackendContext>, code: String) -> BResult<String> {
     let refresh_token = OneDriveBackend::request_refresh_token(code).await?;
     Ok(refresh_token)
 }

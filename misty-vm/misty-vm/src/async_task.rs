@@ -11,7 +11,6 @@ use std::{
 use async_task::Task;
 use misty_async::{BoxFuture, IAsyncRuntimeAdapter};
 
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct AsyncTaskId(u64);
 
@@ -81,7 +80,7 @@ impl IAsyncRuntimeAdapter for DefaultAsyncRuntimeAdapter {
         todo!()
     }
 
-    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
+    fn sleep(&self, _duration: Duration) -> BoxFuture<()> {
         todo!()
     }
 

@@ -102,7 +102,7 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     }
 }
 
-pub(crate) fn build_music_abstract(cx: &Arc<BackendContext>, model: MusicModel) -> MusicAbstract {
+pub(crate) fn build_music_abstract(_cx: &Arc<BackendContext>, model: MusicModel) -> MusicAbstract {
     let cover = if model
         .cover
         .as_ref()

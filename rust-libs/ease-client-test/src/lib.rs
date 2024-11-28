@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::AtomicBool;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,7 +43,6 @@ pub struct TestApp {
     ui_async_runtime: Arc<TestAsyncRuntimeAdapter>,
     backend_async_runtime: Arc<TestAsyncRuntimeAdapter>,
     event_loop: EventLoop,
-    last_wait_req_session: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -169,7 +168,7 @@ impl TestApp {
                                     }
                                 },
                                 AssetChunkRead::None => {
-                                    tokio::time::sleep(Duration::from_millis(5)).await;
+                                    tokio::time::sleep(Duration::from_millis(20)).await;
                                 }
                                 _ => {
                                     panic!("{:?}", read);
@@ -220,7 +219,6 @@ impl TestApp {
             backend_async_runtime: backend_async_runtime_adapter,
             view_state,
             event_loop,
-            last_wait_req_session: Default::default(),
         };
         ret.wait_network().await;
         ret
@@ -374,7 +372,7 @@ impl TestApp {
     }
 
     pub async fn wait_network(&self) {
-        self.wait(100).await;
+        self.wait(200).await;
     }
 
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {

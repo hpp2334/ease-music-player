@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 use super::{

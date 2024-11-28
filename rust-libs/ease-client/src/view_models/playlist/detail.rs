@@ -4,7 +4,7 @@ use ease_client_shared::backends::{
     playlist::{ArgAddMusicsToPlaylist, Playlist, PlaylistAbstract, PlaylistId},
     storage::{CurrentStorageImportType, StorageEntry, StorageId},
 };
-use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
+use misty_vm::{AppBuilderContext, AsyncTasks, Model, ViewModel, ViewModelContext};
 
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
@@ -96,7 +96,7 @@ impl PlaylistDetailVM {
         &self,
         cx: &ViewModelContext,
         playlist_id: PlaylistId,
-        storage_id: StorageId,
+        _storage_id: StorageId,
         entries: Vec<StorageEntry>,
     ) -> EaseResult<()> {
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {

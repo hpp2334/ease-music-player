@@ -59,6 +59,7 @@ pub struct PlayerState {
 }
 
 impl PlayerState {
+    #[allow(dead_code)]
     pub fn id(&self) -> Option<MusicId> {
         self.current.read().unwrap().as_ref().map(|v| v.id)
     }
@@ -85,6 +86,7 @@ impl PlayerState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn cover(&self) -> Option<DataSourceKey> {
         if let Some(PlayerMedia { queue, index, .. }) = self.current.read().unwrap().as_ref() {
             if let Some(music) = queue.get(*index) {

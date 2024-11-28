@@ -18,6 +18,7 @@ pub enum LrcParseError {
     #[error("Invalid timestamp format in line {0}")]
     InvalidTimestamp(usize),
     #[error("Invalid offset format in line {0}")]
+    #[allow(dead_code)]
     InvalidOffset(usize),
 }
 
