@@ -42,6 +42,9 @@ pub fn build_client(
         .with_view_models(|cx, builder| {
             // Connector
             builder.add(Connector::new(cx));
+            // Main
+            builder.add(RouterVM::new(cx));
+            builder.add(MainBodyVM::new(cx));
             // Storage
             builder.add(StorageCommonVM::new(cx));
             builder.add(StorageImportVM::new(cx));
@@ -59,9 +62,6 @@ pub fn build_client(
             builder.add(MusicDetailVM::new(cx));
             builder.add(MusicLyricVM::new(cx));
             builder.add(TimeToPauseVM::new(cx));
-            // Main
-            builder.add(RouterVM::new(cx));
-            builder.add(MainBodyVM::new(cx));
             // View State
             builder.add(ViewStateVM::new(cx));
         })
