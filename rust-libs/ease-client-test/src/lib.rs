@@ -10,7 +10,7 @@ use ease_client::{
     PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey, StorageImportWidget,
     StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
 };
-use ease_client_backend::{AssetChunkData, AssetChunkRead, AssetLoadStatus, Backend};
+use ease_client_backend::Backend;
 use ease_client_shared::backends::app::ArgInitializeApp;
 use ease_client_shared::backends::music::MusicId;
 use ease_client_shared::backends::playlist::{CreatePlaylistMode, PlaylistId};
@@ -23,7 +23,7 @@ pub use fake_server::ReqInteceptor;
 use fake_server::*;
 use misty_vm::{AppPod, AsyncRuntime};
 use misty_vm_test::TestAsyncRuntimeAdapter;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use view_state::ViewStateServiceRef;
 
 mod backend_host;
@@ -120,9 +120,7 @@ impl TestApp {
         let backend_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
 
         let (tx, mut rx) = mpsc::channel::<MessagePayload>(10);
-        let (res_tx, mut res_rx) =
-            mpsc::channel::<(DataSourceKey, oneshot::Sender<Option<Vec<u8>>>)>(100);
-        let player = FakeMusicPlayerRef::new(tx, res_tx.clone());
+        let player = FakeMusicPlayerRef::new(tx);
         let backend = Arc::new(Backend::new(
             AsyncRuntime::new(backend_async_runtime_adapter.clone()),
             Arc::new(player.clone()),
@@ -135,52 +133,6 @@ impl TestApp {
             tokio::spawn(async move {
                 while let Some(v) = rx.recv().await {
                     backend.request(v).await.unwrap();
-                }
-            });
-        }
-        {
-            let backend = backend.clone();
-            tokio::spawn(async move {
-                while let Some((key, tx)) = res_rx.recv().await {
-                    let backend = backend.clone();
-                    let key = key.clone();
-                    tokio::spawn(async move {
-                        let handle = backend.asset_loader().open(key, 0);
-                        let mut dst: Vec<u8> = Default::default();
-                        let mut exist = true;
-
-                        loop {
-                            let read = backend.asset_loader().poll(handle);
-                            match read {
-                                AssetChunkRead::Chunk(v) => match v {
-                                    AssetChunkData::Buffer(buf) => {
-                                        dst.extend(buf);
-                                    }
-                                    AssetChunkData::Status(status) => {
-                                        if status == AssetLoadStatus::Loaded {
-                                            break;
-                                        } else if status == AssetLoadStatus::NotFound {
-                                            exist = false;
-                                            break;
-                                        } else {
-                                            panic!("{:?}", status)
-                                        }
-                                    }
-                                },
-                                AssetChunkRead::None => {
-                                    tokio::time::sleep(Duration::from_millis(20)).await;
-                                }
-                                _ => {
-                                    panic!("{:?}", read);
-                                }
-                            }
-                        }
-
-                        backend.asset_loader().close(handle);
-
-                        let bytes = if exist { Some(dst) } else { None };
-                        tx.send(bytes).unwrap();
-                    });
                 }
             });
         }
@@ -372,7 +324,7 @@ impl TestApp {
     }
 
     pub async fn wait_network(&self) {
-        self.wait(200).await;
+        self.wait(150).await;
     }
 
     pub fn set_inteceptor_req(&self, v: Option<ReqInteceptor>) {
@@ -380,12 +332,7 @@ impl TestApp {
     }
 
     pub async fn load_resource_by_key(&self, key: DataSourceKey) -> Vec<u8> {
-        let v = self
-            .backend
-            .asset_loader()
-            .load(key.into(), 0)
-            .await
-            .unwrap();
+        let v = self.backend.load_asset(key.into(), 0).await.unwrap();
         if let Some(v) = v {
             v.bytes().await.unwrap().to_vec()
         } else {

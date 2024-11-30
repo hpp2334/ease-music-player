@@ -15,11 +15,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.BaseDataSource
-import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DataSpec
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.metadata.flac.PictureFrame
 import androidx.media3.extractor.metadata.id3.ApicFrame
 import androidx.media3.session.CommandButton
@@ -38,12 +34,6 @@ import kotlinx.coroutines.sync.Semaphore
 import uniffi.ease_client_android.IPlayerDelegateForeign
 import uniffi.ease_client_android.apiBackendPlayNext
 import uniffi.ease_client_android.apiBackendPlayPrevious
-import uniffi.ease_client_android.apiCloseAsset
-import uniffi.ease_client_android.apiOpenAsset
-import uniffi.ease_client_android.apiPollAsset
-import uniffi.ease_client_backend.AssetChunkData
-import uniffi.ease_client_backend.AssetChunkRead
-import uniffi.ease_client_backend.AssetLoadStatus
 import uniffi.ease_client_backend.MusicToPlay
 import uniffi.ease_client_shared.DataSourceKey
 import uniffi.ease_client_shared.MusicId
@@ -104,119 +94,6 @@ private fun syncMetadataUtil(player: Player, computeShouldSync: (id: MusicId) ->
     }
 }
 
-@UnstableApi
-private class EaseMusicDataSource : BaseDataSource(true) {
-    private var _handle: ULong? = null
-
-    private var _currentDataSpec: DataSpec? = null
-
-    private var _currentStatus: AssetLoadStatus = AssetLoadStatus.Pending
-    private val _byteQueue = ByteQueue()
-
-    fun poll() {
-        val result = apiPollAsset(this._handle!!)
-        when (result) {
-            is AssetChunkRead.Chunk -> {
-                when (result.v1) {
-                    is AssetChunkData.Buffer -> {
-                        _byteQueue.put(result.v1.v1)
-                    }
-                    is AssetChunkData.Status -> {
-                        this._currentStatus = result.v1.v1
-                    }
-                }
-            }
-            AssetChunkRead.None -> {}
-            AssetChunkRead.NotOpen -> {
-                this._currentStatus = AssetLoadStatus.NotFound
-            }
-        }
-    }
-
-    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        try {
-            if (_byteQueue.isEmpty() && this._handle != null) {
-                poll()
-            }
-
-            val status = this._currentStatus
-            if (status is AssetLoadStatus.NotFound) {
-                throw IOException("Not Found")
-            }
-            if (status is AssetLoadStatus.Error) {
-                throw IOException(status.v1)
-            }
-
-            val chunk = _byteQueue.take(length);
-            val readLength = chunk.size;
-            if (readLength > 0) {
-                chunk.copyInto(buffer, offset);
-            }
-
-            if (status is AssetLoadStatus.Loaded && readLength == 0 && _byteQueue.isEmpty()) {
-                return C.RESULT_END_OF_INPUT
-            }
-            return readLength
-        } catch (e: Exception) {
-            println(e)
-            this.close()
-            throw e
-        }
-    }
-
-    override fun open(dataSpec: DataSpec): Long {
-        this.reset()
-        if (_currentDataSpec != null) {
-            throw Exception("currentDataSpec should be null")
-        }
-
-
-        val _id = dataSpec.uri.getQueryParameter("id")
-        val id = MusicId(_id!!.toLong())
-        val key = DataSourceKey.Music(id)
-
-        _currentDataSpec = dataSpec
-
-        try {
-            this._handle = apiOpenAsset(key, dataSpec.position.toULong())
-            return C.LENGTH_UNSET.toLong()
-        } catch (e: Exception) {
-            println(e)
-            this.close()
-            throw e
-        }
-    }
-
-    override fun getUri(): Uri? {
-        return _currentDataSpec?.uri
-    }
-
-    override fun close() {
-        this.reset()
-    }
-
-    private fun reset() {
-        if (this._handle != null) {
-            apiCloseAsset(this._handle!!)
-        }
-        this._handle = null
-        this._currentDataSpec = null
-        this._byteQueue.clear()
-        this._currentStatus = AssetLoadStatus.Pending
-    }
-}
-
-@UnstableApi
-private class EaseMusicDataSourceFactory : DataSource.Factory {
-    override fun createDataSource(): EaseMusicDataSource {
-        return EaseMusicDataSource()
-    }
-}
-
-private fun buildMusicUrl(id: MusicId): Uri {
-    return Uri.parse("easem://music?id=${id.value}")
-}
-
 private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
     private var _internal: ExoPlayer? = null
     private var _context: android.content.Context? = null
@@ -224,14 +101,10 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
     private var _lastSyncMusicId: MusicId? = null
     val customScope = CoroutineScope(Dispatchers.Main)
 
-    @OptIn(UnstableApi::class)
     fun onCreate(context: android.content.Context) {
         _context = context
 
         val player = ExoPlayer.Builder(context)
-            .setMediaSourceFactory(
-                DefaultMediaSourceFactory(context).setDataSourceFactory(EaseMusicDataSourceFactory())
-            )
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -323,7 +196,7 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
 
         val mediaItem = MediaItem.Builder()
             .setMediaId(item.id.value.toString())
-            .setUri(buildMusicUrl(item.id))
+            .setUri(item.url)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(item.title)
@@ -345,18 +218,13 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
         return PlayerDurations(current, buffer)
     }
 
-    @OptIn(UnstableApi::class)
-    override fun requestTotalDuration(id: MusicId) {
+    override fun requestTotalDuration(id: MusicId, url: String) {
         val context = _context ?: return
 
         customScope.launch {
             _requestSemaphore.acquire()
             try {
-                val player = ExoPlayer.Builder(context)
-                    .setMediaSourceFactory(
-                        DefaultMediaSourceFactory(context).setDataSourceFactory(EaseMusicDataSourceFactory())
-                    ).build()
-
+                val player = ExoPlayer.Builder(context).build()
                 player.addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
@@ -373,7 +241,7 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
                 })
                 val mediaItem = MediaItem.Builder()
                     .setMediaId(id.value.toString())
-                    .setUri(buildMusicUrl(id))
+                    .setUri(url)
                     .build()
                 player.setMediaItem(mediaItem)
                 player.prepare()
@@ -480,7 +348,6 @@ class PlaybackService : MediaSessionService() {
                     }
                     return super.onCustomCommand(session, controller, customCommand, args)
                 }
-
             })
             .build()
 

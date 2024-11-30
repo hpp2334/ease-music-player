@@ -287,16 +287,16 @@ fun EditStoragesPage(
     val testingColors = when (testing) {
         StorageConnectionTestResult.NONE -> null
         StorageConnectionTestResult.TESTING -> EaseIconButtonColors(
-            Color.Transparent,
-            MaterialTheme.colorScheme.tertiary,
+            buttonBg = Color.Transparent,
+            iconTint = MaterialTheme.colorScheme.tertiary,
         )
         StorageConnectionTestResult.SUCCESS -> EaseIconButtonColors(
-            Color.Transparent,
-            MaterialTheme.colorScheme.primary,
+            buttonBg = Color.Transparent,
+            iconTint = MaterialTheme.colorScheme.primary,
         )
         else -> EaseIconButtonColors(
-            Color.Transparent,
-            MaterialTheme.colorScheme.error,
+            buttonBg = Color.Transparent,
+            iconTint = MaterialTheme.colorScheme.error,
         )
     }
 

@@ -29,6 +29,7 @@ use super::{
 #[derive(Debug, uniffi::Record)]
 pub struct MusicToPlay {
     pub id: MusicId,
+    pub url: String,
     pub title: String,
     pub has_cover: bool,
 }
@@ -41,7 +42,7 @@ pub trait IPlayerDelegate: Send + Sync + 'static {
     fn seek(&self, arg: u64);
     fn set_music_url(&self, item: MusicToPlay);
     fn get_durations(&self) -> PlayerDurations;
-    fn request_total_duration(&self, id: MusicId);
+    fn request_total_duration(&self, id: MusicId, url: String);
 }
 
 #[derive(Clone)]
@@ -139,8 +140,7 @@ pub(crate) fn notify_player_current(cx: &Arc<BackendContext>) -> BResult<()> {
 
 fn preload_next_music(cx: &Arc<BackendContext>) -> BResult<()> {
     if let Some(music) = cx.player_state().next_music() {
-        cx.asset_server()
-            .schedule_preload(cx, DataSourceKey::Music { id: music.id() })?;
+        cx.asset_server().schedule_preload(cx, music.id())?;
     }
     Ok(())
 }
@@ -169,6 +169,7 @@ pub(crate) async fn player_request_play(
     }
     let item = MusicToPlay {
         id: to_play.id,
+        url: cx.asset_server().serve_music_url(to_play.id),
         title: music.title().to_string(),
         has_cover: music.cover.is_some(),
     };

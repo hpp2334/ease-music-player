@@ -12,15 +12,14 @@ pub(crate) mod services;
 pub(crate) mod utils;
 
 use ease_client_shared::backends::{
-    app::ArgInitializeApp, connector::IConnectorNotifier, message::MessagePayload,
+    app::ArgInitializeApp, connector::IConnectorNotifier, message::MessagePayload, music::MusicId,
+    storage::DataSourceKey,
 };
 pub use ease_remote_storage::StreamFile;
 use error::BResult;
 use misty_async::{AsyncRuntime, IOnAsyncRuntime};
-use services::app::app_bootstrap;
 pub use services::player::{IPlayerDelegate, MusicToPlay};
-use services::server::AssetLoader;
-pub use services::server::{AssetChunkData, AssetChunkRead, AssetLoadStatus};
+use services::{app::app_bootstrap, server::load_asset};
 
 uniffi::setup_scaffolding!();
 
@@ -73,8 +72,16 @@ impl Backend {
             .detach();
     }
 
-    pub fn asset_loader(&self) -> AssetLoader {
-        AssetLoader::new(self.cx.clone(), self.cx.asset_server().clone())
+    pub async fn load_asset(
+        &self,
+        key: DataSourceKey,
+        byte_offset: u64,
+    ) -> BResult<Option<StreamFile>> {
+        load_asset(&self.cx, key, byte_offset).await
+    }
+
+    pub fn serve_music_url(&self, id: MusicId) -> String {
+        self.cx.asset_server().serve_music_url(id)
     }
 
     pub fn storage_path(&self) -> String {

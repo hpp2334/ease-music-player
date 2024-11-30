@@ -8,6 +8,8 @@ pub enum BError {
     RemoteStorageError(#[from] ease_remote_storage::StorageBackendError),
     #[error("no such message error: code = {0:?}")]
     NoSuchMessage(Code),
+    #[error("failed to load asset: {0:?}")]
+    AssetLoadFail(String),
     #[error("redb error: {0:?}")]
     RedbError(#[from] redb::Error),
     #[error("redb transaction error: {0:?}")]

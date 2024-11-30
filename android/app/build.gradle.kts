@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.kutedev.easemusicplayer"
-    compileSdk = 34
+    compileSdk = 35
 
     lint {
         abortOnError = false
@@ -25,9 +25,10 @@ android {
     defaultConfig {
         applicationId = "com.kutedev.easemusicplayer"
         minSdk = 29
+        //noinspection OldTargetApi
         targetSdk = 34
         versionCode = 1
-        versionName = "0.2.0-beta.8"
+        versionName = "0.2.0-beta.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -100,7 +101,7 @@ android {
 
 dependencies {
     val nav_version = "2.8.3"
-    val media3_version = "1.4.1"
+    val media3_version = "1.5.0"
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
