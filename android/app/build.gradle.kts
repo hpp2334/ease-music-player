@@ -25,10 +25,10 @@ android {
     defaultConfig {
         applicationId = "com.kutedev.easemusicplayer"
         minSdk = 29
-        //noinspection ExpiredTargetSdkVersion
-        targetSdk = 30
+        //noinspection OldTargetApi
+        targetSdk = 34
         versionCode = 1
-        versionName = "0.2.0-beta.8"
+        versionName = "0.2.0-beta.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
