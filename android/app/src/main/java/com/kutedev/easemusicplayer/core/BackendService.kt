@@ -17,6 +17,13 @@ import uniffi.ease_client_shared.PlayerDelegateEvent
 
 const val BACKEND_STARTED_ACTION = "BACKEND_STARTED_ACTION"
 
+private fun normalizePath(p: String): String {
+    if (p.endsWith("/")) {
+        return p;
+    }
+    return "$p/";
+}
+
 object BackendBridge {
     private const val STORAGE_PATH = "/"
 
@@ -26,8 +33,8 @@ object BackendBridge {
             player
         )
         apiStartBackend(ArgInitializeApp(
-            appDocumentDir = context.filesDir.absolutePath,
-            appCacheDir = context.cacheDir.absolutePath,
+            appDocumentDir = normalizePath(context.filesDir.absolutePath),
+            appCacheDir = normalizePath(context.cacheDir.absolutePath),
             storagePath = STORAGE_PATH
         ))
     }
