@@ -2,12 +2,11 @@ mod asset;
 pub(self) mod chunks;
 mod serve;
 
-use std::sync::{atomic::AtomicU64, Arc, RwLock};
+use std::sync::Arc;
 
 pub use asset::AssetServer;
 use ease_client_shared::backends::storage::DataSourceKey;
 use ease_remote_storage::StreamFile;
-use futures::{select, FutureExt, StreamExt};
 use serve::{
     get_stream_file_by_loc, get_stream_file_by_music_id, get_stream_file_cover_by_music_id,
 };

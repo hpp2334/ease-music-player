@@ -23,7 +23,7 @@ pub use fake_server::ReqInteceptor;
 use fake_server::*;
 use misty_vm::{AppPod, AsyncRuntime};
 use misty_vm_test::TestAsyncRuntimeAdapter;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use view_state::ViewStateServiceRef;
 
 mod backend_host;

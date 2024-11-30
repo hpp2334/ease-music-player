@@ -80,7 +80,6 @@ impl AssetChunksSource {
     }
 
     fn add_chunk(&self, index: u64, chunk: AssetChunkData) -> BResult<()> {
-        tracing::error!("[EASE] add chunk key = {}, index = {}", self.key, index);
         let w_txn = self.db.begin_write()?;
         let table_definition = Self::def(&self.key);
         {

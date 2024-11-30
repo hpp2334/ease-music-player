@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     sync::{
-        atomic::{AtomicU16, AtomicU32, AtomicUsize},
+        atomic::{AtomicU32, AtomicUsize},
         Arc, RwLock,
     },
     time::Duration,
@@ -24,7 +24,6 @@ pub struct BackendContext {
     storage_path: RwLock<String>,
     app_document_dir: RwLock<String>,
     schema_version: AtomicU32,
-    http_port: AtomicU16,
     rt: Arc<AsyncRuntime>,
     #[getset(get = "pub(crate)")]
     player_delegate: Arc<dyn IPlayerDelegate>,
@@ -57,7 +56,6 @@ impl BackendContext {
             storage_path: RwLock::new(String::new()),
             app_document_dir: RwLock::new(String::new()),
             schema_version: AtomicU32::new(0),
-            http_port: AtomicU16::new(0),
             rt,
             player_state: Default::default(),
             player_delegate: player,

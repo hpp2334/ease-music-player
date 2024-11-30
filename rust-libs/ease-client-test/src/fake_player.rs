@@ -6,10 +6,9 @@ use ease_client_backend::{IPlayerDelegate, MusicToPlay};
 use ease_client_shared::backends::generated::Code;
 use ease_client_shared::backends::music::MusicId;
 use ease_client_shared::backends::player::{PlayerDelegateEvent, PlayerDurations};
-use ease_client_shared::backends::storage::DataSourceKey;
 use ease_client_shared::backends::{encode_message_payload, MessagePayload};
 use lofty::AudioFile;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 #[derive(Clone)]
 struct FakeMusicPlayerInner {
@@ -27,8 +26,9 @@ pub struct FakeMusicPlayerRef {
 }
 
 async fn request_bytes(url: String) -> Vec<u8> {
-    let resp = reqwest::Client::new().get(url).send().await.unwrap();
-    let bytes = resp.bytes().await.unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let resp = client.get(url).send().await.unwrap();
+    let bytes = resp.error_for_status().unwrap().bytes().await.unwrap();
     bytes.to_vec()
 }
 

@@ -1,5 +1,4 @@
 use std::{
-    fmt::format,
     net::SocketAddr,
     num::NonZero,
     sync::{
