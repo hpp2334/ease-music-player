@@ -480,7 +480,6 @@ class PlaybackService : MediaSessionService() {
                     }
                     return super.onCustomCommand(session, controller, customCommand, args)
                 }
-
             })
             .build()
 

@@ -4,13 +4,16 @@ use std::{
     collections::HashMap,
     num::NonZero,
     sync::{atomic::AtomicU64, Arc, RwLock},
+    time::Duration,
 };
 
+use bytes::Bytes;
 use ease_client_shared::backends::storage::DataSourceKey;
 use ease_remote_storage::StreamFile;
-use futures::StreamExt;
+use futures::{select, FutureExt, StreamExt};
 use lru::LruCache;
 use misty_async::Task;
+use serde::{Deserialize, Serialize};
 use serve::{
     get_stream_file_by_loc, get_stream_file_by_music_id, get_stream_file_cover_by_music_id,
 };
@@ -26,7 +29,7 @@ pub enum AssetLoadStatus {
     Error(String),
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone)]
 struct AssetChunksCacheKey {
     key: DataSourceKey,
     byte_offset: u64,
@@ -45,7 +48,7 @@ struct AssetChunksReader {
 }
 
 struct AssetChunks {
-    chunk_index: u64,
+    chunk_count: u64,
     bytes: u64,
     source: AssetChunksSource,
 }
@@ -69,10 +72,11 @@ struct OpenedAsset {
 }
 
 pub struct AssetServer {
-    alloc: AtomicU64,
+    opened_alloc: AtomicU64,
+    source_id_alloc: AtomicU64,
     opened_assets: RwLock<HashMap<u64, OpenedAsset>>,
     chunks_cache: RwLock<LruCache<AssetChunksCacheKey, Arc<RwLock<AssetChunks>>>>,
-    db: RwLock<Option<Arc<redb::Database>>>,
+    db: RwLock<Option<(String, Arc<redb::Database>)>>,
 }
 
 pub struct AssetLoader {
@@ -81,6 +85,13 @@ pub struct AssetLoader {
 }
 
 impl AssetChunksSource {
+    fn new(source_id: u64, db: Arc<redb::Database>) -> Self {
+        Self {
+            key: source_id.to_string(),
+            db,
+        }
+    }
+
     fn def(key: &String) -> redb::TableDefinition<u64, Vec<u8>> {
         redb::TableDefinition::new(&key)
     }
@@ -98,7 +109,6 @@ impl AssetChunksSource {
             }
         }
         let table = table.unwrap();
-
         let data = table.get(index)?;
 
         if let Some(data) = data {
@@ -115,7 +125,8 @@ impl AssetChunksSource {
         {
             let mut table = w_txn.open_table(table_definition)?;
             let data = bitcode::encode(&chunk);
-            table.insert(index, data)?;
+            let old = table.insert(index, data)?;
+            assert!(old.is_none());
         }
         w_txn.commit()?;
 
@@ -123,9 +134,10 @@ impl AssetChunksSource {
     }
 
     fn remove(&self) -> BResult<()> {
-        let db = self.db.begin_write()?;
+        let w_txn = self.db.begin_write()?;
         let table_definition = Self::def(&self.key);
-        db.delete_table(table_definition)?;
+        w_txn.delete_table(table_definition)?;
+        w_txn.commit()?;
         Ok(())
     }
 }
@@ -143,7 +155,19 @@ impl AssetChunksReader {
     fn read(&mut self) -> BResult<AssetChunkRead> {
         loop {
             let index = self.chunk_index;
-            let chunk = self.chunks.read().unwrap().source.read_chunk(index)?;
+            let chunk = {
+                let chunks = self.chunks.read().unwrap();
+
+                let chunk = chunks.source.read_chunk(index)?;
+                let can_read = self.chunk_index < chunks.chunk_count;
+
+                if can_read {
+                    assert!(chunk.is_some());
+                    chunk
+                } else {
+                    None
+                }
+            };
 
             if let Some(chunk) = chunk {
                 self.chunk_index += 1;
@@ -176,7 +200,7 @@ impl AssetChunksReader {
 impl AssetChunks {
     fn new(source: AssetChunksSource) -> Arc<RwLock<Self>> {
         Arc::new(RwLock::new(Self {
-            chunk_index: 0,
+            chunk_count: 0,
             bytes: 0,
             source,
         }))
@@ -188,8 +212,8 @@ impl AssetChunks {
             _ => 0,
         };
 
-        let index = self.chunk_index;
-        self.chunk_index += 1;
+        let index = self.chunk_count;
+        self.chunk_count += 1;
         self.source.add_chunk(index, chunk)?;
         self.bytes += byte;
         Ok(())
@@ -206,10 +230,21 @@ impl Drop for AssetChunks {
     }
 }
 
+impl Drop for AssetServer {
+    fn drop(&mut self) {
+        if let Some((p, _)) = &*self.db.write().unwrap() {
+            if std::fs::exists(p.as_str()).unwrap() {
+                std::fs::remove_file(p.as_str()).unwrap();
+            }
+        }
+    }
+}
+
 impl AssetServer {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            alloc: Default::default(),
+            opened_alloc: Default::default(),
+            source_id_alloc: Default::default(),
             opened_assets: Default::default(),
             chunks_cache: RwLock::new(LruCache::new(NonZero::new(6).unwrap())),
             db: Default::default(),
@@ -224,10 +259,10 @@ impl AssetServer {
 
         let mut w = self.db.write().unwrap();
         let db = redb::Database::builder()
-            .set_cache_size(100 << 20)
-            .create(p)
+            .set_cache_size(20 << 20)
+            .create(&p)
             .expect("failed to init database");
-        *w = Some(Arc::new(db));
+        *w = Some((p, Arc::new(db)));
     }
 
     pub async fn load(
@@ -278,22 +313,58 @@ impl AssetServer {
 
         let file = file.unwrap();
         let mut stream = Box::pin(file.into_stream());
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    chunks
-                        .write()
-                        .unwrap()
-                        .push(AssetChunkData::Buffer(bytes.to_vec()))?;
-                }
-                Err(err) => {
+        let mut buffer_cache: Vec<u8> = Default::default();
+
+        let flush = |buffer_cache: &mut Vec<u8>| -> BResult<()> {
+            if !buffer_cache.is_empty() {
+                chunks
+                    .write()
+                    .unwrap()
+                    .push(AssetChunkData::Buffer(buffer_cache.clone()))?;
+                buffer_cache.clear();
+            }
+            Ok(())
+        };
+        let write = |bytes: Bytes, buffer_cache: &mut Vec<u8>| -> BResult<()> {
+            buffer_cache.extend(bytes);
+
+            if buffer_cache.len() >= (1 << 22) {
+                flush(buffer_cache)?;
+            }
+            Ok(())
+        };
+
+        loop {
+            select! {
+                read = stream.next().fuse() => {
+                    if let Some(chunk) = read {
+                        match chunk {
+                            Ok(bytes) => {
+                                write(bytes, &mut buffer_cache)?;
+                            }
+                            Err(err) => {
+                                flush(&mut buffer_cache)?;
+                                chunks.write().unwrap().push(AssetChunkData::Status(
+                                    AssetLoadStatus::Error(err.to_string()),
+                                ))?;
+                                return Ok(false);
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                },
+                _ = cx.async_runtime().sleep(Duration::from_secs(20)).fuse() => {
+                    flush(&mut buffer_cache)?;
                     chunks.write().unwrap().push(AssetChunkData::Status(
-                        AssetLoadStatus::Error(err.to_string()),
+                        AssetLoadStatus::Error("Timeout".to_string()),
                     ))?;
                     return Ok(false);
                 }
             }
         }
+
+        flush(&mut buffer_cache)?;
 
         chunks
             .write()
@@ -320,20 +391,21 @@ impl AssetServer {
         key: DataSourceKey,
         byte_offset: u64,
     ) -> (Option<Task<()>>, Arc<RwLock<AssetChunks>>) {
-        let source = AssetChunksSource {
-            key: serde_json::to_string(&key).unwrap(),
-            db: self.db.read().unwrap().clone().unwrap(),
-        };
-
         let cached_key = AssetChunksCacheKey {
             key: key.clone(),
             byte_offset,
         };
+
         let (existed, created) = {
             let mut w = self.chunks_cache.write().unwrap();
             if let Some(existed) = w.get(&cached_key) {
                 (Some(existed.clone()), None)
             } else {
+                let source_id = self
+                    .source_id_alloc
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let source =
+                    AssetChunksSource::new(source_id, self.db.read().unwrap().clone().unwrap().1);
                 let created = w
                     .get_or_insert(cached_key.clone(), || AssetChunks::new(source))
                     .clone();
@@ -352,7 +424,7 @@ impl AssetServer {
                         .await
                         .unwrap();
                     if !success {
-                        this.chunks_cache.write().unwrap().pop_entry(&cached_key);
+                        this.chunks_cache.write().unwrap().pop(&cached_key);
                     }
                 })
             };
@@ -381,7 +453,7 @@ impl AssetServer {
     ) -> u64 {
         let cx = cx.clone();
         let id = self
-            .alloc
+            .opened_alloc
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let to_reuse = {

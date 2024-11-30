@@ -42,7 +42,7 @@ private fun getAppVersion(
     } else {
         packageManager.getPackageInfo(packageName, 0)
     }
-    return packageInfo.versionName
+    return packageInfo.versionName ?: "<unknown>"
 }
 
 @Composable

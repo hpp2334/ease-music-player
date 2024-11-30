@@ -183,6 +183,7 @@ export function generateMetas() {
     // codes
     {
         let s = ''
+        s += `#![allow(unused_imports)]\n`
         for (const module of allModules) {
             s += `use crate::backends::${module}::*;\n`
         }
@@ -207,6 +208,7 @@ export function generateMetas() {
     // controllers
     {
         let s = ''
+        s += `#![allow(unused_imports)]\n`
         s += `generate_dispatch_message! {\n`
         for (let i = 0; i < metas.length; i++) {
             const meta = metas[i]
