@@ -14,7 +14,7 @@ use axum::{
 };
 use bytes::Bytes;
 use ease_client_shared::backends::{music::MusicId, storage::DataSourceKey};
-use ease_remote_storage::StatusCode;
+use ease_remote_storage::{StatusCode, StreamFile};
 use futures::StreamExt;
 use lru::LruCache;
 use misty_async::Task;
@@ -136,7 +136,14 @@ impl AssetServer {
         cx: &Arc<BackendContext>,
         id: MusicId,
     ) -> BResult<()> {
-        let _ = self.build_chunks_reader(cx, id, 0);
+        let this = self.clone();
+        let cx = cx.clone();
+        cx.async_runtime()
+            .clone()
+            .spawn(async move {
+                let _ = this.build_chunks_reader(&cx, id, 0).await;
+            })
+            .detach();
         Ok(())
     }
 
@@ -218,6 +225,7 @@ impl AssetServer {
                 }
             }
         };
+        let all_bytes = reader.all_bytes();
 
         let mut headers = HeaderMap::new();
         headers.append(
@@ -225,9 +233,25 @@ impl AssetServer {
             HeaderValue::from_str("application/octet-stream").unwrap(),
         );
         if is_partial {
+            let val = if all_bytes == 0 {
+                format!("bytes {}-/*", byte_offset)
+            } else {
+                format!(
+                    "bytes {}-{}/{}",
+                    byte_offset,
+                    byte_offset + all_bytes - 1,
+                    byte_offset + all_bytes
+                )
+            };
             headers.append(
                 header::CONTENT_RANGE,
-                HeaderValue::from_str(&format!("bytes {}-/*", byte_offset)).unwrap(),
+                HeaderValue::from_str(val.as_str()).unwrap(),
+            );
+        } else if all_bytes > 0 {
+            let val = all_bytes.to_string();
+            headers.append(
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(val.as_str()).unwrap(),
             );
         }
 
@@ -243,10 +267,12 @@ impl AssetServer {
         id: MusicId,
         byte_offset: u64,
     ) -> BResult<Option<Arc<AssetChunksReader>>> {
-        let from_zero_chunks = self.build_chunks_impl(cx, id, 0).await?;
-        if let Some(chunks) = from_zero_chunks {
-            if chunks.read().unwrap().bytes() > byte_offset {
-                return Ok(Some(AssetChunksReader::new(&chunks, byte_offset)));
+        if byte_offset > 0 {
+            let from_zero_chunks = self.build_chunks_impl(cx, id, 0).await?;
+            if let Some(chunks) = from_zero_chunks {
+                if chunks.read().unwrap().current_bytes() > byte_offset {
+                    return Ok(Some(AssetChunksReader::new(&chunks, byte_offset)));
+                }
             }
         }
 
@@ -290,15 +316,21 @@ impl AssetServer {
             return Ok(Some(chunks.clone()));
         }
 
+        let file = load_asset(&cx, key.clone(), byte_offset).await?;
+        if file.is_none() {
+            return Ok(None);
+        }
+        let file = file.unwrap();
+        if let Some(size) = file.size() {
+            chunks.write().unwrap().set_all_bytes(size as u64);
+        }
+
         let this = self.clone();
         let task = {
             let chunks = chunks.clone();
             let cx = cx.clone();
             cx.async_runtime().clone().spawn(async move {
-                let success = this
-                    .preload_impl(&cx, chunks, key, byte_offset)
-                    .await
-                    .unwrap();
+                let success = this.preload_impl(chunks, file).await.unwrap();
                 if !success {
                     this.chunks_cache.write().unwrap().pop(&cached_key);
                 }
@@ -311,36 +343,9 @@ impl AssetServer {
 
     async fn preload_impl(
         self: &Arc<Self>,
-        cx: &Arc<BackendContext>,
         chunks: Arc<RwLock<AssetChunks>>,
-        key: DataSourceKey,
-        byte_offset: u64,
+        file: StreamFile,
     ) -> BResult<bool> {
-        let file = load_asset(&cx, key.clone(), byte_offset).await;
-
-        if let Err(e) = &file {
-            chunks
-                .write()
-                .unwrap()
-                .push(AssetChunkData::Status(AssetLoadStatus::Error(
-                    e.to_string(),
-                )))?;
-            return Ok(false);
-        }
-        let file = file.unwrap();
-
-        if file.is_none() {
-            chunks
-                .write()
-                .unwrap()
-                .push(AssetChunkData::Status(AssetLoadStatus::Error(format!(
-                    "{:?} not found",
-                    key
-                ))))?;
-            return Ok(false);
-        }
-
-        let file = file.unwrap();
         let mut stream = Box::pin(file.into_stream());
         let mut buffer_cache: Vec<u8> = Default::default();
 

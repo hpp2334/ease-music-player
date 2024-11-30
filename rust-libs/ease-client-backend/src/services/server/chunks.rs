@@ -30,6 +30,7 @@ pub struct AssetChunksSource {
 }
 
 pub struct AssetChunksReader {
+    init_offset: u64,
     init_remaining: AtomicU64,
     chunk_index: AtomicU64,
     chunks: Arc<RwLock<AssetChunks>>,
@@ -38,7 +39,8 @@ pub struct AssetChunksReader {
 
 pub struct AssetChunks {
     chunk_count: u64,
-    bytes: u64,
+    chunk_bytes: u64,
+    all_bytes: u64,
     source: AssetChunksSource,
     stx: flume::Sender<()>,
     srx: flume::Receiver<()>,
@@ -105,12 +107,17 @@ impl AssetChunksSource {
 impl AssetChunksReader {
     pub fn new(chunks: &Arc<RwLock<AssetChunks>>, byte_offset: u64) -> Arc<AssetChunksReader> {
         let reader = AssetChunksReader {
+            init_offset: byte_offset,
             init_remaining: AtomicU64::new(byte_offset),
             chunk_index: AtomicU64::new(0),
             chunks: chunks.clone(),
             srx: chunks.read().unwrap().srx.clone(),
         };
         Arc::new(reader)
+    }
+
+    pub fn all_bytes(&self) -> u64 {
+        self.chunks.read().unwrap().all_bytes() - self.init_offset
     }
 
     pub async fn read(&self) -> BResult<Option<Vec<u8>>> {
@@ -171,7 +178,8 @@ impl AssetChunks {
         let (stx, srx) = flume::unbounded();
         Arc::new(RwLock::new(Self {
             chunk_count: 0,
-            bytes: 0,
+            chunk_bytes: 0,
+            all_bytes: 0,
             source,
             stx,
             srx,
@@ -187,13 +195,21 @@ impl AssetChunks {
         let index = self.chunk_count;
         self.chunk_count += 1;
         self.source.add_chunk(index, chunk)?;
-        self.bytes += byte;
+        self.chunk_bytes += byte;
         self.stx.send(()).unwrap();
         Ok(())
     }
 
-    pub fn bytes(&self) -> u64 {
-        self.bytes
+    pub fn current_bytes(&self) -> u64 {
+        self.chunk_bytes
+    }
+
+    pub fn all_bytes(&self) -> u64 {
+        self.all_bytes
+    }
+
+    pub fn set_all_bytes(&mut self, val: u64) {
+        self.all_bytes = val;
     }
 }
 
