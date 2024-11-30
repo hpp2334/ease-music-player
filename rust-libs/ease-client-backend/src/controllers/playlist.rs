@@ -102,7 +102,8 @@ pub(crate) async fn cc_create_playlist(
             .clone()
             .spawn_on_main(async move {
                 for id in music_ids {
-                    cx.player_delegate().request_total_duration(id);
+                    cx.player_delegate()
+                        .request_total_duration(id, cx.asset_server().serve_music_url(id));
                 }
             })
             .await;
@@ -147,7 +148,8 @@ pub(crate) async fn cu_add_musics_to_playlist(
             .clone()
             .spawn_on_main(async move {
                 for id in music_ids {
-                    cx.player_delegate().request_total_duration(id);
+                    cx.player_delegate()
+                        .request_total_duration(id, cx.asset_server().serve_music_url(id));
                 }
             })
             .await;

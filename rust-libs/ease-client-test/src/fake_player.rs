@@ -19,7 +19,6 @@ struct FakeMusicPlayerInner {
     current_duration: Arc<AtomicU64>,
     total_duration: Arc<AtomicU64>,
     tx: mpsc::Sender<MessagePayload>,
-    res_tx: mpsc::Sender<(DataSourceKey, oneshot::Sender<Option<Vec<u8>>>)>,
 }
 
 #[derive(Clone)]
@@ -27,11 +26,14 @@ pub struct FakeMusicPlayerRef {
     inner: Arc<FakeMusicPlayerInner>,
 }
 
+async fn request_bytes(url: String) -> Vec<u8> {
+    let resp = reqwest::Client::new().get(url).send().await.unwrap();
+    let bytes = resp.bytes().await.unwrap();
+    bytes.to_vec()
+}
+
 impl FakeMusicPlayerInner {
-    fn new(
-        tx: mpsc::Sender<MessagePayload>,
-        res_tx: mpsc::Sender<(DataSourceKey, oneshot::Sender<Option<Vec<u8>>>)>,
-    ) -> Self {
+    fn new(tx: mpsc::Sender<MessagePayload>) -> Self {
         Self {
             req_handle: Default::default(),
             last_bytes: Default::default(),
@@ -39,7 +41,6 @@ impl FakeMusicPlayerInner {
             current_duration: Default::default(),
             total_duration: Default::default(),
             tx,
-            res_tx,
         }
     }
 
@@ -97,12 +98,9 @@ impl FakeMusicPlayerInner {
 }
 
 impl FakeMusicPlayerRef {
-    pub fn new(
-        tx: mpsc::Sender<MessagePayload>,
-        res_tx: mpsc::Sender<(DataSourceKey, oneshot::Sender<Option<Vec<u8>>>)>,
-    ) -> Self {
+    pub fn new(tx: mpsc::Sender<MessagePayload>) -> Self {
         FakeMusicPlayerRef {
-            inner: Arc::new(FakeMusicPlayerInner::new(tx, res_tx)),
+            inner: Arc::new(FakeMusicPlayerInner::new(tx)),
         }
     }
 
@@ -162,6 +160,7 @@ impl IPlayerDelegate for FakeMusicPlayerRef {
     fn set_music_url(&self, item: MusicToPlay) {
         let inner = self.inner.clone();
         let id = item.id;
+        let url = item.url;
         {
             let handle = inner.req_handle.clone();
             let handle = handle.lock().unwrap();
@@ -175,15 +174,7 @@ impl IPlayerDelegate for FakeMusicPlayerRef {
             .store(0, std::sync::atomic::Ordering::SeqCst);
         let cloned_inner = inner.clone();
         let handle = tokio::spawn(async move {
-            let res_tx = cloned_inner.res_tx.clone();
-            let (buf_tx, buf_rx) = oneshot::channel::<Option<Vec<u8>>>();
-            tokio::spawn(async move {
-                res_tx
-                    .send((DataSourceKey::Music { id }, buf_tx))
-                    .await
-                    .unwrap();
-            });
-            let bytes = buf_rx.await.unwrap().unwrap();
+            let bytes = request_bytes(url).await;
             let buf_cursor = std::io::Cursor::new(bytes.to_vec());
 
             let file = lofty::Probe::new(std::io::BufReader::new(buf_cursor))
@@ -213,18 +204,10 @@ impl IPlayerDelegate for FakeMusicPlayerRef {
         self.resume();
     }
 
-    fn request_total_duration(&self, id: MusicId) {
+    fn request_total_duration(&self, id: MusicId, url: String) {
         let cloned_inner = self.inner.clone();
         tokio::spawn(async move {
-            let res_tx = cloned_inner.res_tx.clone();
-            let (buf_tx, buf_rx) = oneshot::channel::<Option<Vec<u8>>>();
-            tokio::spawn(async move {
-                res_tx
-                    .send((DataSourceKey::Music { id }, buf_tx))
-                    .await
-                    .unwrap();
-            });
-            let bytes = buf_rx.await.unwrap().unwrap();
+            let bytes = request_bytes(url).await;
 
             let file = lofty::Probe::new(std::io::BufReader::new(std::io::Cursor::new(
                 bytes.to_vec(),

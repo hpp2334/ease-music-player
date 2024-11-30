@@ -57,7 +57,7 @@ generate_delegate!(PlayerDelegate, IPlayerDelegate, IPlayerDelegateForeign, {
    seek(arg: u64);
    set_music_url(item: MusicToPlay);
    get_durations() -> PlayerDurations;
-   request_total_duration(id: MusicId);
+   request_total_duration(id: MusicId, url: String);
 });
 
 #[uniffi::export(with_foreign)]
