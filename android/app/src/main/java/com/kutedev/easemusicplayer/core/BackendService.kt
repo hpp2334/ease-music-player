@@ -18,8 +18,6 @@ import uniffi.ease_client_shared.PlayerDelegateEvent
 const val BACKEND_STARTED_ACTION = "BACKEND_STARTED_ACTION"
 
 object BackendBridge {
-    @SuppressLint("StaticFieldLeak")
-    private const val SCHEMA_VERSION = 1u
     private const val STORAGE_PATH = "/"
 
     fun onCreate(context: android.content.Context, player: IPlayerDelegateForeign) {
@@ -28,9 +26,9 @@ object BackendBridge {
             player
         )
         apiStartBackend(ArgInitializeApp(
-            context.filesDir.absolutePath,
-            SCHEMA_VERSION,
-            STORAGE_PATH
+            appDocumentDir = context.filesDir.absolutePath,
+            appCacheDir = context.cacheDir.absolutePath,
+            storagePath = STORAGE_PATH
         ))
     }
 

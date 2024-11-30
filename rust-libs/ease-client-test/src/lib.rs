@@ -61,8 +61,6 @@ impl IToastService for FakeToastServiceImpl {
 
 static SETUP_SUBCRIBER_ONCE: AtomicBool = AtomicBool::new(false);
 
-static SCHEMA_VERSION: u32 = 1;
-
 fn setup_subscriber() {
     let has_setup = SETUP_SUBCRIBER_ONCE.swap(true, std::sync::atomic::Ordering::Relaxed);
     if has_setup {
@@ -139,7 +137,7 @@ impl TestApp {
         backend
             .init(ArgInitializeApp {
                 app_document_dir: test_dir.to_string(),
-                schema_version: SCHEMA_VERSION,
+                app_cache_dir: test_dir.to_string(),
                 storage_path,
             })
             .unwrap();

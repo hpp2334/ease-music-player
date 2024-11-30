@@ -87,12 +87,14 @@ pub fn save_preference_data(cx: &Arc<BackendContext>, data: PreferenceData) {
 }
 
 pub fn app_bootstrap(cx: &Arc<BackendContext>, arg: ArgInitializeApp) -> BResult<()> {
+    static SCHEMA_VERSION: u32 = 1;
+
     cx.set_storage_path(&arg.storage_path);
     cx.set_app_document_dir(&arg.app_document_dir);
-    cx.set_schema_version(arg.schema_version);
+    cx.set_schema_version(SCHEMA_VERSION);
     // Init
     init_persistent_state(&cx)?;
-    cx.asset_server().start(&cx, arg.app_document_dir);
+    cx.asset_server().start(&cx, arg.app_cache_dir);
     Ok(())
 }
 
