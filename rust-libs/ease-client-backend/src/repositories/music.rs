@@ -64,23 +64,6 @@ impl DatabaseServer {
         Ok(model)
     }
 
-    pub fn load_music_by_key(
-        self: &Arc<Self>,
-        loc: StorageEntryLoc,
-    ) -> BResult<Option<MusicModel>> {
-        let db = self.db().begin_read()?;
-        let id = {
-            let table = db.open_table(TABLE_MUSIC_BY_LOC)?;
-            table.get(loc)?.map(|v| v.value())
-        };
-
-        if let Some(id) = id {
-            self.load_music(id)
-        } else {
-            Ok(None)
-        }
-    }
-
     fn load_music_by_key_impl(
         self: &Arc<Self>,
         db: &ReadTransaction,

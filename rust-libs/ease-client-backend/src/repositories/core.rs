@@ -4,11 +4,21 @@ use redb::{ReadableTable, WriteTransaction};
 
 use crate::{error::BResult, models::key::DbKeyAlloc};
 
-use super::defs::TABLE_ID_ALLOC;
+use super::defs::{
+    TABLE_BLOB, TABLE_ID_ALLOC, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST,
+    TABLE_PLAYLIST_MUSIC, TABLE_PREFERENCE, TABLE_SCHEMA_VERSION, TABLE_STORAGE,
+    TABLE_STORAGE_MUSIC,
+};
 
 #[derive(Default)]
 pub struct DatabaseServer {
     _db: RwLock<Option<Arc<redb::Database>>>,
+}
+
+impl Drop for DatabaseServer {
+    fn drop(&mut self) {
+        self._db.write().unwrap().take();
+    }
 }
 
 impl DatabaseServer {
@@ -28,6 +38,24 @@ impl DatabaseServer {
                 .expect("failed to init database");
             *w = Some(Arc::new(db));
         }
+
+        self.init_database().unwrap();
+    }
+
+    fn init_database(&self) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        db.open_table(TABLE_ID_ALLOC)?;
+        db.open_table(TABLE_PLAYLIST)?;
+        db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+        db.open_table(TABLE_MUSIC)?;
+        db.open_table(TABLE_MUSIC_BY_LOC)?;
+        db.open_table(TABLE_STORAGE)?;
+        db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
+        db.open_table(TABLE_PREFERENCE)?;
+        db.open_table(TABLE_SCHEMA_VERSION)?;
+        db.open_table(TABLE_BLOB)?;
+        db.commit()?;
+        Ok(())
     }
 
     pub fn db(&self) -> Arc<redb::Database> {

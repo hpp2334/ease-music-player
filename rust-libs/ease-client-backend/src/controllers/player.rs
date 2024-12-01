@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::services::player::{
-    get_player_current, notify_player_current, on_player_event,
-    player_request_play, player_request_play_adjacent,
+    get_player_current, notify_player_current, on_player_event, player_request_play,
+    player_request_play_adjacent,
 };
 use crate::services::preference::save_preference_playmode;
 use crate::{
@@ -13,9 +13,7 @@ use crate::{
 use ease_client_shared::backends::player::{
     ConnectorPlayerAction, PlayMode, PlayerCurrentPlaying, PlayerDelegateEvent, PlayerDurations,
 };
-use ease_client_shared::backends::{
-    connector::ConnectorAction, player::ArgPlayMusic,
-};
+use ease_client_shared::backends::{connector::ConnectorAction, player::ArgPlayMusic};
 
 pub(crate) async fn cp_player_current(
     cx: &Arc<BackendContext>,
@@ -111,7 +109,7 @@ pub(crate) async fn cp_update_playmode(cx: &Arc<BackendContext>, arg: PlayMode) 
         *playmode = arg;
     }
 
-    save_preference_playmode(cx, arg);
+    save_preference_playmode(cx, arg)?;
     cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playmode {
         value: arg,
     }));

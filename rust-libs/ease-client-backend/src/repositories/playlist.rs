@@ -99,6 +99,9 @@ impl DatabaseServer {
             playlist.picture = picture;
             playlist.created_time = current_time_ms;
 
+            let mut table = db.open_table(TABLE_PLAYLIST)?;
+            table.insert(id, playlist)?;
+
             id
         };
         for m in musics {
