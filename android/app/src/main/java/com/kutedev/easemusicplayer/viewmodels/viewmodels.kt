@@ -98,7 +98,6 @@ val DefaultEditStorageState =
                         ),
                 test = StorageConnectionTestResult.NONE,
                 musicCount = 0u,
-                playlistCount = 0u
         )
 val DefaultCreatePlaylistState =
         VCreatePlaylistState(

@@ -19,7 +19,10 @@ use futures::StreamExt;
 use lru::LruCache;
 use misty_async::Task;
 
-use crate::{ctx::BackendContext, error::BResult};
+use crate::{
+    ctx::{BackendContext, WeakBackendContext},
+    error::BResult,
+};
 
 use super::{
     chunks::{
@@ -86,13 +89,18 @@ fn reader_into_stream(
 #[axum::debug_handler]
 async fn handle_music_download(
     headers: HeaderMap,
-    axum::extract::State(cx): axum::extract::State<Arc<BackendContext>>,
+    axum::extract::State(cx): axum::extract::State<WeakBackendContext>,
     axum::extract::Path(id): axum::extract::Path<i64>,
 ) -> axum::response::Response {
     let id = MusicId::wrap(id);
-    cx.asset_server()
-        .handle_got_stream_file(&cx, headers, id)
-        .await
+
+    if let Some(cx) = cx.upgrade() {
+        cx.asset_server()
+            .handle_got_stream_file(&cx, headers, id)
+            .await
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
 }
 
 impl Drop for AssetServer {
@@ -126,28 +134,26 @@ impl AssetServer {
         format!("http://127.0.0.1:{}/music/{}", port, id)
     }
 
-    pub fn start(&self, cx: &Arc<BackendContext>, dir: String) {
+    pub fn start(&self, cx: &BackendContext, dir: String) {
         self.start_db(cx, dir);
         self.start_server(cx);
     }
 
-    pub fn schedule_preload(
-        self: &Arc<Self>,
-        cx: &Arc<BackendContext>,
-        id: MusicId,
-    ) -> BResult<()> {
+    pub fn schedule_preload(self: &Arc<Self>, cx: &BackendContext, id: MusicId) -> BResult<()> {
         let this = self.clone();
-        let cx = cx.clone();
-        cx.async_runtime()
-            .clone()
+        let rt = cx.async_runtime();
+        let cx = cx.weak();
+        rt.clone()
             .spawn(async move {
-                let _ = this.build_chunks_reader(&cx, id, 0).await;
+                if let Some(cx) = cx.upgrade() {
+                    let _ = this.build_chunks_reader(&cx, id, 0).await;
+                }
             })
             .detach();
         Ok(())
     }
 
-    fn start_db(&self, _cx: &Arc<BackendContext>, dir: String) {
+    fn start_db(&self, _cx: &BackendContext, dir: String) {
         let p = dir + "chunk.redb";
         if std::fs::exists(p.as_str()).unwrap() {
             std::fs::remove_file(p.as_str()).unwrap();
@@ -162,10 +168,10 @@ impl AssetServer {
         }
     }
 
-    fn start_server(&self, cx: &Arc<BackendContext>) {
+    fn start_server(&self, cx: &BackendContext) {
         let router_svc = axum::Router::new()
             .route("/music/:id", axum::routing::get(handle_music_download))
-            .with_state(cx.clone())
+            .with_state(cx.weak())
             .into_make_service();
 
         let addr = SocketAddr::from(([127, 0, 0, 1], 0));
@@ -189,7 +195,7 @@ impl AssetServer {
 
     async fn handle_got_stream_file(
         self: &Arc<AssetServer>,
-        cx: &Arc<BackendContext>,
+        cx: &BackendContext,
         headers: HeaderMap,
         id: MusicId,
     ) -> Response {
@@ -263,7 +269,7 @@ impl AssetServer {
 
     async fn build_chunks_reader(
         self: &Arc<Self>,
-        cx: &Arc<BackendContext>,
+        cx: &BackendContext,
         id: MusicId,
         byte_offset: u64,
     ) -> BResult<Option<Arc<AssetChunksReader>>> {
@@ -285,7 +291,7 @@ impl AssetServer {
 
     async fn build_chunks_impl(
         self: &Arc<Self>,
-        cx: &Arc<BackendContext>,
+        cx: &BackendContext,
         id: MusicId,
         byte_offset: u64,
     ) -> BResult<Option<Arc<RwLock<AssetChunks>>>> {
@@ -328,7 +334,6 @@ impl AssetServer {
         let this = self.clone();
         let task = {
             let chunks = chunks.clone();
-            let cx = cx.clone();
             cx.async_runtime().clone().spawn(async move {
                 let success = this.preload_impl(chunks, file).await.unwrap();
                 if !success {

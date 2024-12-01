@@ -27,6 +27,12 @@ pub struct Backend {
     cx: Arc<BackendContext>,
 }
 
+impl Drop for Backend {
+    fn drop(&mut self) {
+        tracing::info!("drop Backend")
+    }
+}
+
 impl Backend {
     pub fn new(rt: Arc<AsyncRuntime>, player: Arc<dyn IPlayerDelegate>) -> Self {
         let cx = Arc::new(BackendContext::new(rt, player));

@@ -10,12 +10,6 @@ use futures::try_join;
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    repositories::{
-        core::get_conn,
-        music::db_get_playlists_count_by_storage,
-        playlist::{db_get_musics_count_by_storage, db_remove_musics_in_playlists_by_storage},
-        storage::{db_load_storage, db_remove_storage, db_upsert_storage},
-    },
     services::{
         playlist::notify_all_playlist_abstracts,
         storage::{
@@ -25,14 +19,9 @@ use crate::{
     },
 };
 
-pub async fn ccu_upsert_storage(cx: &Arc<BackendContext>, arg: ArgUpsertStorage) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    let id = arg.id;
-    db_upsert_storage(conn.get_ref(), arg)?;
-
-    if let Some(id) = id {
-        evict_storage_backend_cache(cx, id);
-    }
+pub async fn ccu_upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> BResult<()> {
+    let id = cx.database_server().upsert_storage(arg)?;
+    evict_storage_backend_cache(cx, id);
 
     try_join! {
         notify_storages(cx),
@@ -40,29 +29,13 @@ pub async fn ccu_upsert_storage(cx: &Arc<BackendContext>, arg: ArgUpsertStorage)
     Ok(())
 }
 
-pub async fn cr_get_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<Option<Storage>> {
-    let conn = get_conn(&cx)?;
-    let model = db_load_storage(conn.get_ref(), id)?;
-    let storage = if let Some(model) = model {
-        let music_count = db_get_musics_count_by_storage(conn.get_ref(), id)?;
-        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), id)?;
-        Some(build_storage(model, music_count, playlist_count))
-    } else {
-        None
-    };
-    Ok(storage)
-}
-
-pub async fn cr_get_refresh_token(_cx: &Arc<BackendContext>, code: String) -> BResult<String> {
+pub async fn cr_get_refresh_token(_cx: &BackendContext, code: String) -> BResult<String> {
     let refresh_token = OneDriveBackend::request_refresh_token(code).await?;
     Ok(refresh_token)
 }
 
-pub async fn cd_remove_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
-    db_remove_storage(conn.get_ref(), id)?;
-
+pub async fn cd_remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()> {
+    cx.database_server().remove_storage(id)?;
     evict_storage_backend_cache(cx, id);
 
     try_join! {
@@ -74,7 +47,7 @@ pub async fn cd_remove_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResu
 }
 
 pub async fn cr_test_storage(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgUpsertStorage,
 ) -> BResult<StorageConnectionTestResult> {
     let backend = build_storage_backend_by_arg(&cx, arg)?;
@@ -95,7 +68,7 @@ pub async fn cr_test_storage(
 }
 
 pub async fn cr_list_storage_entry_children(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: StorageEntryLoc,
 ) -> BResult<ListStorageEntryChildrenResp> {
     let backend = get_storage_backend(&cx, arg.storage_id)?;

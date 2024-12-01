@@ -73,8 +73,7 @@ pub struct VEditStorageState {
     pub info: ArgUpsertStorage,
     pub validated: EditStorageFormValidated,
     pub test: StorageConnectionTestResult,
-    pub music_count: u32,
-    pub playlist_count: u32,
+    pub music_count: u64,
 }
 
 fn resolve_storage_name(storage: &Storage) -> String {
@@ -217,6 +216,5 @@ pub(crate) fn edit_storage_vs(state: &EditStorageState, root: &mut RootViewModel
         validated: state.validated.clone(),
         test: state.test,
         music_count: state.music_count,
-        playlist_count: state.playlist_count,
     });
 }

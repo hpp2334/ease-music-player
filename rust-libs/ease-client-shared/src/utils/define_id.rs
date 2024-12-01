@@ -29,14 +29,6 @@ macro_rules! define_id {
             }
         }
 
-        impl ease_database::ToSql for $s {
-            fn to_sql(&self) -> ease_database::Result<ease_database::ToSqlOutput<'_>> {
-                Ok(ease_database::ToSqlOutput::Owned(
-                    ease_database::Value::Integer(self.value),
-                ))
-            }
-        }
-
         impl serde::Serialize for $s {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where

@@ -85,8 +85,7 @@ private fun RemoveDialog(
     isOpen: Boolean,
     onClose: () -> Unit,
     title: String,
-    musicCount: UInt,
-    playlistCount: UInt,
+    musicCount: ULong,
 ) {
     val bridge = UIBridgeController.current
     val mainDesc = buildStr(
@@ -96,7 +95,6 @@ private fun RemoveDialog(
     val countDesc = buildStr(
         stringResource(R.string.storage_remove_desc_count)
             .replace("E_MCNT", musicCount.toString())
-            .replace("E_PCNT", playlistCount.toString())
     )
 
     ConfirmDialog(
@@ -421,6 +419,5 @@ fun EditStoragesPage(
         },
         title = state.title,
         musicCount = state.musicCount,
-        playlistCount = state.playlistCount
     )
 }

@@ -73,6 +73,12 @@ impl std::fmt::Debug for AppInternal {
     }
 }
 
+impl Drop for AppInternal {
+    fn drop(&mut self) {
+        tracing::info!("drop AppInternal")
+    }
+}
+
 impl AppInternal {
     #[instrument]
     pub fn emit<Event>(self: &Arc<Self>, evt: Event)

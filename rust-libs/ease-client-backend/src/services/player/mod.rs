@@ -130,7 +130,7 @@ impl PlayerState {
     }
 }
 
-pub(crate) fn notify_player_current(cx: &Arc<BackendContext>) -> BResult<()> {
+pub(crate) fn notify_player_current(cx: &BackendContext) -> BResult<()> {
     let current = get_player_current(cx)?;
     cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Current {
         value: current,
@@ -138,17 +138,14 @@ pub(crate) fn notify_player_current(cx: &Arc<BackendContext>) -> BResult<()> {
     Ok(())
 }
 
-fn preload_next_music(cx: &Arc<BackendContext>) -> BResult<()> {
+fn preload_next_music(cx: &BackendContext) -> BResult<()> {
     if let Some(music) = cx.player_state().next_music() {
         cx.asset_server().schedule_preload(cx, music.id())?;
     }
     Ok(())
 }
 
-pub(crate) async fn player_request_play(
-    cx: &Arc<BackendContext>,
-    to_play: PlayerMedia,
-) -> BResult<()> {
+pub(crate) async fn player_request_play(cx: &BackendContext, to_play: PlayerMedia) -> BResult<()> {
     let prev_music = {
         let current = cx.player_state().current.read().unwrap();
         current.clone()
@@ -170,19 +167,21 @@ pub(crate) async fn player_request_play(
         has_cover: music.cover.is_some(),
     };
     {
-        let cx = cx.clone();
-        cx.async_runtime()
-            .clone()
+        let rt = cx.async_runtime().clone();
+        let cx = cx.weak();
+        rt.clone()
             .spawn_on_main(async move {
-                cx.player_delegate().set_music_url(item);
-                cx.player_delegate().resume();
+                if let Some(cx) = cx.upgrade() {
+                    cx.player_delegate().set_music_url(item);
+                    cx.player_delegate().resume();
 
-                {
-                    let mut state = cx.player_state().current.write().unwrap();
-                    *state = Some(to_play.clone());
+                    {
+                        let mut state = cx.player_state().current.write().unwrap();
+                        *state = Some(to_play.clone());
+                    }
+                    notify_player_current(&cx).unwrap();
+                    preload_next_music(&cx).unwrap();
                 }
-                notify_player_current(&cx).unwrap();
-                preload_next_music(&cx).unwrap();
             })
             .await;
     }
@@ -190,7 +189,7 @@ pub(crate) async fn player_request_play(
 }
 
 pub(crate) async fn player_request_play_adjacent<const IS_NEXT: bool>(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
 ) -> BResult<()> {
     let (music, can_play) = {
         let state = cx.player_state();
@@ -248,11 +247,11 @@ pub(crate) async fn player_request_play_adjacent<const IS_NEXT: bool>(
     Ok(())
 }
 
-pub(crate) fn player_clear_current(cx: &Arc<BackendContext>) {
+pub(crate) fn player_clear_current(cx: &BackendContext) {
     cx.player_state().current.write().unwrap().take();
 }
 
-pub(crate) async fn player_refresh_current(cx: &Arc<BackendContext>) -> BResult<()> {
+pub(crate) async fn player_refresh_current(cx: &BackendContext) -> BResult<()> {
     let current = cx.player_state().current.write().unwrap().clone();
 
     if current.is_none() {
@@ -280,11 +279,13 @@ pub(crate) async fn player_refresh_current(cx: &Arc<BackendContext>) -> BResult<
     }
 
     {
-        let cx = cx.clone();
-        cx.async_runtime()
-            .clone()
+        let rt = cx.async_runtime().clone();
+        let cx = cx.weak();
+        rt.clone()
             .spawn_on_main(async move {
-                cx.player_delegate().stop();
+                if let Some(cx) = cx.upgrade() {
+                    cx.player_delegate().stop();
+                }
             })
             .await
     };
@@ -293,9 +294,7 @@ pub(crate) async fn player_refresh_current(cx: &Arc<BackendContext>) -> BResult<
     return Ok(());
 }
 
-pub(crate) fn get_player_current(
-    cx: &Arc<BackendContext>,
-) -> BResult<Option<PlayerCurrentPlaying>> {
+pub(crate) fn get_player_current(cx: &BackendContext) -> BResult<Option<PlayerCurrentPlaying>> {
     let player_state = cx.player_state();
     let state = player_state.current.read().unwrap().clone();
     if state.is_none() {
@@ -325,27 +324,32 @@ pub(crate) fn get_player_current(
 }
 
 pub(crate) async fn on_player_event(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     event: PlayerDelegateEvent,
 ) -> BResult<()> {
-    let cx = cx.clone();
     let rt = cx.async_runtime().clone();
     match event {
         PlayerDelegateEvent::Complete => {
             let play_mode = *cx.player_state().playmode.read().unwrap();
             match play_mode {
                 PlayMode::Single => {
+                    let cx = cx.weak();
                     rt.spawn_on_main(async move {
-                        cx.player_delegate().pause();
-                        cx.player_delegate().seek(0);
+                        if let Some(cx) = cx.upgrade() {
+                            cx.player_delegate().pause();
+                            cx.player_delegate().seek(0);
+                        }
                     })
                     .await;
                 }
                 PlayMode::SingleLoop => {
+                    let cx = cx.weak();
                     rt.spawn_on_main(async move {
-                        cx.player_delegate().pause();
-                        cx.player_delegate().seek(0);
-                        cx.player_delegate().resume();
+                        if let Some(cx) = cx.upgrade() {
+                            cx.player_delegate().pause();
+                            cx.player_delegate().seek(0);
+                            cx.player_delegate().resume();
+                        }
                     })
                     .await;
                 }
@@ -399,10 +403,7 @@ pub(crate) async fn on_player_event(
     Ok(())
 }
 
-pub(crate) async fn on_connect_for_player(
-    cx: &Arc<BackendContext>,
-    playmode: PlayMode,
-) -> BResult<()> {
+pub(crate) async fn on_connect_for_player(cx: &BackendContext, playmode: PlayMode) -> BResult<()> {
     {
         let mut w = cx.player_state().playmode.write().unwrap();
         *w = playmode;
@@ -412,13 +413,15 @@ pub(crate) async fn on_connect_for_player(
         value: get_player_current(cx)?,
     }));
     {
-        let cx = cx.clone();
-        cx.async_runtime()
-            .clone()
+        let rt = cx.async_runtime().clone();
+        let cx = cx.weak();
+        rt.clone()
             .spawn_on_main(async move {
-                cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playing {
-                    value: cx.player_delegate().is_playing(),
-                }));
+                if let Some(cx) = cx.upgrade() {
+                    cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playing {
+                        value: cx.player_delegate().is_playing(),
+                    }));
+                }
             })
             .await;
     }

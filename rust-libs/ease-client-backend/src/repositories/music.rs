@@ -1,138 +1,183 @@
+use std::sync::Arc;
+
 use ease_client_shared::backends::{
-    music::MusicId, music_duration::MusicDuration, playlist::PlaylistId, storage::StorageId,
+    music::MusicId,
+    music_duration::MusicDuration,
+    playlist::PlaylistId,
+    storage::{BlobId, StorageEntryLoc, StorageId},
 };
-use ease_database::{params, DbConnectionRef};
+use redb::{ReadTransaction, ReadableTable, WriteTransaction};
 use tracing::instrument;
 
 use crate::{
     error::BResult,
-    models::{music::MusicModel, storage::StorageEntryLocModel},
+    models::{key::DbKeyAlloc, music::MusicModel},
 };
 
-#[instrument]
-pub fn db_load_music_metas_by_playlist_id(
-    conn: DbConnectionRef,
-    playlist_id: PlaylistId,
-) -> BResult<Vec<MusicModel>> {
-    let models = conn.query::<MusicModel>(
-        r#"
-    SELECT *
-    FROM music
-    WHERE id IN (SELECT music_id FROM playlist_music WHERE playlist_id = ?1)
-    "#,
-        [playlist_id],
-    )?;
-    Ok(models)
-}
-
-#[instrument]
-pub fn db_load_music(conn: DbConnectionRef, music_id: MusicId) -> BResult<Option<MusicModel>> {
-    let model = conn
-        .query::<MusicModel>(
-            r#"
-        SELECT * FROM music WHERE id = ?1
-    "#,
-            params![music_id],
-        )?
-        .pop();
-
-    Ok(model)
-}
-
-#[instrument]
-fn db_load_music_by_key(
-    conn: DbConnectionRef,
-    storage_id: StorageId,
-    path: String,
-) -> BResult<Option<MusicModel>> {
-    let model = conn
-        .query::<MusicModel>(
-            "SELECT * FROM music WHERE storage_id = ?1 AND path = ?2",
-            params![storage_id, path],
-        )?
-        .pop();
-
-    Ok(model)
-}
+use super::{
+    core::DatabaseServer,
+    defs::{
+        TABLE_BLOB, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC,
+    },
+};
 
 #[derive(Debug)]
 pub struct ArgDBAddMusic {
-    pub storage_id: StorageId,
-    pub path: String,
+    pub loc: StorageEntryLoc,
     pub title: String,
 }
 
-#[instrument]
-pub fn db_add_music(conn: DbConnectionRef, arg: ArgDBAddMusic) -> BResult<MusicId> {
-    let music = db_load_music_by_key(conn, arg.storage_id.clone(), arg.path.clone())?;
-    if let Some(music) = music {
-        return Ok(music.id);
+impl DatabaseServer {
+    pub fn load_musics_by_playlist_id(
+        self: &Arc<Self>,
+        playlist_id: PlaylistId,
+    ) -> BResult<Vec<MusicModel>> {
+        let db = self.db().begin_read()?;
+        let table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+        let table_music = db.open_table(TABLE_MUSIC)?;
+        let mut iter = table_playlist_musics.get(playlist_id)?;
+        let mut ret: Vec<MusicModel> = Vec::new();
+        ret.reserve(iter.len() as usize);
+
+        while let Some(item) = iter.next() {
+            let id = item?.value();
+
+            let music = table_music.get(id)?.unwrap().value();
+            ret.push(music);
+        }
+        Ok(ret)
     }
 
-    let inserted_id = conn
-        .query::<MusicId>(
-            r#"
-        INSERT INTO music (storage_id, path, title, lyric_default)
-        VALUES (?1, ?2, ?3, true) RETURNING id"#,
-            params![arg.storage_id.as_ref(), arg.path, arg.title,],
-        )?
-        .pop()
-        .unwrap();
+    pub fn load_music(self: &Arc<Self>, id: MusicId) -> BResult<Option<MusicModel>> {
+        let db = self.db().begin_read()?;
+        self.load_music_impl(&db, id)
+    }
 
-    return Ok(inserted_id);
-}
+    pub fn load_music_impl(
+        self: &Arc<Self>,
+        db: &ReadTransaction,
+        id: MusicId,
+    ) -> BResult<Option<MusicModel>> {
+        let table_music = db.open_table(TABLE_MUSIC)?;
+        let model = table_music.get(id)?.map(|v| v.value()).clone();
 
-#[instrument]
-pub fn db_update_music_total_duration(
-    conn: DbConnectionRef,
-    id: MusicId,
-    duration: MusicDuration,
-) -> BResult<()> {
-    conn.execute(
-        "UPDATE music set duration = ?1 WHERE id = ?2",
-        params![duration, id],
-    )?;
+        Ok(model)
+    }
 
-    Ok(())
-}
+    fn load_music_by_key_impl(
+        self: &Arc<Self>,
+        db: &ReadTransaction,
+        loc: StorageEntryLoc,
+    ) -> BResult<Option<MusicModel>> {
+        let id = {
+            let table = db.open_table(TABLE_MUSIC_BY_LOC)?;
+            table.get(loc)?.map(|v| v.value())
+        };
 
-#[instrument]
-pub fn db_update_music_cover(conn: DbConnectionRef, id: MusicId, cover: Vec<u8>) -> BResult<()> {
-    conn.execute(
-        "UPDATE music set cover = ?1 WHERE id = ?2",
-        params![cover, id],
-    )?;
+        if let Some(id) = id {
+            self.load_music_impl(db, id)
+        } else {
+            Ok(None)
+        }
+    }
 
-    Ok(())
-}
+    pub fn add_music_impl(
+        self: &Arc<Self>,
+        db: &WriteTransaction,
+        rdb: &ReadTransaction,
+        arg: ArgDBAddMusic,
+    ) -> BResult<MusicId> {
+        let music = self.load_music_by_key_impl(rdb, arg.loc.clone())?;
+        if let Some(music) = music {
+            return Ok(music.id);
+        }
 
-#[instrument]
-pub fn db_update_music_lyric(
-    conn: DbConnectionRef,
-    id: MusicId,
-    lyric_loc: StorageEntryLocModel,
-) -> BResult<()> {
-    conn.execute(
-        "UPDATE music set lyric_storage_id = ?2, lyric_path = ?3, lyric_default = false WHERE id = ?1",
-        params![id, lyric_loc.1, lyric_loc.0],
-    )?;
-    Ok(())
-}
+        let id = self.alloc_id(db, DbKeyAlloc::Music)?;
+        let id = MusicId::wrap(id);
+        let mut table_music = db.open_table(TABLE_MUSIC)?;
+        let mut table_music_by_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
+        let mut table_storage_music = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
+        table_music.insert(
+            id,
+            MusicModel {
+                id,
+                loc: arg.loc.clone(),
+                title: arg.title,
+                duration: None,
+                cover: None,
+                lyric: None,
+                lyric_default: true,
+            },
+        )?;
+        table_storage_music.insert(arg.loc.storage_id, id)?;
+        table_music_by_loc.insert(arg.loc, id)?;
 
-#[instrument]
-pub fn db_get_playlists_count_by_storage(
-    conn: DbConnectionRef,
-    storage_id: StorageId,
-) -> BResult<u32> {
-    let mut list = conn.query::<u32>(
-        r#"
-        SELECT COUNT(DISTINCT p.id) AS playlist_count
-FROM playlist p
-JOIN playlist_music pm ON p.id = pm.playlist_id
-JOIN music m ON pm.music_id = m.id
-WHERE m.storage_id = ?;
-    "#,
-        [storage_id],
-    )?;
-    Ok(list.pop().unwrap())
+        return Ok(id);
+    }
+
+    pub fn update_music_total_duration(
+        self: &Arc<Self>,
+        id: MusicId,
+        duration: MusicDuration,
+    ) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        {
+            let mut table = db.open_table(TABLE_MUSIC)?;
+            let m = table.get(id)?.map(|v| v.value());
+
+            if let Some(mut m) = m {
+                m.duration = Some(duration);
+                table.insert(id, m)?;
+            }
+        }
+        db.commit()?;
+
+        Ok(())
+    }
+
+    pub fn update_music_cover(self: &Arc<Self>, id: MusicId, cover: Vec<u8>) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        {
+            let mut table_music = db.open_table(TABLE_MUSIC)?;
+            let m = table_music.get(id)?.map(|v| v.value());
+
+            if let Some(mut m) = m {
+                if let Some(id) = m.cover {
+                    self.remove_blob_impl(&db, id)?;
+                }
+
+                let cover_id = self.alloc_id(&db, DbKeyAlloc::Blob)?;
+                let cover_id = BlobId::wrap(cover_id);
+
+                let mut table_cover = db.open_table(TABLE_BLOB)?;
+                m.cover = Some(cover_id);
+                table_music.insert(id, m)?;
+                table_cover.insert(cover_id, cover)?;
+            }
+        }
+        db.commit()?;
+
+        Ok(())
+    }
+
+    pub fn update_music_lyric(
+        self: &Arc<Self>,
+        id: MusicId,
+        loc: Option<StorageEntryLoc>,
+    ) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        {
+            let mut table_music = db.open_table(TABLE_MUSIC)?;
+            let m = table_music.get(id)?.map(|v| v.value());
+
+            if let Some(mut m) = m {
+                m.lyric = loc;
+                m.lyric_default = false;
+                table_music.insert(id, m)?;
+            }
+        }
+        db.commit()?;
+
+        Ok(())
+    }
 }

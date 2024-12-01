@@ -402,6 +402,7 @@ async fn playlist_full_reimport_discarded_bug() {
     app.dispatch_click(PlaylistDetailWidget::Remove);
     app.wait_network().await;
     create_playlist_and_import_music().await;
+    drop(app);
 
     // reload
     let app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", false).await;
@@ -451,5 +452,4 @@ async fn playlist_full_import_storage_count_bug() {
     });
     let state = app.latest_state().edit_storage.unwrap();
     assert_eq!(state.music_count, 1);
-    assert_eq!(state.playlist_count, 1);
 }

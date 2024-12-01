@@ -1,16 +1,16 @@
-use ease_client_shared::backends::{music::MusicId, playlist::PlaylistId, storage::StorageId};
-use serde::{Deserialize, Serialize};
+use ease_client_shared::backends::{
+    music::MusicId, playlist::PlaylistId, storage::StorageEntryLoc,
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct PlaylistModel {
     pub id: PlaylistId,
     pub title: String,
     pub created_time: i64,
-    pub picture_storage_id: Option<StorageId>,
-    pub picture_path: Option<String>,
+    pub picture: Option<StorageEntryLoc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct PlaylistMusicModel {
     pub playlist_id: PlaylistId,
     pub music_id: MusicId,

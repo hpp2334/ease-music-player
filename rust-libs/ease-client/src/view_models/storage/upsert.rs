@@ -100,7 +100,6 @@ impl StorageUpsertVM {
         edit.backup.clear();
         edit.test = StorageConnectionTestResult::None;
         edit.music_count = storage.music_count;
-        edit.playlist_count = storage.playlist_count;
         edit.validated = Default::default();
         edit.is_create = false;
 

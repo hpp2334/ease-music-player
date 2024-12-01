@@ -88,9 +88,9 @@ mod tests {
         let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        let pod = AppPod::new();
+        let pod = Arc::new(AppPod::new());
         pod.set(app.clone());
-        rt.bind(Arc::new(pod));
+        rt.bind(Arc::downgrade(&pod));
 
         // Add a new item
         app.emit(TodoEvent::AddButtonClicked);
@@ -138,9 +138,9 @@ mod tests {
         let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        let pod = AppPod::new();
+        let pod = Arc::new(AppPod::new());
         pod.set(app.clone());
-        rt.bind(Arc::new(pod));
+        rt.bind(Arc::downgrade(&pod));
 
         // Add a new item
         app.emit(TodoEvent::AddButtonClicked);
@@ -171,9 +171,9 @@ mod tests {
         let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        let pod = AppPod::new();
+        let pod = Arc::new(AppPod::new());
         pod.set(app.clone());
-        rt.bind(Arc::new(pod));
+        rt.bind(Arc::downgrade(&pod));
 
         // Add multiple items
         for i in 0..5 {

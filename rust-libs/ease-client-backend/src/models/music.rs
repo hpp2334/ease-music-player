@@ -1,17 +1,16 @@
 use ease_client_shared::backends::{
-    music::MusicId, music_duration::MusicDuration, storage::StorageId,
+    music::MusicId,
+    music_duration::MusicDuration,
+    storage::{BlobId, StorageEntryLoc},
 };
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct MusicModel {
     pub id: MusicId,
-    pub path: String,
-    pub storage_id: StorageId,
+    pub loc: StorageEntryLoc,
     pub title: String,
     pub duration: Option<MusicDuration>,
-    pub cover: Option<Vec<u8>>,
-    pub lyric_storage_id: Option<StorageId>,
-    pub lyric_path: Option<String>,
+    pub cover: Option<BlobId>,
+    pub lyric: Option<StorageEntryLoc>,
     pub lyric_default: bool,
 }

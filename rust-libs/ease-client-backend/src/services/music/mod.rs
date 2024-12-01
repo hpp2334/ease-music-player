@@ -13,21 +13,11 @@ use ease_client_shared::backends::{
 };
 use misty_async::Task;
 
-use crate::{
-    ctx::BackendContext,
-    error::BResult,
-    models::music::MusicModel,
-    repositories::{
-        core::get_conn,
-        music::{db_load_music, db_update_music_cover, db_update_music_total_duration},
-    },
-};
+use crate::{ctx::BackendContext, error::BResult, models::music::MusicModel};
 
 use super::{
-    lyrics::parse_lrc,
-    player::player_refresh_current,
-    playlist::notify_all_playlist_abstracts,
-    storage::{load_storage_entry_data, to_opt_storage_entry},
+    lyrics::parse_lrc, player::player_refresh_current, playlist::notify_all_playlist_abstracts,
+    storage::load_storage_entry_data,
 };
 
 #[derive(Debug, Default)]
@@ -38,7 +28,7 @@ pub struct TimeToPauseState {
 }
 
 async fn load_lyric(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     loc: Option<StorageEntryLoc>,
     is_fallback: bool,
 ) -> Option<MusicLyric> {
@@ -102,13 +92,8 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     }
 }
 
-pub(crate) fn build_music_abstract(_cx: &Arc<BackendContext>, model: MusicModel) -> MusicAbstract {
-    let cover = if model
-        .cover
-        .as_ref()
-        .map(|v| !v.is_empty())
-        .unwrap_or_default()
-    {
+pub(crate) fn build_music_abstract(_cx: &BackendContext, model: MusicModel) -> MusicAbstract {
+    let cover = if model.cover.is_some() {
         Some(DataSourceKey::Cover { id: model.id })
     } else {
         Default::default()
@@ -121,31 +106,25 @@ pub(crate) fn build_music_abstract(_cx: &Arc<BackendContext>, model: MusicModel)
 }
 
 pub fn get_music_storage_entry_loc(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     id: MusicId,
 ) -> BResult<Option<StorageEntryLoc>> {
-    let conn = get_conn(cx)?;
-    let m = db_load_music(conn.get_ref(), id)?;
+    let m = cx.database_server().load_music(id)?;
     if m.is_none() {
         return Ok(None);
     }
     let m = m.unwrap();
-    let m = StorageEntryLoc {
-        path: m.path,
-        storage_id: m.storage_id,
-    };
+    let m = m.loc;
     Ok(Some(m))
 }
 
-pub fn get_music_cover_bytes(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Vec<u8>> {
-    let conn = get_conn(cx)?;
-    let m = db_load_music(conn.get_ref(), id)?;
-    if m.is_none() {
-        return Ok(Default::default());
+pub fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<Vec<u8>> {
+    let m = cx.database_server().load_music(id)?.unwrap();
+    if let Some(id) = m.cover {
+        cx.database_server().load_blob(id)
+    } else {
+        Ok(Default::default())
     }
-    let m = m.unwrap();
-    let cover = m.cover.unwrap_or_default();
-    Ok(cover)
 }
 
 pub(crate) struct ArgUpdateMusicDuration {
@@ -153,11 +132,11 @@ pub(crate) struct ArgUpdateMusicDuration {
     pub duration: MusicDuration,
 }
 pub(crate) async fn update_music_duration(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgUpdateMusicDuration,
 ) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    db_update_music_total_duration(conn.get_ref(), arg.id, arg.duration)?;
+    cx.database_server()
+        .update_music_total_duration(arg.id, arg.duration)?;
     player_refresh_current(cx).await?;
     cx.notify(ConnectorAction::MusicTotalDurationChanged(arg.id));
     notify_all_playlist_abstracts(&cx).await?;
@@ -169,31 +148,27 @@ pub(crate) struct ArgUpdateMusicCover {
     pub cover: Vec<u8>,
 }
 pub(crate) async fn update_music_cover(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgUpdateMusicCover,
 ) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    db_update_music_cover(conn.get_ref(), arg.id, arg.cover.clone())?;
+    cx.database_server()
+        .update_music_cover(arg.id, arg.cover.clone())?;
     player_refresh_current(cx).await?;
     cx.notify(ConnectorAction::MusicCoverChanged(arg.id));
     notify_all_playlist_abstracts(&cx).await?;
     Ok(())
 }
 
-pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Option<Music>> {
-    let conn = get_conn(&cx)?;
-    let model = db_load_music(conn.get_ref(), id)?;
+pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Option<Music>> {
+    let model = cx.database_server().load_music(id)?;
     if model.is_none() {
         return Ok(None);
     }
 
     let model = model.unwrap();
     let meta = build_music_meta(model.clone());
-    let loc = StorageEntryLoc {
-        storage_id: model.storage_id,
-        path: model.path,
-    };
-    let mut lyric_loc = to_opt_storage_entry(model.lyric_path, model.lyric_storage_id);
+    let loc = model.loc;
+    let mut lyric_loc = model.lyric;
     let using_fallback = lyric_loc.is_none() && model.lyric_default;
     if using_fallback {
         lyric_loc = Some(StorageEntryLoc {
@@ -211,7 +186,7 @@ pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<
     }
 
     let lyric: Option<MusicLyric> = load_lyric(&cx, lyric_loc, using_fallback).await;
-    let cover = if model.cover.unwrap_or_default().is_empty() {
+    let cover = if model.cover.is_none() {
         Default::default()
     } else {
         Some(DataSourceKey::Cover { id: model.id })
@@ -226,7 +201,7 @@ pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<
     Ok(Some(music))
 }
 
-pub(crate) async fn notify_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<()> {
+pub(crate) async fn notify_music(cx: &BackendContext, id: MusicId) -> BResult<()> {
     let music = get_music(cx, id).await?;
     if let Some(music) = music {
         cx.notify(ConnectorAction::Music(music));
@@ -234,7 +209,7 @@ pub(crate) async fn notify_music(cx: &Arc<BackendContext>, id: MusicId) -> BResu
     Ok(())
 }
 
-pub(crate) fn enable_time_to_pause(cx: &Arc<BackendContext>, delay: Duration) {
+pub(crate) fn enable_time_to_pause(cx: &BackendContext, delay: Duration) {
     let state = cx.time_to_pause_state().clone();
     state.task.write().unwrap().take();
     state
@@ -242,19 +217,23 @@ pub(crate) fn enable_time_to_pause(cx: &Arc<BackendContext>, delay: Duration) {
         .store(true, std::sync::atomic::Ordering::Relaxed);
     *state.expired.write().unwrap() = cx.async_runtime().get_time() + delay;
     let task = {
-        let cx = cx.clone();
-        cx.async_runtime().clone().spawn(async move {
-            cx.async_runtime().sleep(delay).await;
+        let rt = cx.async_runtime().clone();
+        let cx = cx.weak();
+        rt.clone().spawn(async move {
+            rt.sleep(delay).await;
             state
                 .enabled
                 .store(false, std::sync::atomic::Ordering::Relaxed);
-            sync_notify_time_to_pause(&cx);
+            if let Some(cx) = cx.upgrade() {
+                sync_notify_time_to_pause(&cx);
+            }
             {
                 let cx = cx.clone();
-                cx.async_runtime()
-                    .clone()
+                rt.clone()
                     .spawn_on_main(async move {
-                        cx.player_delegate().pause();
+                        if let Some(cx) = cx.upgrade() {
+                            cx.player_delegate().pause();
+                        }
                     })
                     .await
             }
@@ -267,7 +246,7 @@ pub(crate) fn enable_time_to_pause(cx: &Arc<BackendContext>, delay: Duration) {
     sync_notify_time_to_pause(cx);
 }
 
-pub(crate) fn disable_time_to_pause(cx: &Arc<BackendContext>) {
+pub(crate) fn disable_time_to_pause(cx: &BackendContext) {
     cx.time_to_pause_state().task.write().unwrap().take();
     cx.time_to_pause_state()
         .enabled
@@ -275,7 +254,7 @@ pub(crate) fn disable_time_to_pause(cx: &Arc<BackendContext>) {
     sync_notify_time_to_pause(cx);
 }
 
-pub(crate) fn sync_notify_time_to_pause(cx: &Arc<BackendContext>) {
+pub(crate) fn sync_notify_time_to_pause(cx: &BackendContext) {
     let state = cx.time_to_pause_state().clone();
     let enabled = state.enabled.load(std::sync::atomic::Ordering::Relaxed);
     let expired = state.expired.read().unwrap().clone();
@@ -293,7 +272,7 @@ pub(crate) fn sync_notify_time_to_pause(cx: &Arc<BackendContext>) {
     }));
 }
 
-pub(crate) async fn notify_time_to_pause(cx: &Arc<BackendContext>) -> BResult<()> {
+pub(crate) async fn notify_time_to_pause(cx: &BackendContext) -> BResult<()> {
     sync_notify_time_to_pause(cx);
     Ok(())
 }

@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub(crate) async fn get_stream_file_by_loc(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     loc: StorageEntryLoc,
     byte_offset: u64,
 ) -> BResult<Option<StreamFile>> {
@@ -30,7 +30,7 @@ pub(crate) async fn get_stream_file_by_loc(
 }
 
 pub(crate) async fn get_stream_file_by_music_id(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     id: MusicId,
     byte_offset: u64,
 ) -> BResult<Option<StreamFile>> {
@@ -43,7 +43,7 @@ pub(crate) async fn get_stream_file_by_music_id(
 }
 
 pub(crate) async fn get_stream_file_cover_by_music_id(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     id: MusicId,
     byte_offset: u64,
 ) -> BResult<Option<StreamFile>> {

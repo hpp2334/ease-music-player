@@ -85,7 +85,9 @@ pub enum ConnectorPlayerAction {
     Error { value: String },
 }
 
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, uniffi::Record)]
+#[derive(
+    Debug, Default, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, uniffi::Record,
+)]
 pub struct PlayerDurations {
     pub current: Duration,
     pub buffer: Duration,

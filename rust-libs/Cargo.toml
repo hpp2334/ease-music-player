@@ -3,7 +3,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "ease-database",
     "ease-client-shared",
     "ease-remote-storage",
     "ease-client-backend",

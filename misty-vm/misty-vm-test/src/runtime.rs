@@ -1,8 +1,5 @@
 use std::{
-    sync::{
-        atomic::AtomicBool,
-        Arc, Mutex,
-    },
+    sync::{atomic::AtomicBool, Arc, Mutex, Weak},
     thread::ThreadId,
     time::Duration,
 };
@@ -12,7 +9,7 @@ use misty_vm::{BoxFuture, IAsyncRuntimeAdapter, IOnAsyncRuntime};
 use crate::timer::FakeTimers;
 
 struct AsyncRuntimeAdapterInternal {
-    connected: Arc<Mutex<Option<Arc<dyn IOnAsyncRuntime>>>>,
+    connected: Arc<Mutex<Option<Weak<dyn IOnAsyncRuntime>>>>,
     thread_id: ThreadId,
     notified: AtomicBool,
     timers: FakeTimers,
@@ -37,12 +34,12 @@ impl TestAsyncRuntimeAdapter {
         }
     }
 
-    fn connector(&self) -> Arc<dyn IOnAsyncRuntime> {
+    fn connector(&self) -> Option<Arc<dyn IOnAsyncRuntime>> {
         let w = self.store.connected.lock().unwrap();
-        w.clone().unwrap()
+        w.clone().unwrap().upgrade()
     }
 
-    pub fn bind(&self, connector: Arc<dyn IOnAsyncRuntime>) {
+    pub fn bind<S: IOnAsyncRuntime>(&self, connector: Weak<S>) {
         self.check_same_thread();
         {
             let mut w = self.store.connected.lock().unwrap();
@@ -87,7 +84,9 @@ impl TestAsyncRuntimeAdapter {
                 panic!("too many flush")
             }
 
-            app.flush_spawned_locals();
+            if let Some(ref app) = app {
+                app.flush_spawned_locals();
+            }
             count += 1;
         }
     }

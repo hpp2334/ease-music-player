@@ -34,8 +34,7 @@ pub struct EditStorageState {
     pub backup: HashMap<StorageType, ArgUpsertStorage>,
     pub validated: EditStorageFormValidated,
     pub test: StorageConnectionTestResult,
-    pub music_count: u32,
-    pub playlist_count: u32,
+    pub music_count: u64,
 }
 
 #[derive(Default, Clone)]

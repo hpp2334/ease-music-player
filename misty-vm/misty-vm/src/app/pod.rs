@@ -72,9 +72,19 @@ impl IOnAsyncRuntime for AppPod {
     }
 }
 
+impl Drop for AppPod {
+    fn drop(&mut self) {
+        tracing::info!("drop AppPod")
+    }
+}
+
 impl AppPod {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn reset(&self) {
+        self._app.write().unwrap().take();
     }
 
     pub fn set(&self, app: App) {
