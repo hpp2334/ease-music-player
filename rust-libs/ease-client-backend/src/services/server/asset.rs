@@ -114,7 +114,7 @@ impl AssetServer {
         Arc::new(Self {
             port: Default::default(),
             source_id_alloc: Default::default(),
-            chunks_cache: RwLock::new(LruCache::new(NonZero::new(6).unwrap())),
+            chunks_cache: RwLock::new(LruCache::new(NonZero::new(3).unwrap())),
             server_handle: Default::default(),
             db: Default::default(),
         })
