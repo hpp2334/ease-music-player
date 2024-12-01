@@ -35,7 +35,7 @@ fn init_local_storage(cx: &BackendContext) -> BResult<()> {
     cx.database_server().upsert_storage(ArgUpsertStorage {
         id: None,
         addr: Default::default(),
-        alias: Default::default(),
+        alias: "Local".to_string(),
         username: Default::default(),
         password: Default::default(),
         is_anonymous: Default::default(),
