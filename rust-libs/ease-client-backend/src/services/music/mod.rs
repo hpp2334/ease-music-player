@@ -28,7 +28,7 @@ pub struct TimeToPauseState {
 }
 
 async fn load_lyric(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     loc: Option<StorageEntryLoc>,
     is_fallback: bool,
 ) -> Option<MusicLyric> {
@@ -92,7 +92,7 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     }
 }
 
-pub(crate) fn build_music_abstract(_cx: &Arc<BackendContext>, model: MusicModel) -> MusicAbstract {
+pub(crate) fn build_music_abstract(_cx: &BackendContext, model: MusicModel) -> MusicAbstract {
     let cover = if model.cover.is_some() {
         Some(DataSourceKey::Cover { id: model.id })
     } else {
@@ -106,7 +106,7 @@ pub(crate) fn build_music_abstract(_cx: &Arc<BackendContext>, model: MusicModel)
 }
 
 pub fn get_music_storage_entry_loc(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     id: MusicId,
 ) -> BResult<Option<StorageEntryLoc>> {
     let m = cx.database_server().load_music(id)?;
@@ -118,7 +118,7 @@ pub fn get_music_storage_entry_loc(
     Ok(Some(m))
 }
 
-pub fn get_music_cover_bytes(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Vec<u8>> {
+pub fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<Vec<u8>> {
     let m = cx.database_server().load_music(id)?.unwrap();
     if let Some(id) = m.cover {
         cx.database_server().load_blob(id)
@@ -132,7 +132,7 @@ pub(crate) struct ArgUpdateMusicDuration {
     pub duration: MusicDuration,
 }
 pub(crate) async fn update_music_duration(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgUpdateMusicDuration,
 ) -> BResult<()> {
     cx.database_server()
@@ -148,7 +148,7 @@ pub(crate) struct ArgUpdateMusicCover {
     pub cover: Vec<u8>,
 }
 pub(crate) async fn update_music_cover(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgUpdateMusicCover,
 ) -> BResult<()> {
     cx.database_server()
@@ -159,7 +159,7 @@ pub(crate) async fn update_music_cover(
     Ok(())
 }
 
-pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Option<Music>> {
+pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Option<Music>> {
     let model = cx.database_server().load_music(id)?;
     if model.is_none() {
         return Ok(None);
@@ -201,7 +201,7 @@ pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<
     Ok(Some(music))
 }
 
-pub(crate) async fn notify_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<()> {
+pub(crate) async fn notify_music(cx: &BackendContext, id: MusicId) -> BResult<()> {
     let music = get_music(cx, id).await?;
     if let Some(music) = music {
         cx.notify(ConnectorAction::Music(music));
@@ -209,7 +209,7 @@ pub(crate) async fn notify_music(cx: &Arc<BackendContext>, id: MusicId) -> BResu
     Ok(())
 }
 
-pub(crate) fn enable_time_to_pause(cx: &Arc<BackendContext>, delay: Duration) {
+pub(crate) fn enable_time_to_pause(cx: &BackendContext, delay: Duration) {
     let state = cx.time_to_pause_state().clone();
     state.task.write().unwrap().take();
     state
@@ -217,19 +217,23 @@ pub(crate) fn enable_time_to_pause(cx: &Arc<BackendContext>, delay: Duration) {
         .store(true, std::sync::atomic::Ordering::Relaxed);
     *state.expired.write().unwrap() = cx.async_runtime().get_time() + delay;
     let task = {
-        let cx = cx.clone();
-        cx.async_runtime().clone().spawn(async move {
-            cx.async_runtime().sleep(delay).await;
+        let rt = cx.async_runtime().clone();
+        let cx = cx.weak();
+        rt.clone().spawn(async move {
+            rt.sleep(delay).await;
             state
                 .enabled
                 .store(false, std::sync::atomic::Ordering::Relaxed);
-            sync_notify_time_to_pause(&cx);
+            if let Some(cx) = cx.upgrade() {
+                sync_notify_time_to_pause(&cx);
+            }
             {
                 let cx = cx.clone();
-                cx.async_runtime()
-                    .clone()
+                rt.clone()
                     .spawn_on_main(async move {
-                        cx.player_delegate().pause();
+                        if let Some(cx) = cx.upgrade() {
+                            cx.player_delegate().pause();
+                        }
                     })
                     .await
             }
@@ -242,7 +246,7 @@ pub(crate) fn enable_time_to_pause(cx: &Arc<BackendContext>, delay: Duration) {
     sync_notify_time_to_pause(cx);
 }
 
-pub(crate) fn disable_time_to_pause(cx: &Arc<BackendContext>) {
+pub(crate) fn disable_time_to_pause(cx: &BackendContext) {
     cx.time_to_pause_state().task.write().unwrap().take();
     cx.time_to_pause_state()
         .enabled
@@ -250,7 +254,7 @@ pub(crate) fn disable_time_to_pause(cx: &Arc<BackendContext>) {
     sync_notify_time_to_pause(cx);
 }
 
-pub(crate) fn sync_notify_time_to_pause(cx: &Arc<BackendContext>) {
+pub(crate) fn sync_notify_time_to_pause(cx: &BackendContext) {
     let state = cx.time_to_pause_state().clone();
     let enabled = state.enabled.load(std::sync::atomic::Ordering::Relaxed);
     let expired = state.expired.read().unwrap().clone();
@@ -268,7 +272,7 @@ pub(crate) fn sync_notify_time_to_pause(cx: &Arc<BackendContext>) {
     }));
 }
 
-pub(crate) async fn notify_time_to_pause(cx: &Arc<BackendContext>) -> BResult<()> {
+pub(crate) async fn notify_time_to_pause(cx: &BackendContext) -> BResult<()> {
     sync_notify_time_to_pause(cx);
     Ok(())
 }

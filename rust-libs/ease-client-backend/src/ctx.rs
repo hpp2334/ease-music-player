@@ -3,7 +3,7 @@ use std::{
     fmt::Debug,
     sync::{
         atomic::{AtomicU32, AtomicUsize},
-        Arc, RwLock,
+        Arc, RwLock, Weak,
     },
     time::Duration,
 };
@@ -22,71 +22,98 @@ use crate::{
     },
 };
 
-#[derive(Getters)]
-pub struct BackendContext {
+struct BackendContextInternal {
     storage_path: RwLock<String>,
     app_document_dir: RwLock<String>,
     schema_version: AtomicU32,
     rt: Arc<AsyncRuntime>,
-    #[getset(get = "pub(crate)")]
     player_delegate: Arc<dyn IPlayerDelegate>,
-    #[getset(get = "pub(crate)")]
     player_state: Arc<PlayerState>,
-    #[getset(get = "pub(crate)")]
     storage_state: Arc<StorageState>,
-    #[getset(get = "pub(crate)")]
     time_to_pause_state: Arc<TimeToPauseState>,
-    #[getset(get = "pub(crate)")]
     asset_server: Arc<AssetServer>,
-    #[getset(get = "pub(crate)")]
     database_server: Arc<DatabaseServer>,
     connectors: (
         RwLock<HashMap<usize, Arc<dyn IConnectorNotifier>>>,
         AtomicUsize,
     ),
 }
+
+pub struct BackendContext {
+    internal: Arc<BackendContextInternal>,
+}
+
+#[derive(Clone)]
+pub struct WeakBackendContext {
+    internal: Weak<BackendContextInternal>,
+}
+
 impl Debug for BackendContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BackendContext")
-            .field("storage_path", &self.storage_path)
-            .field("app_document_dir", &self.app_document_dir)
-            .field("schema_version", &self.schema_version)
+            .field("storage_path", &self.internal.storage_path)
+            .field("app_document_dir", &self.internal.app_document_dir)
+            .field("schema_version", &self.internal.schema_version)
             .finish()
+    }
+}
+
+impl WeakBackendContext {
+    pub fn upgrade(&self) -> Option<BackendContext> {
+        if let Some(internal) = self.internal.upgrade() {
+            Some(BackendContext { internal })
+        } else {
+            None
+        }
     }
 }
 
 impl BackendContext {
     pub fn new(rt: Arc<AsyncRuntime>, player: Arc<dyn IPlayerDelegate>) -> Self {
         Self {
-            storage_path: RwLock::new(String::new()),
-            app_document_dir: RwLock::new(String::new()),
-            schema_version: AtomicU32::new(0),
-            rt,
-            player_state: Default::default(),
-            player_delegate: player,
-            storage_state: Default::default(),
-            time_to_pause_state: Default::default(),
-            asset_server: AssetServer::new(),
-            database_server: DatabaseServer::new(),
-            connectors: Default::default(),
+            internal: Arc::new(BackendContextInternal {
+                storage_path: RwLock::new(String::new()),
+                app_document_dir: RwLock::new(String::new()),
+                schema_version: AtomicU32::new(0),
+                rt,
+                player_state: Default::default(),
+                player_delegate: player,
+                storage_state: Default::default(),
+                time_to_pause_state: Default::default(),
+                asset_server: AssetServer::new(),
+                database_server: DatabaseServer::new(),
+                connectors: Default::default(),
+            }),
+        }
+    }
+
+    pub fn weak(&self) -> WeakBackendContext {
+        WeakBackendContext {
+            internal: Arc::downgrade(&self.internal),
         }
     }
 
     pub fn connect(&self, notifier: Arc<dyn IConnectorNotifier>) -> usize {
         let id = self
+            .internal
             .connectors
             .1
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.connectors.0.write().unwrap().insert(id, notifier);
+        self.internal
+            .connectors
+            .0
+            .write()
+            .unwrap()
+            .insert(id, notifier);
         id
     }
 
     pub fn disconnect(&self, handle: usize) {
-        self.connectors.0.write().unwrap().remove(&handle);
+        self.internal.connectors.0.write().unwrap().remove(&handle);
     }
 
     pub fn async_runtime(&self) -> &Arc<AsyncRuntime> {
-        &self.rt
+        &self.internal.rt
     }
 
     pub fn current_time(&self) -> Duration {
@@ -94,37 +121,63 @@ impl BackendContext {
     }
 
     pub fn set_storage_path(&self, p: &str) {
-        let mut w = self.storage_path.write().unwrap();
+        let mut w = self.internal.storage_path.write().unwrap();
         *w = p.to_string();
     }
 
     pub fn get_storage_path(&self) -> String {
-        self.storage_path.read().unwrap().clone()
+        self.internal.storage_path.read().unwrap().clone()
     }
 
     pub fn set_app_document_dir(&self, p: &str) {
-        let mut w = self.app_document_dir.write().unwrap();
+        let mut w = self.internal.app_document_dir.write().unwrap();
         *w = p.to_string();
     }
 
     pub fn get_app_document_dir(&self) -> String {
-        self.app_document_dir.read().unwrap().clone()
+        self.internal.app_document_dir.read().unwrap().clone()
     }
 
     pub fn set_schema_version(&self, v: u32) {
-        self.schema_version
+        self.internal
+            .schema_version
             .store(v, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn get_schema_version(&self) -> u32 {
-        self.schema_version
+        self.internal
+            .schema_version
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn notify(&self, payload: ConnectorAction) {
-        let connectors = self.connectors.0.read().unwrap();
+        let connectors = self.internal.connectors.0.read().unwrap();
         for (_, connector) in connectors.iter() {
             connector.notify(payload.clone());
         }
+    }
+
+    pub(crate) fn player_delegate(&self) -> &Arc<dyn IPlayerDelegate> {
+        &self.internal.player_delegate
+    }
+
+    pub(crate) fn player_state(&self) -> &Arc<PlayerState> {
+        &self.internal.player_state
+    }
+
+    pub(crate) fn storage_state(&self) -> &Arc<StorageState> {
+        &self.internal.storage_state
+    }
+
+    pub(crate) fn time_to_pause_state(&self) -> &Arc<TimeToPauseState> {
+        &self.internal.time_to_pause_state
+    }
+
+    pub(crate) fn asset_server(&self) -> &Arc<AssetServer> {
+        &self.internal.asset_server
+    }
+
+    pub(crate) fn database_server(&self) -> &Arc<DatabaseServer> {
+        &self.internal.database_server
     }
 }

@@ -4,7 +4,7 @@ use ease_client_shared::backends::app::ArgInitializeApp;
 
 use crate::{ctx::BackendContext, error::BResult};
 
-pub fn app_bootstrap(cx: &Arc<BackendContext>, arg: ArgInitializeApp) -> BResult<()> {
+pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
     static SCHEMA_VERSION: u32 = 1;
 
     cx.set_storage_path(&arg.storage_path);

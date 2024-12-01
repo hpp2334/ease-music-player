@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ease_client::MusicControlWidget;
 use ease_client_shared::backends::player::PlayMode;
 use ease_client_test::{PresetDepth, TestApp};
@@ -8,6 +10,8 @@ async fn app_loaded_state_1() {
         let mut app = TestApp::new("test-dbs/app_loaded_state_1", true).await;
         app.setup_preset(PresetDepth::Music).await;
     }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    tracing::info!("reload App");
 
     let app = TestApp::new("test-dbs/app_loaded_state_1", false).await;
     let state = app.latest_state();

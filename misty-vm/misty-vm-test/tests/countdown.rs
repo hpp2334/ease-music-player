@@ -161,9 +161,9 @@ mod tests {
         let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        let pod = AppPod::new();
+        let pod = Arc::new(AppPod::new());
         pod.set(app.clone());
-        rt.bind(Arc::new(pod));
+        rt.bind(Arc::downgrade(&pod));
         app.emit(Event::Update { value: 10 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(9));
@@ -179,9 +179,9 @@ mod tests {
         let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        let pod = AppPod::new();
+        let pod = Arc::new(AppPod::new());
         pod.set(app.clone());
-        rt.bind(Arc::new(pod));
+        rt.bind(Arc::downgrade(&pod));
         app.emit(Event::Update { value: 5 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(2));
@@ -210,9 +210,9 @@ mod tests {
         let rt = TestAsyncRuntimeAdapter::new();
 
         let app = build_app(rt.clone());
-        let pod = AppPod::new();
+        let pod = Arc::new(AppPod::new());
         pod.set(app.clone());
-        rt.bind(Arc::new(pod));
+        rt.bind(Arc::downgrade(&pod));
         app.emit(Event::Update { value: 5 });
         app.emit(Event::Start);
         rt.advance(Duration::from_secs(3));

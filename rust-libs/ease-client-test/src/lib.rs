@@ -34,8 +34,8 @@ mod fake_server;
 mod view_state;
 
 pub struct TestApp {
-    app: AppPod,
-    backend: Arc<Backend>,
+    app: Arc<AppPod>,
+    backend_host: Arc<BackendHost>,
     server: FakeServerRef,
     player: FakeMusicPlayerRef,
     view_state: ViewStateServiceRef,
@@ -117,23 +117,15 @@ impl TestApp {
         let ui_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
         let backend_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
 
-        let (tx, mut rx) = mpsc::channel::<MessagePayload>(10);
-        let player = FakeMusicPlayerRef::new(tx);
+        let player = FakeMusicPlayerRef::new();
         let backend = Arc::new(Backend::new(
             AsyncRuntime::new(backend_async_runtime_adapter.clone()),
             Arc::new(player.clone()),
         ));
-        backend_async_runtime_adapter.bind(backend.clone());
+        backend_async_runtime_adapter.bind(Arc::downgrade(&backend));
         let backend_host = BackendHost::new();
         backend_host.set_backend(backend.clone());
-        {
-            let backend = backend_host.clone();
-            tokio::spawn(async move {
-                while let Some(v) = rx.recv().await {
-                    backend.request(v).await.unwrap();
-                }
-            });
-        }
+        player.set_backend(backend_host.clone());
         backend
             .init(ArgInitializeApp {
                 app_document_dir: test_dir.to_string(),
@@ -142,18 +134,18 @@ impl TestApp {
             })
             .unwrap();
 
-        let pod = AppPod::new();
+        let pod = Arc::new(AppPod::new());
         let view_state = ViewStateServiceRef::new();
         let permission = FakePermissionService::new(event_loop.clone());
         let app = build_client(
-            backend_host,
+            backend_host.clone(),
             Arc::new(permission.clone()),
             Arc::new(FakeRouterService),
             Arc::new(FakeToastServiceImpl),
             Arc::new(view_state.clone()),
             AsyncRuntime::new(ui_async_runtime_adapter.clone()),
         );
-        ui_async_runtime_adapter.bind(Arc::new(pod.clone()));
+        ui_async_runtime_adapter.bind(Arc::downgrade(&pod));
         pod.set(app.clone());
 
         app.emit(Action::Init);
@@ -161,7 +153,7 @@ impl TestApp {
 
         let ret = Self {
             app: pod,
-            backend,
+            backend_host,
             server: FakeServerRef::setup("test-files"),
             player,
             permission,
@@ -330,7 +322,12 @@ impl TestApp {
     }
 
     pub async fn load_resource_by_key(&self, key: DataSourceKey) -> Vec<u8> {
-        let v = self.backend.load_asset(key.into(), 0).await.unwrap();
+        let v = self
+            .backend_host
+            .backend()
+            .load_asset(key.into(), 0)
+            .await
+            .unwrap();
         if let Some(v) = v {
             v.bytes().await.unwrap().to_vec()
         } else {
@@ -357,6 +354,9 @@ impl TestApp {
 impl Drop for TestApp {
     fn drop(&mut self) {
         let app = self.app.get();
+        self.event_loop.flush(&app);
         app.emit(Action::Destroy);
+        self.app.reset();
+        self.backend_host.reset();
     }
 }

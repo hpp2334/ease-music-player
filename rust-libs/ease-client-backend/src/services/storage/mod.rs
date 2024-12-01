@@ -21,7 +21,7 @@ pub(crate) struct StorageState {
 
 #[instrument]
 pub(crate) async fn load_storage_entry_data(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     loc: &StorageEntryLoc,
 ) -> BResult<Option<Vec<u8>>> {
     let loc = loc.clone();
@@ -61,7 +61,7 @@ pub fn build_storage(model: StorageModel, music_count: u64) -> Storage {
 }
 
 pub fn build_storage_backend_by_arg(
-    _cx: &Arc<BackendContext>,
+    _cx: &BackendContext,
     arg: ArgUpsertStorage,
 ) -> BResult<Arc<dyn StorageBackend + Send + Sync>> {
     let connect_timeout = Duration::from_secs(5);
@@ -86,13 +86,13 @@ pub fn build_storage_backend_by_arg(
     Ok(ret)
 }
 
-pub(crate) fn evict_storage_backend_cache(cx: &Arc<BackendContext>, storage_id: StorageId) {
+pub(crate) fn evict_storage_backend_cache(cx: &BackendContext, storage_id: StorageId) {
     let mut w = cx.storage_state().cache.write().unwrap();
     w.remove(&storage_id);
 }
 
 pub fn get_storage_backend(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     storage_id: StorageId,
 ) -> BResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
     {
@@ -131,7 +131,7 @@ pub fn get_storage_backend(
     Ok(Some(backend))
 }
 
-pub async fn list_storage(cx: &Arc<BackendContext>) -> BResult<Vec<Storage>> {
+pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
     let models = cx.database_server().load_storages()?;
 
     let mut storages: Vec<Storage> = Default::default();
@@ -155,7 +155,7 @@ pub async fn list_storage(cx: &Arc<BackendContext>) -> BResult<Vec<Storage>> {
     Ok(storages)
 }
 
-pub async fn notify_storages(cx: &Arc<BackendContext>) -> BResult<()> {
+pub async fn notify_storages(cx: &BackendContext) -> BResult<()> {
     let storages = list_storage(cx).await?;
     cx.notify(ConnectorAction::Storages(storages));
     Ok(())

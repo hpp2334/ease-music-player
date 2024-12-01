@@ -22,16 +22,13 @@ use crate::{
 };
 
 pub(crate) async fn cr_get_playlist(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: PlaylistId,
 ) -> BResult<Option<Playlist>> {
     get_playlist(cx, arg).await
 }
 
-pub(crate) async fn cu_update_playlist(
-    cx: &Arc<BackendContext>,
-    arg: ArgUpdatePlaylist,
-) -> BResult<()> {
+pub(crate) async fn cu_update_playlist(cx: &BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
     let current_time_ms = cx.current_time().as_millis() as i64;
 
     cx.database_server()
@@ -46,10 +43,9 @@ pub(crate) async fn cu_update_playlist(
 }
 
 pub(crate) async fn cc_create_playlist(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgCreatePlaylist,
 ) -> BResult<PlaylistId> {
-    let cx = cx.clone();
     let current_time_ms = cx.current_time().as_millis() as i64;
 
     let musics = arg
@@ -73,13 +69,16 @@ pub(crate) async fn cc_create_playlist(
     )?;
 
     {
-        let cx = cx.clone();
-        cx.async_runtime()
+        let rt = cx.async_runtime().clone();
+        let cx = cx.weak();
+        rt.clone()
             .clone()
             .spawn_on_main(async move {
-                for id in music_ids {
-                    cx.player_delegate()
-                        .request_total_duration(id, cx.asset_server().serve_music_url(id));
+                if let Some(cx) = cx.upgrade() {
+                    for id in music_ids {
+                        cx.player_delegate()
+                            .request_total_duration(id, cx.asset_server().serve_music_url(id));
+                    }
                 }
             })
             .await;
@@ -94,7 +93,7 @@ pub(crate) async fn cc_create_playlist(
 }
 
 pub(crate) async fn cu_add_musics_to_playlist(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgAddMusicsToPlaylist,
 ) -> BResult<()> {
     let playlist_id = arg.id;
@@ -114,13 +113,16 @@ pub(crate) async fn cu_add_musics_to_playlist(
     let music_ids = cx.database_server().add_musics_to_playlist(musics)?;
 
     {
-        let cx = cx.clone();
-        cx.async_runtime()
+        let rt = cx.async_runtime().clone();
+        let cx = cx.weak();
+        rt.clone()
             .clone()
             .spawn_on_main(async move {
-                for id in music_ids {
-                    cx.player_delegate()
-                        .request_total_duration(id, cx.asset_server().serve_music_url(id));
+                if let Some(cx) = cx.upgrade() {
+                    for id in music_ids {
+                        cx.player_delegate()
+                            .request_total_duration(id, cx.asset_server().serve_music_url(id));
+                    }
                 }
             })
             .await;
@@ -138,7 +140,7 @@ pub(crate) async fn cu_add_musics_to_playlist(
 }
 
 pub(crate) async fn cd_remove_music_from_playlist(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgRemoveMusicFromPlaylist,
 ) -> BResult<()> {
     cx.database_server()
@@ -154,7 +156,7 @@ pub(crate) async fn cd_remove_music_from_playlist(
     Ok(())
 }
 
-pub(crate) async fn cd_remove_playlist(cx: &Arc<BackendContext>, arg: PlaylistId) -> BResult<()> {
+pub(crate) async fn cd_remove_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<()> {
     cx.database_server().remove_playlist(arg)?;
 
     player_refresh_current(cx).await?;

@@ -18,6 +18,7 @@ pub struct DatabaseServer {
 impl Drop for DatabaseServer {
     fn drop(&mut self) {
         self._db.write().unwrap().take();
+        tracing::info!("drop DatabaseServer");
     }
 }
 

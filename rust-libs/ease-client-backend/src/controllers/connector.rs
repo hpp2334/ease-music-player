@@ -11,7 +11,7 @@ use crate::{
     },
 };
 
-pub(crate) async fn ci_on_connect(cx: &Arc<BackendContext>, _arg: ()) -> BResult<()> {
+pub(crate) async fn ci_on_connect(cx: &BackendContext, _arg: ()) -> BResult<()> {
     let data = cx.database_server().load_preference()?;
 
     try_join! {

@@ -14,7 +14,7 @@ use serve::{
 use crate::{ctx::BackendContext, error::BResult};
 
 pub(crate) async fn load_asset(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     key: DataSourceKey,
     byte_offset: u64,
 ) -> BResult<Option<StreamFile>> {

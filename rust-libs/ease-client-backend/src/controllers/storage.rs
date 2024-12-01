@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-pub async fn ccu_upsert_storage(cx: &Arc<BackendContext>, arg: ArgUpsertStorage) -> BResult<()> {
+pub async fn ccu_upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> BResult<()> {
     let id = cx.database_server().upsert_storage(arg)?;
     evict_storage_backend_cache(cx, id);
 
@@ -29,12 +29,12 @@ pub async fn ccu_upsert_storage(cx: &Arc<BackendContext>, arg: ArgUpsertStorage)
     Ok(())
 }
 
-pub async fn cr_get_refresh_token(_cx: &Arc<BackendContext>, code: String) -> BResult<String> {
+pub async fn cr_get_refresh_token(_cx: &BackendContext, code: String) -> BResult<String> {
     let refresh_token = OneDriveBackend::request_refresh_token(code).await?;
     Ok(refresh_token)
 }
 
-pub async fn cd_remove_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<()> {
+pub async fn cd_remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()> {
     cx.database_server().remove_storage(id)?;
     evict_storage_backend_cache(cx, id);
 
@@ -47,7 +47,7 @@ pub async fn cd_remove_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResu
 }
 
 pub async fn cr_test_storage(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: ArgUpsertStorage,
 ) -> BResult<StorageConnectionTestResult> {
     let backend = build_storage_backend_by_arg(&cx, arg)?;
@@ -68,7 +68,7 @@ pub async fn cr_test_storage(
 }
 
 pub async fn cr_list_storage_entry_children(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: StorageEntryLoc,
 ) -> BResult<ListStorageEntryChildrenResp> {
     let backend = get_storage_backend(&cx, arg.storage_id)?;

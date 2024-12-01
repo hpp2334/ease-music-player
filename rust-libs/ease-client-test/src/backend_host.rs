@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Weak};
 
 use ease_client::{to_host::connector::IConnectorHost, EaseError, EaseResult};
 use ease_client_backend::{error::BResult, Backend};
@@ -10,26 +10,15 @@ type Mp = (MessagePayload, oneshot::Sender<BResult<MessagePayload>>);
 type Mtx = mpsc::Sender<Mp>;
 
 pub struct BackendHost {
-    _sender: Mtx,
     _backend: RwLock<Option<Arc<Backend>>>,
 }
 
 impl BackendHost {
     pub fn new() -> Arc<Self> {
-        let (tx, mut rx) = mpsc::channel::<Mp>(10);
         let this = Arc::new(Self {
-            _sender: tx,
             _backend: Default::default(),
         });
         let cloned = this.clone();
-
-        tokio::spawn(async move {
-            while let Some((payload, tx)) = rx.recv().await {
-                let ret = this.backend().request(payload).await;
-                let _ = tx.send(ret);
-            }
-        });
-
         cloned
     }
 
@@ -41,6 +30,10 @@ impl BackendHost {
         assert!(!self.has_backend());
         let mut w = self._backend.write().unwrap();
         *w = Some(backend);
+    }
+
+    pub fn reset(&self) {
+        self._backend.write().unwrap().take();
     }
 
     pub fn backend(&self) -> Arc<Backend> {
@@ -63,15 +56,12 @@ impl IConnectorHost for BackendHost {
     }
 
     fn request(&self, msg: MessagePayload) -> BoxFuture<EaseResult<MessagePayload>> {
-        let (tx, rx) = oneshot::channel();
-        let sender = self._sender.clone();
+        let backend = self.backend();
         Box::pin(async move {
-            sender.send((msg, tx)).await.unwrap();
-            let ret = rx
+            backend
+                .request(msg)
                 .await
-                .unwrap()
-                .map_err(|e| EaseError::BackendChannelError(e.into()));
-            ret
+                .map_err(|e| EaseError::BackendChannelError(e.into()))
         })
     }
 

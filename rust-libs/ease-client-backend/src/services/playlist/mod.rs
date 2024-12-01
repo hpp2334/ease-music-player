@@ -29,7 +29,7 @@ fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<MusicDuration> {
 }
 
 pub(crate) fn build_playlist_meta(
-    _cx: &Arc<BackendContext>,
+    _cx: &BackendContext,
     model: PlaylistModel,
     first_cover_music_id: Option<MusicId>,
 ) -> PlaylistMeta {
@@ -58,7 +58,7 @@ pub(crate) fn build_playlist_meta(
 }
 
 pub(crate) fn build_playlist_abstract(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     model: PlaylistModel,
 ) -> BResult<(PlaylistAbstract, Vec<MusicAbstract>)> {
     let id = model.id;
@@ -81,12 +81,18 @@ pub(crate) fn build_playlist_abstract(
 }
 
 pub(crate) async fn get_playlist(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
     arg: PlaylistId,
 ) -> BResult<Option<Playlist>> {
     let rt = cx.async_runtime();
-    let cx = cx.clone();
+    let cx = cx.weak();
     rt.spawn(async move {
+        let cx = cx.upgrade();
+        if cx.is_none() {
+            return Ok(None);
+        }
+        let cx = cx.unwrap();
+
         let model = cx.database_server().load_playlist(arg)?;
 
         if model.is_none() {
@@ -101,7 +107,7 @@ pub(crate) async fn get_playlist(
 }
 
 pub(crate) async fn get_all_playlist_abstracts(
-    cx: &Arc<BackendContext>,
+    cx: &BackendContext,
 ) -> BResult<Vec<PlaylistAbstract>> {
     let models = cx.database_server().load_playlists()?;
 
@@ -114,13 +120,13 @@ pub(crate) async fn get_all_playlist_abstracts(
     Ok(ret)
 }
 
-pub(crate) async fn notify_all_playlist_abstracts(cx: &Arc<BackendContext>) -> BResult<()> {
+pub(crate) async fn notify_all_playlist_abstracts(cx: &BackendContext) -> BResult<()> {
     let playlists = get_all_playlist_abstracts(cx).await?;
     cx.notify(ConnectorAction::PlaylistAbstracts(playlists));
     Ok(())
 }
 
-pub(crate) async fn notify_playlist(cx: &Arc<BackendContext>, id: PlaylistId) -> BResult<()> {
+pub(crate) async fn notify_playlist(cx: &BackendContext, id: PlaylistId) -> BResult<()> {
     let playlist = get_playlist(cx, id).await?;
     if let Some(playlist) = playlist {
         cx.notify(ConnectorAction::Playlist(playlist));

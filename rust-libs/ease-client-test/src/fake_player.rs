@@ -1,23 +1,22 @@
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
+use crate::backend_host::BackendHost;
 use ease_client_backend::{IPlayerDelegate, MusicToPlay};
 use ease_client_shared::backends::generated::Code;
 use ease_client_shared::backends::music::MusicId;
 use ease_client_shared::backends::player::{PlayerDelegateEvent, PlayerDurations};
 use ease_client_shared::backends::{encode_message_payload, MessagePayload};
 use lofty::AudioFile;
-use tokio::sync::mpsc;
 
-#[derive(Clone)]
 struct FakeMusicPlayerInner {
     req_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     last_bytes: Arc<Mutex<Vec<u8>>>,
     playing: Arc<AtomicBool>,
     current_duration: Arc<AtomicU64>,
     total_duration: Arc<AtomicU64>,
-    tx: mpsc::Sender<MessagePayload>,
+    backend_host: Arc<RwLock<Option<Arc<BackendHost>>>>,
 }
 
 #[derive(Clone)]
@@ -33,14 +32,14 @@ async fn request_bytes(url: String) -> Vec<u8> {
 }
 
 impl FakeMusicPlayerInner {
-    fn new(tx: mpsc::Sender<MessagePayload>) -> Self {
+    fn new() -> Self {
         Self {
             req_handle: Default::default(),
             last_bytes: Default::default(),
             playing: Default::default(),
             current_duration: Default::default(),
             total_duration: Default::default(),
-            tx,
+            backend_host: Default::default(),
         }
     }
 
@@ -85,22 +84,26 @@ impl FakeMusicPlayerInner {
     }
 
     fn send_player_event(&self, evt: PlayerDelegateEvent) {
-        let tx = self.tx.clone();
+        let backend_host = self.backend_host.clone();
         tokio::spawn(async move {
-            tx.send(MessagePayload {
-                code: Code::OnPlayerEvent,
-                payload: encode_message_payload(evt),
-            })
-            .await
-            .unwrap();
+            let backend = backend_host.write().unwrap().clone().map(|v| v.backend());
+            if let Some(backend) = backend {
+                backend
+                    .request(MessagePayload {
+                        code: Code::OnPlayerEvent,
+                        payload: encode_message_payload(evt),
+                    })
+                    .await
+                    .unwrap();
+            }
         });
     }
 }
 
 impl FakeMusicPlayerRef {
-    pub fn new(tx: mpsc::Sender<MessagePayload>) -> Self {
+    pub fn new() -> Self {
         FakeMusicPlayerRef {
-            inner: Arc::new(FakeMusicPlayerInner::new(tx)),
+            inner: Arc::new(FakeMusicPlayerInner::new()),
         }
     }
 
@@ -109,6 +112,10 @@ impl FakeMusicPlayerRef {
     }
     pub fn advance(&self, duration: Duration) {
         self.inner.advance(duration);
+    }
+
+    pub fn set_backend(&self, backend_host: Arc<BackendHost>) {
+        *self.inner.backend_host.write().unwrap() = Some(backend_host);
     }
 }
 
