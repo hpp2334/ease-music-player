@@ -321,6 +321,10 @@ impl TestApp {
         self.server.set_inteceptor_req(v);
     }
 
+    pub fn fake_server_addr(&self) -> String {
+        self.server.addr()
+    }
+
     pub async fn load_resource_by_key(&self, key: DataSourceKey) -> Vec<u8> {
         let v = self
             .backend_host

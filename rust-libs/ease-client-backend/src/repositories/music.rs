@@ -139,7 +139,6 @@ impl DatabaseServer {
         let db = self.db().begin_write()?;
         {
             let mut table_music = db.open_table(TABLE_MUSIC)?;
-            let mut table_cover = db.open_table(TABLE_BLOB)?;
             let m = table_music.get(id)?.map(|v| v.value());
 
             if let Some(mut m) = m {
@@ -150,6 +149,7 @@ impl DatabaseServer {
                 let cover_id = self.alloc_id(&db, DbKeyAlloc::Blob)?;
                 let cover_id = BlobId::wrap(cover_id);
 
+                let mut table_cover = db.open_table(TABLE_BLOB)?;
                 m.cover = Some(cover_id);
                 table_music.insert(id, m)?;
                 table_cover.insert(cover_id, cover)?;
@@ -172,6 +172,7 @@ impl DatabaseServer {
 
             if let Some(mut m) = m {
                 m.lyric = loc;
+                m.lyric_default = false;
                 table_music.insert(id, m)?;
             }
         }

@@ -2,8 +2,6 @@ mod asset;
 pub(self) mod chunks;
 mod serve;
 
-use std::sync::Arc;
-
 pub use asset::AssetServer;
 use ease_client_shared::backends::storage::DataSourceKey;
 use ease_remote_storage::StreamFile;
@@ -18,7 +16,6 @@ pub(crate) async fn load_asset(
     key: DataSourceKey,
     byte_offset: u64,
 ) -> BResult<Option<StreamFile>> {
-    let cx = cx.clone();
     match key {
         DataSourceKey::Music { id } => get_stream_file_by_music_id(&cx, id, byte_offset).await,
         DataSourceKey::Cover { id } => {

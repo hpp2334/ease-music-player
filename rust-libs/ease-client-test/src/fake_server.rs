@@ -90,6 +90,8 @@ impl FakeServerInner {
         let server = hyper::Server::bind(&addr).serve(make_service);
         let port = server.local_addr().port();
 
+        tracing::info!("setup fake WebDAV server on {}", port);
+
         tokio::spawn(async move {
             let server = server.with_graceful_shutdown(async {
                 rx_abort_server.await.ok();
@@ -119,7 +121,7 @@ impl Drop for FakeServerInner {
     fn drop(&mut self) {
         let tx = self.tx.take().unwrap();
         let _ = tx.send(());
-        tracing::info!("drop server");
+        tracing::info!("drop FakeServerInner");
     }
 }
 

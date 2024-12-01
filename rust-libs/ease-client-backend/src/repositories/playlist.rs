@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     core::DatabaseServer,
-    defs::{TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC},
+    defs::{TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC},
     music::ArgDBAddMusic,
 };
 
@@ -81,7 +81,7 @@ impl DatabaseServer {
         let mut ret: Vec<MusicId> = Default::default();
         ret.reserve(musics.len());
 
-        let id = {
+        let playlist_id = {
             let id = {
                 let id = self.alloc_id(&db, DbKeyAlloc::Playlist)?;
                 let id = PlaylistId::wrap(id);
@@ -106,11 +106,17 @@ impl DatabaseServer {
         };
         for m in musics {
             let id = self.add_music_impl(&db, &rdb, m)?;
+
+            let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+            let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
+            table_pm.insert(playlist_id, id)?;
+            table_mp.insert(id, playlist_id)?;
+
             ret.push(id);
         }
 
         db.commit()?;
-        Ok((id, ret))
+        Ok((playlist_id, ret))
     }
 
     pub fn update_playlist(
@@ -118,7 +124,6 @@ impl DatabaseServer {
         id: PlaylistId,
         title: String,
         picture: Option<StorageEntryLoc>,
-        current_time_ms: i64,
     ) -> BResult<PlaylistId> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
@@ -128,7 +133,9 @@ impl DatabaseServer {
 
             playlist.title = title;
             playlist.picture = picture;
-            playlist.created_time = current_time_ms;
+
+            let mut table = db.open_table(TABLE_PLAYLIST)?;
+            table.insert(id, playlist)?;
         };
         db.commit()?;
         Ok(id)
@@ -157,8 +164,10 @@ impl DatabaseServer {
         let db = self.db().begin_write()?;
 
         {
-            let mut table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
-            table_playlist_musics.remove(playlist_id, music_id)?;
+            let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+            let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
+            table_pm.remove(playlist_id, music_id)?;
+            table_mp.remove(music_id, playlist_id)?;
         }
 
         db.commit()?;
@@ -167,6 +176,7 @@ impl DatabaseServer {
 
     pub fn add_musics_to_playlist(
         self: &Arc<Self>,
+        playlist_id: PlaylistId,
         musics: Vec<ArgDBAddMusic>,
     ) -> BResult<Vec<MusicId>> {
         let db = self.db().begin_write()?;
@@ -177,6 +187,12 @@ impl DatabaseServer {
 
         for m in musics {
             let id = self.add_music_impl(&db, &rdb, m)?;
+
+            let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+            let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
+            table_pm.insert(playlist_id, id)?;
+            table_mp.insert(id, playlist_id)?;
+
             ret.push(id);
         }
         db.commit()?;

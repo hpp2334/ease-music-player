@@ -5,8 +5,8 @@ use redb::{ReadableTable, WriteTransaction};
 use crate::{error::BResult, models::key::DbKeyAlloc};
 
 use super::defs::{
-    TABLE_BLOB, TABLE_ID_ALLOC, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST,
-    TABLE_PLAYLIST_MUSIC, TABLE_PREFERENCE, TABLE_SCHEMA_VERSION, TABLE_STORAGE,
+    TABLE_BLOB, TABLE_ID_ALLOC, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST,
+    TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_PREFERENCE, TABLE_SCHEMA_VERSION, TABLE_STORAGE,
     TABLE_STORAGE_MUSIC,
 };
 
@@ -48,6 +48,7 @@ impl DatabaseServer {
         db.open_table(TABLE_ID_ALLOC)?;
         db.open_table(TABLE_PLAYLIST)?;
         db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+        db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
         db.open_table(TABLE_MUSIC)?;
         db.open_table(TABLE_MUSIC_BY_LOC)?;
         db.open_table(TABLE_STORAGE)?;

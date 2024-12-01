@@ -10,7 +10,10 @@ use crate::{
 
 use super::{
     core::DatabaseServer,
-    defs::{TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_STORAGE, TABLE_STORAGE_MUSIC},
+    defs::{
+        TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE,
+        TABLE_STORAGE_MUSIC,
+    },
 };
 
 impl DatabaseServer {
@@ -97,6 +100,8 @@ impl DatabaseServer {
 
         {
             let mut table_storage_musics = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
+            let mut table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+            let mut table_music_playlists = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
             let mut table_storage = db.open_table(TABLE_STORAGE)?;
             let mut table_musics = db.open_table(TABLE_MUSIC)?;
             let mut table_music_by_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
@@ -105,6 +110,14 @@ impl DatabaseServer {
 
             while let Some(v) = music_iter.next() {
                 let id = v?.value();
+
+                let mut iter = table_music_playlists.get(id)?;
+                while let Some(v) = iter.next() {
+                    let playlist_id = v?.value();
+                    table_playlist_musics.remove(playlist_id, id)?;
+                }
+                drop(iter);
+                table_music_playlists.remove_all(id)?;
 
                 {
                     let m = self.load_music_impl(&rdb, id)?.unwrap();

@@ -4,15 +4,6 @@ use std::fmt::Debug;
 #[derive(Debug)]
 pub struct BinSerde<T>(T);
 
-impl<T> BinSerde<T> {
-    pub fn new(v: T) -> Self {
-        Self(v)
-    }
-    pub fn unwrap(self) -> T {
-        self.0
-    }
-}
-
 impl<T> redb::Value for BinSerde<T>
 where
     T: Debug + bitcode::Encode + for<'a> bitcode::Decode<'a>,

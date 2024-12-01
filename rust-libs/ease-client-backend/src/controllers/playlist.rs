@@ -12,7 +12,7 @@ use futures::try_join;
 
 use crate::{
     ctx::BackendContext,
-    error::{BError, BResult},
+    error::BResult,
     repositories::music::ArgDBAddMusic,
     services::{
         player::player_refresh_current,
@@ -29,10 +29,8 @@ pub(crate) async fn cr_get_playlist(
 }
 
 pub(crate) async fn cu_update_playlist(cx: &BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
-    let current_time_ms = cx.current_time().as_millis() as i64;
-
     cx.database_server()
-        .update_playlist(arg.id, arg.title, arg.cover, current_time_ms)?;
+        .update_playlist(arg.id, arg.title, arg.cover)?;
 
     try_join! {
         notify_playlist(cx, arg.id),
@@ -110,7 +108,9 @@ pub(crate) async fn cu_add_musics_to_playlist(
         })
         .collect();
 
-    let music_ids = cx.database_server().add_musics_to_playlist(musics)?;
+    let music_ids = cx
+        .database_server()
+        .add_musics_to_playlist(arg.id, musics)?;
 
     {
         let rt = cx.async_runtime().clone();

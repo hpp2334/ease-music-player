@@ -402,6 +402,7 @@ async fn playlist_full_reimport_discarded_bug() {
     app.dispatch_click(PlaylistDetailWidget::Remove);
     app.wait_network().await;
     create_playlist_and_import_music().await;
+    drop(app);
 
     // reload
     let app = TestApp::new("test-dbs/playlist_full_reimport_discarded_bug", false).await;

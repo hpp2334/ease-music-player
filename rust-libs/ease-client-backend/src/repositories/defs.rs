@@ -18,6 +18,8 @@ pub const TABLE_PLAYLIST: TableDefinition<BinSerde<PlaylistId>, BinSerde<Playlis
     TableDefinition::new("playlist");
 pub const TABLE_PLAYLIST_MUSIC: MultimapTableDefinition<BinSerde<PlaylistId>, BinSerde<MusicId>> =
     MultimapTableDefinition::new("playlist_music");
+pub const TABLE_MUSIC_PLAYLIST: MultimapTableDefinition<BinSerde<MusicId>, BinSerde<PlaylistId>> =
+    MultimapTableDefinition::new("music_playlist");
 pub const TABLE_MUSIC: TableDefinition<BinSerde<MusicId>, BinSerde<MusicModel>> =
     TableDefinition::new("music");
 pub const TABLE_MUSIC_BY_LOC: TableDefinition<BinSerde<StorageEntryLoc>, BinSerde<MusicId>> =
