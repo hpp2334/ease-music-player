@@ -94,7 +94,7 @@ pub fn app_bootstrap(cx: &Arc<BackendContext>, arg: ArgInitializeApp) -> BResult
     cx.set_schema_version(SCHEMA_VERSION);
     // Init
     init_persistent_state(&cx)?;
-    cx.asset_server().start(&cx, arg.app_cache_dir);
+    cx.asset_server().start(&cx, arg.app_document_dir);
     Ok(())
 }
 

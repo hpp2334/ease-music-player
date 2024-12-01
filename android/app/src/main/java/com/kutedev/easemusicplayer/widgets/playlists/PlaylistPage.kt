@@ -51,6 +51,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.DeviceFontFamilyName
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -357,6 +360,7 @@ private fun PlaylistItem(
                 maxLines = 1,
                 modifier = Modifier.wrapContentWidth(),
                 fontSize = 14.sp,
+                fontFamily = FontFamily(Font(R.font.noto_sans)),
             )
         }
         Box(

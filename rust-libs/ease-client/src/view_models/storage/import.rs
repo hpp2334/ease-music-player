@@ -47,7 +47,7 @@ pub(crate) struct StorageImportVM {
 }
 
 pub(crate) fn get_entry_type(entry: &StorageEntry) -> StorageEntryType {
-    const MUSIC_EXTS: [&str; 5] = [".wav", ".mp3", ".aac", ".flac", ".ogg"];
+    const MUSIC_EXTS: [&str; 6] = [".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a"];
     const IMAGE_EXTS: [&str; 3] = [".jpg", ".jpeg", ".png"];
     const LYRIC_EXTS: [&str; 1] = [".lrc"];
 

@@ -51,6 +51,7 @@ private fun Title(title: String) {
         Text(
             text = title,
             letterSpacing = 1.sp,
+            fontSize = 14.sp,
         )
         Box(
            modifier = Modifier

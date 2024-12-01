@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use ease_client_shared::backends::{
     connector::ConnectorAction,
     generated::{
@@ -8,9 +10,7 @@ use ease_client_shared::backends::{
     player::{ArgPlayMusic, ConnectorPlayerAction, PlayMode},
     playlist::Playlist,
 };
-use misty_vm::{
-    AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext,
-};
+use misty_vm::{AppBuilderContext, AsyncTasks, IToHost, Model, ViewModel, ViewModelContext};
 
 use super::{
     common::MusicCommonVM, lyric::MusicLyricVM, state::CurrentMusicState,
@@ -155,6 +155,11 @@ impl MusicControlVM {
     }
 
     fn request_seek(&self, cx: &ViewModelContext, arg: u64) -> EaseResult<()> {
+        {
+            let mut state = cx.model_mut(&self.current);
+            state.current_duration = Duration::from_millis(arg);
+        }
+
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx)
                 .request::<PlayerSeekMsg>(&cx, arg)
