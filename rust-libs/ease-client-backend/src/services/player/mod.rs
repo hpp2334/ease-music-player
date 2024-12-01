@@ -163,10 +163,6 @@ pub(crate) async fn player_request_play(
 
     let music = to_play.queue[to_play.index].clone();
 
-    {
-        let mut state = cx.player_state().current.write().unwrap();
-        *state = Some(to_play.clone());
-    }
     let item = MusicToPlay {
         id: to_play.id,
         url: cx.asset_server().serve_music_url(to_play.id),
@@ -180,11 +176,16 @@ pub(crate) async fn player_request_play(
             .spawn_on_main(async move {
                 cx.player_delegate().set_music_url(item);
                 cx.player_delegate().resume();
+
+                {
+                    let mut state = cx.player_state().current.write().unwrap();
+                    *state = Some(to_play.clone());
+                }
+                notify_player_current(&cx).unwrap();
+                preload_next_music(&cx).unwrap();
             })
             .await;
     }
-    notify_player_current(cx)?;
-    preload_next_music(cx)?;
     Ok(())
 }
 
