@@ -1,12 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use ease_client_shared::backends::{
-    music::MusicId,
-    playlist::PlaylistId,
-    storage::{StorageEntryLoc, StorageId},
+    music::MusicId, playlist::PlaylistId, storage::StorageEntryLoc,
 };
 use redb::{ReadTransaction, ReadableTable, ReadableTableMetadata};
-use tracing::instrument;
 
 use crate::{
     error::BResult,
@@ -15,11 +12,16 @@ use crate::{
 
 use super::{
     core::DatabaseServer,
-    defs::{TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE},
+    defs::{TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC},
     music::ArgDBAddMusic,
 };
 
 impl DatabaseServer {
+    pub fn load_playlist(self: &Arc<Self>, id: PlaylistId) -> BResult<Option<PlaylistModel>> {
+        let db = self.db().begin_read()?;
+        self.load_playlist_impl(&db, id)
+    }
+
     fn load_playlist_impl(
         self: &Arc<Self>,
         db: &ReadTransaction,
@@ -72,9 +74,12 @@ impl DatabaseServer {
         picture: Option<StorageEntryLoc>,
         musics: Vec<ArgDBAddMusic>,
         current_time_ms: i64,
-    ) -> BResult<PlaylistId> {
+    ) -> BResult<(PlaylistId, Vec<MusicId>)> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
+
+        let mut ret: Vec<MusicId> = Default::default();
+        ret.reserve(musics.len());
 
         let id = {
             let id = {
@@ -97,11 +102,12 @@ impl DatabaseServer {
             id
         };
         for m in musics {
-            self.add_music_impl(&db, &rdb, m)?;
+            let id = self.add_music_impl(&db, &rdb, m)?;
+            ret.push(id);
         }
 
         db.commit()?;
-        Ok(id)
+        Ok((id, ret))
     }
 
     pub fn update_playlist(
@@ -156,41 +162,21 @@ impl DatabaseServer {
         Ok(())
     }
 
-    pub fn add_musics_to_playlist(self: &Arc<Self>, musics: Vec<ArgDBAddMusic>) -> BResult<()> {
+    pub fn add_musics_to_playlist(
+        self: &Arc<Self>,
+        musics: Vec<ArgDBAddMusic>,
+    ) -> BResult<Vec<MusicId>> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
+        let mut ret: Vec<MusicId> = Default::default();
+        ret.reserve(musics.len());
+
         for m in musics {
-            self.add_music_impl(&db, &rdb, m)?;
+            let id = self.add_music_impl(&db, &rdb, m)?;
+            ret.push(id);
         }
         db.commit()?;
-        Ok(())
+        Ok(ret)
     }
-}
-
-#[instrument]
-pub fn db_remove_musics_in_playlists_by_storage(
-    conn: DbConnectionRef,
-    storage_id: StorageId,
-) -> BResult<()> {
-    conn.execute(
-        r#"DELETE FROM playlist_music
-    WHERE id IN (SELECT id FROM music WHERE storage_id = ?1)"#,
-        params![storage_id],
-    )?;
-    Ok(())
-}
-
-#[instrument]
-pub fn db_get_musics_count_by_storage(
-    conn: DbConnectionRef,
-    storage_id: StorageId,
-) -> BResult<u32> {
-    let mut list = conn.query::<u32>(
-        r#"
-        SELECT COUNT(*) FROM music WHERE storage_id = ?;
-    "#,
-        [storage_id],
-    )?;
-    Ok(list.pop().unwrap())
 }

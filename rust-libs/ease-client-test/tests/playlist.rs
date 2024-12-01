@@ -451,5 +451,4 @@ async fn playlist_full_import_storage_count_bug() {
     });
     let state = app.latest_state().edit_storage.unwrap();
     assert_eq!(state.music_count, 1);
-    assert_eq!(state.playlist_count, 1);
 }

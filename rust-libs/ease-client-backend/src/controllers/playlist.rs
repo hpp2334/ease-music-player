@@ -6,20 +6,14 @@ use ease_client_shared::backends::{
         ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
         Playlist, PlaylistId,
     },
+    storage::StorageEntryLoc,
 };
 use futures::try_join;
 
 use crate::{
     ctx::BackendContext,
     error::{BError, BResult},
-    repositories::{
-        music::{db_add_music, ArgDBAddMusic},
-        playlist::{
-            db_batch_add_music_to_playlist, db_remove_all_musics_in_playlist,
-            db_remove_music_from_playlist, db_remove_playlist, db_upsert_playlist,
-            ArgDBUpsertPlaylist,
-        },
-    },
+    repositories::music::ArgDBAddMusic,
     services::{
         player::player_refresh_current,
         playlist::{get_playlist, notify_all_playlist_abstracts, notify_playlist},
@@ -38,18 +32,13 @@ pub(crate) async fn cu_update_playlist(
     cx: &Arc<BackendContext>,
     arg: ArgUpdatePlaylist,
 ) -> BResult<()> {
-    let conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
-    let id = arg.id;
-    let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
-        id: Some(id),
-        title: arg.title,
-        picture: arg.cover.clone(),
-    };
-    db_upsert_playlist(conn.get_ref(), arg, current_time_ms)?;
+
+    cx.database_server()
+        .update_playlist(arg.id, arg.title, arg.cover, current_time_ms)?;
 
     try_join! {
-        notify_playlist(cx, id),
+        notify_playlist(cx, arg.id),
         notify_all_playlist_abstracts(cx),
     }?;
 
@@ -61,40 +50,28 @@ pub(crate) async fn cc_create_playlist(
     arg: ArgCreatePlaylist,
 ) -> BResult<PlaylistId> {
     let cx = cx.clone();
-    let mut conn = get_conn(&cx)?;
     let current_time_ms = cx.current_time().as_millis() as i64;
 
-    let (arg, entries) = {
-        let entries = arg.entries;
-        let arg: ArgDBUpsertPlaylist = ArgDBUpsertPlaylist {
-            id: None,
-            title: arg.title,
-            picture: arg.cover.clone(),
-        };
+    let musics = arg
+        .entries
+        .clone()
+        .into_iter()
+        .map(|(entry, name)| ArgDBAddMusic {
+            loc: StorageEntryLoc {
+                storage_id: entry.storage_id,
+                path: entry.path,
+            },
+            title: name,
+        })
+        .collect();
 
-        (arg, entries)
-    };
+    let (playlist_id, music_ids) = cx.database_server().create_playlist(
+        arg.title,
+        arg.cover.clone(),
+        musics,
+        current_time_ms,
+    )?;
 
-    let mut musics: Vec<(MusicId, PlaylistId)> = Default::default();
-    let playlist_id = conn.transaction::<PlaylistId, BError>(|conn| {
-        let playlist_id = db_upsert_playlist(conn, arg, current_time_ms)?;
-
-        for (entry, name) in entries {
-            let music_id = db_add_music(
-                conn,
-                ArgDBAddMusic {
-                    storage_id: entry.storage_id,
-                    path: entry.path,
-                    title: name,
-                },
-            )?;
-            musics.push((music_id, playlist_id));
-        }
-        db_batch_add_music_to_playlist(conn, musics.clone())?;
-        Ok(playlist_id)
-    })?;
-
-    let music_ids: Vec<MusicId> = musics.into_iter().map(|v| v.0).collect();
     {
         let cx = cx.clone();
         cx.async_runtime()
@@ -120,27 +97,22 @@ pub(crate) async fn cu_add_musics_to_playlist(
     cx: &Arc<BackendContext>,
     arg: ArgAddMusicsToPlaylist,
 ) -> BResult<()> {
-    let mut conn = get_conn(&cx)?;
     let playlist_id = arg.id;
+    let musics = arg
+        .entries
+        .clone()
+        .into_iter()
+        .map(|(entry, name)| ArgDBAddMusic {
+            loc: StorageEntryLoc {
+                storage_id: entry.storage_id,
+                path: entry.path,
+            },
+            title: name,
+        })
+        .collect();
 
-    let musics = conn.transaction(move |conn| {
-        let mut musics: Vec<(MusicId, PlaylistId)> = Default::default();
-        for (entry, name) in arg.entries {
-            let music_id = db_add_music(
-                conn,
-                ArgDBAddMusic {
-                    storage_id: entry.storage_id,
-                    path: entry.path,
-                    title: name,
-                },
-            )?;
-            musics.push((music_id, playlist_id));
-        }
-        db_batch_add_music_to_playlist(conn, musics.clone())?;
-        Ok::<_, BError>(musics)
-    })?;
+    let music_ids = cx.database_server().add_musics_to_playlist(musics)?;
 
-    let music_ids: Vec<MusicId> = musics.into_iter().map(|v| v.0).collect();
     {
         let cx = cx.clone();
         cx.async_runtime()
@@ -169,8 +141,8 @@ pub(crate) async fn cd_remove_music_from_playlist(
     cx: &Arc<BackendContext>,
     arg: ArgRemoveMusicFromPlaylist,
 ) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    db_remove_music_from_playlist(conn.get_ref(), arg.playlist_id, arg.music_id)?;
+    cx.database_server()
+        .remove_music_from_playlist(arg.playlist_id, arg.music_id)?;
     player_refresh_current(cx).await?;
 
     try_join! {
@@ -183,10 +155,7 @@ pub(crate) async fn cd_remove_music_from_playlist(
 }
 
 pub(crate) async fn cd_remove_playlist(cx: &Arc<BackendContext>, arg: PlaylistId) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-
-    db_remove_all_musics_in_playlist(conn.get_ref(), arg)?;
-    db_remove_playlist(conn.get_ref(), arg)?;
+    cx.database_server().remove_playlist(arg)?;
 
     player_refresh_current(cx).await?;
 

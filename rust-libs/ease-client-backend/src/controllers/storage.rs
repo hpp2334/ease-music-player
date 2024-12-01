@@ -10,10 +10,6 @@ use futures::try_join;
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    repositories::{
-        playlist::{db_get_musics_count_by_storage, db_remove_musics_in_playlists_by_storage},
-        storage::{db_load_storage, db_remove_storage, db_upsert_storage},
-    },
     services::{
         playlist::notify_all_playlist_abstracts,
         storage::{
@@ -24,31 +20,13 @@ use crate::{
 };
 
 pub async fn ccu_upsert_storage(cx: &Arc<BackendContext>, arg: ArgUpsertStorage) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    let id = arg.id;
-    db_upsert_storage(conn.get_ref(), arg)?;
-
-    if let Some(id) = id {
-        evict_storage_backend_cache(cx, id);
-    }
+    let id = cx.database_server().upsert_storage(arg)?;
+    evict_storage_backend_cache(cx, id);
 
     try_join! {
         notify_storages(cx),
     }?;
     Ok(())
-}
-
-pub async fn cr_get_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<Option<Storage>> {
-    let conn = get_conn(&cx)?;
-    let model = db_load_storage(conn.get_ref(), id)?;
-    let storage = if let Some(model) = model {
-        let music_count = db_get_musics_count_by_storage(conn.get_ref(), id)?;
-        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), id)?;
-        Some(build_storage(model, music_count, playlist_count))
-    } else {
-        None
-    };
-    Ok(storage)
 }
 
 pub async fn cr_get_refresh_token(_cx: &Arc<BackendContext>, code: String) -> BResult<String> {
@@ -57,10 +35,7 @@ pub async fn cr_get_refresh_token(_cx: &Arc<BackendContext>, code: String) -> BR
 }
 
 pub async fn cd_remove_storage(cx: &Arc<BackendContext>, id: StorageId) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    db_remove_musics_in_playlists_by_storage(conn.get_ref(), id)?;
-    db_remove_storage(conn.get_ref(), id)?;
-
+    cx.database_server().remove_storage(id)?;
     evict_storage_backend_cache(cx, id);
 
     try_join! {

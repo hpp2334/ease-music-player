@@ -89,7 +89,6 @@ async fn storage_remove_1() {
     let state = app.latest_state();
     let edit_storage = state.edit_storage.unwrap();
     assert_eq!(edit_storage.music_count, 2);
-    assert_eq!(edit_storage.playlist_count, 1);
     assert_eq!(edit_storage.is_created, false);
 
     app.dispatch_click(StorageListWidget::Item { id });

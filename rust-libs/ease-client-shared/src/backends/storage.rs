@@ -140,8 +140,7 @@ pub struct Storage {
     pub password: String,
     pub is_anonymous: bool,
     pub typ: StorageType,
-    pub music_count: u32,
-    pub playlist_count: u32,
+    pub music_count: u64,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, uniffi::Enum)]

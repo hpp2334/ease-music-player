@@ -13,21 +13,11 @@ use ease_client_shared::backends::{
 };
 use misty_async::Task;
 
-use crate::{
-    ctx::BackendContext,
-    error::BResult,
-    models::music::MusicModel,
-    repositories::{
-        core::get_conn,
-        music::{db_load_music, db_update_music_cover, db_update_music_total_duration},
-    },
-};
+use crate::{ctx::BackendContext, error::BResult, models::music::MusicModel};
 
 use super::{
-    lyrics::parse_lrc,
-    player::player_refresh_current,
-    playlist::notify_all_playlist_abstracts,
-    storage::{load_storage_entry_data, to_opt_storage_entry},
+    lyrics::parse_lrc, player::player_refresh_current, playlist::notify_all_playlist_abstracts,
+    storage::load_storage_entry_data,
 };
 
 #[derive(Debug, Default)]
@@ -103,12 +93,7 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
 }
 
 pub(crate) fn build_music_abstract(_cx: &Arc<BackendContext>, model: MusicModel) -> MusicAbstract {
-    let cover = if model
-        .cover
-        .as_ref()
-        .map(|v| !v.is_empty())
-        .unwrap_or_default()
-    {
+    let cover = if model.cover.is_some() {
         Some(DataSourceKey::Cover { id: model.id })
     } else {
         Default::default()
@@ -124,28 +109,22 @@ pub fn get_music_storage_entry_loc(
     cx: &Arc<BackendContext>,
     id: MusicId,
 ) -> BResult<Option<StorageEntryLoc>> {
-    let conn = get_conn(cx)?;
-    let m = db_load_music(conn.get_ref(), id)?;
+    let m = cx.database_server().load_music(id)?;
     if m.is_none() {
         return Ok(None);
     }
     let m = m.unwrap();
-    let m = StorageEntryLoc {
-        path: m.path,
-        storage_id: m.storage_id,
-    };
+    let m = m.loc;
     Ok(Some(m))
 }
 
 pub fn get_music_cover_bytes(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Vec<u8>> {
-    let conn = get_conn(cx)?;
-    let m = db_load_music(conn.get_ref(), id)?;
-    if m.is_none() {
-        return Ok(Default::default());
+    let m = cx.database_server().load_music(id)?.unwrap();
+    if let Some(id) = m.cover {
+        cx.database_server().load_blob(id)
+    } else {
+        Ok(Default::default())
     }
-    let m = m.unwrap();
-    let cover = m.cover.unwrap_or_default();
-    Ok(cover)
 }
 
 pub(crate) struct ArgUpdateMusicDuration {
@@ -156,8 +135,8 @@ pub(crate) async fn update_music_duration(
     cx: &Arc<BackendContext>,
     arg: ArgUpdateMusicDuration,
 ) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    db_update_music_total_duration(conn.get_ref(), arg.id, arg.duration)?;
+    cx.database_server()
+        .update_music_total_duration(arg.id, arg.duration)?;
     player_refresh_current(cx).await?;
     cx.notify(ConnectorAction::MusicTotalDurationChanged(arg.id));
     notify_all_playlist_abstracts(&cx).await?;
@@ -172,8 +151,8 @@ pub(crate) async fn update_music_cover(
     cx: &Arc<BackendContext>,
     arg: ArgUpdateMusicCover,
 ) -> BResult<()> {
-    let conn = get_conn(&cx)?;
-    db_update_music_cover(conn.get_ref(), arg.id, arg.cover.clone())?;
+    cx.database_server()
+        .update_music_cover(arg.id, arg.cover.clone())?;
     player_refresh_current(cx).await?;
     cx.notify(ConnectorAction::MusicCoverChanged(arg.id));
     notify_all_playlist_abstracts(&cx).await?;
@@ -181,19 +160,15 @@ pub(crate) async fn update_music_cover(
 }
 
 pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<Option<Music>> {
-    let conn = get_conn(&cx)?;
-    let model = db_load_music(conn.get_ref(), id)?;
+    let model = cx.database_server().load_music(id)?;
     if model.is_none() {
         return Ok(None);
     }
 
     let model = model.unwrap();
     let meta = build_music_meta(model.clone());
-    let loc = StorageEntryLoc {
-        storage_id: model.storage_id,
-        path: model.path,
-    };
-    let mut lyric_loc = to_opt_storage_entry(model.lyric_path, model.lyric_storage_id);
+    let loc = model.loc;
+    let mut lyric_loc = model.lyric;
     let using_fallback = lyric_loc.is_none() && model.lyric_default;
     if using_fallback {
         lyric_loc = Some(StorageEntryLoc {
@@ -211,7 +186,7 @@ pub(crate) async fn get_music(cx: &Arc<BackendContext>, id: MusicId) -> BResult<
     }
 
     let lyric: Option<MusicLyric> = load_lyric(&cx, lyric_loc, using_fallback).await;
-    let cover = if model.cover.unwrap_or_default().is_empty() {
+    let cover = if model.cover.is_none() {
         Default::default()
     } else {
         Some(DataSourceKey::Cover { id: model.id })

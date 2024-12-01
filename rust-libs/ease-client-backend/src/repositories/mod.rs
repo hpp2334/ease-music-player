@@ -1,3 +1,4 @@
+pub mod app;
 pub(self) mod bin;
 pub mod core;
 pub(self) mod defs;

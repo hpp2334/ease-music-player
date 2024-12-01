@@ -12,11 +12,14 @@ use ease_client_shared::backends::connector::{ConnectorAction, IConnectorNotifie
 use getset::Getters;
 use misty_async::AsyncRuntime;
 
-use crate::services::{
-    music::TimeToPauseState,
-    player::{IPlayerDelegate, PlayerState},
-    server::AssetServer,
-    storage::StorageState,
+use crate::{
+    repositories::core::DatabaseServer,
+    services::{
+        music::TimeToPauseState,
+        player::{IPlayerDelegate, PlayerState},
+        server::AssetServer,
+        storage::StorageState,
+    },
 };
 
 #[derive(Getters)]
@@ -35,6 +38,8 @@ pub struct BackendContext {
     time_to_pause_state: Arc<TimeToPauseState>,
     #[getset(get = "pub(crate)")]
     asset_server: Arc<AssetServer>,
+    #[getset(get = "pub(crate)")]
+    database_server: Arc<DatabaseServer>,
     connectors: (
         RwLock<HashMap<usize, Arc<dyn IConnectorNotifier>>>,
         AtomicUsize,
@@ -62,6 +67,7 @@ impl BackendContext {
             storage_state: Default::default(),
             time_to_pause_state: Default::default(),
             asset_server: AssetServer::new(),
+            database_server: DatabaseServer::new(),
             connectors: Default::default(),
         }
     }

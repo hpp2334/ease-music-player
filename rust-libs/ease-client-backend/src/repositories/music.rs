@@ -28,7 +28,7 @@ pub struct ArgDBAddMusic {
 }
 
 impl DatabaseServer {
-    pub fn load_music_metas_by_playlist_id(
+    pub fn load_musics_by_playlist_id(
         self: &Arc<Self>,
         playlist_id: PlaylistId,
     ) -> BResult<Vec<MusicModel>> {
@@ -113,7 +113,7 @@ impl DatabaseServer {
         let id = MusicId::wrap(id);
         let mut table_music = db.open_table(TABLE_MUSIC)?;
         let mut table_music_by_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
-        let mut table_storage_music = db.open_table(TABLE_STORAGE_MUSIC)?;
+        let mut table_storage_music = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
         table_music.insert(
             id,
             MusicModel {
@@ -160,6 +160,10 @@ impl DatabaseServer {
             let m = table_music.get(id)?.map(|v| v.value());
 
             if let Some(mut m) = m {
+                if let Some(id) = m.cover {
+                    self.remove_blob_impl(&db, id)?;
+                }
+
                 let cover_id = self.alloc_id(&db, DbKeyAlloc::Blob)?;
                 let cover_id = BlobId::wrap(cover_id);
 

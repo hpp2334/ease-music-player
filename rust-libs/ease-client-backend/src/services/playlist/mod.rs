@@ -6,24 +6,15 @@ use std::{
 
 use ease_client_shared::backends::{
     connector::ConnectorAction,
-    music::MusicAbstract,
+    music::{MusicAbstract, MusicId},
     music_duration::MusicDuration,
     playlist::{Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta},
     storage::DataSourceKey,
 };
 
-use crate::{
-    ctx::BackendContext,
-    error::BResult,
-    models::playlist::PlaylistModel,
-    repositories::{
-        core::get_conn,
-        music::db_load_music_metas_by_playlist_id,
-        playlist::{db_load_first_music_covers, db_load_playlists, FirstMusicCovers},
-    },
-};
+use crate::{ctx::BackendContext, error::BResult, models::playlist::PlaylistModel};
 
-use super::{music::build_music_abstract, storage::to_opt_storage_entry};
+use super::music::build_music_abstract;
 
 fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<MusicDuration> {
     let mut sum: Duration = Default::default();
@@ -40,18 +31,17 @@ fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<MusicDuration> {
 pub(crate) fn build_playlist_meta(
     _cx: &Arc<BackendContext>,
     model: PlaylistModel,
-    first_covers: &FirstMusicCovers,
+    first_cover_music_id: Option<MusicId>,
 ) -> PlaylistMeta {
-    let cover_loc =
-        if let Some(picture) = to_opt_storage_entry(model.picture_path, model.picture_storage_id) {
-            Some(picture)
-        } else {
-            None
-        };
+    let cover_loc = if let Some(picture) = model.picture {
+        Some(picture)
+    } else {
+        None
+    };
     let show_cover = if let Some(loc) = cover_loc.clone() {
         Some(DataSourceKey::AnyEntry { entry: loc })
     } else {
-        let id = first_covers.get(&model.id).map(|c| c.clone());
+        let id = first_cover_music_id;
         if let Some(id) = id {
             Some(DataSourceKey::Cover { id })
         } else {
@@ -69,13 +59,12 @@ pub(crate) fn build_playlist_meta(
 
 pub(crate) fn build_playlist_abstract(
     cx: &Arc<BackendContext>,
-    conn: DbConnectionRef,
     model: PlaylistModel,
-    first_covers: &FirstMusicCovers,
 ) -> BResult<(PlaylistAbstract, Vec<MusicAbstract>)> {
     let id = model.id;
-    let meta = build_playlist_meta(&cx, model, &first_covers);
-    let musics = db_load_music_metas_by_playlist_id(conn, id)?;
+    let first_cover_music_id = cx.database_server().load_playlist_first_cover_id(id)?;
+    let meta = build_playlist_meta(&cx, model, first_cover_music_id);
+    let musics = cx.database_server().load_musics_by_playlist_id(id)?;
     let musics = musics
         .into_iter()
         .map(|v| build_music_abstract(cx, v))
@@ -98,16 +87,13 @@ pub(crate) async fn get_playlist(
     let rt = cx.async_runtime();
     let cx = cx.clone();
     rt.spawn(async move {
-        let conn = get_conn(&cx)?;
-        let models = db_load_playlists(conn.get_ref())?;
-        let first_covers = db_load_first_music_covers(conn.get_ref())?;
+        let model = cx.database_server().load_playlist(arg)?;
 
-        let model = models.into_iter().find(|m| m.id == arg);
         if model.is_none() {
             return Ok(None);
         }
         let model = model.unwrap();
-        let (abstr, musics) = build_playlist_abstract(&cx, conn.get_ref(), model, &first_covers)?;
+        let (abstr, musics) = build_playlist_abstract(&cx, model)?;
 
         Ok(Some(Playlist { abstr, musics }))
     })
@@ -117,13 +103,11 @@ pub(crate) async fn get_playlist(
 pub(crate) async fn get_all_playlist_abstracts(
     cx: &Arc<BackendContext>,
 ) -> BResult<Vec<PlaylistAbstract>> {
-    let conn = get_conn(&cx)?;
-    let models = db_load_playlists(conn.get_ref())?;
-    let first_covers = db_load_first_music_covers(conn.get_ref())?;
+    let models = cx.database_server().load_playlists()?;
 
     let mut ret: Vec<PlaylistAbstract> = Default::default();
     for model in models {
-        let (abstr, _) = build_playlist_abstract(&cx, conn.get_ref(), model, &first_covers)?;
+        let (abstr, _) = build_playlist_abstract(&cx, model)?;
         ret.push(abstr)
     }
 

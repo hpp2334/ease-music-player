@@ -4,17 +4,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    ctx::BackendContext,
-    error::BResult,
-    models::storage::{StorageEntryLocModel, StorageModel},
-    repositories::{
-        core::get_conn,
-        music::db_get_playlists_count_by_storage,
-        playlist::db_get_musics_count_by_storage,
-        storage::{db_load_storage, db_load_storages},
-    },
-};
+use crate::{ctx::BackendContext, error::BResult, models::storage::StorageModel};
 use ease_client_shared::backends::{
     connector::ConnectorAction,
     storage::{ArgUpsertStorage, Storage, StorageEntryLoc, StorageId, StorageType},
@@ -22,34 +12,11 @@ use ease_client_shared::backends::{
 use ease_remote_storage::{
     BuildOneDriveArg, BuildWebdavArg, LocalBackend, OneDriveBackend, StorageBackend, Webdav,
 };
-use num_traits::FromPrimitive;
 use tracing::instrument;
 
 #[derive(Default)]
 pub(crate) struct StorageState {
     cache: RwLock<HashMap<StorageId, Arc<dyn StorageBackend + Send + Sync + 'static>>>,
-}
-
-pub(crate) fn to_opt_storage_entry(
-    path: Option<String>,
-    id: Option<StorageId>,
-) -> Option<StorageEntryLoc> {
-    if path.is_some() && id.is_some() {
-        Some(StorageEntryLoc {
-            path: path.unwrap(),
-            storage_id: id.unwrap(),
-        })
-    } else {
-        None
-    }
-}
-
-pub(crate) fn from_opt_storage_entry(loc: Option<StorageEntryLoc>) -> StorageEntryLocModel {
-    if let Some(loc) = loc {
-        (Some(loc.path), Some(loc.storage_id))
-    } else {
-        (None, None)
-    }
 }
 
 #[instrument]
@@ -80,7 +47,7 @@ pub(crate) async fn load_storage_entry_data(
     }
 }
 
-pub fn build_storage(model: StorageModel, music_count: u32, playlist_count: u32) -> Storage {
+pub fn build_storage(model: StorageModel, music_count: u64) -> Storage {
     Storage {
         id: model.id,
         addr: model.addr,
@@ -88,9 +55,8 @@ pub fn build_storage(model: StorageModel, music_count: u32, playlist_count: u32)
         username: model.username,
         password: model.password,
         is_anonymous: model.is_anonymous,
-        typ: StorageType::from_i32(model.typ).unwrap(),
+        typ: model.typ,
         music_count,
-        playlist_count,
     }
 }
 
@@ -137,22 +103,14 @@ pub fn get_storage_backend(
         }
     }
 
-    let conn = get_conn(&cx)?;
-    let model = db_load_storage(conn.get_ref(), storage_id)?;
-    let (music_count, playlist_count) = if let Some(model) = model.as_ref() {
-        let music_count = db_get_musics_count_by_storage(conn.get_ref(), model.id)?;
-        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), model.id)?;
-        (music_count, playlist_count)
-    } else {
-        (0, 0)
-    };
-    drop(conn);
+    let model = cx.database_server().load_storage(storage_id)?;
+    let music_count = cx.database_server().load_storage_music_count(storage_id)?;
 
     if model.is_none() {
         return Ok(None);
     }
     let storage = model.unwrap();
-    let storage = build_storage(storage, music_count, playlist_count);
+    let storage = build_storage(storage, music_count);
     let backend = build_storage_backend_by_arg(
         &cx,
         ArgUpsertStorage {
@@ -174,15 +132,13 @@ pub fn get_storage_backend(
 }
 
 pub async fn list_storage(cx: &Arc<BackendContext>) -> BResult<Vec<Storage>> {
-    let conn = get_conn(&cx)?;
-    let models = db_load_storages(conn.get_ref())?;
+    let models = cx.database_server().load_storages()?;
 
     let mut storages: Vec<Storage> = Default::default();
     for m in models.into_iter() {
-        let music_count = db_get_musics_count_by_storage(conn.get_ref(), m.id)?;
-        let playlist_count = db_get_playlists_count_by_storage(conn.get_ref(), m.id)?;
+        let music_count = cx.database_server().load_storage_music_count(m.id)?;
 
-        storages.push(build_storage(m, music_count, playlist_count));
+        storages.push(build_storage(m, music_count));
     }
 
     storages.sort_by(|lhs, rhs| {
