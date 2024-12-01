@@ -1,9 +1,42 @@
+use std::sync::Arc;
+
 use ease_client_shared::backends::storage::{ArgUpsertStorage, StorageId};
-use ease_database::{params, DbConnectionRef};
 use num_traits::ToPrimitive;
+use redb::{ReadTransaction, ReadableTable, ReadableTableMetadata};
 use tracing::instrument;
 
 use crate::{error::BResult, models::storage::StorageModel};
+
+use super::{core::DatabaseServer, defs::TABLE_STORAGE};
+
+impl DatabaseServer {
+    fn load_storage_impl(
+        self: &Arc<Self>,
+        db: &ReadTransaction,
+        id: StorageId,
+    ) -> BResult<Option<StorageModel>> {
+        let table = db.open_table(TABLE_STORAGE)?;
+        let p = table.get(id)?.map(|v| v.value());
+        Ok(p)
+    }
+
+    pub fn load_storages(self: &Arc<Self>) -> BResult<Vec<StorageModel>> {
+        let db = self.db().begin_read()?;
+        let table = db.open_table(TABLE_STORAGE)?;
+        let len = table.len()? as usize;
+
+        let mut ret: Vec<StorageModel> = Default::default();
+        ret.reserve(len);
+
+        let mut iter = table.iter()?;
+        while let Some(v) = iter.next() {
+            let v = v?.1.value();
+            ret.push(v);
+        }
+
+        Ok(ret)
+    }
+}
 
 #[instrument]
 pub fn db_load_storage(

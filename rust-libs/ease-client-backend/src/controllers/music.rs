@@ -6,7 +6,6 @@ use futures::try_join;
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    repositories::{core::get_conn, music::db_update_music_lyric},
     services::{
         music::{disable_time_to_pause, enable_time_to_pause, get_music, notify_music},
         storage::from_opt_storage_entry,

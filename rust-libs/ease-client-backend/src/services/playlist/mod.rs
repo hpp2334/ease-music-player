@@ -11,7 +11,6 @@ use ease_client_shared::backends::{
     playlist::{Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta},
     storage::DataSourceKey,
 };
-use ease_database::DbConnectionRef;
 
 use crate::{
     ctx::BackendContext,

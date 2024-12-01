@@ -6,6 +6,7 @@ use crate::{backends::env::EASEM_ONEDRIVE_ID, define_id};
 use super::{music::MusicId, playlist::PlaylistId};
 
 define_id!(StorageId);
+define_id!(BlobId);
 
 #[derive(
     Debug,
@@ -18,10 +19,12 @@ define_id!(StorageId);
     bitcode::Encode,
     bitcode::Decode,
     uniffi::Record,
+    PartialOrd,
+    Ord,
 )]
 pub struct StorageEntryLoc {
-    pub path: String,
     pub storage_id: StorageId,
+    pub path: String,
 }
 
 #[derive(

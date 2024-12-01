@@ -11,8 +11,6 @@ use crate::{
     ctx::BackendContext,
     error::BResult,
     repositories::{
-        core::get_conn,
-        music::db_get_playlists_count_by_storage,
         playlist::{db_get_musics_count_by_storage, db_remove_musics_in_playlists_by_storage},
         storage::{db_load_storage, db_remove_storage, db_upsert_storage},
     },

@@ -13,7 +13,6 @@ use crate::{
     ctx::BackendContext,
     error::{BError, BResult},
     repositories::{
-        core::get_conn,
         music::{db_add_music, ArgDBAddMusic},
         playlist::{
             db_batch_add_music_to_playlist, db_remove_all_musics_in_playlist,

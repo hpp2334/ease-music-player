@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use ease_client_shared::backends::{
     app::ArgInitializeApp,
-    preference::PreferenceData,
     storage::{ArgUpsertStorage, StorageType},
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

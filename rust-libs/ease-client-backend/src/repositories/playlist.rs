@@ -1,118 +1,171 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use ease_client_shared::backends::{
     music::MusicId,
     playlist::PlaylistId,
     storage::{StorageEntryLoc, StorageId},
 };
-use ease_database::{params, DbConnectionRef};
+use redb::{ReadTransaction, ReadableTable, ReadableTableMetadata};
 use tracing::instrument;
 
-use crate::{error::BResult, models::playlist::PlaylistModel};
+use crate::{
+    error::BResult,
+    models::{key::DbKeyAlloc, playlist::PlaylistModel},
+};
 
-#[derive(Debug)]
-pub struct ArgDBUpsertPlaylist {
-    pub id: Option<PlaylistId>,
-    pub title: String,
-    pub picture: Option<StorageEntryLoc>,
-}
+use super::{
+    core::DatabaseServer,
+    defs::{TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE},
+    music::ArgDBAddMusic,
+};
 
-#[instrument]
-pub fn db_upsert_playlist(
-    conn: DbConnectionRef,
-    arg: ArgDBUpsertPlaylist,
-    current_time_ms: i64,
-) -> BResult<PlaylistId> {
-    let (picture_storage_id, picture_path) = if let Some(picture) = arg.picture {
-        (Some(picture.storage_id), Some(picture.path))
-    } else {
-        (None, None)
-    };
-    if let Some(id) = arg.id {
-        conn.execute(
-            "UPDATE playlist SET title = ?1, picture_storage_id = ?2, picture_path = ?3 WHERE id = ?4",
-            params![arg.title, picture_storage_id, picture_path, id],
-        )?;
-        Ok(id)
-    } else {
-        let id = conn.query::<PlaylistId>(
-            "INSERT INTO playlist (title, picture_storage_id, picture_path, created_time) VALUES (?1, ?2, ?3, ?4) RETURNING id",
-            params![arg.title, picture_storage_id, picture_path, current_time_ms],
-        )?.pop().unwrap();
+impl DatabaseServer {
+    fn load_playlist_impl(
+        self: &Arc<Self>,
+        db: &ReadTransaction,
+        id: PlaylistId,
+    ) -> BResult<Option<PlaylistModel>> {
+        let table = db.open_table(TABLE_PLAYLIST)?;
+        let p = table.get(id)?.map(|v| v.value());
+        Ok(p)
+    }
+
+    pub fn load_playlists(self: &Arc<Self>) -> BResult<Vec<PlaylistModel>> {
+        let db = self.db().begin_read()?;
+        let table = db.open_table(TABLE_PLAYLIST)?;
+        let len = table.len()? as usize;
+
+        let mut ret: Vec<PlaylistModel> = Default::default();
+        ret.reserve(len);
+
+        let mut iter = table.iter()?;
+        while let Some(v) = iter.next() {
+            let v = v?.1.value();
+            ret.push(v);
+        }
+
+        Ok(ret)
+    }
+
+    pub fn load_playlist_first_cover_id(
+        self: &Arc<Self>,
+        id: PlaylistId,
+    ) -> BResult<Option<MusicId>> {
+        let db = self.db().begin_read()?;
+        let table = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+        let mut iter = table.get(id)?;
+
+        while let Some(id) = iter.next() {
+            let id = id?.value();
+            let m = self.load_music_impl(&db, id)?.unwrap();
+
+            if m.cover.is_some() {
+                return Ok(Some(m.id));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn create_playlist(
+        self: &Arc<Self>,
+        title: String,
+        picture: Option<StorageEntryLoc>,
+        musics: Vec<ArgDBAddMusic>,
+        current_time_ms: i64,
+    ) -> BResult<PlaylistId> {
+        let db = self.db().begin_write()?;
+        let rdb = self.db().begin_read()?;
+
+        let id = {
+            let id = {
+                let id = self.alloc_id(&db, DbKeyAlloc::Playlist)?;
+                let id = PlaylistId::wrap(id);
+                id
+            };
+
+            let mut playlist = PlaylistModel {
+                id,
+                title: Default::default(),
+                created_time: Default::default(),
+                picture: Default::default(),
+            };
+
+            playlist.title = title;
+            playlist.picture = picture;
+            playlist.created_time = current_time_ms;
+
+            id
+        };
+        for m in musics {
+            self.add_music_impl(&db, &rdb, m)?;
+        }
+
+        db.commit()?;
         Ok(id)
     }
-}
 
-#[instrument]
-pub fn db_remove_playlist(conn: DbConnectionRef, id: PlaylistId) -> BResult<()> {
-    conn.execute("DELETE FROM playlist WHERE id = ?1", params![id])?;
-    Ok(())
-}
+    pub fn update_playlist(
+        self: &Arc<Self>,
+        id: PlaylistId,
+        title: String,
+        picture: Option<StorageEntryLoc>,
+        current_time_ms: i64,
+    ) -> BResult<PlaylistId> {
+        let db = self.db().begin_write()?;
+        let rdb = self.db().begin_read()?;
 
-#[instrument]
-pub fn db_remove_all_musics_in_playlist(conn: DbConnectionRef, id: PlaylistId) -> BResult<()> {
-    conn.execute(
-        "DELETE FROM playlist_music WHERE playlist_id = ?1",
-        params![id],
-    )?;
-    Ok(())
-}
+        {
+            let mut playlist = self.load_playlist_impl(&rdb, id)?.unwrap();
 
-#[instrument]
-pub fn db_remove_music_from_playlist(
-    conn: DbConnectionRef,
-    playlist_id: PlaylistId,
-    music_id: MusicId,
-) -> BResult<()> {
-    conn.execute(
-        "DELETE FROM playlist_music WHERE playlist_id = ?1 AND music_id = ?2",
-        params![playlist_id, music_id],
-    )?;
-    Ok(())
-}
-
-#[instrument]
-pub fn db_batch_add_music_to_playlist(
-    conn: DbConnectionRef,
-    args: Vec<(MusicId, PlaylistId)>,
-) -> BResult<()> {
-    for (music_id, playlist_id) in args {
-        conn.execute(
-            "INSERT OR IGNORE INTO playlist_music (playlist_id, music_id) VALUES (?1, ?2)",
-            params![playlist_id, music_id],
-        )?;
+            playlist.title = title;
+            playlist.picture = picture;
+            playlist.created_time = current_time_ms;
+        };
+        db.commit()?;
+        Ok(id)
     }
-    Ok(())
-}
 
-#[instrument]
-pub fn db_load_playlists(conn: DbConnectionRef) -> BResult<Vec<PlaylistModel>> {
-    let playlist_models = conn.query::<PlaylistModel>(
-        r#"
-        SELECT id, title, picture_storage_id, picture_path, created_time FROM playlist;
-    "#,
-        [],
-    )?;
-    Ok(playlist_models)
-}
+    pub fn remove_playlist(self: &Arc<Self>, playlist_id: PlaylistId) -> BResult<()> {
+        let db = self.db().begin_write()?;
 
-pub type FirstMusicCovers = HashMap<PlaylistId, MusicId>;
+        {
+            let mut table_playlist = db.open_table(TABLE_PLAYLIST)?;
+            let mut table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
 
-#[instrument]
-pub fn db_load_first_music_covers(conn: DbConnectionRef) -> BResult<FirstMusicCovers> {
-    let list = conn.query::<(MusicId, PlaylistId)>(
-        r#"
-    SELECT music_id, playlist_id
-    FROM playlist_music
-    JOIN music ON music.id = playlist_music.music_id
-    WHERE music.cover NOT NULL
-    GROUP BY playlist_id;
-"#,
-        [],
-    )?;
+            table_playlist.remove(playlist_id)?;
+            table_playlist_musics.remove_all(playlist_id)?;
+        }
 
-    let map: FirstMusicCovers = list.into_iter().map(|v| (v.1, v.0)).collect();
-    Ok(map)
+        db.commit()?;
+        Ok(())
+    }
+
+    pub fn remove_music_from_playlist(
+        self: &Arc<Self>,
+        playlist_id: PlaylistId,
+        music_id: MusicId,
+    ) -> BResult<()> {
+        let db = self.db().begin_write()?;
+
+        {
+            let mut table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+            table_playlist_musics.remove(playlist_id, music_id)?;
+        }
+
+        db.commit()?;
+        Ok(())
+    }
+
+    pub fn add_musics_to_playlist(self: &Arc<Self>, musics: Vec<ArgDBAddMusic>) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        let rdb = self.db().begin_read()?;
+
+        for m in musics {
+            self.add_music_impl(&db, &rdb, m)?;
+        }
+        db.commit()?;
+        Ok(())
+    }
 }
 
 #[instrument]
