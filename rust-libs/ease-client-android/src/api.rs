@@ -151,31 +151,34 @@ pub fn api_destroy_backend() {
 #[uniffi::export]
 pub fn api_send_backend_player_event(evt: PlayerDelegateEvent) {
     let _guard = RT.enter();
-    let backend = BACKEND.backend();
-    backend.request_from_host(MessagePayload {
-        code: Code::OnPlayerEvent,
-        payload: encode_message_payload(evt),
-    });
+    if let Some(backend) = BACKEND.try_backend() {
+        backend.request_from_host(MessagePayload {
+            code: Code::OnPlayerEvent,
+            payload: encode_message_payload(evt),
+        });
+    }
 }
 
 #[uniffi::export]
 pub fn api_backend_play_next() {
     let _guard = RT.enter();
-    let backend = BACKEND.backend();
-    backend.request_from_host(MessagePayload {
-        code: Code::PlayNext,
-        payload: encode_message_payload(()),
-    });
+    if let Some(backend) = BACKEND.try_backend() {
+        backend.request_from_host(MessagePayload {
+            code: Code::PlayNext,
+            payload: encode_message_payload(()),
+        });
+    }
 }
 
 #[uniffi::export]
 pub fn api_backend_play_previous() {
     let _guard = RT.enter();
-    let backend = BACKEND.backend();
-    backend.request_from_host(MessagePayload {
-        code: Code::PlayPrevious,
-        payload: encode_message_payload(()),
-    });
+    if let Some(backend) = BACKEND.try_backend() {
+        backend.request_from_host(MessagePayload {
+            code: Code::PlayPrevious,
+            payload: encode_message_payload(()),
+        });
+    }
 }
 
 #[uniffi::export]

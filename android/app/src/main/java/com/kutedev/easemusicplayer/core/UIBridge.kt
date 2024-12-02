@@ -215,22 +215,6 @@ class UIBridge {
         _toastService.setContext(context)
         _permissionService.setContext(context, requestPermissionLauncher)
 
-        val factory = MediaController.Builder(
-            context,
-            SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        ).buildAsync()
-        factory.addListener(
-            {
-                _playerController = factory.let {
-                    if (it.isDone)
-                        it.get()
-                    else
-                        null
-                }
-            },
-            MoreExecutors.directExecutor()
-        )
-
         this._handle = apiBuildClient(
             _permissionService,
             routerInternal,

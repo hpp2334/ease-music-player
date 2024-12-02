@@ -38,6 +38,12 @@ struct BackendContextInternal {
     ),
 }
 
+impl Drop for BackendContextInternal {
+    fn drop(&mut self) {
+        tracing::info!("drop BackendContextInternal")
+    }
+}
+
 pub struct BackendContext {
     internal: Arc<BackendContextInternal>,
 }

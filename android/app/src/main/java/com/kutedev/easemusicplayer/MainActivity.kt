@@ -38,12 +38,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.kutedev.easemusicplayer.core.BACKEND_STARTED_ACTION
+import com.kutedev.easemusicplayer.core.BackendService
 import com.kutedev.easemusicplayer.core.IOnNotifyView
 import com.kutedev.easemusicplayer.core.UIBridge
 import com.kutedev.easemusicplayer.core.UIBridgeController
@@ -91,6 +93,7 @@ class MainActivity : ComponentActivity() {
 
         LocalBroadcastManager.getInstance(this).registerReceiver(uiReceiver, IntentFilter(
             BACKEND_STARTED_ACTION))
+        startService(Intent(this, BackendService::class.java))
 
         val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
             uiBridge!!.schedule {
