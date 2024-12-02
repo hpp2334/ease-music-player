@@ -1,11 +1,15 @@
 package com.kutedev.easemusicplayer
 
+import android.Manifest.permission.FOREGROUND_SERVICE
+import android.Manifest.permission.POST_NOTIFICATIONS
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import androidx.activity.ComponentActivity
@@ -34,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.compose.NavHost
@@ -104,6 +109,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         uiBridge!!.onActivityStart()
+        ensurePostNotificationsPermission()
     }
 
     override fun onStop() {
@@ -231,6 +237,20 @@ class MainActivity : ComponentActivity() {
 
     private fun registerViewModels() {
         registerViewModel<EaseViewModel>(uiBridge!!)
+    }
+
+    private fun ensurePostNotificationsPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(
+                POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(
+                    arrayOf(POST_NOTIFICATIONS),
+                    101
+                )
+            }
+        }
     }
 }
 

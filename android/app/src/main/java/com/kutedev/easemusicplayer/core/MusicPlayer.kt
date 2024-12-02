@@ -106,7 +106,12 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
         _context = context
 
         val player = ExoPlayer.Builder(context)
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).build(), true)
+            .setAudioAttributes(AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build(),
+                true
+            )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(WAKE_MODE_NETWORK)
             .build()
