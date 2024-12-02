@@ -1,7 +1,6 @@
-use std::sync::Arc;
 
 use ease_client_shared::backends::storage::{
-    ArgUpsertStorage, ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult,
+    ArgUpsertStorage, ListStorageEntryChildrenResp, StorageConnectionTestResult,
     StorageEntry, StorageEntryLoc, StorageId,
 };
 use ease_remote_storage::OneDriveBackend;
@@ -13,7 +12,7 @@ use crate::{
     services::{
         playlist::notify_all_playlist_abstracts,
         storage::{
-            build_storage, build_storage_backend_by_arg, evict_storage_backend_cache,
+            build_storage_backend_by_arg, evict_storage_backend_cache,
             get_storage_backend, notify_storages,
         },
     },

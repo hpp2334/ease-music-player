@@ -4,10 +4,9 @@ use ease_client_shared::backends::{
     music::MusicId,
     music_duration::MusicDuration,
     playlist::PlaylistId,
-    storage::{BlobId, StorageEntryLoc, StorageId},
+    storage::{BlobId, StorageEntryLoc},
 };
 use redb::{ReadTransaction, ReadableTable, WriteTransaction};
-use tracing::instrument;
 
 use crate::{
     error::BResult,

@@ -1,13 +1,9 @@
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{Arc, RwLock};
 
 use ease_client::{to_host::connector::IConnectorHost, EaseError, EaseResult};
-use ease_client_backend::{error::BResult, Backend};
+use ease_client_backend::Backend;
 use ease_client_shared::backends::{connector::IConnectorNotifier, music::MusicId, MessagePayload};
 use misty_vm::BoxFuture;
-use tokio::sync::{mpsc, oneshot};
-
-type Mp = (MessagePayload, oneshot::Sender<BResult<MessagePayload>>);
-type Mtx = mpsc::Sender<Mp>;
 
 pub struct BackendHost {
     _backend: RwLock<Option<Arc<Backend>>>,

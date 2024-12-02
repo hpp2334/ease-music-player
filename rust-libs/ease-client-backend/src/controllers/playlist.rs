@@ -1,7 +1,5 @@
-use std::sync::Arc;
 
 use ease_client_shared::backends::{
-    music::MusicId,
     playlist::{
         ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
         Playlist, PlaylistId,

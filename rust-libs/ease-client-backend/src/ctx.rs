@@ -9,7 +9,6 @@ use std::{
 };
 
 use ease_client_shared::backends::connector::{ConnectorAction, IConnectorNotifier};
-use getset::Getters;
 use misty_async::AsyncRuntime;
 
 use crate::{
@@ -127,27 +126,6 @@ impl BackendContext {
 
     pub fn get_storage_path(&self) -> String {
         self.internal.storage_path.read().unwrap().clone()
-    }
-
-    pub fn set_app_document_dir(&self, p: &str) {
-        let mut w = self.internal.app_document_dir.write().unwrap();
-        *w = p.to_string();
-    }
-
-    pub fn get_app_document_dir(&self) -> String {
-        self.internal.app_document_dir.read().unwrap().clone()
-    }
-
-    pub fn set_schema_version(&self, v: u32) {
-        self.internal
-            .schema_version
-            .store(v, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    pub fn get_schema_version(&self) -> u32 {
-        self.internal
-            .schema_version
-            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn notify(&self, payload: ConnectorAction) {

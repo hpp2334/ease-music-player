@@ -7,7 +7,6 @@ use crate::{ctx::BackendContext, error::BResult};
 
 pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
     cx.set_storage_path(&arg.storage_path);
-    cx.set_app_document_dir(&arg.app_document_dir);
     // Init
     init_database(cx, &arg)?;
     cx.asset_server().start(&cx, arg.app_document_dir);
@@ -27,7 +26,6 @@ fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
     }
 
     cx.database_server().save_schema_version(SCHEMA_VERSION)?;
-    cx.set_schema_version(SCHEMA_VERSION);
     Ok(())
 }
 

@@ -1,4 +1,3 @@
-use std::sync::Arc;
 
 use ease_client_shared::backends::music::{ArgUpdateMusicLyric, Music, MusicId};
 use futures::try_join;

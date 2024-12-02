@@ -1,9 +1,4 @@
-use std::sync::Arc;
-
-use ease_client_shared::backends::{
-    music::MusicId,
-    storage::StorageEntryLoc,
-};
+use ease_client_shared::backends::{music::MusicId, storage::StorageEntryLoc};
 use ease_remote_storage::StreamFile;
 
 use crate::{

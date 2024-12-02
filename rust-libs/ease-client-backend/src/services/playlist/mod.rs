@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::time::Duration;
 
 use ease_client_shared::backends::{
     connector::ConnectorAction,
