@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -400,13 +402,16 @@ private fun PlaylistItemsBlock(
         mutableStateOf<MusicId?>(null)
     }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .padding(0.dp)
     ) {
-        Box(modifier = Modifier.height(48.dp))
-        for (item in items) {
+        item {
+            Box(modifier = Modifier.height(48.dp))
+        }
+        items(items) {
+            val item = it;
             val playing = item.id == currentMusicState.id
 
             key(item.id) {
@@ -424,10 +429,12 @@ private fun PlaylistItemsBlock(
                 )
             }
         }
-        BottomBarSpacer(
-            hasCurrentMusic = currentMusicState.id != null,
-            scaffoldPadding = scaffoldPadding,
-        )
+        item {
+            BottomBarSpacer(
+                hasCurrentMusic = currentMusicState.id != null,
+                scaffoldPadding = scaffoldPadding,
+            )
+        }
     }
 }
 
