@@ -37,7 +37,7 @@ pub struct AssetServer {
     source_id_alloc: AtomicU64,
     chunks_cache: RwLock<LruCache<AssetChunksCacheKey, Arc<RwLock<AssetChunks>>>>,
     server_handle: RwLock<Option<Task<()>>>,
-    db: RwLock<Option<(String, Arc<redb::Database>)>>,
+    db: RwLock<Option<(String, Arc<RwLock<redb::Database>>)>>,
 }
 
 fn parse_request_range(headers: &HeaderMap) -> Option<u64> {
@@ -103,6 +103,20 @@ async fn handle_music_download(
     }
 }
 
+#[axum::debug_handler]
+async fn handle_music_meta(
+    axum::extract::State(cx): axum::extract::State<WeakBackendContext>,
+    axum::extract::Path(id): axum::extract::Path<i64>,
+) -> axum::response::Response {
+    let id = MusicId::wrap(id);
+
+    if let Some(cx) = cx.upgrade() {
+        cx.asset_server().handle_got_stream_meta(&cx, id).await
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
 impl Drop for AssetServer {
     fn drop(&mut self) {
         {
@@ -132,6 +146,12 @@ impl AssetServer {
         let port = self.port.load(std::sync::atomic::Ordering::Relaxed);
         let id = *id.as_ref();
         format!("http://127.0.0.1:{}/music/{}", port, id)
+    }
+
+    pub fn serve_music_meta_url(&self, id: MusicId) -> String {
+        let port = self.port.load(std::sync::atomic::Ordering::Relaxed);
+        let id = *id.as_ref();
+        format!("http://127.0.0.1:{}/music-meta/{}", port, id)
     }
 
     pub fn start(&self, cx: &BackendContext, dir: String) {
@@ -164,13 +184,14 @@ impl AssetServer {
                 .set_cache_size(20 << 20)
                 .create(&p)
                 .expect("failed to init database");
-            *w = Some((p, Arc::new(db)));
+            *w = Some((p, Arc::new(RwLock::new(db))));
         }
     }
 
     fn start_server(&self, cx: &BackendContext) {
         let router_svc = axum::Router::new()
             .route("/music/:id", axum::routing::get(handle_music_download))
+            .route("/music-meta/:id", axum::routing::get(handle_music_meta))
             .with_state(cx.weak())
             .into_make_service();
 
@@ -265,6 +286,36 @@ impl AssetServer {
 
         let body = axum::body::StreamBody::new(stream);
         return (status, headers, body).into_response();
+    }
+
+    async fn handle_got_stream_meta(
+        self: &Arc<AssetServer>,
+        cx: &BackendContext,
+        id: MusicId,
+    ) -> Response {
+        let file = load_asset(&cx, DataSourceKey::Music { id }, 0).await;
+        if file.is_err() {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        let file = file.unwrap();
+        if file.is_none() {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        let file = file.unwrap();
+
+        let mut headers = HeaderMap::new();
+        headers.append(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str("application/octet-stream").unwrap(),
+        );
+        if let Some(size) = file.size() {
+            headers.append(
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(size.to_string().as_str()).unwrap(),
+            );
+        }
+        let body = axum::body::StreamBody::new(file.into_stream());
+        return (headers, body).into_response();
     }
 
     async fn build_chunks_reader(

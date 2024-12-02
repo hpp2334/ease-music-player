@@ -75,7 +75,7 @@ pub(crate) async fn cc_create_playlist(
                 if let Some(cx) = cx.upgrade() {
                     for id in music_ids {
                         cx.player_delegate()
-                            .request_total_duration(id, cx.asset_server().serve_music_url(id));
+                            .request_total_duration(id, cx.asset_server().serve_music_meta_url(id));
                     }
                 }
             })
@@ -121,7 +121,7 @@ pub(crate) async fn cu_add_musics_to_playlist(
                 if let Some(cx) = cx.upgrade() {
                     for id in music_ids {
                         cx.player_delegate()
-                            .request_total_duration(id, cx.asset_server().serve_music_url(id));
+                            .request_total_duration(id, cx.asset_server().serve_music_meta_url(id));
                     }
                 }
             })

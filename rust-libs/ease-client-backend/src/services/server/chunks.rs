@@ -26,7 +26,7 @@ pub enum AssetChunkData {
 #[derive(Clone)]
 pub struct AssetChunksSource {
     key: String,
-    db: Arc<redb::Database>,
+    db: Arc<RwLock<redb::Database>>,
 }
 
 pub struct AssetChunksReader {
@@ -47,7 +47,7 @@ pub struct AssetChunks {
 }
 
 impl AssetChunksSource {
-    pub fn new(source_id: u64, db: Arc<redb::Database>) -> Self {
+    pub fn new(source_id: u64, db: Arc<RwLock<redb::Database>>) -> Self {
         Self {
             key: source_id.to_string(),
             db,
@@ -59,7 +59,7 @@ impl AssetChunksSource {
     }
 
     fn read_chunk(&self, index: u64) -> BResult<Option<AssetChunkData>> {
-        let db = self.db.begin_read()?;
+        let db = self.db.read().unwrap().begin_read()?;
         let table_definition = Self::def(&self.key);
         let table = db.open_table(table_definition);
         if let Err(e) = &table {
@@ -82,7 +82,7 @@ impl AssetChunksSource {
     }
 
     fn add_chunk(&self, index: u64, chunk: AssetChunkData) -> BResult<()> {
-        let w_txn = self.db.begin_write()?;
+        let w_txn = self.db.read().unwrap().begin_write()?;
         let table_definition = Self::def(&self.key);
         {
             let mut table = w_txn.open_table(table_definition)?;
@@ -96,7 +96,7 @@ impl AssetChunksSource {
     }
 
     fn remove(&self) -> BResult<()> {
-        let w_txn = self.db.begin_write()?;
+        let w_txn = self.db.read().unwrap().begin_write()?;
         let table_definition = Self::def(&self.key);
         w_txn.delete_table(table_definition)?;
         w_txn.commit()?;
