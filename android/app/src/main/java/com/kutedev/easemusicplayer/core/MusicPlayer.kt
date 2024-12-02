@@ -10,6 +10,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
+import androidx.media3.common.C.WAKE_MODE_NETWORK
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -107,6 +108,7 @@ private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
         val player = ExoPlayer.Builder(context)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).build(), true)
             .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(WAKE_MODE_NETWORK)
             .build()
         _internal = player
 
