@@ -18,9 +18,6 @@ import androidx.media3.session.SessionToken
 import androidx.navigation.NavHostController
 import com.google.common.util.concurrent.MoreExecutors
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import uniffi.ease_client.MainAction
 import uniffi.ease_client_android.IPermissionServiceForeign
 import uniffi.ease_client_android.IRouterServiceForeign
@@ -45,13 +42,11 @@ import uniffi.ease_client.ViewAction
 import uniffi.ease_client.Widget
 import uniffi.ease_client.WidgetAction
 import uniffi.ease_client.WidgetActionType
-import uniffi.ease_client_android.IAsyncAdapterForeign
 import uniffi.ease_client_android.apiBuildClient
 import uniffi.ease_client_android.apiDestroyClient
 import uniffi.ease_client_android.apiEmitViewAction
 import uniffi.ease_client_android.apiLoadAsset
 import uniffi.ease_client_android.apiStartClient
-import uniffi.ease_client_shared.ArgInitializeApp
 import uniffi.ease_client_shared.DataSourceKey
 
 
@@ -145,49 +140,54 @@ private class PermissionService : IPermissionServiceForeign {
     }
 }
 
+
+class DataSourceKeyH(key: DataSourceKey) {
+    private val _key = key;
+
+    fun value(): DataSourceKey {
+        return this._key
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is DataSourceKeyH) return false
+
+        if (this._key is DataSourceKey.Music && other._key is DataSourceKey.Music) {
+            return this._key.id == other._key.id
+        }
+        if (this._key is DataSourceKey.Cover && other._key is DataSourceKey.Cover) {
+            return this._key.id == other._key.id
+        }
+        if (this._key is DataSourceKey.AnyEntry && other._key is DataSourceKey.AnyEntry) {
+            return this._key.entry.storageId == other._key.entry.storageId && this._key.entry.path == other._key.entry.path;
+        }
+        return false;
+    }
+
+    override fun hashCode(): Int {
+        return _key.hashCode()
+    }
+}
+
 class BitmapDataSources {
-    class K(key: DataSourceKey) {
-        private val _key = key;
+    private val _map = HashMap<DataSourceKeyH, ImageBitmap?>()
 
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (other !is K) return false
-
-            if (this._key is DataSourceKey.Music && other._key is DataSourceKey.Music) {
-                return this._key.id == other._key.id
-            }
-            if (this._key is DataSourceKey.Cover && other._key is DataSourceKey.Cover) {
-                return this._key.id == other._key.id
-            }
-            if (this._key is DataSourceKey.AnyEntry && other._key is DataSourceKey.AnyEntry) {
-                return this._key.entry.storageId == other._key.entry.storageId && this._key.entry.path == other._key.entry.path;
-            }
-            return false;
-        }
-
-        override fun hashCode(): Int {
-            return _key.hashCode()
-        }
+    fun get(key: DataSourceKeyH): ImageBitmap? {
+        return this._map[key]
     }
 
-    private val _map = HashMap<K, ImageBitmap?>()
-
-    fun get(key: DataSourceKey): ImageBitmap? {
-        return this._map[K(key)]
-    }
-
-    suspend fun load(key: DataSourceKey): ImageBitmap? {
-        val cached = this._map[K(key)]
+    suspend fun load(key: DataSourceKeyH): ImageBitmap? {
+        val cached = this._map[key]
         if (cached != null) {
             return cached
         }
 
-        val data = apiLoadAsset(key)
+        val data = apiLoadAsset(key.value())
         val decoded = data?.let {
             val bitmap = android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)
             bitmap?.asImageBitmap()
         }
-        this._map[K(key)] = decoded
+        this._map[key] = decoded
         return decoded
     }
 }

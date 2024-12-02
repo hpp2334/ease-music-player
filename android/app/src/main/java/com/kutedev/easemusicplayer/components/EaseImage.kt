@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import com.kutedev.easemusicplayer.core.DataSourceKeyH
 import com.kutedev.easemusicplayer.core.UIBridgeController
 import uniffi.ease_client_shared.DataSourceKey
 
@@ -18,10 +19,17 @@ fun EaseImage(
     contentScale: ContentScale
 ) {
     val bridge = UIBridgeController.current
-    var bitmap by remember { mutableStateOf(bridge.bitmapDataSources.get(dataSourceKey)) }
+    var oldKey by remember { mutableStateOf(DataSourceKeyH(dataSourceKey)) }
+    val key = DataSourceKeyH(dataSourceKey)
+    var bitmap by remember { mutableStateOf(bridge.bitmapDataSources.get(key)) }
 
-    LaunchedEffect(dataSourceKey) {
-        val data = bridge.bitmapDataSources.load(dataSourceKey)
+    if (oldKey != key) {
+        oldKey = key;
+        bitmap = bridge.bitmapDataSources.get(key)
+    }
+
+    LaunchedEffect(key) {
+        val data = bridge.bitmapDataSources.load(key)
         bitmap = data
     }
 
