@@ -1,9 +1,15 @@
-use std::sync::{atomic::AtomicU64, Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize},
+    Arc, RwLock,
+};
 
-use ease_client_shared::backends::storage::DataSourceKey;
+use ease_client_shared::backends::storage::{BlobId, DataSourceKey};
 use serde::{Deserialize, Serialize};
 
-use crate::error::{BError, BResult};
+use crate::{
+    error::{BError, BResult},
+    repositories::blob::BlobManager,
+};
 
 #[derive(Debug, bitcode::Encode, bitcode::Decode, PartialEq, Eq, uniffi::Enum)]
 pub enum AssetLoadStatus {
@@ -23,22 +29,20 @@ pub enum AssetChunkData {
     Buffer(Vec<u8>),
 }
 
-#[derive(Clone)]
 pub struct AssetChunksSource {
-    key: String,
-    db: Arc<RwLock<redb::Database>>,
+    blob: Arc<BlobManager>,
+    ids: Vec<BlobId>,
 }
 
 pub struct AssetChunksReader {
     init_offset: u64,
     init_remaining: AtomicU64,
-    chunk_index: AtomicU64,
+    chunk_index: AtomicUsize,
     chunks: Arc<RwLock<AssetChunks>>,
     srx: flume::Receiver<()>,
 }
 
 pub struct AssetChunks {
-    chunk_count: u64,
     chunk_bytes: u64,
     all_bytes: u64,
     source: AssetChunksSource,
@@ -47,59 +51,41 @@ pub struct AssetChunks {
 }
 
 impl AssetChunksSource {
-    pub fn new(source_id: u64, db: Arc<RwLock<redb::Database>>) -> Self {
+    pub fn new(blob: Arc<BlobManager>) -> Self {
         Self {
-            key: source_id.to_string(),
-            db,
+            blob,
+            ids: Default::default(),
         }
     }
 
-    fn def(key: &String) -> redb::TableDefinition<u64, Vec<u8>> {
-        redb::TableDefinition::new(&key)
+    fn chunk_len(&self) -> usize {
+        self.ids.len()
     }
 
-    fn read_chunk(&self, index: u64) -> BResult<Option<AssetChunkData>> {
-        let db = self.db.read().unwrap().begin_read()?;
-        let table_definition = Self::def(&self.key);
-        let table = db.open_table(table_definition);
-        if let Err(e) = &table {
-            match e {
-                redb::TableError::TableDoesNotExist(_) => {
-                    return Ok(None);
-                }
-                _ => {}
-            }
+    fn read_chunk(&self, index: usize) -> BResult<Option<AssetChunkData>> {
+        if index >= self.ids.len() {
+            return Ok(None);
         }
-        let table = table.unwrap();
-        let data = table.get(index)?;
 
-        if let Some(data) = data {
-            let data = bitcode::decode(&data.value()).unwrap();
-            Ok(Some(data))
-        } else {
-            Ok(None)
-        }
+        let id = self.ids[index];
+        let data = self.blob.read(id)?;
+        let data = bitcode::decode(&data).unwrap();
+        Ok(Some(data))
     }
 
-    fn add_chunk(&self, index: u64, chunk: AssetChunkData) -> BResult<()> {
-        let w_txn = self.db.read().unwrap().begin_write()?;
-        let table_definition = Self::def(&self.key);
-        {
-            let mut table = w_txn.open_table(table_definition)?;
-            let data = bitcode::encode(&chunk);
-            let old = table.insert(index, data)?;
-            assert!(old.is_none());
-        }
-        w_txn.commit()?;
-
-        Ok(())
+    fn add_chunk(&mut self, chunk: AssetChunkData) -> BResult<usize> {
+        let data = bitcode::encode(&chunk);
+        let index = self.ids.len();
+        let id = self.blob.write(data)?;
+        self.ids.push(id);
+        Ok(index)
     }
 
-    fn remove(&self) -> BResult<()> {
-        let w_txn = self.db.read().unwrap().begin_write()?;
-        let table_definition = Self::def(&self.key);
-        w_txn.delete_table(table_definition)?;
-        w_txn.commit()?;
+    fn remove(&mut self) -> BResult<()> {
+        for id in self.ids.iter() {
+            self.blob.remove(*id)?;
+        }
+        self.ids.clear();
         Ok(())
     }
 }
@@ -109,7 +95,7 @@ impl AssetChunksReader {
         let reader = AssetChunksReader {
             init_offset: byte_offset,
             init_remaining: AtomicU64::new(byte_offset),
-            chunk_index: AtomicU64::new(0),
+            chunk_index: AtomicUsize::new(0),
             chunks: chunks.clone(),
             srx: chunks.read().unwrap().srx.clone(),
         };
@@ -127,7 +113,7 @@ impl AssetChunksReader {
                 let chunks = self.chunks.read().unwrap();
 
                 let chunk = chunks.source.read_chunk(index)?;
-                let can_read = index < chunks.chunk_count;
+                let can_read = index < chunks.source.chunk_len();
 
                 if can_read {
                     assert!(chunk.is_some());
@@ -177,7 +163,6 @@ impl AssetChunks {
     pub fn new(source: AssetChunksSource) -> Arc<RwLock<Self>> {
         let (stx, srx) = flume::unbounded();
         Arc::new(RwLock::new(Self {
-            chunk_count: 0,
             chunk_bytes: 0,
             all_bytes: 0,
             source,
@@ -192,9 +177,7 @@ impl AssetChunks {
             _ => 0,
         };
 
-        let index = self.chunk_count;
-        self.chunk_count += 1;
-        self.source.add_chunk(index, chunk)?;
+        self.source.add_chunk(chunk)?;
         self.chunk_bytes += byte;
         self.stx.send(()).unwrap();
         Ok(())

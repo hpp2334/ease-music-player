@@ -121,7 +121,7 @@ pub fn get_music_storage_entry_loc(
 pub fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<Vec<u8>> {
     let m = cx.database_server().load_music(id)?.unwrap();
     if let Some(id) = m.cover {
-        cx.database_server().load_blob(id)
+        cx.database_server().blob().read(id)
     } else {
         Ok(Default::default())
     }

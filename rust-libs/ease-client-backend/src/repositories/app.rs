@@ -1,14 +1,8 @@
 use std::sync::Arc;
 
-use ease_client_shared::backends::storage::BlobId;
-use redb::WriteTransaction;
-
 use crate::error::BResult;
 
-use super::{
-    core::DatabaseServer,
-    defs::{TABLE_BLOB, TABLE_SCHEMA_VERSION},
-};
+use super::{core::DatabaseServer, defs::TABLE_SCHEMA_VERSION};
 
 impl DatabaseServer {
     pub fn get_schema_version(self: &Arc<Self>) -> BResult<u32> {
@@ -25,19 +19,6 @@ impl DatabaseServer {
             table.insert((), version)?;
         }
         db.commit()?;
-        Ok(())
-    }
-
-    pub fn load_blob(self: &Arc<Self>, id: BlobId) -> BResult<Vec<u8>> {
-        let db = self.db().begin_read()?;
-        let table = db.open_table(TABLE_BLOB)?;
-        let blob = table.get(id)?.unwrap().value();
-        Ok(blob)
-    }
-
-    pub fn remove_blob_impl(self: &Arc<Self>, db: &WriteTransaction, id: BlobId) -> BResult<()> {
-        let mut table = db.open_table(TABLE_BLOB)?;
-        table.remove(id)?;
         Ok(())
     }
 }

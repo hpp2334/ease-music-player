@@ -1,10 +1,7 @@
 use std::{
     net::SocketAddr,
     num::NonZero,
-    sync::{
-        atomic::{AtomicU16, AtomicU64},
-        Arc, RwLock,
-    },
+    sync::{atomic::AtomicU16, Arc, RwLock},
 };
 
 use async_stream::stream;
@@ -22,6 +19,7 @@ use misty_async::Task;
 use crate::{
     ctx::{BackendContext, WeakBackendContext},
     error::BResult,
+    repositories::blob::BlobManager,
 };
 
 use super::{
@@ -34,10 +32,9 @@ use super::{
 
 pub struct AssetServer {
     port: AtomicU16,
-    source_id_alloc: AtomicU64,
     chunks_cache: RwLock<LruCache<AssetChunksCacheKey, Arc<RwLock<AssetChunks>>>>,
     server_handle: RwLock<Option<Task<()>>>,
-    db: RwLock<Option<(String, Arc<RwLock<redb::Database>>)>>,
+    db: RwLock<Option<(String, Arc<BlobManager>)>>,
 }
 
 fn parse_request_range(headers: &HeaderMap) -> Option<u64> {
@@ -122,12 +119,6 @@ impl Drop for AssetServer {
         {
             self.server_handle.write().unwrap().take();
         }
-
-        if let Some((p, _)) = &*self.db.write().unwrap() {
-            if std::fs::exists(p.as_str()).unwrap() {
-                std::fs::remove_file(p.as_str()).unwrap();
-            }
-        }
     }
 }
 
@@ -135,7 +126,6 @@ impl AssetServer {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             port: Default::default(),
-            source_id_alloc: Default::default(),
             chunks_cache: RwLock::new(LruCache::new(NonZero::new(3).unwrap())),
             server_handle: Default::default(),
             db: Default::default(),
@@ -174,17 +164,14 @@ impl AssetServer {
     }
 
     fn start_db(&self, _cx: &BackendContext, dir: String) {
-        let p = dir + "chunk.redb";
+        let p = dir + "asset_cache";
         if std::fs::exists(p.as_str()).unwrap() {
-            std::fs::remove_file(p.as_str()).unwrap();
+            std::fs::remove_dir_all(p.as_str()).unwrap();
         }
         {
             let mut w = self.db.write().unwrap();
-            let db = redb::Database::builder()
-                .set_cache_size(20 << 20)
-                .create(&p)
-                .expect("failed to init database");
-            *w = Some((p, Arc::new(RwLock::new(db))));
+            let blob = BlobManager::open(p.to_string());
+            *w = Some((p, blob));
         }
     }
 
@@ -357,11 +344,7 @@ impl AssetServer {
             if let Some(existed) = w.get(&cached_key) {
                 (existed.clone(), true)
             } else {
-                let source_id = self
-                    .source_id_alloc
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let source =
-                    AssetChunksSource::new(source_id, self.db.read().unwrap().clone().unwrap().1);
+                let source = AssetChunksSource::new(self.db.read().unwrap().clone().unwrap().1);
                 let created = w
                     .get_or_insert(cached_key.clone(), || AssetChunks::new(source))
                     .clone();
@@ -418,7 +401,7 @@ impl AssetServer {
         let write = |bytes: Bytes, buffer_cache: &mut Vec<u8>| -> BResult<()> {
             buffer_cache.extend(bytes);
 
-            if buffer_cache.len() >= (1 << 22) {
+            if buffer_cache.len() >= (16 << 20) {
                 flush(buffer_cache)?;
             }
             Ok(())

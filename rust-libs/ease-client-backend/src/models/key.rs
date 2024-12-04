@@ -3,5 +3,4 @@ pub enum DbKeyAlloc {
     Playlist,
     Music,
     Storage,
-    Blob,
 }

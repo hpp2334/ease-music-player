@@ -122,7 +122,7 @@ impl DatabaseServer {
                 {
                     let m = self.load_music_impl(&rdb, id)?.unwrap();
                     if let Some(id) = m.cover {
-                        self.remove_blob_impl(&db, id)?;
+                        self.blob().remove(id)?;
                     }
                 }
 

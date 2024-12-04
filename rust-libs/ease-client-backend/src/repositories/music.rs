@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use ease_client_shared::backends::{
-    music::MusicId,
-    music_duration::MusicDuration,
-    playlist::PlaylistId,
-    storage::{BlobId, StorageEntryLoc},
+    music::MusicId, music_duration::MusicDuration, playlist::PlaylistId, storage::StorageEntryLoc,
 };
 use redb::{ReadTransaction, ReadableTable, WriteTransaction};
 
@@ -15,9 +12,7 @@ use crate::{
 
 use super::{
     core::DatabaseServer,
-    defs::{
-        TABLE_BLOB, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC,
-    },
+    defs::{TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC},
 };
 
 #[derive(Debug)]
@@ -142,16 +137,13 @@ impl DatabaseServer {
 
             if let Some(mut m) = m {
                 if let Some(id) = m.cover {
-                    self.remove_blob_impl(&db, id)?;
+                    self.blob().remove(id)?;
                 }
 
-                let cover_id = self.alloc_id(&db, DbKeyAlloc::Blob)?;
-                let cover_id = BlobId::wrap(cover_id);
+                let cover_id = self.blob().write(cover)?;
 
-                let mut table_cover = db.open_table(TABLE_BLOB)?;
                 m.cover = Some(cover_id);
                 table_music.insert(id, m)?;
-                table_cover.insert(cover_id, cover)?;
             }
         }
         db.commit()?;

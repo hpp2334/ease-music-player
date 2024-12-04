@@ -4,15 +4,18 @@ use redb::{ReadableTable, WriteTransaction};
 
 use crate::{error::BResult, models::key::DbKeyAlloc};
 
-use super::defs::{
-    TABLE_BLOB, TABLE_ID_ALLOC, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST,
-    TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_PREFERENCE, TABLE_SCHEMA_VERSION, TABLE_STORAGE,
-    TABLE_STORAGE_MUSIC,
+use super::{
+    blob::BlobManager,
+    defs::{
+        TABLE_ID_ALLOC, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST,
+        TABLE_PLAYLIST_MUSIC, TABLE_PREFERENCE, TABLE_SCHEMA_VERSION, TABLE_STORAGE,
+        TABLE_STORAGE_MUSIC,
+    },
 };
 
 #[derive(Default)]
 pub struct DatabaseServer {
-    _db: RwLock<Option<Arc<redb::Database>>>,
+    _db: RwLock<Option<(Arc<redb::Database>, Arc<BlobManager>)>>,
 }
 
 impl Drop for DatabaseServer {
@@ -30,14 +33,15 @@ impl DatabaseServer {
     }
 
     pub fn init(&self, document_dir: String) {
-        let p = document_dir + "data.redb";
+        let p = document_dir.to_string() + "data.redb";
         {
             let mut w = self._db.write().unwrap();
             let db = redb::Database::builder()
                 .set_cache_size(80 << 20)
                 .create(&p)
                 .expect("failed to init database");
-            *w = Some(Arc::new(db));
+            let blob_manager = BlobManager::open(document_dir + "blobs");
+            *w = Some((Arc::new(db), blob_manager));
         }
 
         self.init_database().unwrap();
@@ -55,13 +59,16 @@ impl DatabaseServer {
         db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
         db.open_table(TABLE_PREFERENCE)?;
         db.open_table(TABLE_SCHEMA_VERSION)?;
-        db.open_table(TABLE_BLOB)?;
         db.commit()?;
         Ok(())
     }
 
     pub fn db(&self) -> Arc<redb::Database> {
-        self._db.read().unwrap().clone().unwrap()
+        self._db.read().unwrap().clone().unwrap().0
+    }
+
+    pub fn blob(&self) -> Arc<BlobManager> {
+        self._db.read().unwrap().clone().unwrap().1
     }
 
     pub fn alloc_id(&self, db: &WriteTransaction, key: DbKeyAlloc) -> BResult<i64> {

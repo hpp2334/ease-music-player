@@ -18,6 +18,8 @@ pub enum BError {
     RedbStorageError(#[from] redb::StorageError),
     #[error("redb commit error: {0:?}")]
     RedbCommitError(#[from] redb::CommitError),
+    #[error("io error: {0:?}")]
+    IoError(#[from] std::io::Error),
 }
 
 pub type BResult<T> = Result<T, BError>;

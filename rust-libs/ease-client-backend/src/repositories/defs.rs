@@ -1,7 +1,7 @@
 use ease_client_shared::backends::{
     music::MusicId,
     playlist::PlaylistId,
-    storage::{BlobId, StorageEntryLoc, StorageId},
+    storage::{StorageEntryLoc, StorageId},
 };
 use redb::{MultimapTableDefinition, TableDefinition};
 
@@ -31,4 +31,3 @@ pub const TABLE_STORAGE_MUSIC: MultimapTableDefinition<BinSerde<StorageId>, BinS
 pub const TABLE_PREFERENCE: TableDefinition<(), BinSerde<PreferenceModel>> =
     TableDefinition::new("preference");
 pub const TABLE_SCHEMA_VERSION: TableDefinition<(), u32> = TableDefinition::new("schema_version");
-pub const TABLE_BLOB: TableDefinition<BinSerde<BlobId>, Vec<u8>> = TableDefinition::new("blob");
