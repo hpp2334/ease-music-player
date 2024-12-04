@@ -248,7 +248,11 @@ pub(crate) async fn player_request_play_adjacent<const IS_NEXT: bool>(
 }
 
 pub(crate) fn player_clear_current(cx: &BackendContext) {
-    cx.player_state().current.write().unwrap().take();
+    let mut w = cx.player_state().current.write().unwrap();
+    if let Some(ref curr) = *w {
+        cx.asset_server().evict_cache(curr.id);
+    }
+    w.take();
 }
 
 pub(crate) async fn player_refresh_current(cx: &BackendContext) -> BResult<()> {
@@ -395,9 +399,20 @@ pub(crate) async fn on_player_event(
             update_music_cover(&cx, ArgUpdateMusicCover { id, cover: buffer }).await?
         }
         PlayerDelegateEvent::Error { msg } => {
+            {
+                let cx = cx.weak();
+                rt.spawn_on_main(async move {
+                    if let Some(cx) = cx.upgrade() {
+                        cx.player_delegate().pause();
+                        cx.player_delegate().seek(0);
+                    }
+                })
+                .await;
+            }
             cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Error {
                 value: msg,
             }));
+            cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Loaded));
         }
     }
     Ok(())

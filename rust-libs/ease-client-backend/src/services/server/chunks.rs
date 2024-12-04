@@ -3,7 +3,7 @@ use std::sync::{
     Arc, RwLock,
 };
 
-use ease_client_shared::backends::storage::{BlobId, DataSourceKey};
+use ease_client_shared::backends::{music::MusicId, storage::BlobId};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -13,13 +13,14 @@ use crate::{
 
 #[derive(Debug, bitcode::Encode, bitcode::Decode, PartialEq, Eq, uniffi::Enum)]
 pub enum AssetLoadStatus {
+    NotFound,
     Loaded,
     Error(String),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone)]
 pub struct AssetChunksCacheKey {
-    pub key: DataSourceKey,
+    pub id: MusicId,
     pub byte_offset: u64,
 }
 
@@ -130,6 +131,7 @@ impl AssetChunksReader {
                     AssetChunkData::Status(asset_load_status) => {
                         return match asset_load_status {
                             AssetLoadStatus::Loaded => Ok(None),
+                            AssetLoadStatus::NotFound => Err(BError::AssetNotFound),
                             AssetLoadStatus::Error(e) => Err(BError::AssetLoadFail(e)),
                         }
                     }

@@ -8,6 +8,8 @@ pub enum BError {
     NoSuchMessage(Code),
     #[error("failed to load asset: {0:?}")]
     AssetLoadFail(String),
+    #[error("asset not found")]
+    AssetNotFound,
     #[error("redb error: {0:?}")]
     RedbError(#[from] redb::Error),
     #[error("redb transaction error: {0:?}")]

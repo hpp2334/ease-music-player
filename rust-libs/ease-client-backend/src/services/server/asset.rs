@@ -77,6 +77,7 @@ fn reader_into_stream(
                 },
                 Err(e) => {
                     yield(Err(e));
+                    break;
                 },
             }
         }
@@ -90,6 +91,7 @@ async fn handle_music_download(
     axum::extract::Path(id): axum::extract::Path<i64>,
 ) -> axum::response::Response {
     let id = MusicId::wrap(id);
+    tracing::info!("handle_music_download {:?}", id);
 
     if let Some(cx) = cx.upgrade() {
         cx.asset_server()
@@ -163,6 +165,16 @@ impl AssetServer {
         Ok(())
     }
 
+    pub fn evict_cache(&self, id: MusicId) {
+        let mut w = self.chunks_cache.write().unwrap();
+        w.pop(&AssetChunksCacheKey { id, byte_offset: 0 });
+    }
+
+    fn evict_cache_impl(&self, key: &AssetChunksCacheKey) {
+        let mut w = self.chunks_cache.write().unwrap();
+        w.pop(&key);
+    }
+
     fn start_db(&self, _cx: &BackendContext, dir: String) {
         let p = dir + "asset_cache";
         if std::fs::exists(p.as_str()).unwrap() {
@@ -223,22 +235,7 @@ impl AssetServer {
             StatusCode::OK
         };
 
-        let reader = self.build_chunks_reader(cx, id, byte_offset).await;
-        let reader = {
-            match reader {
-                Ok(reader) => {
-                    if let Some(reader) = reader {
-                        reader
-                    } else {
-                        return StatusCode::NOT_FOUND.into_response();
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("{}", e);
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                }
-            }
-        };
+        let reader = self.build_chunks_reader(cx, id, byte_offset).await.unwrap();
         let all_bytes = reader.all_bytes();
 
         let mut headers = HeaderMap::new();
@@ -310,21 +307,16 @@ impl AssetServer {
         cx: &BackendContext,
         id: MusicId,
         byte_offset: u64,
-    ) -> BResult<Option<Arc<AssetChunksReader>>> {
+    ) -> BResult<Arc<AssetChunksReader>> {
         if byte_offset > 0 {
             let from_zero_chunks = self.build_chunks_impl(cx, id, 0).await?;
-            if let Some(chunks) = from_zero_chunks {
-                if chunks.read().unwrap().current_bytes() > byte_offset {
-                    return Ok(Some(AssetChunksReader::new(&chunks, byte_offset)));
-                }
+            if from_zero_chunks.read().unwrap().current_bytes() >= byte_offset {
+                return Ok(AssetChunksReader::new(&from_zero_chunks, byte_offset));
             }
         }
 
         let chunks = self.build_chunks_impl(cx, id, byte_offset).await?;
-        if let Some(chunks) = chunks {
-            return Ok(Some(AssetChunksReader::new(&chunks, 0)));
-        }
-        return Ok(None);
+        return Ok(AssetChunksReader::new(&chunks, 0));
     }
 
     async fn build_chunks_impl(
@@ -332,12 +324,9 @@ impl AssetServer {
         cx: &BackendContext,
         id: MusicId,
         byte_offset: u64,
-    ) -> BResult<Option<Arc<RwLock<AssetChunks>>>> {
+    ) -> BResult<Arc<RwLock<AssetChunks>>> {
         let key = DataSourceKey::Music { id };
-        let cached_key = AssetChunksCacheKey {
-            key: key.clone(),
-            byte_offset,
-        };
+        let cached_key = AssetChunksCacheKey { id, byte_offset };
 
         let (chunks, existed) = {
             let mut w = self.chunks_cache.write().unwrap();
@@ -352,32 +341,51 @@ impl AssetServer {
             }
         };
 
-        if existed {
-            return Ok(Some(chunks.clone()));
-        }
+        tracing::info!(
+            "build_chunks cached_key = {:?}, existed = {:?}",
+            cached_key,
+            existed
+        );
 
-        let file = load_asset(&cx, key.clone(), byte_offset).await?;
-        if file.is_none() {
-            return Ok(None);
-        }
-        let file = file.unwrap();
-        if let Some(size) = file.size() {
-            chunks.write().unwrap().set_all_bytes(size as u64);
-        }
+        if !existed {
+            let file = load_asset(&cx, key.clone(), byte_offset).await;
+            match file {
+                Ok(file) => match file {
+                    Some(file) => {
+                        let chunks = chunks.clone();
+                        if let Some(size) = file.size() {
+                            chunks.write().unwrap().set_all_bytes(size as u64);
+                        }
 
-        let this = self.clone();
-        let task = {
-            let chunks = chunks.clone();
-            cx.async_runtime().clone().spawn(async move {
-                let success = this.preload_impl(chunks, file).await.unwrap();
-                if !success {
-                    this.chunks_cache.write().unwrap().pop(&cached_key);
+                        let this = self.clone();
+                        let task = {
+                            let chunks = chunks.clone();
+                            cx.async_runtime().clone().spawn(async move {
+                                let success = this.preload_impl(chunks, file).await.unwrap();
+                                if !success {
+                                    this.evict_cache_impl(&cached_key);
+                                }
+                            })
+                        };
+                        task.detach();
+                    }
+                    None => {
+                        self.evict_cache_impl(&cached_key);
+                        chunks
+                            .write()
+                            .unwrap()
+                            .push(AssetChunkData::Status(AssetLoadStatus::NotFound))?;
+                    }
+                },
+                Err(e) => {
+                    self.evict_cache_impl(&cached_key);
+                    chunks.write().unwrap().push(AssetChunkData::Status(
+                        AssetLoadStatus::Error(e.to_string()),
+                    ))?;
                 }
-            })
-        };
-        task.detach();
-
-        Ok(Some(chunks))
+            }
+        }
+        return Ok(chunks.clone());
     }
 
     async fn preload_impl(
