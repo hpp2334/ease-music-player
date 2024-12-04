@@ -1,4 +1,3 @@
-
 use ease_client_shared::backends::{
     playlist::{
         ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
@@ -71,9 +70,13 @@ pub(crate) async fn cc_create_playlist(
             .clone()
             .spawn_on_main(async move {
                 if let Some(cx) = cx.upgrade() {
-                    for id in music_ids {
-                        cx.player_delegate()
-                            .request_total_duration(id, cx.asset_server().serve_music_meta_url(id));
+                    for (id, existed) in music_ids {
+                        if !existed {
+                            cx.player_delegate().request_total_duration(
+                                id,
+                                cx.asset_server().serve_music_meta_url(id),
+                            );
+                        }
                     }
                 }
             })
@@ -117,9 +120,13 @@ pub(crate) async fn cu_add_musics_to_playlist(
             .clone()
             .spawn_on_main(async move {
                 if let Some(cx) = cx.upgrade() {
-                    for id in music_ids {
-                        cx.player_delegate()
-                            .request_total_duration(id, cx.asset_server().serve_music_meta_url(id));
+                    for (id, existed) in music_ids {
+                        if !existed {
+                            cx.player_delegate().request_total_duration(
+                                id,
+                                cx.asset_server().serve_music_meta_url(id),
+                            );
+                        }
                     }
                 }
             })

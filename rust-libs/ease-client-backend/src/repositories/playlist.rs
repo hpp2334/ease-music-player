@@ -76,11 +76,11 @@ impl DatabaseServer {
         picture: Option<StorageEntryLoc>,
         musics: Vec<ArgDBAddMusic>,
         current_time_ms: i64,
-    ) -> BResult<(PlaylistId, Vec<MusicId>)> {
+    ) -> BResult<(PlaylistId, Vec<(MusicId, bool)>)> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
-        let mut ret: Vec<MusicId> = Default::default();
+        let mut ret: Vec<(MusicId, bool)> = Default::default();
         ret.reserve(musics.len());
 
         let playlist_id = {
@@ -107,14 +107,14 @@ impl DatabaseServer {
             id
         };
         for m in musics {
-            let id = self.add_music_impl(&db, &rdb, m)?;
+            let (id, existed) = self.add_music_impl(&db, &rdb, m)?;
 
             let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
             let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
             table_pm.insert(playlist_id, id)?;
             table_mp.insert(id, playlist_id)?;
 
-            ret.push(id);
+            ret.push((id, existed));
         }
 
         db.commit()?;
@@ -205,22 +205,22 @@ impl DatabaseServer {
         self: &Arc<Self>,
         playlist_id: PlaylistId,
         musics: Vec<ArgDBAddMusic>,
-    ) -> BResult<Vec<MusicId>> {
+    ) -> BResult<Vec<(MusicId, bool)>> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
-        let mut ret: Vec<MusicId> = Default::default();
+        let mut ret: Vec<(MusicId, bool)> = Default::default();
         ret.reserve(musics.len());
 
         for m in musics {
-            let id = self.add_music_impl(&db, &rdb, m)?;
+            let (id, existed) = self.add_music_impl(&db, &rdb, m)?;
 
             let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
             let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
             table_pm.insert(playlist_id, id)?;
             table_mp.insert(id, playlist_id)?;
 
-            ret.push(id);
+            ret.push((id, existed));
         }
         db.commit()?;
         Ok(ret)

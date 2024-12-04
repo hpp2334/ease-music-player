@@ -84,10 +84,10 @@ impl DatabaseServer {
         db: &WriteTransaction,
         rdb: &ReadTransaction,
         arg: ArgDBAddMusic,
-    ) -> BResult<MusicId> {
+    ) -> BResult<(MusicId, bool)> {
         let music = self.load_music_by_key_impl(rdb, arg.loc.clone())?;
         if let Some(music) = music {
-            return Ok(music.id);
+            return Ok((music.id, true));
         }
 
         let id = self.alloc_id(db, DbKeyAlloc::Music)?;
@@ -110,7 +110,7 @@ impl DatabaseServer {
         table_storage_music.insert(arg.loc.storage_id, id)?;
         table_music_by_loc.insert(arg.loc, id)?;
 
-        return Ok(id);
+        return Ok((id, false));
     }
 
     pub fn update_music_total_duration(
