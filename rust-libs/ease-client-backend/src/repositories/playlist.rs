@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use ease_client_shared::backends::{
-    music::MusicId, playlist::PlaylistId, storage::StorageEntryLoc,
+    music::MusicId,
+    playlist::PlaylistId,
+    storage::{BlobId, StorageEntryLoc},
 };
-use redb::{ReadTransaction, ReadableTable, ReadableTableMetadata};
+use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
 use crate::{
     error::BResult,
@@ -143,16 +145,31 @@ impl DatabaseServer {
 
     pub fn remove_playlist(self: &Arc<Self>, playlist_id: PlaylistId) -> BResult<()> {
         let db = self.db().begin_write()?;
+        let rdb = self.db().begin_read()?;
+        let mut to_remove_blobs: Vec<BlobId> = Default::default();
 
         {
             let mut table_playlist = db.open_table(TABLE_PLAYLIST)?;
-            let mut table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+            let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
+            let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
 
             table_playlist.remove(playlist_id)?;
-            table_playlist_musics.remove_all(playlist_id)?;
+
+            let ids = table_pm.get(playlist_id)?;
+            for id in ids {
+                let id = id?.value();
+                table_mp.remove(id, playlist_id)?;
+                self.compact_music_impl(&db, &rdb, &mut table_mp, &mut to_remove_blobs, id)?;
+            }
+            table_pm.remove_all(playlist_id)?;
         }
 
         db.commit()?;
+
+        for id in to_remove_blobs {
+            self.blob().remove(id)?;
+        }
+
         Ok(())
     }
 
@@ -161,16 +178,26 @@ impl DatabaseServer {
         playlist_id: PlaylistId,
         music_id: MusicId,
     ) -> BResult<()> {
+        let mut to_remove_blobs: Vec<BlobId> = Default::default();
+
         let db = self.db().begin_write()?;
+        let rdb = self.db().begin_read()?;
 
         {
             let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
             let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
             table_pm.remove(playlist_id, music_id)?;
             table_mp.remove(music_id, playlist_id)?;
+
+            self.compact_music_impl(&db, &rdb, &mut table_mp, &mut to_remove_blobs, music_id)?;
         }
 
         db.commit()?;
+
+        for id in to_remove_blobs {
+            self.blob().remove(id)?;
+        }
+
         Ok(())
     }
 

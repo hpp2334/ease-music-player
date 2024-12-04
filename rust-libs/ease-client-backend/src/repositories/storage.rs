@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ease_client_shared::backends::storage::{ArgUpsertStorage, StorageId};
+use ease_client_shared::backends::storage::{ArgUpsertStorage, BlobId, StorageId};
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
 use crate::{
@@ -95,6 +95,7 @@ impl DatabaseServer {
     }
 
     pub fn remove_storage(self: &Arc<Self>, id: StorageId) -> BResult<()> {
+        let mut to_remove_blobs: Vec<BlobId> = Default::default();
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
@@ -122,7 +123,7 @@ impl DatabaseServer {
                 {
                     let m = self.load_music_impl(&rdb, id)?.unwrap();
                     if let Some(id) = m.cover {
-                        self.blob().remove(id)?;
+                        to_remove_blobs.push(id);
                     }
                 }
 
@@ -136,6 +137,10 @@ impl DatabaseServer {
         }
 
         db.commit()?;
+
+        for id in to_remove_blobs {
+            self.blob().remove(id)?;
+        }
 
         Ok(())
     }

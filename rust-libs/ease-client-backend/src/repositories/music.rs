@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use ease_client_shared::backends::{
-    music::MusicId, music_duration::MusicDuration, playlist::PlaylistId, storage::StorageEntryLoc,
+    music::MusicId,
+    music_duration::MusicDuration,
+    playlist::PlaylistId,
+    storage::{BlobId, StorageEntryLoc},
 };
-use redb::{ReadTransaction, ReadableTable, WriteTransaction};
+use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, WriteTransaction};
 
 use crate::{
     error::BResult,
@@ -11,6 +14,7 @@ use crate::{
 };
 
 use super::{
+    bin::BinSerde,
     core::DatabaseServer,
     defs::{TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC},
 };
@@ -169,6 +173,30 @@ impl DatabaseServer {
         }
         db.commit()?;
 
+        Ok(())
+    }
+
+    pub fn compact_music_impl(
+        self: &Arc<Self>,
+        db: &WriteTransaction,
+        rdb: &ReadTransaction,
+        table_mp: &mut redb::MultimapTable<'_, BinSerde<MusicId>, BinSerde<PlaylistId>>,
+        to_remove_blobs: &mut Vec<BlobId>,
+        id: MusicId,
+    ) -> BResult<()> {
+        let ref_playlists = table_mp.get(id)?.len();
+
+        if ref_playlists == 0 {
+            let m = self.load_music_impl(&rdb, id)?.unwrap();
+
+            let mut table_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
+            let mut table_m = db.open_table(TABLE_MUSIC)?;
+            table_loc.remove(m.loc)?;
+            table_m.remove(m.id)?;
+            if let Some(id) = m.cover {
+                to_remove_blobs.push(id);
+            }
+        }
         Ok(())
     }
 }
