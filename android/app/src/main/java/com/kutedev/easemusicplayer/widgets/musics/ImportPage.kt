@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -249,18 +251,19 @@ private fun ImportEntries(
                     )
                 }
             }
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .padding(28.dp, 0.dp)
-                    .verticalScroll(rememberScrollState())
             ) {
-                for (entry in entries) {
+                items(entries) {
                     ImportEntry(
-                        entry = entry,
+                        entry = it,
                         onLocateEntry = { path -> bridge.dispatchClick(StorageImportWidget.StorageEntry(path)) },
                     )
                 }
-                Box(modifier = Modifier.height(12.dp))
+                item {
+                    Box(modifier = Modifier.height(12.dp))
+                }
             }
         }
         if (selectedCount > 0) {
