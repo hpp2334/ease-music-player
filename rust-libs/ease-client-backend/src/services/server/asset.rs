@@ -1,6 +1,5 @@
 use std::{
     net::SocketAddr,
-    num::NonZero,
     sync::{atomic::AtomicU16, Arc, RwLock},
 };
 
@@ -13,18 +12,16 @@ use bytes::Bytes;
 use ease_client_shared::backends::{music::MusicId, storage::DataSourceKey};
 use ease_remote_storage::{StatusCode, StreamFile};
 use futures::StreamExt;
-use lru::LruCache;
 use misty_async::Task;
 
 use crate::{
     ctx::{BackendContext, WeakBackendContext},
     error::BResult,
-    repositories::blob::BlobManager,
 };
 
 use super::{
     chunks::{
-        AssetChunkData, AssetChunks, AssetChunksCacheKey, AssetChunksReader, AssetChunksSource,
+        AssetChunkData, AssetChunks, AssetChunksCacheKey, AssetChunksManager, AssetChunksReader,
         AssetLoadStatus,
     },
     load_asset,
@@ -32,9 +29,8 @@ use super::{
 
 pub struct AssetServer {
     port: AtomicU16,
-    chunks_cache: RwLock<LruCache<AssetChunksCacheKey, Arc<RwLock<AssetChunks>>>>,
     server_handle: RwLock<Option<Task<()>>>,
-    db: RwLock<Option<(String, Arc<BlobManager>)>>,
+    manager: AssetChunksManager,
 }
 
 fn parse_request_range(headers: &HeaderMap) -> Option<u64> {
@@ -118,9 +114,7 @@ async fn handle_music_meta(
 
 impl Drop for AssetServer {
     fn drop(&mut self) {
-        {
-            self.server_handle.write().unwrap().take();
-        }
+        self.server_handle.write().unwrap().take();
     }
 }
 
@@ -128,9 +122,8 @@ impl AssetServer {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             port: Default::default(),
-            chunks_cache: RwLock::new(LruCache::new(NonZero::new(3).unwrap())),
             server_handle: Default::default(),
-            db: Default::default(),
+            manager: AssetChunksManager::new(3),
         })
     }
 
@@ -166,13 +159,7 @@ impl AssetServer {
     }
 
     pub fn evict_cache(&self, id: MusicId) {
-        let mut w = self.chunks_cache.write().unwrap();
-        w.pop(&AssetChunksCacheKey { id, byte_offset: 0 });
-    }
-
-    fn evict_cache_impl(&self, key: &AssetChunksCacheKey) {
-        let mut w = self.chunks_cache.write().unwrap();
-        w.pop(&key);
+        self.manager.evict(id, 0);
     }
 
     fn start_db(&self, _cx: &BackendContext, dir: String) {
@@ -180,11 +167,7 @@ impl AssetServer {
         if std::fs::exists(p.as_str()).unwrap() {
             std::fs::remove_dir_all(p.as_str()).unwrap();
         }
-        {
-            let mut w = self.db.write().unwrap();
-            let blob = BlobManager::open(p.to_string());
-            *w = Some((p, blob));
-        }
+        self.manager.init(p);
     }
 
     fn start_server(&self, cx: &BackendContext) {
@@ -328,18 +311,7 @@ impl AssetServer {
         let key = DataSourceKey::Music { id };
         let cached_key = AssetChunksCacheKey { id, byte_offset };
 
-        let (chunks, existed) = {
-            let mut w = self.chunks_cache.write().unwrap();
-            if let Some(existed) = w.get(&cached_key) {
-                (existed.clone(), true)
-            } else {
-                let source = AssetChunksSource::new(self.db.read().unwrap().clone().unwrap().1);
-                let created = w
-                    .get_or_insert(cached_key.clone(), || AssetChunks::new(source))
-                    .clone();
-                (created, false)
-            }
-        };
+        let (chunks, existed) = self.manager.get_or_create(id, byte_offset);
 
         tracing::info!(
             "build_chunks cached_key = {:?}, existed = {:?}",
@@ -361,16 +333,12 @@ impl AssetServer {
                         let task = {
                             let chunks = chunks.clone();
                             cx.async_runtime().clone().spawn(async move {
-                                let success = this.preload_impl(chunks, file).await.unwrap();
-                                if !success {
-                                    this.evict_cache_impl(&cached_key);
-                                }
+                                this.preload_impl(chunks, file).await.unwrap();
                             })
                         };
                         task.detach();
                     }
                     None => {
-                        self.evict_cache_impl(&cached_key);
                         chunks
                             .write()
                             .unwrap()
@@ -378,7 +346,6 @@ impl AssetServer {
                     }
                 },
                 Err(e) => {
-                    self.evict_cache_impl(&cached_key);
                     chunks.write().unwrap().push(AssetChunkData::Status(
                         AssetLoadStatus::Error(e.to_string()),
                     ))?;
@@ -392,7 +359,7 @@ impl AssetServer {
         self: &Arc<Self>,
         chunks: Arc<RwLock<AssetChunks>>,
         file: StreamFile,
-    ) -> BResult<bool> {
+    ) -> BResult<()> {
         let mut stream = Box::pin(file.into_stream());
         let mut buffer_cache: Vec<u8> = Default::default();
 
@@ -425,7 +392,7 @@ impl AssetServer {
                     chunks.write().unwrap().push(AssetChunkData::Status(
                         AssetLoadStatus::Error(err.to_string()),
                     ))?;
-                    return Ok(false);
+                    return Ok(());
                 }
             }
         }
@@ -436,6 +403,6 @@ impl AssetServer {
             .write()
             .unwrap()
             .push(AssetChunkData::Status(AssetLoadStatus::Loaded))?;
-        Ok(true)
+        Ok(())
     }
 }

@@ -1,9 +1,13 @@
-use std::sync::{
-    atomic::{AtomicU64, AtomicUsize},
-    Arc, RwLock,
+use std::{
+    num::NonZero,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize},
+        Arc, RwLock, Weak,
+    },
 };
 
 use ease_client_shared::backends::{music::MusicId, storage::BlobId};
+use lru::LruCache;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -11,7 +15,7 @@ use crate::{
     repositories::blob::BlobManager,
 };
 
-#[derive(Debug, bitcode::Encode, bitcode::Decode, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, bitcode::Encode, bitcode::Decode, PartialEq, Eq, uniffi::Enum, Clone)]
 pub enum AssetLoadStatus {
     NotFound,
     Loaded,
@@ -24,15 +28,21 @@ pub struct AssetChunksCacheKey {
     pub byte_offset: u64,
 }
 
-#[derive(Debug, bitcode::Encode, bitcode::Decode, uniffi::Enum)]
+#[derive(Debug)]
 pub enum AssetChunkData {
     Status(AssetLoadStatus),
     Buffer(Vec<u8>),
 }
 
-pub struct AssetChunksSource {
+#[derive(Debug, Clone)]
+enum AssetChunkDataInternal {
+    Status(AssetLoadStatus),
+    Buffer(BlobId),
+}
+
+struct AssetChunksSource {
     blob: Arc<BlobManager>,
-    ids: Vec<BlobId>,
+    chunks: Vec<AssetChunkDataInternal>,
 }
 
 pub struct AssetChunksReader {
@@ -44,49 +54,78 @@ pub struct AssetChunksReader {
 }
 
 pub struct AssetChunks {
+    key: AssetChunksCacheKey,
     chunk_bytes: u64,
     all_bytes: u64,
     source: AssetChunksSource,
     stx: flume::Sender<()>,
     srx: flume::Receiver<()>,
+    manager: Weak<AssetChunksManagerInternal>,
+}
+
+struct AssetChunksManagerInternal {
+    cache: RwLock<LruCache<AssetChunksCacheKey, Arc<RwLock<AssetChunks>>>>,
+    blob_manager: RwLock<Option<Arc<BlobManager>>>,
+}
+
+pub struct AssetChunksManager {
+    internal: Arc<AssetChunksManagerInternal>,
 }
 
 impl AssetChunksSource {
     pub fn new(blob: Arc<BlobManager>) -> Self {
         Self {
             blob,
-            ids: Default::default(),
+            chunks: Default::default(),
         }
     }
 
     fn chunk_len(&self) -> usize {
-        self.ids.len()
+        self.chunks.len()
     }
 
     fn read_chunk(&self, index: usize) -> BResult<Option<AssetChunkData>> {
-        if index >= self.ids.len() {
+        if index >= self.chunks.len() {
             return Ok(None);
         }
 
-        let id = self.ids[index];
-        let data = self.blob.read(id)?;
-        let data = bitcode::decode(&data).unwrap();
-        Ok(Some(data))
+        let data = self.chunks[index].clone();
+        match data {
+            AssetChunkDataInternal::Status(asset_load_status) => {
+                Ok(Some(AssetChunkData::Status(asset_load_status)))
+            }
+            AssetChunkDataInternal::Buffer(id) => {
+                let data = self.blob.read(id)?;
+                Ok(Some(AssetChunkData::Buffer(data)))
+            }
+        }
     }
 
     fn add_chunk(&mut self, chunk: AssetChunkData) -> BResult<usize> {
-        let data = bitcode::encode(&chunk);
-        let index = self.ids.len();
-        let id = self.blob.write(data)?;
-        self.ids.push(id);
+        let index = self.chunks.len();
+        match chunk {
+            AssetChunkData::Status(asset_load_status) => {
+                self.chunks
+                    .push(AssetChunkDataInternal::Status(asset_load_status));
+            }
+            AssetChunkData::Buffer(data) => {
+                let id = self.blob.write(data)?;
+                self.chunks.push(AssetChunkDataInternal::Buffer(id));
+            }
+        }
         Ok(index)
     }
 
     fn remove(&mut self) -> BResult<()> {
-        for id in self.ids.iter() {
-            self.blob.remove(*id)?;
+        for chunk in self.chunks.iter() {
+            match chunk {
+                AssetChunkDataInternal::Status(_) => {}
+                AssetChunkDataInternal::Buffer(id) => {
+                    self.blob.remove(*id)?;
+                }
+            }
         }
-        self.ids.clear();
+        self.chunks.clear();
         Ok(())
     }
 }
@@ -162,14 +201,20 @@ impl AssetChunksReader {
 }
 
 impl AssetChunks {
-    pub fn new(source: AssetChunksSource) -> Arc<RwLock<Self>> {
+    fn new(
+        key: AssetChunksCacheKey,
+        source: AssetChunksSource,
+        manager: Weak<AssetChunksManagerInternal>,
+    ) -> Arc<RwLock<Self>> {
         let (stx, srx) = flume::unbounded();
         Arc::new(RwLock::new(Self {
+            key,
             chunk_bytes: 0,
             all_bytes: 0,
             source,
             stx,
             srx,
+            manager,
         }))
     }
 
@@ -178,6 +223,17 @@ impl AssetChunks {
             AssetChunkData::Buffer(buf) => buf.len() as u64,
             _ => 0,
         };
+
+        if let AssetChunkData::Status(status) = &chunk {
+            match status {
+                AssetLoadStatus::NotFound | AssetLoadStatus::Error(_) => {
+                    if let Some(manager) = self.manager.upgrade() {
+                        manager.evict(&self.key);
+                    }
+                }
+                AssetLoadStatus::Loaded => {}
+            }
+        }
 
         self.source.add_chunk(chunk)?;
         self.chunk_bytes += byte;
@@ -201,5 +257,61 @@ impl AssetChunks {
 impl Drop for AssetChunks {
     fn drop(&mut self) {
         self.source.remove().unwrap();
+    }
+}
+
+impl AssetChunksManagerInternal {
+    fn new(capacity: usize) -> Self {
+        Self {
+            cache: RwLock::new(LruCache::new(NonZero::new(capacity).unwrap())),
+            blob_manager: Default::default(),
+        }
+    }
+
+    fn init(&self, dir: String) {
+        let mut w = self.blob_manager.write().unwrap();
+        *w = Some(BlobManager::open(dir));
+    }
+
+    fn evict(&self, key: &AssetChunksCacheKey) {
+        let mut w = self.cache.write().unwrap();
+        w.pop(&key);
+    }
+}
+
+impl AssetChunksManager {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            internal: Arc::new(AssetChunksManagerInternal::new(capacity)),
+        }
+    }
+
+    pub fn init(&self, dir: String) {
+        self.internal.init(dir);
+    }
+
+    pub fn evict(&self, id: MusicId, byte_offset: u64) {
+        self.internal
+            .evict(&AssetChunksCacheKey { id, byte_offset });
+    }
+
+    pub fn get_or_create(&self, id: MusicId, byte_offset: u64) -> (Arc<RwLock<AssetChunks>>, bool) {
+        let key = AssetChunksCacheKey { id, byte_offset };
+        let (chunks, existed) = {
+            let mut w = self.internal.cache.write().unwrap();
+            if let Some(existed) = w.get(&key) {
+                (existed.clone(), true)
+            } else {
+                let blob_manager = self.internal.blob_manager.write().unwrap().clone().unwrap();
+                let source = AssetChunksSource::new(blob_manager);
+                let created = w
+                    .get_or_insert(key.clone(), || {
+                        AssetChunks::new(key.clone(), source, Arc::downgrade(&self.internal))
+                    })
+                    .clone();
+                (created, false)
+            }
+        };
+        (chunks, existed)
     }
 }
