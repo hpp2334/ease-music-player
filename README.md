@@ -25,6 +25,8 @@ The primary purpose of this application is to experiment with the feasibility an
 
 [In version 0.1](https://github.com/hpp2334/ease-music-player/tree/feat/flutter), the application was implemented using Rust + Flutter. After some time of use, several issues were discovered, such as:
 
+- It is hard to call flutter from native synchronously.
+
 - Flutter's complexity in cross-platform development, especially when dealing with platform-specific features.
 
 - Difficulty in finding solutions for some minor issues, such as the absence of system-provided crash dialogs when the program crashes.
