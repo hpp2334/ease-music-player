@@ -10,6 +10,7 @@ members = [
     "ease-client-test",
     "ease-client-android-ffi-builder",
     "ease-client-android",
+    "ease-client-desktop",
 ]
 
 [profile.bench]
