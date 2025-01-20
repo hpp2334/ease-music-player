@@ -11,7 +11,7 @@ use ease_client_shared::backends::{
     music_duration::MusicDuration,
     storage::{DataSourceKey, StorageEntryLoc},
 };
-use misty_async::Task;
+use misty_lifecycle::Task;
 
 use crate::{ctx::BackendContext, error::BResult, models::music::MusicModel};
 
@@ -219,23 +219,15 @@ pub(crate) fn enable_time_to_pause(cx: &BackendContext, delay: Duration) {
     let task = {
         let rt = cx.async_runtime().clone();
         let cx = cx.weak();
-        rt.clone().spawn(async move {
+        rt.clone().spawn_main_thread(async move {
             rt.sleep(delay).await;
             state
                 .enabled
                 .store(false, std::sync::atomic::Ordering::Relaxed);
+
             if let Some(cx) = cx.upgrade() {
                 sync_notify_time_to_pause(&cx);
-            }
-            {
-                let cx = cx.clone();
-                rt.clone()
-                    .spawn_on_main(async move {
-                        if let Some(cx) = cx.upgrade() {
-                            cx.player_delegate().pause();
-                        }
-                    })
-                    .await
+                cx.player_delegate().pause();
             }
         })
     };

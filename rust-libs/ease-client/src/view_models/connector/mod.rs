@@ -97,20 +97,14 @@ impl Connector {
         arg: <S as IMessage>::Argument,
     ) -> EaseResult<<S as IMessage>::Return> {
         let connector = ConnectorHostService::of(cx);
-        let ret = cx
-            .spawn_background::<_, EaseError>(async move {
-                let arg = encode_message_payload(arg);
-                let ret = connector
-                    .request(MessagePayload {
-                        code: S::CODE,
-                        payload: arg,
-                    })
-                    .await?;
-                let ret = decode_message_payload(ret.payload);
-
-                Ok::<_, EaseError>(ret)
+        let arg = encode_message_payload(arg);
+        let ret = connector
+            .request(MessagePayload {
+                code: S::CODE,
+                payload: arg,
             })
             .await?;
+        let ret = decode_message_payload(ret.payload);
         self.after_request::<S>(cx);
         Ok(ret)
     }

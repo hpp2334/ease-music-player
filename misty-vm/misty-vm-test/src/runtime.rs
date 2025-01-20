@@ -4,46 +4,29 @@ use std::{
     time::Duration,
 };
 
-use misty_vm::{BoxFuture, IAsyncRuntimeAdapter, IOnAsyncRuntime};
+use misty_vm::{BoxFuture, ILifecycleExternal};
 
 use crate::timer::FakeTimers;
 
-struct AsyncRuntimeAdapterInternal {
-    connected: Arc<Mutex<Option<Weak<dyn IOnAsyncRuntime>>>>,
+struct Internal {
     thread_id: ThreadId,
-    notified: AtomicBool,
     timers: FakeTimers,
 }
 
 #[derive(Clone)]
-pub struct TestAsyncRuntimeAdapter {
-    store: Arc<AsyncRuntimeAdapterInternal>,
+pub struct TestLifecycleExternal {
+    store: Arc<Internal>,
 }
-unsafe impl Send for TestAsyncRuntimeAdapter {}
-unsafe impl Sync for TestAsyncRuntimeAdapter {}
+unsafe impl Send for TestLifecycleExternal {}
+unsafe impl Sync for TestLifecycleExternal {}
 
-impl TestAsyncRuntimeAdapter {
+impl TestLifecycleExternal {
     pub fn new() -> Self {
         Self {
-            store: Arc::new(AsyncRuntimeAdapterInternal {
-                connected: Default::default(),
+            store: Arc::new(Internal {
                 thread_id: std::thread::current().id(),
-                notified: Default::default(),
                 timers: FakeTimers::new(),
             }),
-        }
-    }
-
-    fn connector(&self) -> Option<Arc<dyn IOnAsyncRuntime>> {
-        let w = self.store.connected.lock().unwrap();
-        w.clone().unwrap().upgrade()
-    }
-
-    pub fn bind<S: IOnAsyncRuntime>(&self, connector: Weak<S>) {
-        self.check_same_thread();
-        {
-            let mut w = self.store.connected.lock().unwrap();
-            *w = Some(connector);
         }
     }
 
@@ -51,7 +34,6 @@ impl TestAsyncRuntimeAdapter {
         const MILLIS: u64 = 500;
 
         self.check_same_thread();
-        self.wait_all();
 
         let step = Duration::from_millis(MILLIS);
         let mut remaining = duration;
@@ -61,34 +43,11 @@ impl TestAsyncRuntimeAdapter {
             self.advance_impl(advance_duration);
             remaining -= advance_duration;
         }
+        self.advance_impl(Duration::ZERO);
     }
 
     fn advance_impl(&self, duration: Duration) {
         self.store.timers.advance(duration);
-        self.wait_all();
-    }
-
-    fn wait_all(&self) {
-        let app = self.connector();
-        let mut count = 0;
-
-        loop {
-            let notified = self
-                .store
-                .notified
-                .swap(false, std::sync::atomic::Ordering::Relaxed);
-            if !notified {
-                break;
-            }
-            if count == 100 {
-                panic!("too many flush")
-            }
-
-            if let Some(ref app) = app {
-                app.flush_spawned_locals();
-            }
-            count += 1;
-        }
     }
 
     fn is_same_thread(&self) -> bool {
@@ -103,25 +62,31 @@ impl TestAsyncRuntimeAdapter {
     }
 }
 
-impl IAsyncRuntimeAdapter for TestAsyncRuntimeAdapter {
-    fn is_main_thread(&self) -> bool {
-        self.is_same_thread()
-    }
-
-    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
-        self.check_same_thread();
-        let timer = self.store.timers.sleep(duration);
-        Box::pin(timer)
-    }
-
+impl ILifecycleExternal for TestLifecycleExternal {
     fn get_time(&self) -> std::time::Duration {
         self.check_same_thread();
         self.store.timers.get_current_time()
     }
 
-    fn on_spawn_locals(&self) {
-        self.store
-            .notified
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+    fn is_main_thread(&self) -> bool {
+        self.store.thread_id == std::thread::current().id()
+    }
+
+    fn spawn_main_thread(&self, runnable: misty_vm::Runnable) {
+        self.store.timers.sleep(Duration::from_millis(0), move || {
+            runnable.run();
+        });
+    }
+
+    fn spawn(&self, runnable: misty_vm::Runnable) {
+        tokio::spawn(async move {
+            runnable.run();
+        });
+    }
+
+    fn spawn_sleep(&self, duration: Duration, runnable: misty_vm::Runnable) {
+        self.store.timers.sleep(duration, move || {
+            runnable.run();
+        });
     }
 }

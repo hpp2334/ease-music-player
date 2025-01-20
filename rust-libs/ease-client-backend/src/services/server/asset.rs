@@ -12,7 +12,7 @@ use bytes::Bytes;
 use ease_client_shared::backends::{music::MusicId, storage::DataSourceKey};
 use ease_remote_storage::{StatusCode, StreamFile};
 use futures::StreamExt;
-use misty_async::Task;
+use misty_lifecycle::Task;
 
 use crate::{
     ctx::{BackendContext, WeakBackendContext},

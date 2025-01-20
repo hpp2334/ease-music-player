@@ -1,9 +1,9 @@
 use std::{any::Any, sync::Arc};
 
-use misty_async::AsyncRuntime;
+use misty_lifecycle::{ArcLocalCore, ILifecycleExternal, Lifecycle};
 
 use crate::{
-    async_task::DefaultAsyncRuntimeAdapter, models::Models, to_host::ToHostsBuilder,
+    async_task::DefaultLifecycleExternal, models::Models, to_host::ToHostsBuilder,
     view_models::builder::ViewModelsBuilder, Model,
 };
 
@@ -17,10 +17,11 @@ pub struct AppBuilder<Event>
 where
     Event: 'static,
 {
+    local: ArcLocalCore,
     cx: AppBuilderContext,
     view_models_builder: ViewModelsBuilder<Event>,
     to_hosts_builder: ToHostsBuilder,
-    async_tasks: Arc<AsyncRuntime>,
+    lifecycle: Arc<Lifecycle>,
 }
 
 impl AppBuilderContext {
@@ -37,13 +38,16 @@ where
     Event: Any + 'static,
 {
     pub(crate) fn new() -> Self {
+        let local = ArcLocalCore::new();
+
         Self {
+            local,
             cx: AppBuilderContext {
                 models: Models::new(),
             },
             view_models_builder: ViewModelsBuilder::new(),
-            to_hosts_builder: ToHostsBuilder::new(),
-            async_tasks: AsyncRuntime::new(Arc::new(DefaultAsyncRuntimeAdapter)),
+            to_hosts_builder: ToHostsBuilder::new(local),
+            lifecycle: Lifecycle::new(Arc::new(DefaultLifecycleExternal)),
         }
     }
 
@@ -60,8 +64,8 @@ where
         self
     }
 
-    pub fn with_async_runtime(mut self, rt: Arc<AsyncRuntime>) -> Self {
-        self.async_tasks = rt;
+    pub fn with_async_dispatcher(mut self, dispatcher: Arc<dyn ILifecycleExternal>) -> Self {
+        self.lifecycle = Lifecycle::new(dispatcher);
         self
     }
 
@@ -70,11 +74,11 @@ where
 
         App {
             _app: Arc::new(AppInternal {
-                thread_id: std::thread::current().id(),
+                local: self.local,
                 models: self.cx.models,
                 view_models: self.view_models_builder.build(),
                 to_hosts: self.to_hosts_builder.build(),
-                async_executor: self.async_tasks,
+                async_executor: self.lifecycle,
                 pending_events,
                 during_flush: Default::default(),
             }),

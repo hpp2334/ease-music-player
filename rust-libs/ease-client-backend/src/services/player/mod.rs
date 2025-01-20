@@ -166,25 +166,15 @@ pub(crate) async fn player_request_play(cx: &BackendContext, to_play: PlayerMedi
         title: music.title().to_string(),
         has_cover: music.cover.is_some(),
     };
-    {
-        let rt = cx.async_runtime().clone();
-        let cx = cx.weak();
-        rt.clone()
-            .spawn_on_main(async move {
-                if let Some(cx) = cx.upgrade() {
-                    cx.player_delegate().set_music_url(item);
-                    cx.player_delegate().resume();
+    cx.player_delegate().set_music_url(item);
+    cx.player_delegate().resume();
 
-                    {
-                        let mut state = cx.player_state().current.write().unwrap();
-                        *state = Some(to_play.clone());
-                    }
-                    notify_player_current(&cx).unwrap();
-                    preload_next_music(&cx).unwrap();
-                }
-            })
-            .await;
+    {
+        let mut state = cx.player_state().current.write().unwrap();
+        *state = Some(to_play.clone());
     }
+    notify_player_current(&cx).unwrap();
+    preload_next_music(&cx).unwrap();
     Ok(())
 }
 
@@ -282,17 +272,7 @@ pub(crate) async fn player_refresh_current(cx: &BackendContext) -> BResult<()> {
         }
     }
 
-    {
-        let rt = cx.async_runtime().clone();
-        let cx = cx.weak();
-        rt.clone()
-            .spawn_on_main(async move {
-                if let Some(cx) = cx.upgrade() {
-                    cx.player_delegate().stop();
-                }
-            })
-            .await
-    };
+    cx.player_delegate().stop();
     player_clear_current(&cx);
     notify_player_current(&cx)?;
     return Ok(());
@@ -337,25 +317,13 @@ pub(crate) async fn on_player_event(
             let play_mode = *cx.player_state().playmode.read().unwrap();
             match play_mode {
                 PlayMode::Single => {
-                    let cx = cx.weak();
-                    rt.spawn_on_main(async move {
-                        if let Some(cx) = cx.upgrade() {
-                            cx.player_delegate().pause();
-                            cx.player_delegate().seek(0);
-                        }
-                    })
-                    .await;
+                    cx.player_delegate().pause();
+                    cx.player_delegate().seek(0);
                 }
                 PlayMode::SingleLoop => {
-                    let cx = cx.weak();
-                    rt.spawn_on_main(async move {
-                        if let Some(cx) = cx.upgrade() {
-                            cx.player_delegate().pause();
-                            cx.player_delegate().seek(0);
-                            cx.player_delegate().resume();
-                        }
-                    })
-                    .await;
+                    cx.player_delegate().pause();
+                    cx.player_delegate().seek(0);
+                    cx.player_delegate().resume();
                 }
                 PlayMode::List | PlayMode::ListLoop => {
                     player_request_play_adjacent::<true>(&cx).await?;
@@ -399,16 +367,8 @@ pub(crate) async fn on_player_event(
             update_music_cover(&cx, ArgUpdateMusicCover { id, cover: buffer }).await?
         }
         PlayerDelegateEvent::Error { msg } => {
-            {
-                let cx = cx.weak();
-                rt.spawn_on_main(async move {
-                    if let Some(cx) = cx.upgrade() {
-                        cx.player_delegate().pause();
-                        cx.player_delegate().seek(0);
-                    }
-                })
-                .await;
-            }
+            cx.player_delegate().pause();
+            cx.player_delegate().seek(0);
             cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Error {
                 value: msg,
             }));
@@ -427,19 +387,9 @@ pub(crate) async fn on_connect_for_player(cx: &BackendContext, playmode: PlayMod
     cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Current {
         value: get_player_current(cx)?,
     }));
-    {
-        let rt = cx.async_runtime().clone();
-        let cx = cx.weak();
-        rt.clone()
-            .spawn_on_main(async move {
-                if let Some(cx) = cx.upgrade() {
-                    cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playing {
-                        value: cx.player_delegate().is_playing(),
-                    }));
-                }
-            })
-            .await;
-    }
+    cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playing {
+        value: cx.player_delegate().is_playing(),
+    }));
     cx.notify(ConnectorAction::Player(ConnectorPlayerAction::Playmode {
         value: playmode,
     }));

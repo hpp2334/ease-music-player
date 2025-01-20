@@ -5,17 +5,17 @@ use std::{
     thread::ThreadId,
 };
 
-use misty_async::AsyncRuntime;
+use misty_lifecycle::{ArcLocalCore, Lifecycle};
 use tracing::instrument;
 
 use crate::{models::Models, to_host::ToHosts, view_models::pod::ViewModels};
 
 pub(crate) struct AppInternal {
-    pub thread_id: ThreadId,
+    pub local: ArcLocalCore,
     pub models: Models,
     pub view_models: ViewModels,
     pub to_hosts: ToHosts,
-    pub async_executor: Arc<AsyncRuntime>,
+    pub async_executor: Arc<Lifecycle>,
     pub pending_events: (
         flume::Sender<Box<dyn Any + 'static>>,
         flume::Receiver<Box<dyn Any + 'static>>,
@@ -40,7 +40,7 @@ impl WeakAppInternal {
     pub fn upgrade(&self) -> Option<Arc<AppInternal>> {
         let app = self.internal.upgrade();
         if let Some(app) = app {
-            app.check_same_thread();
+            app.local.check_same_thread();
             Some(app)
         } else {
             None
@@ -85,7 +85,7 @@ impl AppInternal {
     where
         Event: Any + Debug + 'static,
     {
-        self.check_same_thread();
+        self.local.check_same_thread();
         let lock = self
             .during_flush
             .swap(true, std::sync::atomic::Ordering::Relaxed);
@@ -103,26 +103,8 @@ impl AppInternal {
     }
 
     #[instrument]
-    pub fn flush_spawned(self: &Arc<Self>) {
-        self.check_same_thread();
-        let should_flush = self.async_executor.flush_local_spawns();
-        if should_flush {
-            tracing::trace!("start");
-            let lock = self
-                .during_flush
-                .swap(true, std::sync::atomic::Ordering::Relaxed);
-            if lock {
-                panic!("flush_spawned, but ViewModels are during on_event or on_flush")
-            }
-            self.view_models.handle_flush(self);
-            self.after_flush();
-            tracing::trace!("end");
-        }
-    }
-
-    #[instrument]
     pub fn flush_pending_events(self: &Arc<Self>) {
-        self.check_same_thread();
+        self.local.check_same_thread();
         let len = self.pending_events.1.len();
         if len == 0 {
             return;
@@ -145,10 +127,28 @@ impl AppInternal {
         tracing::trace!("end");
     }
 
+    #[instrument]
+    pub fn flush_only(self: &Arc<Self>) {
+        self.local.check_same_thread();
+
+        let lock = self
+            .during_flush
+            .swap(true, std::sync::atomic::Ordering::Relaxed);
+        if lock {
+            panic!("flush_only, but ViewModels are during on_event or on_flush")
+        }
+
+        tracing::trace!("start");
+        self.view_models.handle_flush(self);
+        self.after_flush();
+        tracing::trace!("end");
+    }
+
     pub fn push_pending_event<Event>(self: &Arc<Self>, evt: Event)
     where
         Event: Any + Debug + 'static,
     {
+        self.local.debug_check_same_thread();
         let should_schedule = self.pending_events.0.is_empty();
         self.pending_events
             .0
@@ -158,11 +158,13 @@ impl AppInternal {
         let weak_internal = WeakAppInternal::new(self);
 
         if should_schedule {
-            self.async_executor.schedule_main(move || {
-                if let Some(app) = weak_internal.upgrade() {
-                    app.flush_pending_events();
-                }
-            });
+            self.async_executor
+                .spawn_main_thread(async move {
+                    if let Some(app) = weak_internal.upgrade() {
+                        app.flush_pending_events();
+                    }
+                })
+                .detach();
         }
     }
 
@@ -170,14 +172,8 @@ impl AppInternal {
     where
         Event: Any + Debug + 'static,
     {
+        self.local.debug_check_same_thread();
         self.push_pending_event(evt);
-    }
-
-    pub fn check_same_thread(self: &Arc<Self>) {
-        let thread_id = std::thread::current().id();
-        if self.thread_id != thread_id {
-            panic!("cannot operate app in other thread")
-        }
     }
 
     fn after_flush(&self) {

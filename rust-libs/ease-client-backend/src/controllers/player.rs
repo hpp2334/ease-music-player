@@ -28,17 +28,12 @@ pub(crate) async fn cp_player_playmode(cx: &BackendContext, _arg: ()) -> BResult
 }
 
 pub(crate) async fn cp_player_durations(cx: &BackendContext, _arg: ()) -> BResult<PlayerDurations> {
-    let rt = cx.async_runtime().clone();
     let cx = cx.weak();
-    rt.clone()
-        .spawn_on_main(async move {
-            if let Some(cx) = cx.upgrade() {
-                Ok(cx.player_delegate().get_durations())
-            } else {
-                Ok(Default::default())
-            }
-        })
-        .await
+    if let Some(cx) = cx.upgrade() {
+        Ok(cx.player_delegate().get_durations())
+    } else {
+        Ok(Default::default())
+    }
 }
 
 pub(crate) async fn cp_play_music(cx: &BackendContext, arg: ArgPlayMusic) -> BResult<()> {
@@ -66,16 +61,10 @@ pub(crate) async fn cp_play_music(cx: &BackendContext, arg: ArgPlayMusic) -> BRe
 }
 
 pub(crate) async fn cp_pause_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
-    let rt = cx.async_runtime().clone();
     let cx = cx.weak();
-    rt.clone()
-        .clone()
-        .spawn_on_main(async move {
-            if let Some(cx) = cx.upgrade() {
-                cx.player_delegate().pause();
-            }
-        })
-        .await;
+    if let Some(cx) = cx.upgrade() {
+        cx.player_delegate().pause();
+    }
     Ok(())
 }
 
@@ -90,28 +79,18 @@ pub(crate) async fn cp_play_previous(cx: &BackendContext, _arg: ()) -> BResult<(
 pub(crate) async fn cp_stop_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
     let rt = cx.async_runtime().clone();
     let cx = cx.weak();
-    rt.clone()
-        .clone()
-        .spawn_on_main(async move {
-            if let Some(cx) = cx.upgrade() {
-                cx.player_delegate().stop();
-            }
-        })
-        .await;
+    if let Some(cx) = cx.upgrade() {
+        cx.player_delegate().stop();
+    }
     Ok(())
 }
 
 pub(crate) async fn cp_player_seek(cx: &BackendContext, arg: u64) -> BResult<()> {
     let rt = cx.async_runtime().clone();
     let cx = cx.weak();
-    rt.clone()
-        .clone()
-        .spawn_on_main(async move {
-            if let Some(cx) = cx.upgrade() {
-                cx.player_delegate().seek(arg);
-            }
-        })
-        .await;
+    if let Some(cx) = cx.upgrade() {
+        cx.player_delegate().seek(arg);
+    }
     Ok(())
 }
 
@@ -130,16 +109,10 @@ pub(crate) async fn cp_update_playmode(cx: &BackendContext, arg: PlayMode) -> BR
 }
 
 pub(crate) async fn cp_resume_player(cx: &BackendContext, _arg: ()) -> BResult<()> {
-    let rt = cx.async_runtime().clone();
     let cx = cx.weak();
-    rt.clone()
-        .clone()
-        .spawn_on_main(async move {
-            if let Some(cx) = cx.upgrade() {
-                cx.player_delegate().resume();
-            }
-        })
-        .await;
+    if let Some(cx) = cx.upgrade() {
+        cx.player_delegate().resume();
+    }
     Ok(())
 }
 

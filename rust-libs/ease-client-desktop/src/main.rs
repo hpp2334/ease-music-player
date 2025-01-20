@@ -12,6 +12,7 @@ use gpui::{
     BoxShadow, DragMoveEvent, ElementId, Model, MouseButton, Pixels, Point, Rgba, SharedString,
     TitlebarOptions, View, ViewContext, WindowBounds, WindowDecorations, WindowOptions,
 };
+use view_state::GpuiViewStateService;
 
 mod core;
 mod view_state;
@@ -317,10 +318,14 @@ fn main() {
 
     patch_cwd();
 
-    let app = App::new()
+    App::new()
         .with_assets(Assets {})
         .run(|cx: &mut AppContext| {
-            // cx.set_global(build_desktop_client(cx, vs));
+            {
+                let vs = GpuiViewStateService::new(cx);
+                let pod = build_desktop_client(cx, vs);
+                cx.set_global(pod);
+            }
 
             let bounds = Bounds::centered(None, size(px(1280.0 + 32.0), px(800.0 + 32.0)), cx);
             cx.open_window(

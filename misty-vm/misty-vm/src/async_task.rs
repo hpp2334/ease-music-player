@@ -9,7 +9,7 @@ use std::{
 };
 
 use async_task::Task;
-use misty_async::{BoxFuture, IAsyncRuntimeAdapter};
+use misty_lifecycle::{BoxFuture, ILifecycleExternal};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct AsyncTaskId(u64);
@@ -69,22 +69,26 @@ impl AsyncTaskPod {
     }
 }
 
-pub(crate) struct DefaultAsyncRuntimeAdapter;
+pub(crate) struct DefaultLifecycleExternal;
 
-impl IAsyncRuntimeAdapter for DefaultAsyncRuntimeAdapter {
+impl ILifecycleExternal for DefaultLifecycleExternal {
+    fn get_time(&self) -> Duration {
+        todo!()
+    }
+
     fn is_main_thread(&self) -> bool {
         todo!()
     }
 
-    fn on_spawn_locals(&self) {
+    fn spawn_main_thread(&self, runnable: async_task::Runnable) {
         todo!()
     }
 
-    fn sleep(&self, _duration: Duration) -> BoxFuture<()> {
+    fn spawn(&self, runnable: async_task::Runnable) {
         todo!()
     }
 
-    fn get_time(&self) -> Duration {
+    fn spawn_sleep(&self, duration: Duration, runnable: async_task::Runnable) {
         todo!()
     }
 }

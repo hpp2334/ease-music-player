@@ -9,7 +9,7 @@ use std::{
 };
 
 use ease_client_shared::backends::connector::{ConnectorAction, IConnectorNotifier};
-use misty_async::AsyncRuntime;
+use misty_lifecycle::Lifecycle;
 
 use crate::{
     repositories::core::DatabaseServer,
@@ -25,7 +25,7 @@ struct BackendContextInternal {
     storage_path: RwLock<String>,
     app_document_dir: RwLock<String>,
     schema_version: AtomicU32,
-    rt: Arc<AsyncRuntime>,
+    rt: Arc<Lifecycle>,
     player_delegate: Arc<dyn IPlayerDelegate>,
     player_state: Arc<PlayerState>,
     storage_state: Arc<StorageState>,
@@ -74,7 +74,7 @@ impl WeakBackendContext {
 }
 
 impl BackendContext {
-    pub fn new(rt: Arc<AsyncRuntime>, player: Arc<dyn IPlayerDelegate>) -> Self {
+    pub fn new(rt: Arc<Lifecycle>, player: Arc<dyn IPlayerDelegate>) -> Self {
         Self {
             internal: Arc::new(BackendContextInternal {
                 storage_path: RwLock::new(String::new()),
@@ -117,7 +117,7 @@ impl BackendContext {
         self.internal.connectors.0.write().unwrap().remove(&handle);
     }
 
-    pub fn async_runtime(&self) -> &Arc<AsyncRuntime> {
+    pub fn async_runtime(&self) -> &Arc<Lifecycle> {
         &self.internal.rt
     }
 

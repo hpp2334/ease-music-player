@@ -8,7 +8,7 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct FakeTimers {
     current: Arc<AtomicU64>,
-    timers: Arc<RwLock<Vec<(u64, Waker)>>>,
+    timers: Arc<RwLock<Vec<(u64, Box<dyn FnOnce()>)>>>,
 }
 
 impl FakeTimers {
@@ -30,44 +30,22 @@ impl FakeTimers {
             timers.drain(..).partition(|&(t, _)| t <= new_time);
 
         *timers = to_keep;
+        drop(timers);
 
-        for (_, waker) in to_wake {
-            waker.wake();
+        for (_, f) in to_wake {
+            f();
         }
     }
 
-    pub fn sleep(&self, duration: Duration) -> FakeTimer {
+    pub fn sleep(&self, duration: Duration, f: impl FnOnce() + 'static) {
         let wake_time =
             self.current.load(std::sync::atomic::Ordering::Relaxed) + duration.as_millis() as u64;
-        FakeTimer {
-            wake_time,
-            time: self.clone(),
-        }
+
+        let mut timers = self.timers.write().unwrap();
+        timers.push((wake_time, Box::new(f)));
     }
 
     pub fn get_current_time(&self) -> Duration {
         Duration::from_millis(self.current.load(std::sync::atomic::Ordering::Relaxed))
-    }
-}
-
-pub struct FakeTimer {
-    wake_time: u64,
-    time: FakeTimers,
-}
-
-impl Future for FakeTimer {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.time.current.load(std::sync::atomic::Ordering::Relaxed) >= self.wake_time {
-            Poll::Ready(())
-        } else {
-            self.time
-                .timers
-                .write()
-                .unwrap()
-                .push((self.wake_time, cx.waker().clone()));
-            Poll::Pending
-        }
     }
 }

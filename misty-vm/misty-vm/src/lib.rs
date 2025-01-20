@@ -16,5 +16,5 @@ pub use view_models::context::{AsyncViewModelContext, ViewModelContext};
 pub use view_models::pod::ViewModel;
 
 // External
-pub use misty_async::*;
+pub use misty_lifecycle::*;
 pub use misty_vm_macro::misty_to_host;

@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-misty-async = { path = "../misty-async" }
+misty-lifecycle = { path = "../misty-lifecycle" }
 misty-vm-macro = { path = "../misty-vm-macro" }
 tracing = "0.1"
 thread_local = "1.1.7"

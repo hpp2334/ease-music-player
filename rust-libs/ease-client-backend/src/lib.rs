@@ -17,7 +17,7 @@ use ease_client_shared::backends::{
 };
 pub use ease_remote_storage::StreamFile;
 use error::BResult;
-use misty_async::{AsyncRuntime, IOnAsyncRuntime};
+use misty_lifecycle::{ILifecycleExternal, Lifecycle};
 pub use services::player::{IPlayerDelegate, MusicToPlay};
 use services::{app::app_bootstrap, server::load_asset};
 
@@ -34,7 +34,8 @@ impl Drop for Backend {
 }
 
 impl Backend {
-    pub fn new(rt: Arc<AsyncRuntime>, player: Arc<dyn IPlayerDelegate>) -> Self {
+    pub fn new(dispatcher: Arc<dyn ILifecycleExternal>, player: Arc<dyn IPlayerDelegate>) -> Self {
+        let rt = Lifecycle::new(dispatcher);
         let cx = Arc::new(BackendContext::new(rt, player));
         Self { cx }
     }
@@ -42,10 +43,6 @@ impl Backend {
     pub fn init(&self, arg: ArgInitializeApp) -> BResult<()> {
         app_bootstrap(&self.cx, arg)?;
         Ok(())
-    }
-
-    pub fn flush_spawned_locals(&self) {
-        self.cx.async_runtime().flush_local_spawns();
     }
 
     pub fn connect(&self, notifier: Arc<dyn IConnectorNotifier>) -> usize {
@@ -92,11 +89,5 @@ impl Backend {
 
     pub fn storage_path(&self) -> String {
         self.cx.get_storage_path()
-    }
-}
-
-impl IOnAsyncRuntime for Backend {
-    fn flush_spawned_locals(&self) {
-        self.flush_spawned_locals();
     }
 }

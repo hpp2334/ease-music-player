@@ -64,23 +64,12 @@ pub(crate) async fn cc_create_playlist(
     )?;
 
     {
-        let rt = cx.async_runtime().clone();
-        let cx = cx.weak();
-        rt.clone()
-            .clone()
-            .spawn_on_main(async move {
-                if let Some(cx) = cx.upgrade() {
-                    for (id, existed) in music_ids {
-                        if !existed {
-                            cx.player_delegate().request_total_duration(
-                                id,
-                                cx.asset_server().serve_music_meta_url(id),
-                            );
-                        }
-                    }
-                }
-            })
-            .await;
+        for (id, existed) in music_ids {
+            if !existed {
+                cx.player_delegate()
+                    .request_total_duration(id, cx.asset_server().serve_music_meta_url(id));
+            }
+        }
     }
 
     try_join! {
@@ -114,23 +103,15 @@ pub(crate) async fn cu_add_musics_to_playlist(
         .add_musics_to_playlist(arg.id, musics)?;
 
     {
-        let rt = cx.async_runtime().clone();
         let cx = cx.weak();
-        rt.clone()
-            .clone()
-            .spawn_on_main(async move {
-                if let Some(cx) = cx.upgrade() {
-                    for (id, existed) in music_ids {
-                        if !existed {
-                            cx.player_delegate().request_total_duration(
-                                id,
-                                cx.asset_server().serve_music_meta_url(id),
-                            );
-                        }
-                    }
+        if let Some(cx) = cx.upgrade() {
+            for (id, existed) in music_ids {
+                if !existed {
+                    cx.player_delegate()
+                        .request_total_duration(id, cx.asset_server().serve_music_meta_url(id));
                 }
-            })
-            .await;
+            }
+        }
     }
 
     player_refresh_current(cx).await?;

@@ -1615,7 +1615,7 @@ dependencies = [
  "futures-util",
  "getset",
  "lru",
- "misty-async",
+ "misty-lifecycle",
  "nom",
  "num-derive 0.2.5",
  "num-traits",
@@ -1641,7 +1641,7 @@ dependencies = [
  "flume",
  "futures",
  "gpui",
- "misty-async",
+ "misty-lifecycle",
  "once_cell",
  "serde",
  "thread_local",
@@ -3231,7 +3231,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "misty-async"
+name = "misty-lifecycle"
 version = "0.2.0"
 dependencies = [
  "async-task",
@@ -3247,7 +3247,7 @@ dependencies = [
  "async-task",
  "flume",
  "futures",
- "misty-async",
+ "misty-lifecycle",
  "misty-vm-macro",
  "once_cell",
  "serde",

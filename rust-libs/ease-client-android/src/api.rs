@@ -10,7 +10,7 @@ use ease_client_shared::backends::{
     app::ArgInitializeApp, encode_message_payload, generated::Code, player::PlayerDelegateEvent,
     storage::DataSourceKey, MessagePayload,
 };
-use misty_vm::{AsyncRuntime, BoxFuture, IAsyncRuntimeAdapter};
+use misty_vm::{BoxFuture, ILifecycleExternal};
 
 use tracing::subscriber::set_global_default;
 
@@ -41,11 +41,7 @@ impl AsyncAdapterDelegate {
         self.app_id
     }
 }
-impl IAsyncRuntimeAdapter for AsyncAdapterDelegate {
-    fn is_main_thread(&self) -> bool {
-        std::thread::current().id() == self.thread_id
-    }
-
+impl ILifecycleExternal for AsyncAdapterDelegate {
     fn on_spawn_locals(&self) {
         self.inner.on_spawn_locals(self.app_id());
     }
@@ -129,7 +125,7 @@ pub fn api_build_backend(
 ) {
     let _guard = RT.enter();
     let backend = Backend::new(
-        AsyncRuntime::new(AsyncAdapterDelegate::new(async_adapter, None)),
+        AsyncAdapterDelegate::new(async_adapter, None),
         PlayerDelegate::new(player),
     );
     BACKEND.set_backend(Arc::new(backend));
@@ -220,7 +216,7 @@ pub fn api_build_client(
         RouterServiceDelegate::new(router),
         ToastServiceDelegate::new(toast),
         ViewStateServiceDelegate::new(vs),
-        AsyncRuntime::new(AsyncAdapterDelegate::new(async_adapter, Some(app_id))),
+        AsyncAdapterDelegate::new(async_adapter, Some(app_id)),
     );
     CLIENTS.allocate(app_id, app);
     app_id

@@ -11,7 +11,10 @@ use ease_client::{
 use ease_client_backend::Backend;
 use ease_client_shared::backends::{connector::IConnectorNotifier, music::MusicId, MessagePayload};
 use futures::future::BoxFuture;
-use misty_async::{AsyncRuntime, IAsyncRuntimeAdapter};
+
+pub struct AppPodProxy(pub AppPod);
+
+impl gpui::Global for AppPodProxy {}
 
 pub struct BackendHost {
     _backend: RwLock<Option<Arc<Backend>>>,
@@ -164,7 +167,7 @@ struct AsyncRuntimeAdapter {
     pod: WeakAppPod,
 }
 
-impl IAsyncRuntimeAdapter for AsyncRuntimeAdapter {
+impl IAsyncDispatcher for AsyncRuntimeAdapter {
     fn is_main_thread(&self) -> bool {
         self.wrapper.is_main_thread()
     }
@@ -201,7 +204,7 @@ impl IAsyncRuntimeAdapter for AsyncRuntimeAdapter {
     }
 }
 
-pub fn build_desktop_client(cx: &mut gpui::AppContext, vs: impl IViewStateService) -> AppPod {
+pub fn build_desktop_client(cx: &mut gpui::AppContext, vs: impl IViewStateService) -> AppPodProxy {
     let pod = AppPod::new();
     let app = build_client(
         BackendHost::new(),
@@ -209,12 +212,13 @@ pub fn build_desktop_client(cx: &mut gpui::AppContext, vs: impl IViewStateServic
         RouterService::new(),
         ToastService::new(),
         Arc::new(vs),
-        AsyncRuntime::new(Arc::new(AsyncRuntimeAdapter {
+        Arc::new(AsyncRuntimeAdapter {
             wrapper: GpuiContextWrapper::new(cx),
             handle_spawned_next_tick: Default::default(),
             pod: pod.weak(),
-        })),
+        }),
     );
     pod.set(app);
-    pod
+
+    AppPodProxy(pod)
 }

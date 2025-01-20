@@ -2,10 +2,9 @@ use std::{
     any::Any,
     collections::HashMap,
     fmt::Debug,
+    rc::Rc,
     sync::{atomic::AtomicU64, Arc, RwLock, Weak},
 };
-
-use misty_async::IOnAsyncRuntime;
 
 use crate::IToHost;
 
@@ -62,21 +61,11 @@ impl App {
         self._app.emit(evt);
     }
 
-    pub fn to_host<C>(&self) -> Arc<C>
+    pub fn to_host<C>(&self) -> Rc<C>
     where
         C: IToHost,
     {
         self._app.to_hosts.get::<C>()
-    }
-
-    pub fn flush_spawned(&self) {
-        self._app.flush_spawned();
-    }
-}
-
-impl IOnAsyncRuntime for AppPod {
-    fn flush_spawned_locals(&self) {
-        self.get().flush_spawned();
     }
 }
 
@@ -96,7 +85,7 @@ impl AppPod {
     }
 
     pub fn set(&self, app: App) {
-        app._app.check_same_thread();
+        app._app.local.check_same_thread();
         let mut w = self._app.write().expect("Failed to write App to AppPod");
         *w = Some(app._app.clone());
     }
@@ -104,7 +93,7 @@ impl AppPod {
     pub fn get(&self) -> App {
         let _app = self._app.read().expect("Failed to get App from AppPod");
         let _app = _app.clone().expect("App in AppPod is None");
-        _app.check_same_thread();
+        _app.local.check_same_thread();
         App { _app }
     }
 
@@ -144,7 +133,7 @@ impl AppPods {
     }
 
     pub fn allocate(&self, id: u64, app: App) {
-        app._app.check_same_thread();
+        app._app.local.check_same_thread();
         let mut apps = self._apps.write().unwrap();
         apps.insert(id, app._app.clone());
     }
@@ -156,7 +145,7 @@ impl AppPods {
         };
         let _app = app;
         if let Some(_app) = _app {
-            _app.check_same_thread();
+            _app.local.check_same_thread();
             Some(App { _app })
         } else {
             None
@@ -173,7 +162,7 @@ impl AppPods {
             apps.remove(&handle).map(|v| v.clone()).clone()
         };
         let _app = app.unwrap();
-        _app.check_same_thread();
+        _app.local.check_same_thread();
         App { _app }
     }
 }

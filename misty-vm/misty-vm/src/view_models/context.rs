@@ -1,11 +1,4 @@
-use std::{
-    any::Any,
-    fmt::Debug,
-    future::Future,
-    sync::Arc,
-    time::Duration,
-};
-
+use std::{any::Any, fmt::Debug, future::Future, rc::Rc, sync::Arc, time::Duration};
 
 use crate::{
     async_task::{AsyncTaskId, AsyncTaskPod, AsyncTasks},
@@ -71,7 +64,7 @@ impl ViewModelContext {
         self._app.models.is_dirty::<T>()
     }
 
-    pub fn to_host<C>(&self) -> Arc<C>
+    pub fn to_host<C>(&self) -> Rc<C>
     where
         C: IToHost,
     {
@@ -96,18 +89,25 @@ impl ViewModelContext {
     {
         let fut = f(self.clone_internal());
         let id = tasks.allocate();
-        let (runnable, raw_task) = {
+        let raw_task = {
             let tasks = tasks.clone();
-            self._app.async_executor.spawn_local_runnable(async move {
+            let app = Arc::downgrade(&self._app);
+            self._app.async_executor.spawn_main_thread(async move {
+                let app = app.upgrade();
+                if app.is_none() {
+                    return;
+                }
+                let app = app.unwrap();
+
                 let r = fut.await;
                 tasks.remove(id);
                 if let Err(e) = r {
                     panic!("spawn error: {}", e.cast());
                 }
+                app.flush_only();
             })
         };
         tasks.bind(id, raw_task);
-        runnable.schedule();
         id
     }
 

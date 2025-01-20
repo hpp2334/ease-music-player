@@ -1,7 +1,7 @@
 use std::{convert::Infallible, sync::Arc};
 
 use misty_vm::{
-    App, AppBuilderContext, AsyncRuntime, IAsyncRuntimeAdapter, Model, ViewModel, ViewModelContext,
+    App, AppBuilderContext, ILifecycleDispatcher, Lifecycle, Model, ViewModel, ViewModelContext,
 };
 
 #[derive(Debug, Clone)]
@@ -66,12 +66,12 @@ impl ViewModel for TodoListVM {
     }
 }
 
-fn build_app(adapter: impl IAsyncRuntimeAdapter) -> App {
+fn build_app(adapter: impl ILifecycleDispatcher) -> App {
     let app = App::builder::<TodoEvent>()
         .with_view_models(|cx, builder| {
             builder.add(TodoListVM::new(cx));
         })
-        .with_async_runtime(AsyncRuntime::new(Arc::new(adapter)))
+        .with_async_dispatcher(Arc::new(adapter))
         .build();
     app
 }
@@ -79,13 +79,13 @@ fn build_app(adapter: impl IAsyncRuntimeAdapter) -> App {
 #[cfg(test)]
 mod tests {
     use misty_vm::AppPod;
-    use misty_vm_test::TestAsyncRuntimeAdapter;
+    use misty_vm_test::TestLifecycleExternal;
 
     use super::*;
 
     #[tokio::test]
     async fn test_todo_list() {
-        let rt = TestAsyncRuntimeAdapter::new();
+        let rt = TestLifecycleExternal::new();
 
         let app = build_app(rt.clone());
         let pod = Arc::new(AppPod::new());
@@ -135,7 +135,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mark_complete_toggle() {
-        let rt = TestAsyncRuntimeAdapter::new();
+        let rt = TestLifecycleExternal::new();
 
         let app = build_app(rt.clone());
         let pod = Arc::new(AppPod::new());
@@ -168,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_items() {
-        let rt = TestAsyncRuntimeAdapter::new();
+        let rt = TestLifecycleExternal::new();
 
         let app = build_app(rt.clone());
         let pod = Arc::new(AppPod::new());

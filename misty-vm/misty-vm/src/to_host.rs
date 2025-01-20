@@ -2,24 +2,28 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     fmt::Debug,
+    rc::Rc,
     sync::Arc,
 };
 
+use misty_lifecycle::{ArcLocal, ArcLocalAny, ArcLocalCore};
+
 use crate::view_models::context::ViewModelContext;
 
-pub trait IToHost: Any + Send + Sync + Sized + 'static {
-    fn of(cx: &ViewModelContext) -> Arc<Self> {
+pub trait IToHost: Any + Sized + 'static {
+    fn of(cx: &ViewModelContext) -> Rc<Self> {
         cx.app().to_hosts.get()
     }
 }
 
 pub struct ToHostsBuilder {
-    to_hosts: HashMap<TypeId, Arc<dyn Any + Send + Sync + 'static>>,
+    core: ArcLocalCore,
+    to_hosts: HashMap<TypeId, ArcLocalAny>,
 }
 
 #[derive(Debug)]
 pub struct ToHosts {
-    to_hosts: HashMap<TypeId, Arc<dyn Any + Send + Sync + 'static>>,
+    to_hosts: HashMap<TypeId, ArcLocalAny>,
 }
 
 pub enum ToHostImplPtr<T: ?Sized> {
@@ -28,8 +32,9 @@ pub enum ToHostImplPtr<T: ?Sized> {
 }
 
 impl ToHostsBuilder {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(core: ArcLocalCore) -> Self {
         ToHostsBuilder {
+            core,
             to_hosts: Default::default(),
         }
     }
@@ -38,7 +43,7 @@ impl ToHostsBuilder {
     where
         C: IToHost,
     {
-        let to_host = Arc::new(to_host);
+        let to_host = ArcLocal::new(self.core, to_host).as_any();
         self.to_hosts.insert(TypeId::of::<C>(), to_host);
         self
     }
@@ -51,7 +56,7 @@ impl ToHostsBuilder {
 }
 
 impl ToHosts {
-    pub fn get<C>(&self) -> Arc<C>
+    pub fn get<C>(&self) -> Rc<C>
     where
         C: IToHost,
     {
@@ -59,7 +64,7 @@ impl ToHosts {
             .to_hosts
             .get(&TypeId::of::<C>())
             .expect(format!("ToHost {} not registered", std::any::type_name::<C>()).as_str());
-        let s = s.clone().downcast::<C>().unwrap();
-        s
+        let s = s.clone().try_downcast::<C>().unwrap();
+        s.get().clone()
     }
 }

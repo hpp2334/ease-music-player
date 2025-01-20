@@ -1,7 +1,7 @@
 use std::{convert::Infallible, sync::Arc, time::Duration};
 
 use misty_vm::{
-    App, AppBuilderContext, AsyncRuntime, AsyncTasks, IAsyncRuntimeAdapter, Model, ViewModel,
+    App, AppBuilderContext, AsyncTasks, ILifecycleDispatcher, Lifecycle, Model, ViewModel,
     ViewModelContext,
 };
 
@@ -137,12 +137,12 @@ impl ViewModel for CountdownVM {
     }
 }
 
-fn build_app(adapter: impl IAsyncRuntimeAdapter) -> App {
+fn build_app(adapter: impl ILifecycleDispatcher) -> App {
     App::builder::<Event>()
         .with_view_models(|cx, builder| {
             builder.add(CountdownVM::new(cx));
         })
-        .with_async_runtime(AsyncRuntime::new(Arc::new(adapter)))
+        .with_async_dispatcher(Arc::new(adapter))
         .build()
 }
 
@@ -152,13 +152,13 @@ mod tests {
     use std::{sync::Arc, time::Duration};
 
     use misty_vm::AppPod;
-    use misty_vm_test::TestAsyncRuntimeAdapter;
+    use misty_vm_test::TestLifecycleExternal;
 
     use crate::{build_app, CountdownState, Event, PlayingState};
 
     #[tokio::test]
     async fn test_update_and_start() {
-        let rt = TestAsyncRuntimeAdapter::new();
+        let rt = TestLifecycleExternal::new();
 
         let app = build_app(rt.clone());
         let pod = Arc::new(AppPod::new());
@@ -176,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_start_and_pause() {
-        let rt = TestAsyncRuntimeAdapter::new();
+        let rt = TestLifecycleExternal::new();
 
         let app = build_app(rt.clone());
         let pod = Arc::new(AppPod::new());
@@ -207,7 +207,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_and_restart() {
-        let rt = TestAsyncRuntimeAdapter::new();
+        let rt = TestLifecycleExternal::new();
 
         let app = build_app(rt.clone());
         let pod = Arc::new(AppPod::new());

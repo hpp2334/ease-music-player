@@ -19,8 +19,8 @@ use fake_permission::FakePermissionService;
 use fake_player::*;
 pub use fake_server::ReqInteceptor;
 use fake_server::*;
-use misty_vm::{AppPod, AsyncRuntime};
-use misty_vm_test::TestAsyncRuntimeAdapter;
+use misty_vm::AppPod;
+use misty_vm_test::TestLifecycleExternal;
 use view_state::ViewStateServiceRef;
 
 mod backend_host;
@@ -37,8 +37,7 @@ pub struct TestApp {
     player: FakeMusicPlayerRef,
     view_state: ViewStateServiceRef,
     permission: FakePermissionService,
-    ui_async_runtime: Arc<TestAsyncRuntimeAdapter>,
-    backend_async_runtime: Arc<TestAsyncRuntimeAdapter>,
+    lifecycle: Arc<TestLifecycleExternal>,
     event_loop: EventLoop,
 }
 
@@ -111,15 +110,10 @@ impl TestApp {
             }
         };
         let event_loop: EventLoop = EventLoop::new();
-        let ui_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
-        let backend_async_runtime_adapter = Arc::new(TestAsyncRuntimeAdapter::new());
+        let lifecycle = Arc::new(TestLifecycleExternal::new());
 
         let player = FakeMusicPlayerRef::new();
-        let backend = Arc::new(Backend::new(
-            AsyncRuntime::new(backend_async_runtime_adapter.clone()),
-            Arc::new(player.clone()),
-        ));
-        backend_async_runtime_adapter.bind(Arc::downgrade(&backend));
+        let backend = Arc::new(Backend::new(lifecycle.clone(), Arc::new(player.clone())));
         let backend_host = BackendHost::new();
         backend_host.set_backend(backend.clone());
         player.set_backend(backend_host.clone());
@@ -140,9 +134,8 @@ impl TestApp {
             Arc::new(FakeRouterService),
             Arc::new(FakeToastServiceImpl),
             Arc::new(view_state.clone()),
-            AsyncRuntime::new(ui_async_runtime_adapter.clone()),
+            lifecycle.clone(),
         );
-        ui_async_runtime_adapter.bind(Arc::downgrade(&pod));
         pod.set(app.clone());
 
         app.emit(Action::Init);
@@ -154,8 +147,7 @@ impl TestApp {
             server: FakeServerRef::setup("test-files"),
             player,
             permission,
-            ui_async_runtime: ui_async_runtime_adapter,
-            backend_async_runtime: backend_async_runtime_adapter,
+            lifecycle,
             view_state,
             event_loop,
         };
@@ -306,8 +298,7 @@ impl TestApp {
     fn advance_timer_impl(&self, duration_s: u64) {
         let duration = Duration::from_secs(duration_s);
         self.player.advance(duration);
-        self.backend_async_runtime.advance(duration);
-        self.ui_async_runtime.advance(duration);
+        self.lifecycle.advance(duration);
     }
 
     pub async fn wait_network(&self) {

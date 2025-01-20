@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use misty_vm::{App, AsyncRuntime};
+use misty_vm::{App, ArcLocalCore, ILifecycleExternal};
 
 use crate::{
     actions::Action,
@@ -36,7 +36,7 @@ pub fn build_client(
     router: Arc<dyn IRouterService>,
     toast: Arc<dyn IToastService>,
     vs: Arc<dyn IViewStateService>,
-    async_runtime: Arc<AsyncRuntime>,
+    async_dispatcher: Arc<dyn ILifecycleExternal>,
 ) -> App {
     App::builder::<Action>()
         .with_view_models(|cx, builder| {
@@ -73,6 +73,6 @@ pub fn build_client(
                 .add(ToastService::new_with_arc(toast))
                 .add(ViewStateService::new_with_arc(vs));
         })
-        .with_async_runtime(async_runtime)
+        .with_async_dispatcher(async_dispatcher)
         .build()
 }
