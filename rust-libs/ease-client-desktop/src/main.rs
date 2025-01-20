@@ -1,7 +1,9 @@
+use core::build_desktop_client;
 use std::{cell::RefCell, collections::HashMap};
 
-use ease_client::view_models::view_state::views::playlist::{
-    VPlaylistAbstractItem, VPlaylistListState,
+use ease_client::{
+    build_client,
+    view_models::view_state::views::playlist::{VPlaylistAbstractItem, VPlaylistListState},
 };
 
 use ease_client_shared::backends::playlist::PlaylistId;
@@ -10,6 +12,9 @@ use gpui::{
     BoxShadow, DragMoveEvent, ElementId, Model, MouseButton, Pixels, Point, Rgba, SharedString,
     TitlebarOptions, View, ViewContext, WindowBounds, WindowDecorations, WindowOptions,
 };
+
+mod core;
+mod view_state;
 
 const RGB_PRIMARY: u32 = 0x2E89B0;
 const RGB_PRIMARY_TEXT: u32 = 0x3A3A3A;
@@ -65,13 +70,10 @@ impl Render for SidebarWidget {
             .size_full()
             .flex()
             .flex_col()
+            .bg(rgb(RGB_SLIGHT))
             .child(div().text_color(rgb(RGB_PRIMARY)).child("PLAYLISTS"))
             .child(div().w_full().h(px(300.0)).children(playlist_elements))
     }
-}
-
-struct WindowbarDrag {
-    last_position: RefCell<(u32, u32)>,
 }
 
 pub struct WindowBarWidget {}
@@ -136,7 +138,81 @@ impl Render for WindowBarWidget {
     }
 }
 
+struct MainWidget {}
+impl Render for MainWidget {
+    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+        let state = VPlaylistListState {
+            playlist_list: vec![
+                VPlaylistAbstractItem {
+                    id: PlaylistId::wrap(1),
+                    title: "Origami King".to_string(),
+                    count: 1,
+                    duration: "00:05:12".to_string(),
+                    cover: None,
+                },
+                VPlaylistAbstractItem {
+                    id: PlaylistId::wrap(2),
+                    title: "サクラノ刻 -櫻の森の下を歩む- サウンドトラックCD Disc1".to_string(),
+                    count: 10,
+                    duration: "00:05:12".to_string(),
+                    cover: None,
+                },
+            ],
+        };
+
+        let playlist_elements: Vec<_> = state
+            .playlist_list
+            .clone()
+            .into_iter()
+            .map(|item| {
+                div()
+                    .id(*item.id.as_ref() as usize)
+                    .px_2()
+                    .cursor_pointer()
+                    .on_click({
+                        let item = item.clone();
+                        move |_event, cx| {
+                            println!("VPlaylistAbstractItem {:?}", item);
+                        }
+                    })
+                    .w(px(320.0))
+                    .h(px(320.0))
+                    .text_ellipsis()
+                    .child(format!("{}", item.title))
+            })
+            .collect();
+
+        div()
+            .size_full()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .children(playlist_elements)
+            .child(
+                div()
+                    .id(SharedString::new_static("main-add-playlist"))
+                    .w(px(320.0))
+                    .h(px(320.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .on_click({
+                        move |_event, cx| {
+                            println!("click add playlist");
+                        }
+                    })
+                    .child(
+                        svg()
+                            .size(px(16.0))
+                            .text_color(rgb(RGB_PRIMARY_TEXT))
+                            .path("drawables://Plus.svg"),
+                    ),
+            )
+    }
+}
+
 struct RootWidget {
+    main: View<MainWidget>,
     window_bar: View<WindowBarWidget>,
     view_sidebar: View<SidebarWidget>,
 }
@@ -144,6 +220,7 @@ struct RootWidget {
 impl RootWidget {
     pub fn new(cx: &mut ViewContext<Self>) -> Self {
         Self {
+            main: cx.new_view(|cx| MainWidget {}),
             window_bar: cx.new_view(|cx| WindowBarWidget {}),
             view_sidebar: cx.new_view(|cx| SidebarWidget {}),
         }
@@ -189,7 +266,8 @@ impl Render for RootWidget {
                                 .w(px(200.0))
                                 .h_full()
                                 .child(self.view_sidebar.clone()),
-                        ),
+                        )
+                        .child(div().size_full().child(self.main.clone())),
                 )
                 .child(
                     div()
@@ -230,11 +308,20 @@ impl AssetSource for Assets {
 }
 
 fn main() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = rt.enter();
+
     patch_cwd();
 
-    App::new()
+    let app = App::new()
         .with_assets(Assets {})
         .run(|cx: &mut AppContext| {
+            // cx.set_global(build_desktop_client(cx, vs));
+
             let bounds = Bounds::centered(None, size(px(1280.0 + 32.0), px(800.0 + 32.0)), cx);
             cx.open_window(
                 WindowOptions {

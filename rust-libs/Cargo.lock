@@ -1636,13 +1636,16 @@ name = "ease-client-desktop"
 version = "0.2.0"
 dependencies = [
  "ease-client",
+ "ease-client-backend",
  "ease-client-shared",
  "flume",
  "futures",
  "gpui",
+ "misty-async",
  "once_cell",
  "serde",
  "thread_local",
+ "tokio",
  "tracing",
  "winit",
 ]

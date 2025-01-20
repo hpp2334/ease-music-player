@@ -2,7 +2,7 @@ use std::{
     any::Any,
     collections::HashMap,
     fmt::Debug,
-    sync::{atomic::AtomicU64, Arc, RwLock},
+    sync::{atomic::AtomicU64, Arc, RwLock, Weak},
 };
 
 use misty_async::IOnAsyncRuntime;
@@ -23,6 +23,14 @@ pub struct AppPod {
 
 unsafe impl Send for AppPod {}
 unsafe impl Sync for AppPod {}
+
+#[derive(Clone)]
+pub struct WeakAppPod {
+    _app: Weak<RwLock<Option<Arc<AppInternal>>>>,
+}
+
+unsafe impl Send for WeakAppPod {}
+unsafe impl Sync for WeakAppPod {}
 
 #[derive(Default)]
 pub struct AppPods {
@@ -98,6 +106,28 @@ impl AppPod {
         let _app = _app.clone().expect("App in AppPod is None");
         _app.check_same_thread();
         App { _app }
+    }
+
+    pub fn weak(&self) -> WeakAppPod {
+        WeakAppPod {
+            _app: Arc::downgrade(&self._app),
+        }
+    }
+}
+
+impl WeakAppPod {
+    pub fn get(&self) -> Option<App> {
+        if let Some(app) = self._app.upgrade() {
+            let _app = app.read().expect("Failed to get App from AppPod");
+            let _app = _app.clone();
+            if let Some(_app) = _app {
+                Some(App { _app })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 

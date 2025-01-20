@@ -30,3 +30,4 @@ pub use view_models::storage::upsert::StorageUpsertWidget;
 
 pub use client::build_client;
 pub use error::{EaseError, EaseResult};
+pub use misty_vm::{App, AppPod, WeakAppPod};
