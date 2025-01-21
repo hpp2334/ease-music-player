@@ -5,7 +5,7 @@ use gpui::{Context, Model};
 
 #[derive(Clone)]
 pub struct ViewStates {
-    playlist_list: Model<VPlaylistListState>,
+    pub playlist_list: Model<VPlaylistListState>,
 }
 
 pub struct GpuiViewStateService {
@@ -13,13 +13,19 @@ pub struct GpuiViewStateService {
     states: ViewStates,
 }
 
-impl GpuiViewStateService {
+impl ViewStates {
     pub fn new(cx: &mut gpui::AppContext) -> Self {
         Self {
+            playlist_list: cx.new_model(|_| VPlaylistListState::default()),
+        }
+    }
+}
+
+impl GpuiViewStateService {
+    pub fn new(cx: &mut gpui::AppContext, states: ViewStates) -> Self {
+        Self {
             cx: cx.to_async(),
-            states: ViewStates {
-                playlist_list: cx.new_model(|_| VPlaylistListState::default()),
-            },
+            states,
         }
     }
 }

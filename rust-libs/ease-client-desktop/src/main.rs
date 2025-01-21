@@ -1,18 +1,23 @@
-use core::build_desktop_client;
-use std::{cell::RefCell, collections::HashMap};
+use core::{build_desktop_backend, build_desktop_client, build_lifecycle, AppPodProxy};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 use ease_client::{
     build_client,
     view_models::view_state::views::playlist::{VPlaylistAbstractItem, VPlaylistListState},
+    Action, AppPod, PlaylistCreateWidget, PlaylistListWidget, ViewAction, Widget, WidgetAction,
+    WidgetActionType,
 };
 
-use ease_client_shared::backends::playlist::PlaylistId;
+use ease_client_shared::backends::{app::ArgInitializeApp, playlist::PlaylistId};
+use futures::{channel::mpsc, StreamExt};
 use gpui::{
     div, prelude::*, px, rgb, rgba, size, svg, uniform_list, App, AppContext, AssetSource, Bounds,
     BoxShadow, DragMoveEvent, ElementId, Model, MouseButton, Pixels, Point, Rgba, SharedString,
     TitlebarOptions, View, ViewContext, WindowBounds, WindowDecorations, WindowOptions,
 };
-use view_state::GpuiViewStateService;
+use misty_lifecycle::Runnable;
+use tracing::level_filters::LevelFilter;
+use view_state::{GpuiViewStateService, ViewStates};
 
 mod core;
 mod view_state;
@@ -22,28 +27,23 @@ const RGB_PRIMARY_TEXT: u32 = 0x3A3A3A;
 const RGB_SLIGHT: u32 = 0xF7F7F7;
 const RGB_SURFACE: u32 = 0xFFFFFF;
 
-pub struct SidebarWidget {}
+pub struct SidebarWidget {
+    playlist_list: Model<VPlaylistListState>,
+}
+
+impl SidebarWidget {
+    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
+        let playlist_list = vs.playlist_list.clone();
+        cx.observe(&playlist_list, |_, _, _| {}).detach();
+        Self {
+            playlist_list: vs.playlist_list.clone(),
+        }
+    }
+}
 
 impl Render for SidebarWidget {
     fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let state = VPlaylistListState {
-            playlist_list: vec![
-                VPlaylistAbstractItem {
-                    id: PlaylistId::wrap(1),
-                    title: "Origami King".to_string(),
-                    count: 1,
-                    duration: "00:05:12".to_string(),
-                    cover: None,
-                },
-                VPlaylistAbstractItem {
-                    id: PlaylistId::wrap(2),
-                    title: "サクラノ刻 -櫻の森の下を歩む- サウンドトラックCD Disc1".to_string(),
-                    count: 10,
-                    duration: "00:05:12".to_string(),
-                    cover: None,
-                },
-            ],
-        };
+        let state = self.playlist_list.read(cx);
 
         let playlist_elements: Vec<_> = state
             .playlist_list
@@ -139,27 +139,23 @@ impl Render for WindowBarWidget {
     }
 }
 
-struct MainWidget {}
+struct MainWidget {
+    playlist_list: Model<VPlaylistListState>,
+}
+
+impl MainWidget {
+    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
+        let playlist_list = vs.playlist_list.clone();
+        cx.observe(&playlist_list, |_, _, _| {}).detach();
+        Self {
+            playlist_list: vs.playlist_list.clone(),
+        }
+    }
+}
+
 impl Render for MainWidget {
     fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let state = VPlaylistListState {
-            playlist_list: vec![
-                VPlaylistAbstractItem {
-                    id: PlaylistId::wrap(1),
-                    title: "Origami King".to_string(),
-                    count: 1,
-                    duration: "00:05:12".to_string(),
-                    cover: None,
-                },
-                VPlaylistAbstractItem {
-                    id: PlaylistId::wrap(2),
-                    title: "サクラノ刻 -櫻の森の下を歩む- サウンドトラックCD Disc1".to_string(),
-                    count: 10,
-                    duration: "00:05:12".to_string(),
-                    cover: None,
-                },
-            ],
-        };
+        let state = self.playlist_list.read(cx);
 
         let playlist_elements: Vec<_> = state
             .playlist_list
@@ -199,7 +195,19 @@ impl Render for MainWidget {
                     .justify_center()
                     .on_click({
                         move |_event, cx| {
-                            println!("click add playlist");
+                            let app = cx.global::<AppPodProxy>().get();
+                            app.emit(Action::View(ViewAction::Widget(WidgetAction {
+                                widget: PlaylistListWidget::Add.into(),
+                                typ: WidgetActionType::Click,
+                            })));
+                            app.emit(Action::View(ViewAction::Widget(WidgetAction {
+                                widget: PlaylistCreateWidget::Name.into(),
+                                typ: WidgetActionType::ChangeText { text: "ABC".into() },
+                            })));
+                            app.emit(Action::View(ViewAction::Widget(WidgetAction {
+                                widget: PlaylistCreateWidget::FinishCreate.into(),
+                                typ: WidgetActionType::Click,
+                            })));
                         }
                     })
                     .child(
@@ -219,11 +227,11 @@ struct RootWidget {
 }
 
 impl RootWidget {
-    pub fn new(cx: &mut ViewContext<Self>) -> Self {
+    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
         Self {
-            main: cx.new_view(|cx| MainWidget {}),
             window_bar: cx.new_view(|cx| WindowBarWidget {}),
-            view_sidebar: cx.new_view(|cx| SidebarWidget {}),
+            main: cx.new_view(|cx| MainWidget::new(cx, vs)),
+            view_sidebar: cx.new_view(|cx| SidebarWidget::new(cx, vs)),
         }
     }
 }
@@ -308,7 +316,17 @@ impl AssetSource for Assets {
     }
 }
 
+fn setup_subscriber() {
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(LevelFilter::INFO)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+}
+
 fn main() {
+    setup_subscriber();
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
@@ -321,10 +339,36 @@ fn main() {
     App::new()
         .with_assets(Assets {})
         .run(|cx: &mut AppContext| {
+            let (foreground_sender, mut foreground_receiver) = mpsc::channel::<Runnable>(128);
+            let vs = ViewStates::new(cx);
+
+            cx.spawn(|_| async move {
+                while let Some(runnable) = foreground_receiver.next().await {
+                    runnable.run();
+                }
+            })
+            .detach();
+
             {
-                let vs = GpuiViewStateService::new(cx);
-                let pod = build_desktop_client(cx, vs);
-                cx.set_global(pod);
+                let vs = GpuiViewStateService::new(cx, vs.clone());
+
+                let lifecycle_external = build_lifecycle(cx, foreground_sender);
+                let backend = build_desktop_backend(lifecycle_external.clone());
+                backend
+                    .init(ArgInitializeApp {
+                        app_document_dir: "./temp/".to_string(),
+                        app_cache_dir: "./temp/".to_string(),
+                        storage_path: "/home/a/".to_string(),
+                    })
+                    .unwrap();
+
+                let app = build_desktop_client(lifecycle_external.clone(), backend, vs);
+                app.emit(Action::Init);
+                app.emit(Action::VsLoaded);
+
+                let pod = AppPod::new();
+                pod.set(app);
+                cx.set_global(AppPodProxy::new(pod));
             }
 
             let bounds = Bounds::centered(None, size(px(1280.0 + 32.0), px(800.0 + 32.0)), cx);
@@ -335,7 +379,7 @@ fn main() {
                     window_background: gpui::WindowBackgroundAppearance::Transparent,
                     ..Default::default()
                 },
-                |cx| cx.new_view(|cx| RootWidget::new(cx)),
+                |cx| cx.new_view(|cx| RootWidget::new(cx, &vs)),
             )
             .unwrap();
         });

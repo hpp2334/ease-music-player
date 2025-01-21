@@ -80,15 +80,15 @@ impl ILifecycleExternal for DefaultLifecycleExternal {
         todo!()
     }
 
-    fn spawn_main_thread(&self, runnable: async_task::Runnable) {
+    fn spawn_main_thread(&self, _runnable: async_task::Runnable) {
         todo!()
     }
 
-    fn spawn(&self, runnable: async_task::Runnable) {
+    fn spawn(&self, _runnable: async_task::Runnable) {
         todo!()
     }
 
-    fn spawn_sleep(&self, duration: Duration, runnable: async_task::Runnable) {
+    fn spawn_sleep(&self, _duration: Duration, _runnable: async_task::Runnable) {
         todo!()
     }
 }
