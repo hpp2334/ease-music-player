@@ -4,7 +4,7 @@ use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
     view_models::{connector::Connector, main::router::RouterVM},
-    PermissionService, RoutesKey,
+    PermissionService, AndroidRoutesKey,
 };
 use ease_client_shared::backends::{
     generated::{GetRefreshTokenMsg, RemoveStorageMsg, TestStorageMsg, UpsertStorageMsg},
@@ -68,7 +68,7 @@ impl StorageUpsertVM {
         edit.test = StorageConnectionTestResult::None;
         edit.is_create = true;
 
-        RouterVM::of(cx).navigate(cx, RoutesKey::AddDevices);
+        RouterVM::of(cx).navigate(cx, AndroidRoutesKey::AddDevices);
         Ok(())
     }
 
@@ -103,7 +103,7 @@ impl StorageUpsertVM {
         edit.validated = Default::default();
         edit.is_create = false;
 
-        RouterVM::of(cx).navigate(cx, RoutesKey::AddDevices);
+        RouterVM::of(cx).navigate(cx, AndroidRoutesKey::AddDevices);
         Ok(())
     }
 

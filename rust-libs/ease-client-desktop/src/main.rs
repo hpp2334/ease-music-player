@@ -1,295 +1,23 @@
-use core::{build_desktop_backend, build_desktop_client, build_lifecycle, AppPodProxy};
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use core::{assets::Assets, view_state::{GpuiViewStateService, ViewStates}, vm::{build_desktop_backend, build_desktop_client, build_lifecycle, AppPodProxy}};
 
 use ease_client::{
-    build_client,
-    view_models::view_state::views::playlist::{VPlaylistAbstractItem, VPlaylistListState},
-    Action, AppPod, PlaylistCreateWidget, PlaylistListWidget, ViewAction, Widget, WidgetAction,
-    WidgetActionType,
+    Action, AppPod,
 };
 
-use ease_client_shared::backends::{app::ArgInitializeApp, playlist::PlaylistId};
+use ease_client_shared::backends::{app::ArgInitializeApp, playlist::PlaylistId, storage::{Storage, StorageType}};
 use futures::{channel::mpsc, StreamExt};
+use gpui::prelude::*;
 use gpui::{
-    div, prelude::*, px, rgb, rgba, size, svg, uniform_list, App, AppContext, AssetSource, Bounds,
-    BoxShadow, DragMoveEvent, ElementId, Model, MouseButton, Pixels, Point, Rgba, SharedString,
-    TitlebarOptions, View, ViewContext, WindowBounds, WindowDecorations, WindowOptions,
+    px, size, App, AppContext, Bounds,
+    WindowBounds, WindowOptions,
 };
 use misty_lifecycle::Runnable;
 use tracing::level_filters::LevelFilter;
-use view_state::{GpuiViewStateService, ViewStates};
+use views::root::RootWidget;
 
-mod core;
-mod view_state;
+pub mod views;
+pub mod core;
 
-const RGB_PRIMARY: u32 = 0x2E89B0;
-const RGB_PRIMARY_TEXT: u32 = 0x3A3A3A;
-const RGB_SLIGHT: u32 = 0xF7F7F7;
-const RGB_SURFACE: u32 = 0xFFFFFF;
-
-pub struct SidebarWidget {
-    playlist_list: Model<VPlaylistListState>,
-}
-
-impl SidebarWidget {
-    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
-        let playlist_list = vs.playlist_list.clone();
-        cx.observe(&playlist_list, |_, _, _| {}).detach();
-        Self {
-            playlist_list: vs.playlist_list.clone(),
-        }
-    }
-}
-
-impl Render for SidebarWidget {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let state = self.playlist_list.read(cx);
-
-        let playlist_elements: Vec<_> = state
-            .playlist_list
-            .clone()
-            .into_iter()
-            .map(|item| {
-                div()
-                    .id(*item.id.as_ref() as usize)
-                    .px_2()
-                    .cursor_pointer()
-                    .on_click({
-                        let item = item.clone();
-                        move |_event, cx| {
-                            println!("VPlaylistAbstractItem {:?}", item);
-                        }
-                    })
-                    .w_full()
-                    .h_5()
-                    .text_ellipsis()
-                    .child(format!("{}", item.title))
-            })
-            .collect();
-
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(rgb(RGB_SLIGHT))
-            .child(div().text_color(rgb(RGB_PRIMARY)).child("PLAYLISTS"))
-            .child(div().w_full().h(px(300.0)).children(playlist_elements))
-    }
-}
-
-pub struct WindowBarWidget {}
-
-impl Render for WindowBarWidget {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        div()
-            .w_full()
-            .h(px(48.0))
-            .flex()
-            .flex_row()
-            .justify_end()
-            .items_center()
-            .child(
-                div()
-                    .id(SharedString::new_static("window-bar-drag"))
-                    .h_full()
-                    .flex_grow()
-                    .on_mouse_down(MouseButton::Left, |_e, cx| {
-                        cx.start_window_move();
-                    }),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(16.0))
-                    .px(px(16.0))
-                    .child(
-                        div()
-                            .id(SharedString::new_static("window-bar-minimize"))
-                            .size(px(16.0))
-                            .cursor_pointer()
-                            .hover(|style| style.bg(rgb(RGB_SLIGHT)))
-                            .on_click(|_event, cx| {
-                                cx.minimize_window();
-                            })
-                            .child(
-                                svg()
-                                    .size(px(16.0))
-                                    .text_color(rgb(RGB_PRIMARY_TEXT))
-                                    .path("drawables://Minimize.svg"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id(SharedString::new_static("window-bar-close"))
-                            .size(px(16.0))
-                            .cursor_pointer()
-                            .hover(|style| style.bg(rgb(RGB_SLIGHT)))
-                            .on_click(|_event, cx| {
-                                cx.quit();
-                            })
-                            .child(
-                                svg()
-                                    .size(px(16.0))
-                                    .text_color(rgb(RGB_PRIMARY_TEXT))
-                                    .path("drawables://Close.svg"),
-                            ),
-                    ),
-            )
-    }
-}
-
-struct MainWidget {
-    playlist_list: Model<VPlaylistListState>,
-}
-
-impl MainWidget {
-    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
-        let playlist_list = vs.playlist_list.clone();
-        cx.observe(&playlist_list, |_, _, _| {}).detach();
-        Self {
-            playlist_list: vs.playlist_list.clone(),
-        }
-    }
-}
-
-impl Render for MainWidget {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let state = self.playlist_list.read(cx);
-
-        let playlist_elements: Vec<_> = state
-            .playlist_list
-            .clone()
-            .into_iter()
-            .map(|item| {
-                div()
-                    .id(*item.id.as_ref() as usize)
-                    .px_2()
-                    .cursor_pointer()
-                    .on_click({
-                        let item = item.clone();
-                        move |_event, cx| {
-                            println!("VPlaylistAbstractItem {:?}", item);
-                        }
-                    })
-                    .w(px(320.0))
-                    .h(px(320.0))
-                    .text_ellipsis()
-                    .child(format!("{}", item.title))
-            })
-            .collect();
-
-        div()
-            .size_full()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .children(playlist_elements)
-            .child(
-                div()
-                    .id(SharedString::new_static("main-add-playlist"))
-                    .w(px(320.0))
-                    .h(px(320.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .on_click({
-                        move |_event, cx| {
-                            let app = cx.global::<AppPodProxy>().get();
-                            app.emit(Action::View(ViewAction::Widget(WidgetAction {
-                                widget: PlaylistListWidget::Add.into(),
-                                typ: WidgetActionType::Click,
-                            })));
-                            app.emit(Action::View(ViewAction::Widget(WidgetAction {
-                                widget: PlaylistCreateWidget::Name.into(),
-                                typ: WidgetActionType::ChangeText { text: "ABC".into() },
-                            })));
-                            app.emit(Action::View(ViewAction::Widget(WidgetAction {
-                                widget: PlaylistCreateWidget::FinishCreate.into(),
-                                typ: WidgetActionType::Click,
-                            })));
-                        }
-                    })
-                    .child(
-                        svg()
-                            .size(px(16.0))
-                            .text_color(rgb(RGB_PRIMARY_TEXT))
-                            .path("drawables://Plus.svg"),
-                    ),
-            )
-    }
-}
-
-struct RootWidget {
-    main: View<MainWidget>,
-    window_bar: View<WindowBarWidget>,
-    view_sidebar: View<SidebarWidget>,
-}
-
-impl RootWidget {
-    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
-        Self {
-            window_bar: cx.new_view(|cx| WindowBarWidget {}),
-            main: cx.new_view(|cx| MainWidget::new(cx, vs)),
-            view_sidebar: cx.new_view(|cx| SidebarWidget::new(cx, vs)),
-        }
-    }
-}
-impl Render for RootWidget {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        div().size_full().relative().child(
-            div()
-                .font_family(SharedString::new_static("NotoSans"))
-                .text_color(rgb(RGB_PRIMARY_TEXT))
-                .bg(rgb(RGB_SURFACE))
-                .rounded_lg()
-                .left(px(16.0))
-                .top(px(16.0))
-                .w(px(1280.0))
-                .h(px(800.0))
-                .shadow(
-                    vec![BoxShadow {
-                        color: rgba(0x2E2E2E2E).into(),
-                        offset: Point {
-                            x: px(0.0),
-                            y: px(0.0),
-                        },
-                        blur_radius: px(4.0),
-                        spread_radius: px(0.0),
-                    }]
-                    .into(),
-                )
-                .relative()
-                .child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .top(px(48.0))
-                        .bottom_0()
-                        .flex()
-                        .flex_row()
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .w(px(200.0))
-                                .h_full()
-                                .child(self.view_sidebar.clone()),
-                        )
-                        .child(div().size_full().child(self.main.clone())),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .right_0()
-                        .h(px(48.0))
-                        .child(self.window_bar.clone()),
-                ),
-        )
-    }
-}
 
 fn patch_cwd() {
     let cwd = std::env::current_dir().unwrap();
@@ -299,22 +27,6 @@ fn patch_cwd() {
     println!("CWD: {:?}", std::env::current_dir());
 }
 
-struct Assets {}
-
-impl AssetSource for Assets {
-    fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
-        const DRAWABLES_PREFIX: &'static str = "drawables://";
-
-        std::fs::read("assets/drawables/".to_string() + &path[DRAWABLES_PREFIX.len()..])
-            .map(Into::into)
-            .map_err(Into::into)
-            .map(Some)
-    }
-
-    fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
-        unimplemented!()
-    }
-}
 
 fn setup_subscriber() {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -350,8 +62,6 @@ fn main() {
             .detach();
 
             {
-                let vs = GpuiViewStateService::new(cx, vs.clone());
-
                 let lifecycle_external = build_lifecycle(cx, foreground_sender);
                 let backend = build_desktop_backend(lifecycle_external.clone());
                 backend
@@ -362,7 +72,7 @@ fn main() {
                     })
                     .unwrap();
 
-                let app = build_desktop_client(lifecycle_external.clone(), backend, vs);
+                let app = build_desktop_client(cx, lifecycle_external.clone(), backend, vs.clone());
                 app.emit(Action::Init);
                 app.emit(Action::VsLoaded);
 

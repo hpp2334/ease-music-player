@@ -5,13 +5,14 @@ use state::{MainState, RootRouteSubKey};
 use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
-    RoutesKey,
+    AndroidRoutesKey,
 };
 
 use super::music::time_to_pause::TimeToPauseVM;
 
 pub mod router;
 pub mod state;
+pub mod sidebar;
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum MainBodyWidget {
@@ -71,7 +72,7 @@ impl ViewModel for MainBodyVM {
                             TimeToPauseVM::of(cx).open(cx);
                         }
                         MainBodyWidget::MiniPlayer => {
-                            RouterVM::of(cx).navigate(cx, RoutesKey::MusicPlayer);
+                            RouterVM::of(cx).navigate(cx, AndroidRoutesKey::MusicPlayer);
                         }
                     },
                     _ => {}

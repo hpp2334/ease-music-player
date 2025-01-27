@@ -1,0 +1,83 @@
+use ease_client::view_models::view_state::views::storage::{VStorageListItem, VStorageListState};
+use ease_client_shared::backends::storage::StorageType;
+use gpui::{div, prelude::*, px, rgb, svg, Model, ViewContext};
+
+use crate::core::{theme::{RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100}, view_state::ViewStates};
+
+pub struct SettingWidget { 
+    storage_list: Model<VStorageListState>,
+}
+
+impl SettingWidget {
+    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
+        Self {
+            storage_list: vs.storage_list.clone(),
+        }
+    }
+}
+
+fn render_storage_block(cx: &mut ViewContext<SettingWidget>, item: VStorageListItem) -> impl IntoElement {
+    let icon_path = match item.typ {
+        StorageType::Local | StorageType::Webdav => "drawables://Cloud.svg",
+        StorageType::OneDrive => "drawables://OneDrive.svg"
+    };
+
+    div()
+        .w(px(200.0))
+        .h(px(80.0))
+        .bg(rgb(RGB_SLIGHT_100))
+        .rounded(px(4.0))
+        .px(px(18.0))
+        .py(px(24.0))
+        .flex()
+        .flex_row()
+        .child(
+            svg()
+                .size(px(32.0))
+                .text_color(rgb(RGB_PRIMARY_TEXT))
+                .path(icon_path),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .child(item.name)
+                )
+                .when(!item.sub_title.is_empty(), |el| {
+                    el
+                        .text_color(rgb(RGB_SECONDARY_TEXT))
+                        .child(item.sub_title)
+                })
+        )
+}
+
+impl Render for SettingWidget {
+    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+        let storages = self.storage_list.read(cx).clone();
+        let mut elements = vec![];
+        for item in storages.items.into_iter() {
+            elements.push(render_storage_block(cx, item.clone()));
+        }
+
+        div()
+            .size_full()
+            .p(px(48.0))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .child(
+                        svg()
+                            .size(px(16.0))
+                            .text_color(rgb(RGB_PRIMARY_TEXT))
+                            .path("drawables://CloudStorage.svg"),
+                    )
+                    .child("Devices")
+            )
+            .children(elements)
+    }
+}

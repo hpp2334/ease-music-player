@@ -1,5 +1,5 @@
 use crate::view_models::{
-    main::MainBodyWidget,
+    main::{sidebar::SidebarWidget, MainBodyWidget},
     music::{
         control::MusicControlWidget, detail::MusicDetailWidget, lyric::MusicLyricWidget,
         time_to_pause::TimeToPauseWidget,
@@ -35,6 +35,7 @@ macro_rules! generate_widget {
 
 generate_widget!(
     MainBody(MainBodyWidget),
+    Sidebar(SidebarWidget),
     MusicControl(MusicControlWidget),
     MusicLyric(MusicLyricWidget),
     MusicDetail(MusicDetailWidget),

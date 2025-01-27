@@ -1,6 +1,6 @@
 use misty_vm::{AppBuilderContext, IToHost, ViewModel, ViewModelContext};
 
-use crate::{error::EaseResult, Action, EaseError, RouterService, RoutesKey, ViewAction};
+use crate::{error::EaseResult, Action, AndroidRoutesKey, DesktopRoutesKey, EaseError, RouterService, ViewAction};
 
 pub(crate) struct RouterVM {}
 
@@ -14,8 +14,12 @@ impl RouterVM {
         Self {}
     }
 
-    pub(crate) fn navigate(&self, cx: &ViewModelContext, key: RoutesKey) {
-        RouterService::of(cx).naviagate(key);
+    pub(crate) fn navigate(&self, cx: &ViewModelContext, key: AndroidRoutesKey) {
+        RouterService::of(cx).navigate(key);
+    }
+
+    pub(crate) fn navigate_desktop(&self, cx: &ViewModelContext, key: DesktopRoutesKey) {
+        RouterService::of(cx).navigate_desktop(key);
     }
 
     pub(crate) fn pop(&self, cx: &ViewModelContext) {

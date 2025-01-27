@@ -19,7 +19,7 @@ use crate::{
         music::lyric::MusicLyricVM,
         playlist::{create::PlaylistCreateVM, detail::PlaylistDetailVM, edit::PlaylistEditVM},
     },
-    RoutesKey,
+    AndroidRoutesKey,
 };
 
 use super::state::{AllStorageState, CurrentStorageState};
@@ -373,7 +373,7 @@ impl StorageImportVM {
             state.current_path = self.get_current_path(cx, id, &store);
         }
         self.reload(cx);
-        RouterVM::of(cx).navigate(cx, RoutesKey::ImportMusics);
+        RouterVM::of(cx).navigate(cx, AndroidRoutesKey::ImportMusics);
 
         Ok(())
     }

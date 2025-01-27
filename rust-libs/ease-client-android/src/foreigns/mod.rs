@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ease_client::{
     IPermissionService, IRouterService, IToastService, IViewStateService, RootViewModelState,
-    RoutesKey,
+    AndroidRoutesKey,
 };
 use ease_client_backend::{IPlayerDelegate, MusicToPlay};
 use ease_client_shared::backends::{music::MusicId, player::PlayerDurations};
@@ -37,7 +37,7 @@ generate_delegate!(PermissionServiceDelegate, IPermissionService, IPermissionSer
 });
 
 generate_delegate!(RouterServiceDelegate, IRouterService, IRouterServiceForeign, {
-   naviagate(key: RoutesKey);
+   navigate(key: AndroidRoutesKey);
    pop();
 });
 

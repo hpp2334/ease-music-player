@@ -1,7 +1,7 @@
 use misty_vm::misty_to_host;
 
 #[derive(uniffi::Enum)]
-pub enum RoutesKey {
+pub enum AndroidRoutesKey {
     Home,
     AddDevices,
     Playlist,
@@ -9,8 +9,15 @@ pub enum RoutesKey {
     MusicPlayer,
 }
 
-pub trait IRouterService: Send + Sync + 'static {
-    fn naviagate(&self, key: RoutesKey);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopRoutesKey {
+    Home,
+    Setting,
+}
+
+pub trait IRouterService: 'static {
+    fn navigate(&self, key: AndroidRoutesKey) {}
+    fn navigate_desktop(&self, key: DesktopRoutesKey) {}
     fn pop(&self);
 }
 misty_to_host!(RouterService, IRouterService);

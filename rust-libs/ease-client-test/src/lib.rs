@@ -6,7 +6,7 @@ use std::time::Duration;
 use backend_host::BackendHost;
 use ease_client::{
     build_client, Action, IRouterService, IToastService, MainAction, PlaylistCreateWidget,
-    PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, RoutesKey, StorageImportWidget,
+    PlaylistDetailWidget, PlaylistListWidget, RootViewModelState, AndroidRoutesKey, StorageImportWidget,
     StorageListWidget, StorageUpsertWidget, ViewAction, Widget, WidgetAction, WidgetActionType,
 };
 use ease_client_backend::Backend;
@@ -71,7 +71,9 @@ fn setup_subscriber() {
 
 struct FakeRouterService;
 impl IRouterService for FakeRouterService {
-    fn naviagate(&self, _key: RoutesKey) {}
+    fn navigate(&self, _key: AndroidRoutesKey) {}
+    fn navigate_desktop(&self, key: ease_client::DesktopRoutesKey) {
+    }
     fn pop(&self) {}
 }
 

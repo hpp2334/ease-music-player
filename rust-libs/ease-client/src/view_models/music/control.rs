@@ -19,7 +19,7 @@ use super::{
 use crate::{
     actions::{event::ViewAction, Widget},
     view_models::main::router::RouterVM,
-    RoutesKey, ToastService,
+    AndroidRoutesKey, ToastService,
 };
 use crate::{
     actions::{Action, WidgetActionType},
@@ -69,7 +69,7 @@ impl MusicControlVM {
                 .await?;
             Ok(())
         });
-        RouterVM::of(cx).navigate(cx, RoutesKey::MusicPlayer);
+        RouterVM::of(cx).navigate(cx, AndroidRoutesKey::MusicPlayer);
         Ok(())
     }
 

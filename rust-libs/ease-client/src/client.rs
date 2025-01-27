@@ -12,7 +12,7 @@ use crate::{
     },
     view_models::{
         connector::Connector,
-        main::{router::RouterVM, MainBodyVM},
+        main::{router::RouterVM, sidebar::SidebarVM, MainBodyVM},
         music::{
             common::MusicCommonVM, control::MusicControlVM, detail::MusicDetailVM,
             lyric::MusicLyricVM, time_to_pause::TimeToPauseVM,
@@ -45,6 +45,7 @@ pub fn build_client(
             // Main
             builder.add(RouterVM::new(cx));
             builder.add(MainBodyVM::new(cx));
+            builder.add(SidebarVM::new(cx));
             // Storage
             builder.add(StorageCommonVM::new(cx));
             builder.add(StorageImportVM::new(cx));
