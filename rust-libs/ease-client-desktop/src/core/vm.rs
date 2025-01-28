@@ -1,7 +1,5 @@
 use std::{
-    sync::{atomic::AtomicBool, Arc, RwLock},
-    thread::ThreadId,
-    time::{Duration, SystemTime},
+    cell::RefCell, rc::Rc, sync::{atomic::AtomicBool, Arc, RwLock}, thread::ThreadId, time::{Duration, SystemTime}
 };
 
 use ease_client::{
@@ -10,23 +8,57 @@ use ease_client::{
 use ease_client_backend::{Backend, IPlayerDelegate};
 use ease_client_shared::backends::{connector::IConnectorNotifier, music::MusicId, MessagePayload};
 use futures::{channel::mpsc, future::BoxFuture, SinkExt};
-use gpui::{AsyncAppContext, Context, Model};
 use misty_lifecycle::{ILifecycleExternal, Runnable};
 
 use super::view_state::{GpuiViewStateService, RouteStack, ViewStates};
 
-pub struct AppPodProxy(AppPod);
-
-impl AppPodProxy {
-    pub fn new(pod: AppPod) -> Self {
-        Self(pod)
-    }
-    pub fn dispatch(&self, action: WidgetAction) {
-        self.0.get().emit(Action::View(ViewAction::Widget(action)));
-    }   
+#[derive(Clone)]
+pub struct AppBridge {
+    pod: Rc<AppPod>,
+    vs: Rc<RefCell<Option<ease_client::RootViewModelState>>>,
+    routes: Rc<RefCell<RouteStack>>,
+    gpui_vs: ViewStates,
 }
 
-impl gpui::Global for AppPodProxy {}
+impl AppBridge {
+    pub fn dispatch<C>(&self, cx: &mut C, action: Action)
+    where C: gpui::Context {
+        self.pod.get().emit(action);
+        self.flush(cx);
+    }
+    pub fn dispatch_widget<C>(&self, cx: &mut C, action: WidgetAction)
+    where C: gpui::Context {
+        self.pod.get().emit(Action::View(ViewAction::Widget(action)));
+        self.flush(cx);
+    }
+
+    pub fn flush<C>(&self, cx: &mut C)
+    where C: gpui::Context {
+        {
+            let v = self.vs.borrow_mut().take();
+            if let Some(v) = v {
+                let u = v.playlist_list.clone();
+                if u.is_some() {
+                    let state = self.gpui_vs.playlist_list.clone();
+                    state.update(cx, |v, _| {
+                        *v = u.unwrap();
+                    });
+                }
+            }
+        }
+        {
+            let mut v = self.routes.borrow_mut();
+            if v.dirty {
+                v.dirty = false;
+                self.gpui_vs.route_stack.update(cx, |dst, _| {
+                    *dst = v.clone();
+                });
+            }
+        }
+    }
+}
+
+impl gpui::Global for AppBridge {}
 
 struct Player;
 
@@ -115,34 +147,30 @@ impl IPermissionService for PermissionService {
 
 
 struct RouterService {
-    gpui_cx: AsyncAppContext,
-    routes: Model<RouteStack>,
+    routes: Rc<RefCell<RouteStack>>,
 }
 impl RouterService {
-    pub fn new(cx: &mut gpui::AppContext, vs: &ViewStates) -> Arc<Self> {
+    pub fn new(routes: Rc<RefCell<RouteStack>>) -> Arc<Self> {
         Arc::new(Self {
-            gpui_cx: cx.to_async(),
-            routes: vs.route_stack.clone(),
+            routes,
         })
     }
 }
 impl IRouterService for RouterService {
     fn navigate(&self, key: AndroidRoutesKey) {}
     fn navigate_desktop(&self, key: DesktopRoutesKey) {
+        tracing::info!("{:?}", key);
+
         let routes = self.routes.clone();
-        let _ = self.gpui_cx.update(|cx| {
-            routes.update(cx, |state, cx| {
-                state.routes.push(key);
-            });
-        });
+        let mut routes = routes.borrow_mut();
+        routes.dirty = true;
+        routes.routes.push(key);
     }
     fn pop(&self) {
         let routes = self.routes.clone();
-        let _ = self.gpui_cx.update(|cx| {
-            routes.update(cx, |state, cx| {
-                state.routes.pop();
-            });
-        });
+        let mut routes = routes.borrow_mut();
+        routes.dirty = true;
+        routes.routes.pop();
     }
 }
 
@@ -216,18 +244,29 @@ pub fn build_desktop_backend(lifecycle_external: Arc<LifecycleExternal>) -> Back
 }
 
 pub fn build_desktop_client(
-    cx: &mut gpui::AppContext,
     lifecycle_external: Arc<LifecycleExternal>,
     backend: Backend,
     vs: ViewStates,
-) -> App {
+) -> AppBridge {
+    let rvs: Rc<RefCell<Option<ease_client::RootViewModelState>>> = Default::default();
+    let routes: Rc<RefCell<RouteStack>> = Default::default();
+
     let app = build_client(
         BackendHost::new(backend),
         PermissionService::new(),
-        RouterService::new(cx, &vs),
+        RouterService::new(routes.clone()),
         ToastService::new(),
-        Arc::new(GpuiViewStateService::new(cx, vs.clone())),
+        Arc::new(GpuiViewStateService::new(rvs.clone())),
         lifecycle_external,
     );
-    app
+    
+    let pod = AppPod::new();
+    pod.set(app);
+    
+    AppBridge {
+        pod: Rc::new(pod),
+        vs: rvs,
+        routes,
+        gpui_vs: vs,
+    }
 }

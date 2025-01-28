@@ -66,7 +66,7 @@ pub struct VCurrentStorageEntriesState {
     pub can_undo: bool,
 }
 
-#[derive(Debug, Clone, Serialize, uniffi::Record)]
+#[derive(Debug, Default, Clone, Serialize, uniffi::Record)]
 pub struct VEditStorageState {
     pub is_created: bool,
     pub title: String,
@@ -74,6 +74,7 @@ pub struct VEditStorageState {
     pub validated: EditStorageFormValidated,
     pub test: StorageConnectionTestResult,
     pub music_count: u64,
+    pub open: bool,
 }
 
 fn resolve_storage_name(storage: &Storage) -> String {
@@ -216,5 +217,6 @@ pub(crate) fn edit_storage_vs(state: &EditStorageState, root: &mut RootViewModel
         validated: state.validated.clone(),
         test: state.test,
         music_count: state.music_count,
+        open: state.open,
     });
 }

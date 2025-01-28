@@ -1,7 +1,7 @@
-use ease_client::{view_models::{main::sidebar::SidebarWidget, view_state::views::playlist::VPlaylistListState}, DesktopRoutesKey, WidgetAction, WidgetActionType};
+use ease_client::{view_models::{main::desktop_sidebar::DesktopSidebarWidget, view_state::views::playlist::VPlaylistListState}, DesktopRoutesKey, WidgetAction, WidgetActionType};
 use gpui::{div, prelude::*, px, rgb, svg, Model, SharedString, View, ViewContext};
 
-use crate::core::{theme::{RGB_PRIMARY, RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100}, view_state::{RouteStack, ViewStates}, vm::AppPodProxy};
+use crate::core::{theme::{RGB_PRIMARY, RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100}, view_state::{RouteStack, ViewStates}, vm::AppBridge};
 
 fn route_id(key: DesktopRoutesKey) -> &'static str {
     match key {
@@ -10,29 +10,47 @@ fn route_id(key: DesktopRoutesKey) -> &'static str {
     }
 }
 
-pub struct SiderbarHeaderComponent {
-    route_stack: Model<RouteStack>,
+struct SiderbarHeaderComponentProps {
     icon_path: &'static str,
     text: &'static str,
     route: DesktopRoutesKey,
+    widget: DesktopSidebarWidget,
+}
+
+pub struct SiderbarHeaderComponent {
+    route_stack: Model<RouteStack>,
+    props: SiderbarHeaderComponentProps,
+}
+
+impl SiderbarHeaderComponent {
+    fn new(cx: &mut ViewContext<Self>, route_stack: Model<RouteStack>, props: SiderbarHeaderComponentProps) -> Self {
+        cx.observe(&route_stack, |_,_,_| {}).detach();
+
+        Self {
+            route_stack,
+            props,
+        }
+    }
 }
 
 impl Render for SiderbarHeaderComponent {
     fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let active = self.route_stack.read(cx).current() == self.route;
+        let active = self.route_stack.read(cx).current() == self.props.route;
+        let w = self.props.widget.clone();
 
         div()
-            .id(SharedString::new_static(route_id(self.route.clone())))
+            .id(SharedString::new_static(route_id(self.props.route.clone())))
             .w_full()
             .h(px(28.0))
             .flex()
             .flex_row()
             .items_center()
             .cursor_pointer()
-            .on_click(move |e, cx| {
-                if active {
-                    cx.global::<AppPodProxy>().dispatch(WidgetAction {
-                        widget: SidebarWidget::Playlists.into(),
+            .on_click(move |_, cx| {
+                if !active {
+                    let app = cx.global::<AppBridge>().clone(); 
+                    app.dispatch_widget(cx, WidgetAction {
+                        widget: w.clone().into(),
                         typ: WidgetActionType::Click,
                     });
                 }
@@ -42,7 +60,7 @@ impl Render for SiderbarHeaderComponent {
                 svg()
                     .size(px(16.0))
                     .text_color(rgb(RGB_PRIMARY_TEXT))
-                    .path(self.icon_path)
+                    .path(self.props.icon_path)
             )
             .child(div().w(px(6.0)).h_full())
             .child(div()
@@ -52,7 +70,7 @@ impl Render for SiderbarHeaderComponent {
                 } else {
                     rgb(RGB_SECONDARY_TEXT)
                 })
-                .child(self.text)
+                .child(self.props.text)
             )
             .child(div()
                 .w(px(4.0))
@@ -81,23 +99,34 @@ pub struct SidebarComponent {
 
 impl SidebarComponent {
     pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
-        let playlist_list = vs.playlist_list.clone();
-        cx.observe(&playlist_list, |_, _, _| {}).detach();
-        Self {
-            playlist_list: vs.playlist_list.clone(),
-            route_stack: vs.route_stack.clone(),
-            view_playlist_header: cx.new_view(|_| SiderbarHeaderComponent {
-                route_stack: vs.route_stack.clone(),
+        let view_playlist_header = cx.new_view(|cx| SiderbarHeaderComponent::new(
+            cx,
+            vs.route_stack.clone(),
+            SiderbarHeaderComponentProps {
                 icon_path: "drawables://AlbumOutline.svg",
                 text: "Playlists",
                 route: DesktopRoutesKey::Home,
-            }),
-            view_setting_header: cx.new_view(|_| SiderbarHeaderComponent {
-                route_stack: vs.route_stack.clone(),
+                widget: DesktopSidebarWidget::Playlists,
+            }
+        ));
+        let view_setting_header = cx.new_view(|cx| SiderbarHeaderComponent::new( 
+            cx,
+            vs.route_stack.clone(),
+            SiderbarHeaderComponentProps {
                 icon_path: "drawables://SettingOutline.svg",
                 text: "Setting",
                 route: DesktopRoutesKey::Setting,
-            })
+                widget: DesktopSidebarWidget::Settings,
+            }
+        ));
+
+        cx.observe(&vs.playlist_list, |_, _, _| {}).detach();
+        
+        Self {
+            playlist_list: vs.playlist_list.clone(),
+            route_stack: vs.route_stack.clone(),
+            view_playlist_header: view_playlist_header.clone(),
+            view_setting_header: view_setting_header.clone(),
         }
     }
 }

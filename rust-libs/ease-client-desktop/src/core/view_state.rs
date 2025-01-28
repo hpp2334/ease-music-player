@@ -1,24 +1,27 @@
+use std::{cell::RefCell, rc::Rc};
+
 use gpui::prelude::*;
 use ease_client::{
-    view_models::{storage::state::AllStorageState, view_state::views::{playlist::VPlaylistListState, storage::VStorageListState}}, DesktopRoutesKey, IViewStateService
+    view_models::{storage::state::AllStorageState, view_state::views::{playlist::VPlaylistListState, storage::{VEditStorageState, VStorageListState}}}, DesktopRoutesKey, IViewStateService
 };
 use gpui::{Context, Model};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct RouteStack {
-    pub routes: Vec<DesktopRoutesKey>
+    pub routes: Vec<DesktopRoutesKey>,
+    pub dirty: bool,
 }
 
 #[derive(Clone)]
 pub struct ViewStates {
     pub playlist_list: Model<VPlaylistListState>,
     pub storage_list: Model<VStorageListState>,
+    pub storage_upsert: Model<VEditStorageState>,
     pub route_stack: Model<RouteStack>,
 }
 
 pub struct GpuiViewStateService {
-    cx: gpui::AsyncAppContext,
-    states: ViewStates,
+    states: Rc<RefCell<Option<ease_client::RootViewModelState>>>
 }
 
 impl RouteStack {
@@ -32,15 +35,15 @@ impl ViewStates {
         Self {
             playlist_list: cx.new_model(|_| VPlaylistListState::default()),
             storage_list: cx.new_model(|_| VStorageListState::default()),
+            storage_upsert: cx.new_model(|_| VEditStorageState::default()),
             route_stack: cx.new_model(|_| RouteStack::default())
         }
     }
 }
 
 impl GpuiViewStateService {
-    pub fn new(cx: &mut gpui::AppContext, states: ViewStates) -> Self {
+    pub fn new(states: Rc<RefCell<Option<ease_client::RootViewModelState>>>) -> Self {
         Self {
-            cx: cx.to_async(),
             states,
         }
     }
@@ -48,16 +51,6 @@ impl GpuiViewStateService {
 
 impl IViewStateService for GpuiViewStateService {
     fn handle_notify(&self, v: ease_client::RootViewModelState) {
-        let u = v.playlist_list.clone();
-        if u.is_some() {
-            let state = self.states.playlist_list.clone();
-            self.cx
-                .update(move |cx| {
-                    state.update(cx, |v, _| {
-                        *v = u.unwrap();
-                    })
-                })
-                .unwrap();
-        }
+        *self.states.borrow_mut() = Some(v);
     }
 }

@@ -29,6 +29,7 @@ pub enum StorageUpsertWidget {
     ConnectAccount,
     DisconnectAccount,
     Finish,
+    Cancel,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -104,6 +105,12 @@ impl StorageUpsertVM {
         edit.is_create = false;
 
         RouterVM::of(cx).navigate(cx, AndroidRoutesKey::AddDevices);
+        Ok(())
+    }
+
+    fn cancel(&self, cx: &ViewModelContext) -> EaseResult<()> {
+        let mut state = cx.model_mut(&self.edit);
+        state.open = false;
         Ok(())
     }
 
@@ -318,6 +325,9 @@ impl ViewModel for StorageUpsertVM {
                         }
                         StorageUpsertWidget::Finish => {
                             self.finish(cx)?;
+                        }
+                        StorageUpsertWidget::Cancel => {
+                            self.cancel(cx)?;
                         }
                         _ => {
                             unimplemented!()

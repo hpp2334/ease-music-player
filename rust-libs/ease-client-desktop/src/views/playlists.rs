@@ -3,11 +3,11 @@ use gpui::{div, prelude::*, px, rgb, svg, Model, SharedString, ViewContext};
 
 use crate::core::{theme::RGB_PRIMARY_TEXT, view_state::ViewStates};
 
-pub struct MainWidget {
+pub struct PlaylistListComponent {
     playlist_list: Model<VPlaylistListState>,
 }
 
-impl MainWidget {
+impl PlaylistListComponent {
     pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
         let playlist_list = vs.playlist_list.clone();
         cx.observe(&playlist_list, |_, _, _| {}).detach();
@@ -17,7 +17,7 @@ impl MainWidget {
     }
 }
 
-impl Render for MainWidget {
+impl Render for PlaylistListComponent {
     fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
         let state = self.playlist_list.read(cx);
 

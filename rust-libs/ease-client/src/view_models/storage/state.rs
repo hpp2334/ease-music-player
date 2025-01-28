@@ -29,6 +29,7 @@ pub struct AllStorageState {
 
 #[derive(Default, Clone)]
 pub struct EditStorageState {
+    pub open: bool,
     pub is_create: bool,
     pub info: ArgUpsertStorage,
     pub backup: HashMap<StorageType, ArgUpsertStorage>,

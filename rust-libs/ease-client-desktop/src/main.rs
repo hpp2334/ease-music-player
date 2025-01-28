@@ -1,4 +1,4 @@
-use core::{assets::Assets, view_state::{GpuiViewStateService, ViewStates}, vm::{build_desktop_backend, build_desktop_client, build_lifecycle, AppPodProxy}};
+use core::{assets::Assets, view_state::{GpuiViewStateService, ViewStates}, vm::{build_desktop_backend, build_desktop_client, build_lifecycle, AppBridge}};
 
 use ease_client::{
     Action, AppPod,
@@ -13,7 +13,7 @@ use gpui::{
 };
 use misty_lifecycle::Runnable;
 use tracing::level_filters::LevelFilter;
-use views::root::RootWidget;
+use views::root::RootComponent;
 
 pub mod views;
 pub mod core;
@@ -54,9 +54,13 @@ fn main() {
             let (foreground_sender, mut foreground_receiver) = mpsc::channel::<Runnable>(128);
             let vs = ViewStates::new(cx);
 
-            cx.spawn(|_| async move {
+            cx.spawn(|cx| async move {
                 while let Some(runnable) = foreground_receiver.next().await {
                     runnable.run();
+
+                    let _ = cx.update(|cx| {
+                        cx.global::<AppBridge>().clone().flush(cx);
+                    });
                 }
             })
             .detach();
@@ -72,13 +76,11 @@ fn main() {
                     })
                     .unwrap();
 
-                let app = build_desktop_client(cx, lifecycle_external.clone(), backend, vs.clone());
-                app.emit(Action::Init);
-                app.emit(Action::VsLoaded);
+                let app = build_desktop_client(lifecycle_external.clone(), backend, vs.clone());
+                app.dispatch(cx, Action::Init);
+                app.dispatch(cx, Action::VsLoaded);
 
-                let pod = AppPod::new();
-                pod.set(app);
-                cx.set_global(AppPodProxy::new(pod));
+                cx.set_global(app);
             }
 
             let bounds = Bounds::centered(None, size(px(1280.0 + 32.0), px(800.0 + 32.0)), cx);
@@ -89,7 +91,7 @@ fn main() {
                     window_background: gpui::WindowBackgroundAppearance::Transparent,
                     ..Default::default()
                 },
-                |cx| cx.new_view(|cx| RootWidget::new(cx, &vs)),
+                |cx| cx.new_view(|cx| RootComponent::new(cx, &vs)),
             )
             .unwrap();
         });

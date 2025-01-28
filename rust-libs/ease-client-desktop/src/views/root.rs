@@ -2,24 +2,24 @@ use gpui::{div, prelude::*, px, rgb, rgba, BoxShadow, Point, SharedString, View,
 
 use crate::core::{theme::{RGB_PRIMARY_TEXT, RGB_SURFACE}, view_state::ViewStates};
 
-use super::{main::MainWidget, sidebar::SidebarComponent, windowbar::WindowBarWidget};
+use super::{routes::RoutesComponent, sidebar::SidebarComponent, windowbar::WindowBarComponent};
 
-pub struct RootWidget {
-    main: View<MainWidget>,
-    window_bar: View<WindowBarWidget>,
+pub struct RootComponent {
+    routes: View<RoutesComponent>,
+    window_bar: View<WindowBarComponent>,
     view_sidebar: View<SidebarComponent>,
 }
 
-impl RootWidget {
+impl RootComponent {
     pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
         Self {
-            window_bar: cx.new_view(|cx| WindowBarWidget {}),
-            main: cx.new_view(|cx| MainWidget::new(cx, vs)),
+            window_bar: cx.new_view(|cx| WindowBarComponent {}),
+            routes: cx.new_view(|cx| RoutesComponent::new(cx, vs)),
             view_sidebar: cx.new_view(|cx| SidebarComponent::new(cx, vs)),
         }
     }
 }
-impl Render for RootWidget {
+impl Render for RootComponent {
     fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
         div().size_full().relative().child(
             div()
@@ -61,7 +61,7 @@ impl Render for RootWidget {
                                 .h_full()
                                 .child(self.view_sidebar.clone()),
                         )
-                        .child(div().size_full().child(self.main.clone())),
+                        .child(div().size_full().child(self.routes.clone())),
                 )
                 .child(
                     div()

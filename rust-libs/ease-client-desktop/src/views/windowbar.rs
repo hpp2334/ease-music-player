@@ -2,10 +2,10 @@ use gpui::{div, prelude::*, px, rgb, svg, MouseButton, SharedString, ViewContext
 
 use crate::core::theme::{RGB_PRIMARY_TEXT, RGB_SLIGHT_100, RGB_WINDOW_BAR};
 
-pub struct WindowBarWidget {}
+pub struct WindowBarComponent {}
 
 
-impl Render for WindowBarWidget {
+impl Render for WindowBarComponent {
     fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
         div()
             .w_full()

@@ -12,7 +12,8 @@ use super::music::time_to_pause::TimeToPauseVM;
 
 pub mod router;
 pub mod state;
-pub mod sidebar;
+pub mod desktop_sidebar;
+pub mod desktop_right_menu;
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum MainBodyWidget {

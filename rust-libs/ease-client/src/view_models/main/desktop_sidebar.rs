@@ -4,41 +4,33 @@ use crate::{error::EaseResult, Action, AndroidRoutesKey, DesktopRoutesKey, EaseE
 
 use super::RouterVM;
 
-pub(crate) struct SidebarVM {}
+pub(crate) struct DesktopSidebarVM {}
 
 #[derive(Debug, Clone, uniffi::Enum)]
-pub enum SidebarWidget {
+pub enum DesktopSidebarWidget {
     Playlists,
     Settings,
 }
 
 
-impl SidebarVM {
+impl DesktopSidebarVM {
     pub fn new(_cx: &mut AppBuilderContext) -> Self {
         Self {}
     }
-
-    pub(crate) fn navigate(&self, cx: &ViewModelContext, key: AndroidRoutesKey) {
-        RouterService::of(cx).navigate(key);
-    }
-
-    pub(crate) fn pop(&self, cx: &ViewModelContext) {
-        RouterService::of(cx).pop();
-    }
 }
 
-impl ViewModel for SidebarVM {
+impl ViewModel for DesktopSidebarVM {
     type Event = Action;
     type Error = EaseError;
     fn on_event(&self, cx: &ViewModelContext, event: &Action) -> EaseResult<()> {
         match event {
             Action::View(action) => match action {
                 ViewAction::Widget(action) => match (&action.widget, &action.typ) {
-                    (Widget::Sidebar(action), WidgetActionType::Click) => match action {
-                        SidebarWidget::Playlists =>{
+                    (Widget::DesktopSidebar(action), WidgetActionType::Click) => match action {
+                        DesktopSidebarWidget::Playlists =>{
                             RouterVM::of(cx).navigate_desktop(cx, DesktopRoutesKey::Home);
                         },
-                        SidebarWidget::Settings =>{
+                        DesktopSidebarWidget::Settings =>{
                             RouterVM::of(cx).navigate_desktop(cx, DesktopRoutesKey::Setting);
                         },
                     },

@@ -1,5 +1,5 @@
 use crate::view_models::{
-    main::{sidebar::SidebarWidget, MainBodyWidget},
+    main::{desktop_right_menu::DesktopRightMenuWidget, desktop_sidebar::DesktopSidebarWidget, MainBodyWidget},
     music::{
         control::MusicControlWidget, detail::MusicDetailWidget, lyric::MusicLyricWidget,
         time_to_pause::TimeToPauseWidget,
@@ -14,6 +14,10 @@ use crate::view_models::{
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum WidgetActionType {
     Click,
+    RightClick {
+        x: i32,
+        y: i32,
+    },
     ChangeText { text: String },
 }
 macro_rules! generate_widget {
@@ -35,7 +39,8 @@ macro_rules! generate_widget {
 
 generate_widget!(
     MainBody(MainBodyWidget),
-    Sidebar(SidebarWidget),
+    DesktopSidebar(DesktopSidebarWidget),
+    DesktopRightMenu(DesktopRightMenuWidget),
     MusicControl(MusicControlWidget),
     MusicLyric(MusicLyricWidget),
     MusicDetail(MusicDetailWidget),
