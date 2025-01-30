@@ -9,6 +9,8 @@ pub struct PlaylistListComponent {
 
 impl PlaylistListComponent {
     pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
+        cx.focus_handle();
+
         let playlist_list = vs.playlist_list.clone();
         cx.observe(&playlist_list, |_, _, _| {}).detach();
         Self {
