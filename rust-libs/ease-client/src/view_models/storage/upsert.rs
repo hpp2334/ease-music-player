@@ -68,6 +68,7 @@ impl StorageUpsertVM {
         edit.validated = Default::default();
         edit.test = StorageConnectionTestResult::None;
         edit.is_create = true;
+        edit.open = true;
 
         RouterVM::of(cx).navigate(cx, AndroidRoutesKey::AddDevices);
         Ok(())
@@ -103,6 +104,7 @@ impl StorageUpsertVM {
         edit.music_count = storage.music_count;
         edit.validated = Default::default();
         edit.is_create = false;
+        edit.open = true;
 
         RouterVM::of(cx).navigate(cx, AndroidRoutesKey::AddDevices);
         Ok(())

@@ -1,6 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
 
-use gpui::prelude::*;
 use ease_client::{
     view_models::{storage::state::AllStorageState, view_state::views::{playlist::VPlaylistListState, storage::{VEditStorageState, VStorageListState}}}, DesktopRoutesKey, IViewStateService
 };
