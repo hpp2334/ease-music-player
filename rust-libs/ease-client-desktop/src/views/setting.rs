@@ -1,4 +1,4 @@
-use ease_client::view_models::view_state::views::storage::{VStorageListItem, VStorageListState};
+use ease_client::{view_models::view_state::views::storage::{VStorageListItem, VStorageListState}, StorageListWidget, WidgetAction, WidgetActionType};
 use ease_client_shared::backends::storage::StorageType;
 use gpui::{div, prelude::*, px, rgb, svg, Model, SharedString, ViewContext};
 
@@ -99,7 +99,11 @@ impl Render for SettingComponent {
                             .items_center()
                             .justify_center()
                             .on_click(|_, cx| {
-                                // cx.global::<AppBridge>().clone().dispatch(cx, action);
+                                let app = cx.global::<AppBridge>().clone();
+                                app.dispatch_widget(cx, WidgetAction {
+                                    widget: StorageListWidget::Create.into(),
+                                    typ: WidgetActionType::Click,
+                                });
                             })
                             .child(
                                 svg()

@@ -13,7 +13,7 @@ use gpui::{
 };
 use misty_lifecycle::Runnable;
 use tracing::level_filters::LevelFilter;
-use views::root::RootComponent;
+use views::{base::input_base::setup_input_keyboards, root::RootComponent};
 
 pub mod views;
 pub mod core;
@@ -53,6 +53,8 @@ fn main() {
         .run(|cx: &mut AppContext| {
             let (foreground_sender, mut foreground_receiver) = mpsc::channel::<Runnable>(128);
             let vs = ViewStates::new(cx);
+
+            setup_input_keyboards(cx);
 
             cx.spawn(|cx| async move {
                 while let Some(runnable) = foreground_receiver.next().await {

@@ -2,20 +2,24 @@ use gpui::{div, prelude::*, px, rgb, rgba, BoxShadow, Point, SharedString, View,
 
 use crate::core::{theme::{RGB_PRIMARY_TEXT, RGB_SURFACE}, view_state::ViewStates};
 
-use super::{routes::RoutesComponent, sidebar::SidebarComponent, windowbar::WindowBarComponent};
+use super::{routes::RoutesComponent, sidebar::SidebarComponent, storage_upsert::StorageUpsertModalComponent, windowbar::WindowBarComponent};
 
 pub struct RootComponent {
     routes: View<RoutesComponent>,
     window_bar: View<WindowBarComponent>,
     view_sidebar: View<SidebarComponent>,
+    view_modal_storage_upsert: View<StorageUpsertModalComponent>,
 }
 
 impl RootComponent {
     pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
+        let view_modal_storage_upsert = cx.new_view(|cx| StorageUpsertModalComponent::new(cx, vs));
+
         Self {
             window_bar: cx.new_view(|cx| WindowBarComponent {}),
             routes: cx.new_view(|cx| RoutesComponent::new(cx, vs)),
             view_sidebar: cx.new_view(|cx| SidebarComponent::new(cx, vs)),
+            view_modal_storage_upsert,
         }
     }
 }
@@ -52,16 +56,25 @@ impl Render for RootComponent {
                         .right_0()
                         .top(px(48.0))
                         .bottom_0()
-                        .flex()
-                        .flex_row()
                         .child(
                             div()
-                                .flex_shrink_0()
-                                .w(px(200.0))
-                                .h_full()
-                                .child(self.view_sidebar.clone()),
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .top_0()
+                                .bottom_0()
+                                .flex()
+                                .flex_row()
+                                .child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .w(px(200.0))
+                                        .h_full()
+                                        .child(self.view_sidebar.clone()),
+                                )
+                                .child(div().size_full().child(self.routes.clone()))
                         )
-                        .child(div().size_full().child(self.routes.clone())),
+                        .child(self.view_modal_storage_upsert.clone())
                 )
                 .child(
                     div()

@@ -5,6 +5,8 @@ use gpui::{
 };
 use unicode_segmentation::*;
 
+use crate::core::theme::RGB_SLIGHT_100;
+
 actions!(
     text_input,
     [
@@ -24,7 +26,7 @@ actions!(
     ]
 );
 
-struct TextInput {
+pub struct BaseInputComponent {
     focus_handle: FocusHandle,
     content: SharedString,
     placeholder: SharedString,
@@ -34,10 +36,11 @@ struct TextInput {
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
+    on_change: Option<Box<dyn Fn(&str)>>
 }
 
-impl TextInput {
-    pub fn new<C>(cx: &mut AppContext) -> Self {
+impl BaseInputComponent {
+    pub fn new(cx: &mut AppContext) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             content: "".into(),
@@ -48,11 +51,17 @@ impl TextInput {
             last_layout: None,
             last_bounds: None,
             is_selecting: false,
-        }        
+            on_change: None,
+        }
     }
 
     pub fn content(mut self, text: SharedString) -> Self {
         self.content = text;
+        self
+    }
+
+    pub fn on_change(mut self, on: impl Fn(&str) + 'static) -> Self {
+        self.on_change = Some(Box::new(on));
         self
     }
 
@@ -261,7 +270,7 @@ impl TextInput {
     }
 }
 
-impl ViewInputHandler for TextInput {
+impl ViewInputHandler for BaseInputComponent {
     fn text_for_range(
         &mut self,
         range_utf16: Range<usize>,
@@ -362,7 +371,7 @@ impl ViewInputHandler for TextInput {
 }
 
 struct TextElement {
-    input: View<TextInput>,
+    input: View<BaseInputComponent>,
 }
 
 struct PrepaintState {
@@ -528,13 +537,14 @@ impl Element for TextElement {
     }
 }
 
-impl Render for TextInput {
+impl Render for BaseInputComponent {
     fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
         div()
-            .flex()
+            .flex_grow()
             .key_context("TextInput")
             .track_focus(&self.focus_handle(cx))
             .cursor(CursorStyle::IBeam)
+            .size_full()
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::left))
@@ -552,15 +562,14 @@ impl Render for TextInput {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
-            .bg(rgb(0xeeeeee))
-            .line_height(px(30.))
-            .text_size(px(24.))
+            .line_height(px(18.))
+            .text_size(px(14.))
             .child(
                 div()
                     .h(px(30. + 4. * 2.))
                     .w_full()
-                    .p(px(4.))
-                    .bg(white())
+                    .p(px(10.0))
+                    .bg(rgb(RGB_SLIGHT_100))
                     .child(TextElement {
                         input: cx.view().clone(),
                     }),
@@ -568,7 +577,7 @@ impl Render for TextInput {
     }
 }
 
-impl FocusableView for TextInput {
+impl FocusableView for BaseInputComponent {
     fn focus_handle(&self, _: &AppContext) -> FocusHandle {
         self.focus_handle.clone()
     }

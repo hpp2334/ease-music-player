@@ -8,7 +8,9 @@ use ease_client::{
 use ease_client_backend::{Backend, IPlayerDelegate};
 use ease_client_shared::backends::{connector::IConnectorNotifier, music::MusicId, MessagePayload};
 use futures::{channel::mpsc, future::BoxFuture, SinkExt};
+use gpui::Model;
 use misty_lifecycle::{ILifecycleExternal, Runnable};
+use std::fmt::Debug;
 
 use super::view_state::{GpuiViewStateService, RouteStack, ViewStates};
 
@@ -34,17 +36,11 @@ impl AppBridge {
 
     pub fn flush<C>(&self, cx: &mut C)
     where C: gpui::Context {
-        {
-            let v = self.vs.borrow_mut().take();
-            if let Some(v) = v {
-                let u = v.playlist_list.clone();
-                if u.is_some() {
-                    let state = self.gpui_vs.playlist_list.clone();
-                    state.update(cx, |v, _| {
-                        *v = u.unwrap();
-                    });
-                }
-            }
+        let v = self.vs.borrow_mut().take();
+        if let Some(v) = v {
+            self.flush_vs(cx, &v.playlist_list, &self.gpui_vs.playlist_list);
+            self.flush_vs(cx, &v.storage_list, &self.gpui_vs.storage_list);
+            self.flush_vs(cx, &v.edit_storage, &self.gpui_vs.storage_upsert);
         }
         {
             let mut v = self.routes.borrow_mut();
@@ -54,6 +50,18 @@ impl AppBridge {
                     *dst = v.clone();
                 });
             }
+        }
+    }
+
+    fn flush_vs<C, V>(&self, cx: &mut C, vs: &Option<V>, m: &Model<V>)
+    where C: gpui::Context, V: Debug + Clone + 'static {
+        let u = vs.clone();
+        if u.is_some() {
+            let state = m.clone();
+            state.update(cx, |v, cx| {
+                *v = u.unwrap();
+                cx.notify();
+            });
         }
     }
 }
