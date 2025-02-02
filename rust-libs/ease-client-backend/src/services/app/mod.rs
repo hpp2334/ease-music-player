@@ -14,14 +14,17 @@ pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> 
 }
 
 fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
-    static SCHEMA_VERSION: u32 = 1;
+    static SCHEMA_VERSION: u32 = 2;
 
     cx.database_server().init(arg.app_document_dir.clone());
     let old_schema_version = cx.database_server().get_schema_version()?;
+    tracing::info!("old schema version is {}, now is {}", old_schema_version, SCHEMA_VERSION);
 
     if old_schema_version < SCHEMA_VERSION {
-        if SCHEMA_VERSION == 1 {
+        if old_schema_version < 1 {
             init_local_storage(cx)?;
+        } else if old_schema_version < 2 {
+            cx.database_server().cleanup_invalid_storage_music_entries()?;
         }
     }
 

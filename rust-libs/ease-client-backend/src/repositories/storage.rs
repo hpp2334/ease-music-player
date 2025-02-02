@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ease_client_shared::backends::storage::{ArgUpsertStorage, BlobId, StorageId};
+use ease_client_shared::backends::{music::MusicId, storage::{ArgUpsertStorage, BlobId, StorageId}};
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
 use crate::{
@@ -141,6 +141,40 @@ impl DatabaseServer {
         for id in to_remove_blobs {
             self.blob().remove(id)?;
         }
+
+        Ok(())
+    }
+
+    pub fn cleanup_invalid_storage_music_entries(self: &Arc<Self>) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        let rdb = self.db().begin_read()?;
+
+        {
+            let mut table_storage_musics = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
+
+            let mut to_remove: Vec<(StorageId, MusicId)> = Default::default();
+
+            for music_iter in table_storage_musics.iter()? {
+                let (storage_id, mut music_iter) = music_iter?;
+                let storage_id = storage_id.value();
+                while let Some(v) = music_iter.next() {
+                    let id = v?.value();
+                    {
+                        let m = self.load_music_impl(&rdb, id)?;
+                        if m.is_none() {
+                            to_remove.push((storage_id, id));
+                        }
+                    }
+                }
+                drop(music_iter);
+            }
+            
+            for (storage_id, music_id) in to_remove {
+                table_storage_musics.remove(storage_id, music_id)?;
+            }
+        }
+
+        db.commit()?;
 
         Ok(())
     }

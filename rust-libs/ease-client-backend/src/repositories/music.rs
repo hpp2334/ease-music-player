@@ -190,7 +190,9 @@ impl DatabaseServer {
             let m = self.load_music_impl(&rdb, id)?.unwrap();
 
             let mut table_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
+            let mut table_storage = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
             let mut table_m = db.open_table(TABLE_MUSIC)?;
+            table_storage.remove(m.loc.storage_id, m.id)?;
             table_loc.remove(m.loc)?;
             table_m.remove(m.id)?;
             if let Some(id) = m.cover {

@@ -1,7 +1,5 @@
 use ease_client::{
-    view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget,
-    PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget,
-    StorageListWidget, ViewAction,
+    view_models::storage::import::StorageImportAction, Action, PlaylistCreateWidget, PlaylistDetailWidget, PlaylistEditWidget, PlaylistListWidget, StorageImportWidget, StorageListWidget, StorageUpsertWidget, ViewAction
 };
 use ease_client_shared::backends::{
     playlist::CreatePlaylistMode,
@@ -452,4 +450,23 @@ async fn playlist_full_import_storage_count_bug() {
     });
     let state = app.latest_state().edit_storage.unwrap();
     assert_eq!(state.music_count, 1);
+}
+
+
+#[tokio::test]
+async fn remove_playlist_then_storage_bug() {
+    let mut app = TestApp::new("test-dbs/remove_playlist_then_storage_bug", true).await;
+    app.setup_preset(PresetDepth::Music).await;
+
+    let id = app.get_first_playlist_id_from_latest_state();
+    app.dispatch_click(PlaylistListWidget::Item { id });
+    app.wait_network().await;
+    app.dispatch_click(PlaylistDetailWidget::Remove);
+    app.wait_network().await;
+
+    let storage_id = app.get_first_storage_id_from_latest_state();
+    app.dispatch_click(StorageListWidget::Item { id: storage_id });
+    app.wait_network().await;
+    app.dispatch_click(StorageUpsertWidget::Remove);
+    app.wait_network().await;
 }
