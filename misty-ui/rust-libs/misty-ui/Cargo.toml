@@ -1,0 +1,10 @@
+[package]
+name = "misty-ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+deno_core = "0.334.0"
+serde_json = "1.0.138"
+serde_v8 = "0.243.0"
+v8 = { version = "130.0.7" }
