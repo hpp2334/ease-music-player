@@ -1,0 +1,15 @@
+{
+  "name": "misty-ui-renderer",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react-reconciler": "^0.28.9"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "react-reconciler": "0.31.0"
+  }
+}
