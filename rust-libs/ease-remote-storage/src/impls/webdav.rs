@@ -4,7 +4,7 @@ use crate::StorageBackendError;
 
 use futures_util::future::BoxFuture;
 use reqwest::header::HeaderValue;
-use reqwest::StatusCode;
+use reqwest::{StatusCode, Url};
 
 use std::cmp::Ordering;
 
@@ -61,6 +61,12 @@ mod webdav_list_types {
     pub struct Root {
         pub response: Vec<Response>,
     }
+}
+
+fn join_url(mut url: Url, path: &str) -> Url {
+    let base = url.path();
+    url.set_path(&(base.trim_end_matches('/').to_string() + "/" + path.trim_start_matches('/')));    
+    url
 }
 
 fn build_authorization_header_value(
@@ -159,9 +165,9 @@ impl Webdav {
     }
 
     async fn list_core(&self, dir: &str) -> StorageBackendResult<reqwest::Response> {
-        let mut url = reqwest::Url::parse(&self.addr)
+        let url = reqwest::Url::parse(&self.addr)
             .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
-        url.set_path(dir);
+        let url = join_url(url, dir);
 
         let method = reqwest::Method::from_bytes(b"PROPFIND").unwrap();
         let resp = self
