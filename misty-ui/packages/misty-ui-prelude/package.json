@@ -1,11 +1,9 @@
 {
-  "name": "misty-ui",
+  "name": "misty-ui-prelude",
+  "module": "src/index.ts",
   "type": "module",
-  "workspaces": [
-    "packages/*",
-    "examples/counter/demo-ui"
-  ],
   "devDependencies": {
+    "misty-ui-types": "workspace:*"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

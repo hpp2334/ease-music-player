@@ -1,0 +1,8 @@
+[package]
+name = "shell"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+misty-ui = { path = "../../../rust-libs/misty-ui" }
+smol = "2.0.2"

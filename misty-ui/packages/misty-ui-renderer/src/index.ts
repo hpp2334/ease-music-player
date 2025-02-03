@@ -1,10 +1,13 @@
+import "misty-ui-prelude"
 import type React from 'react'
 import Reconciler, { type HostConfig } from 'react-reconciler'
+import { Element } from "misty-ui-core"
+import { getRootElement } from "./global";
 
 type Type = string;
 type Props = any;
-type Container = {};
-type Instance = {};
+type Container = Element;
+type Instance = Element;
 type TextInstance = never;
 type SuspenseInstance = never;
 type HydratableInstance = never;
@@ -104,6 +107,6 @@ const MistyRenderer = Reconciler(Host)
 
 export const MistyUI = {
     render(element: React.ReactNode) {
-        MistyRenderer.updateContainer(element)
+        MistyRenderer.updateContainer(element, getRootElement())
     }
 }

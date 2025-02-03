@@ -1,0 +1,10 @@
+{
+  "name": "misty-ui-types",
+  "main": "index.d.ts",
+  "types": "index.d.ts",
+  "devDependencies": {
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

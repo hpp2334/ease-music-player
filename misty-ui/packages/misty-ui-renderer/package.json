@@ -1,15 +1,18 @@
 {
   "name": "misty-ui-renderer",
-  "module": "index.ts",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
   "type": "module",
   "devDependencies": {
-    "@types/bun": "latest",
     "@types/react-reconciler": "^0.28.9"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "react-reconciler": "0.31.0"
+    "react-reconciler": "0.31.0",
+    "misty-ui-prelude": "workspace:*",
+    "misty-ui-core": "workspace:*"
   }
 }
