@@ -4,7 +4,7 @@ use crate::StorageBackendError;
 
 use futures_util::future::BoxFuture;
 use reqwest::header::HeaderValue;
-use reqwest::StatusCode;
+use reqwest::{StatusCode, Url};
 
 use std::cmp::Ordering;
 
@@ -60,6 +60,14 @@ mod webdav_list_types {
     #[derive(Deserialize, Debug)]
     pub struct Root {
         pub response: Vec<Response>,
+    }
+}
+
+fn normalize_path(p: String) -> String {
+    if p.starts_with('/') {
+        p
+    } else {
+        "/".to_string() + p.as_str()
     }
 }
 
@@ -158,10 +166,23 @@ impl Webdav {
         return header_map;
     }
 
-    async fn list_core(&self, dir: &str) -> StorageBackendResult<reqwest::Response> {
+    fn get_url(&self, dir: &str) -> StorageBackendResult<Url> {
         let mut url = reqwest::Url::parse(&self.addr)
             .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
-        url.set_path(dir);
+        let base = url.path();
+        url.set_path(&(base.trim_end_matches('/').to_string() + "/" + dir.trim_start_matches('/')));    
+        Ok(url)
+    }
+
+    fn get_href(&self, dir: &str) -> StorageBackendResult<String> {
+        let url = reqwest::Url::parse(&self.addr)
+            .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
+        let base = normalize_path(url.path().to_string());
+        Ok(normalize_path(dir.trim_start_matches(base.as_str()).into()))
+    }
+
+    async fn list_core(&self, dir: &str) -> StorageBackendResult<reqwest::Response> {
+        let url = self.get_url(dir)?;
 
         let method = reqwest::Method::from_bytes(b"PROPFIND").unwrap();
         let resp = self
@@ -189,10 +210,11 @@ impl Webdav {
 
         let mut ret: Vec<Entry> = Default::default();
         for item in obj.response {
-            let mut path = item.href;
+            let path = item.href;
             let mut name = item.propstat.prop.displayname.unwrap_or(Default::default());
             let is_dir = item.propstat.prop.resourcetype.collection.is_some();
             let size = item.propstat.prop.getcontentlength;
+            let mut path = self.get_href(path.as_str())?;
 
             if path == "/" {
                 continue;
@@ -245,9 +267,7 @@ impl Webdav {
     }
 
     async fn get_impl(&self, p: &str, byte_offset: u64) -> StorageBackendResult<StreamFile> {
-        let mut url = reqwest::Url::parse(&self.addr)
-            .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
-        url.set_path(p);
+        let url = self.get_url(p)?;
 
         let mut headers = self.build_base_header_map(reqwest::Method::GET, &url);
         headers.insert(

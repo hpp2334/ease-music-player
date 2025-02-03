@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -60,8 +59,6 @@ pub enum PlayerDelegateEvent {
     Eq,
     Serialize,
     Deserialize,
-    FromPrimitive,
-    ToPrimitive,
     bitcode::Encode,
     bitcode::Decode,
     uniffi::Enum,

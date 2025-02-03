@@ -46,3 +46,6 @@ app.*.map.json
 rust-libs/ease-client-backend/src/controllers/generated.rs
 rust-libs/ease-client-shared/src/backends/generated.rs
 rust-libs/ease-remote-storage/src/generated.rs
+
+**/target
+**/node_modules

@@ -1,4 +1,3 @@
-use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
 use crate::{backends::env::EASEM_ONEDRIVE_ID, define_id};
@@ -46,8 +45,6 @@ pub enum DataSourceKey {
 }
 
 #[derive(
-    FromPrimitive,
-    ToPrimitive,
     Serialize,
     Deserialize,
     Clone,
