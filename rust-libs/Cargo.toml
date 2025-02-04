@@ -9,8 +9,7 @@ members = [
     "ease-client",
     "ease-client-test",
     "ease-client-android-ffi-builder",
-    "ease-client-android",
-    "ease-client-desktop",
+    "ease-client-android"
 ]
 
 [profile.bench]
