@@ -1,7 +1,8 @@
-use ease_client::view_models::view_state::views::playlist::VPlaylistListState;
-use gpui::{div, prelude::*, px, rgb, rgba, svg, Div, Model, SharedString, Stateful, View, ViewContext};
+use gpui::{div, prelude::*, px, rgb, Div, SharedString, Stateful};
 
-use crate::core::{theme::{RGB_PRIMARY, RGB_PRIMARY_700, RGB_PRIMARY_TEXT, RGB_SLIGHT_300, RGB_SLIGHT_700, RGB_SURFACE}, view_state::ViewStates};
+use crate::core::theme::{
+    RGB_PRIMARY, RGB_PRIMARY_700, RGB_PRIMARY_TEXT, RGB_SLIGHT_300, RGB_SLIGHT_700, RGB_SURFACE,
+};
 
 pub enum ButtonType {
     Primary,
@@ -11,7 +12,7 @@ pub enum ButtonType {
 pub struct ButtonComponent {
     id: SharedString,
     typ: ButtonType,
-    on_click: Option<Box<dyn Fn(&mut gpui::WindowContext<'_>)>>,
+    on_click: Option<Box<dyn Fn(&mut gpui::App)>>,
     text: String,
 }
 
@@ -20,13 +21,15 @@ impl ButtonComponent {
         self.typ = typ;
         self
     }
-    
+
     pub fn on_click<F>(mut self, on_click: F) -> Self
-    where F: Fn(&mut gpui::WindowContext<'_>) + 'static {
+    where
+        F: Fn(&mut gpui::App) + 'static,
+    {
         self.on_click = Some(Box::new(on_click));
         self
     }
-    
+
     pub fn text(mut self, text: String) -> Self {
         self.text = text;
         self
@@ -50,7 +53,7 @@ impl IntoElement for ButtonComponent {
             ButtonType::Primary => rgb(RGB_SURFACE),
         };
         let on_click = self.on_click.take();
-        
+
         div()
             .id(self.id.clone())
             .rounded(px(2.0))
@@ -59,7 +62,7 @@ impl IntoElement for ButtonComponent {
             .bg(bg_col)
             .text_color(text_col)
             .hover(|style| style.bg(bg_hovered_col))
-            .on_click(move |_e, cx| {
+            .on_click(move |_e, _, cx| {
                 if let Some(on_click) = on_click.as_ref() {
                     on_click(cx);
                 }
@@ -67,7 +70,6 @@ impl IntoElement for ButtonComponent {
             .child(self.text.clone())
     }
 }
-
 
 pub fn button(id: SharedString) -> ButtonComponent {
     ButtonComponent {

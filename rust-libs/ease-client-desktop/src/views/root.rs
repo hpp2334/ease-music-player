@@ -1,37 +1,43 @@
-use gpui::{div, prelude::*, px, rgb, rgba, BoxShadow, Point, SharedString, View, ViewContext};
+use gpui::{div, prelude::*, px, rgb, rgba, BoxShadow, Entity, Point, SharedString};
 
-use crate::core::{theme::{RGB_PRIMARY_TEXT, RGB_SURFACE}, view_state::ViewStates};
+use crate::core::{
+    theme::{RGB_PRIMARY_TEXT, RGB_SURFACE},
+    view_state::ViewStates,
+};
 
-use super::{routes::RoutesComponent, sidebar::SidebarComponent, storage_upsert::StorageUpsertModalComponent, windowbar::WindowBarComponent};
+use super::{
+    routes::RoutesComponent, sidebar::SidebarComponent,
+    storage_upsert::StorageUpsertModalComponent, windowbar::WindowBarComponent,
+};
 
 pub struct RootComponent {
-    routes: View<RoutesComponent>,
-    window_bar: View<WindowBarComponent>,
-    view_sidebar: View<SidebarComponent>,
-    view_modal_storage_upsert: View<StorageUpsertModalComponent>,
+    routes: Entity<RoutesComponent>,
+    window_bar: Entity<WindowBarComponent>,
+    view_sidebar: Entity<SidebarComponent>,
+    view_modal_storage_upsert: Entity<StorageUpsertModalComponent>,
 }
 
 impl RootComponent {
-    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
-        let view_modal_storage_upsert = cx.new_view(|cx| StorageUpsertModalComponent::new(cx, vs));
+    pub fn new(cx: &mut Context<Self>, vs: &ViewStates) -> Self {
+        let view_modal_storage_upsert = cx.new(|cx| StorageUpsertModalComponent::new(cx, vs));
 
         Self {
-            window_bar: cx.new_view(|cx| WindowBarComponent {}),
-            routes: cx.new_view(|cx| RoutesComponent::new(cx, vs)),
-            view_sidebar: cx.new_view(|cx| SidebarComponent::new(cx, vs)),
+            window_bar: cx.new(|cx| WindowBarComponent {}),
+            routes: cx.new(|cx| RoutesComponent::new(cx, vs)),
+            view_sidebar: cx.new(|cx| SidebarComponent::new(cx, vs)),
             view_modal_storage_upsert,
         }
     }
 }
+
 impl Render for RootComponent {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        div().size_full().relative().child(
+    fn render(&mut self, _window: &mut gpui::Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().relative().child(
             div()
+                .relative()
                 .font_family(SharedString::new_static("NotoSans"))
                 .text_color(rgb(RGB_PRIMARY_TEXT))
                 .bg(rgb(RGB_SURFACE))
-                .rounded_lg()
-                .overflow_hidden()
                 .left(px(16.0))
                 .top(px(16.0))
                 .w(px(1280.0))
@@ -48,7 +54,16 @@ impl Render for RootComponent {
                     }]
                     .into(),
                 )
-                .relative()
+                .overflow_hidden()
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .right_0()
+                        .h(px(48.0))
+                        .child(self.window_bar.clone()),
+                )
                 .child(
                     div()
                         .absolute()
@@ -72,18 +87,9 @@ impl Render for RootComponent {
                                         .h_full()
                                         .child(self.view_sidebar.clone()),
                                 )
-                                .child(div().size_full().child(self.routes.clone()))
+                                .child(div().size_full().child(self.routes.clone())),
                         )
-                        .child(self.view_modal_storage_upsert.clone())
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .right_0()
-                        .h(px(48.0))
-                        .child(self.window_bar.clone()),
+                        .child(self.view_modal_storage_upsert.clone()),
                 ),
         )
     }

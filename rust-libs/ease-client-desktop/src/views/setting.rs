@@ -1,25 +1,35 @@
-use ease_client::{view_models::view_state::views::storage::{VStorageListItem, VStorageListState}, StorageListWidget, WidgetAction, WidgetActionType};
+use ease_client::{
+    view_models::view_state::views::storage::{VStorageListItem, VStorageListState},
+    StorageListWidget, WidgetAction, WidgetActionType,
+};
 use ease_client_shared::backends::storage::StorageType;
-use gpui::{div, prelude::*, px, rgb, svg, Model, SharedString, ViewContext};
+use gpui::{div, prelude::*, px, rgb, svg, Entity, SharedString};
 
-use crate::core::{theme::{RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300}, view_state::ViewStates, vm::AppBridge};
+use crate::core::{
+    theme::{RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300},
+    view_state::ViewStates,
+    vm::AppBridge,
+};
 
-pub struct SettingComponent { 
-    storage_list: Model<VStorageListState>,
+pub struct SettingComponent {
+    storage_list: Entity<VStorageListState>,
 }
 
 impl SettingComponent {
-    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
+    pub fn new(cx: &mut Context<Self>, vs: &ViewStates) -> Self {
         Self {
             storage_list: vs.storage_list.clone(),
         }
     }
 }
 
-fn render_storage_block(cx: &mut ViewContext<SettingComponent>, item: VStorageListItem) -> impl IntoElement {
+fn render_storage_block(
+    cx: &mut Context<SettingComponent>,
+    item: VStorageListItem,
+) -> impl IntoElement {
     let icon_path = match item.typ {
         StorageType::Local | StorageType::Webdav => "drawables://Cloud.svg",
-        StorageType::OneDrive => "drawables://OneDrive.svg"
+        StorageType::OneDrive => "drawables://OneDrive.svg",
     };
 
     div()
@@ -42,21 +52,15 @@ fn render_storage_block(cx: &mut ViewContext<SettingComponent>, item: VStorageLi
             div()
                 .flex()
                 .flex_col()
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .child(item.name)
-                )
+                .child(div().text_size(px(12.0)).child(item.name))
                 .when(!item.sub_title.is_empty(), |el| {
-                    el
-                        .text_color(rgb(RGB_SECONDARY_TEXT))
-                        .child(item.sub_title)
-                })
+                    el.text_color(rgb(RGB_SECONDARY_TEXT)).child(item.sub_title)
+                }),
         )
 }
 
 impl Render for SettingComponent {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         let storages = self.storage_list.read(cx).clone();
         let mut elements = vec![];
         for item in storages.items.into_iter() {
@@ -78,7 +82,7 @@ impl Render for SettingComponent {
                             .text_color(rgb(RGB_PRIMARY_TEXT))
                             .path("drawables://CloudStorage.svg"),
                     )
-                    .child("Devices")
+                    .child("Devices"),
             )
             .child(
                 div()
@@ -98,20 +102,23 @@ impl Render for SettingComponent {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .on_click(|_, cx| {
+                            .on_click(|_, _, cx| {
                                 let app = cx.global::<AppBridge>().clone();
-                                app.dispatch_widget(cx, WidgetAction {
-                                    widget: StorageListWidget::Create.into(),
-                                    typ: WidgetActionType::Click,
-                                });
+                                app.dispatch_widget(
+                                    cx,
+                                    WidgetAction {
+                                        widget: StorageListWidget::Create.into(),
+                                        typ: WidgetActionType::Click,
+                                    },
+                                );
                             })
                             .child(
                                 svg()
                                     .size(px(16.0))
                                     .text_color(rgb(RGB_PRIMARY_TEXT))
                                     .path("drawables://Plus.svg"),
-                            )
-                    )
+                            ),
+                    ),
             )
     }
 }

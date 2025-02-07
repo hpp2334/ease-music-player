@@ -1,14 +1,14 @@
 use ease_client::view_models::view_state::views::playlist::VPlaylistListState;
-use gpui::{div, prelude::*, px, rgb, svg, Model, SharedString, ViewContext};
+use gpui::{div, prelude::*, px, rgb, svg, Entity, SharedString};
 
 use crate::core::{theme::RGB_PRIMARY_TEXT, view_state::ViewStates};
 
 pub struct PlaylistListComponent {
-    playlist_list: Model<VPlaylistListState>,
+    playlist_list: Entity<VPlaylistListState>,
 }
 
 impl PlaylistListComponent {
-    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
+    pub fn new(cx: &mut Context<Self>, vs: &ViewStates) -> Self {
         cx.focus_handle();
 
         let playlist_list = vs.playlist_list.clone();
@@ -20,7 +20,7 @@ impl PlaylistListComponent {
 }
 
 impl Render for PlaylistListComponent {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.playlist_list.read(cx);
 
         let playlist_elements: Vec<_> = state
@@ -34,7 +34,7 @@ impl Render for PlaylistListComponent {
                     .cursor_pointer()
                     .on_click({
                         let item = item.clone();
-                        move |_event, cx| {
+                        move |_event, _, cx| {
                             println!("VPlaylistAbstractItem {:?}", item);
                         }
                     })
@@ -60,7 +60,7 @@ impl Render for PlaylistListComponent {
                     .items_center()
                     .justify_center()
                     .on_click({
-                        move |_event, cx| {
+                        move |_event, _w, _cx| {
                             // let app = cx.global::<AppPodProxy>().get();
                             // app.emit(Action::View(ViewAction::Widget(WidgetAction {
                             //     widget: PlaylistListWidget::Add.into(),

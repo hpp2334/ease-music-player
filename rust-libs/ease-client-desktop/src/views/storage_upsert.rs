@@ -1,10 +1,24 @@
-use ease_client::{view_models::view_state::views::storage::{VEditStorageState, VStorageListItem, VStorageListState}, StorageUpsertWidget, WidgetAction, WidgetActionType};
+use ease_client::{
+    view_models::view_state::views::storage::VEditStorageState, StorageUpsertWidget, WidgetAction,
+    WidgetActionType,
+};
 use ease_client_shared::backends::storage::StorageType;
-use gpui::{div, prelude::*, px, rgb, svg, Model, SharedString, View, ViewContext};
+use gpui::{div, prelude::*, px, rgb, svg, App, Entity, SharedString};
 
-use crate::core::{theme::{RGB_PRIMARY, RGB_PRIMARY_700, RGB_PRIMARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300, RGB_SURFACE}, view_state::ViewStates, vm::AppBridge};
+use crate::core::{
+    theme::{
+        RGB_PRIMARY, RGB_PRIMARY_700, RGB_PRIMARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300, RGB_SURFACE,
+    },
+    view_state::ViewStates,
+    vm::AppBridge,
+};
 
-use super::base::{button::{button, ButtonType}, form_input::{form_input, FormInputComponent}, input_base::BaseInputComponent, modal::modal };
+use super::base::{
+    button::{button, ButtonType},
+    form_input::form_input,
+    input_base::BaseInputComponent,
+    modal::modal,
+};
 
 struct StorageBlockComponent {
     icon_path: &'static str,
@@ -13,24 +27,31 @@ struct StorageBlockComponent {
     current_active: StorageType,
 }
 
-
-pub struct StorageUpsertModalComponent { 
-    state: Model<VEditStorageState>,
+pub struct StorageUpsertModalComponent {
+    state: Entity<VEditStorageState>,
     visible: bool,
-    view_webdav_block: View<StorageBlockComponent>,
-    view_onedrive_block: View<StorageBlockComponent>,
-    view_input_alias: View<FormInputComponent>,
-    view_input_address: View<FormInputComponent>,
-    view_input_username: View<FormInputComponent>,
-    view_input_password: View<FormInputComponent>,
+    view_webdav_block: Entity<StorageBlockComponent>,
+    view_onedrive_block: Entity<StorageBlockComponent>,
+    view_input_alias: Entity<BaseInputComponent>,
+    view_input_address: Entity<BaseInputComponent>,
+    view_input_username: Entity<BaseInputComponent>,
+    view_input_password: Entity<BaseInputComponent>,
 }
 
 impl Render for StorageBlockComponent {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut gpui::Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.current_active == self.storage_typ;
-        let col = rgb(if active { RGB_SURFACE } else { RGB_PRIMARY_TEXT });
+        let col = rgb(if active {
+            RGB_SURFACE
+        } else {
+            RGB_PRIMARY_TEXT
+        });
         let bg_col = rgb(if active { RGB_PRIMARY } else { RGB_SLIGHT_100 });
-        let hovered_bg_col = rgb(if active { RGB_PRIMARY_700 } else { RGB_SLIGHT_300 });
+        let hovered_bg_col = rgb(if active {
+            RGB_PRIMARY_700
+        } else {
+            RGB_SLIGHT_300
+        });
 
         div()
             .w(px(100.0))
@@ -43,147 +64,203 @@ impl Render for StorageBlockComponent {
             .text_color(col)
             .bg(bg_col)
             .hover(|style| style.bg(hovered_bg_col))
-            .child(
-                svg()
-                    .size(px(32.0))
-                    .text_color(col)
-                    .path(self.icon_path)
-            )
+            .child(svg().size(px(32.0)).text_color(col).path(self.icon_path))
             .child(self.text)
     }
 }
 
 impl StorageUpsertModalComponent {
-    pub fn new(cx: &mut ViewContext<Self>, vs: &ViewStates) -> Self {
+    pub fn new(cx: &mut Context<Self>, vs: &ViewStates) -> Self {
+        let _ = cx;
         let current_storage_type = vs.storage_upsert.read(cx).info.typ;
-        
+        let view_input_alias = cx.new(|cx| BaseInputComponent::new(cx));
+        let view_input_address = cx.new(|cx| BaseInputComponent::new(cx));
+        let view_input_username = cx.new(|cx| BaseInputComponent::new(cx));
+        let view_input_password = cx.new(|cx| BaseInputComponent::new(cx));
+
         cx.observe(&vs.storage_upsert, move |this, _, cx| {
             let vs = this.state.read(cx).clone();
             let current_storage_type = vs.info.typ;
-            this.view_onedrive_block.update(cx, |v, cx| {
+            this.view_onedrive_block.update(cx, |v, _cx| {
                 v.current_active = current_storage_type;
             });
-            this.view_webdav_block.update(cx, |v, cx| {
+            this.view_webdav_block.update(cx, |v, _cx| {
                 v.current_active = current_storage_type;
             });
             this.visible = vs.open;
-        }).detach();
+            this.view_input_alias.update(cx, |v, _cx| {
+                v.change_content(vs.info.alias.into());
+            });
+            this.view_input_address.update(cx, |v, _cx| {
+                v.change_content(vs.info.addr.into());
+            });
+            this.view_input_username.update(cx, |v, _cx| {
+                v.change_content(vs.info.username.into());
+            });
+            this.view_input_password.update(cx, |v, _cx| {
+                v.change_content(vs.info.password.into());
+            });
+        })
+        .detach();
+
+        cx.observe(&view_input_alias, |_this, view, cx| {
+            let text = view.read(cx).content.clone();
+            let app = cx.global::<AppBridge>().clone();
+            app.dispatch_widget(
+                cx,
+                WidgetAction {
+                    widget: StorageUpsertWidget::Alias.into(),
+                    typ: WidgetActionType::ChangeText { text: text.into() },
+                },
+            );
+        })
+        .detach();
+        cx.observe(&view_input_address, |_this, view, cx| {
+            let text = view.read(cx).content.clone();
+            let app = cx.global::<AppBridge>().clone();
+            app.dispatch_widget(
+                cx,
+                WidgetAction {
+                    widget: StorageUpsertWidget::Address.into(),
+                    typ: WidgetActionType::ChangeText { text: text.into() },
+                },
+            );
+        })
+        .detach();
+        cx.observe(&view_input_username, |_this, view, cx| {
+            let text = view.read(cx).content.clone();
+            let app = cx.global::<AppBridge>().clone();
+            app.dispatch_widget(
+                cx,
+                WidgetAction {
+                    widget: StorageUpsertWidget::Username.into(),
+                    typ: WidgetActionType::ChangeText { text: text.into() },
+                },
+            );
+        })
+        .detach();
+        cx.observe(&view_input_password, |_this, view, cx| {
+            let text = view.read(cx).content.clone();
+            let app = cx.global::<AppBridge>().clone();
+            app.dispatch_widget(
+                cx,
+                WidgetAction {
+                    widget: StorageUpsertWidget::Password.into(),
+                    typ: WidgetActionType::ChangeText { text: text.into() },
+                },
+            );
+        })
+        .detach();
 
         Self {
             state: vs.storage_upsert.clone(),
             visible: false,
-            view_webdav_block: cx.new_view(|cx| {
-                StorageBlockComponent {
-                    icon_path: "drawables://Cloud.svg",
-                    text: "WebDAV",
-                    storage_typ: StorageType::Webdav,
-                    current_active: current_storage_type,
-                }
+            view_webdav_block: cx.new(|_cx| StorageBlockComponent {
+                icon_path: "drawables://Cloud.svg",
+                text: "WebDAV",
+                storage_typ: StorageType::Webdav,
+                current_active: current_storage_type,
             }),
-            view_onedrive_block: cx.new_view(|cx| {
-                StorageBlockComponent {
-                    icon_path: "drawables://OneDrive.svg",
-                    text: "OneDrive",
-                    storage_typ: StorageType::OneDrive,
-                    current_active: current_storage_type,
-                }
+            view_onedrive_block: cx.new(|_cx| StorageBlockComponent {
+                icon_path: "drawables://OneDrive.svg",
+                text: "OneDrive",
+                storage_typ: StorageType::OneDrive,
+                current_active: current_storage_type,
             }),
-            view_input_alias: cx.new_view(|cx| {
-                BaseInputComponent::new(cx).on_change(|w| {
-                    
-                });
-            }),
-            view_input_address: cx.new_view(|cx| {
-                let base = BaseInputComponent::new(cx);
-                FormInputComponent::new(cx, base).label("ADDRESS".into())
-            }),
-            view_input_username: cx.new_view(|cx| {
-                let base = BaseInputComponent::new(cx);
-                FormInputComponent::new(cx, base).label("USERNAME".into())
-            }),
-            view_input_password: cx.new_view(|cx| {
-                let base = BaseInputComponent::new(cx);
-                FormInputComponent::new(cx, base).label("PASSWORD".into())
-            }),
+            view_input_alias,
+            view_input_address,
+            view_input_username,
+            view_input_password,
         }
     }
 }
 
 impl Render for StorageUpsertModalComponent {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-
-        modal()
-            .visible(self.visible)
-            .child(
-                div()
-                    .px(px(42.0))
-                    .py(px(42.0))
-                    .w(px(750.0))
-                    .h(px(442.0))
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .gap(px(16.0))
-                            .child(self.view_webdav_block.clone())
-                            .child(self.view_onedrive_block.clone())
-                    )
-                    .child(div().w_full().h(px(40.0)))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .child(
-                                form_input()
-                                    .label("ALIAS".into())
-                                    .input(self.view_input_alias.clone())
-                            )
-                            .child(div().w(px(32.0)).h_full())
-                            .child(self.view_input_address.clone())
-                    )
-                    .child(div().w_full().h(px(40.0)))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .child(self.view_input_username.clone())
-                            .child(div().w(px(32.0)).h_full())
-                            .child(self.view_input_password.clone())
-                    )
-                    .child(div().w_full().h(px(40.0)))
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_row()
-                            .justify_end()
-                            .gap(px(10.0))
-                            .child(
-                                button(SharedString::new_static("storage-upsert-add"))
-                                    .typ(ButtonType::Primary)
-                                    .text("OK".into())
-                                    .on_click(|cx| {})
-                            )
-                            .child(
-                                button(SharedString::new_static("storage-upsert-test"))
-                                    .text("Test Connection".into())
-                                    .on_click(|cx| {})
-                            )
-                            .child(
-                                button(SharedString::new_static("storage-upsert-cancel"))
-                                    .text("Cancel".into())
-                                    .on_click(|cx| {
-                                        let app = cx.global::<AppBridge>().clone();
-                                        app.dispatch_widget(cx, WidgetAction {
+    fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
+        modal().visible(self.visible).child(
+            div()
+                .px(px(42.0))
+                .py(px(42.0))
+                .w(px(750.0))
+                .h(px(442.0))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(16.0))
+                        .child(self.view_webdav_block.clone())
+                        .child(self.view_onedrive_block.clone()),
+                )
+                .child(div().w_full().h(px(40.0)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .child(
+                            form_input()
+                                .label("ALIAS".into())
+                                .input(self.view_input_alias.clone()),
+                        )
+                        .child(div().w(px(32.0)).h_full())
+                        .child(
+                            form_input()
+                                .label("ADDRESS".into())
+                                .input(self.view_input_address.clone()),
+                        ),
+                )
+                .child(div().w_full().h(px(40.0)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .child(
+                            form_input()
+                                .label("USERNAME".into())
+                                .input(self.view_input_username.clone()),
+                        )
+                        .child(div().w(px(32.0)).h_full())
+                        .child(
+                            form_input()
+                                .label("PASSWORD".into())
+                                .input(self.view_input_password.clone()),
+                        ),
+                )
+                .child(div().w_full().h(px(40.0)))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_row()
+                        .justify_end()
+                        .gap(px(10.0))
+                        .child(
+                            button(SharedString::new_static("storage-upsert-add"))
+                                .typ(ButtonType::Primary)
+                                .text("OK".into())
+                                .on_click(|cx| {}),
+                        )
+                        .child(
+                            button(SharedString::new_static("storage-upsert-test"))
+                                .text("Test Connection".into())
+                                .on_click(|cx| {}),
+                        )
+                        .child(
+                            button(SharedString::new_static("storage-upsert-cancel"))
+                                .text("Cancel".into())
+                                .on_click(|cx| {
+                                    let app = cx.global::<AppBridge>().clone();
+                                    app.dispatch_widget(
+                                        cx,
+                                        WidgetAction {
                                             widget: StorageUpsertWidget::Cancel.into(),
                                             typ: WidgetActionType::Click,
-                                        });
-                                    })
-                            )
-                    )
-            )
+                                        },
+                                    );
+                                }),
+                        ),
+                ),
+        )
     }
 }
-

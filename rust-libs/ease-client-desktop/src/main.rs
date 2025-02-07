@@ -1,23 +1,25 @@
-use core::{assets::Assets, view_state::{GpuiViewStateService, ViewStates}, vm::{build_desktop_backend, build_desktop_client, build_lifecycle, AppBridge}};
-
-use ease_client::{
-    Action, AppPod,
+use core::{
+    assets::Assets,
+    view_state::{GpuiViewStateService, ViewStates},
+    vm::{build_desktop_backend, build_desktop_client, build_lifecycle, AppBridge},
 };
 
-use ease_client_shared::backends::{app::ArgInitializeApp, playlist::PlaylistId, storage::{Storage, StorageType}};
+use ease_client::{Action, AppPod};
+
+use ease_client_shared::backends::{
+    app::ArgInitializeApp,
+    playlist::PlaylistId,
+    storage::{Storage, StorageType},
+};
 use futures::{channel::mpsc, StreamExt};
-use gpui::prelude::*;
-use gpui::{
-    px, size, App, AppContext, Bounds,
-    WindowBounds, WindowOptions,
-};
+use gpui::{prelude::*, Application};
+use gpui::{px, size, App, AppContext, Bounds, WindowBounds, WindowOptions};
 use misty_lifecycle::Runnable;
 use tracing::level_filters::LevelFilter;
 use views::{base::input_base::setup_input_keyboards, root::RootComponent};
 
-pub mod views;
 pub mod core;
-
+pub mod views;
 
 fn patch_cwd() {
     let cwd = std::env::current_dir().unwrap();
@@ -26,7 +28,6 @@ fn patch_cwd() {
     }
     println!("CWD: {:?}", std::env::current_dir());
 }
-
 
 fn setup_subscriber() {
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
@@ -48,9 +49,9 @@ fn main() {
 
     patch_cwd();
 
-    App::new()
+    Application::new()
         .with_assets(Assets {})
-        .run(|cx: &mut AppContext| {
+        .run(|cx: &mut App| {
             let (foreground_sender, mut foreground_receiver) = mpsc::channel::<Runnable>(128);
             let vs = ViewStates::new(cx);
 
@@ -93,7 +94,7 @@ fn main() {
                     window_background: gpui::WindowBackgroundAppearance::Transparent,
                     ..Default::default()
                 },
-                |cx| cx.new_view(|cx| RootComponent::new(cx, &vs)),
+                |_, cx| cx.new(|cx| RootComponent::new(cx, &vs)),
             )
             .unwrap();
         });

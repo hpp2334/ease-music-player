@@ -1,6 +1,4 @@
-use gpui::{div, prelude::*, px, rgb, rgba, svg, AnyElement, Div, Model, SharedString, View, ViewContext};
-
-use crate::core::{theme::{RGB_PRIMARY_TEXT, RGB_SURFACE}, view_state::ViewStates};
+use gpui::{div, prelude::*, px, rgb, rgba, AnyElement, Div};
 
 pub struct Modal {
     visible: bool,
@@ -21,7 +19,7 @@ impl Modal {
 
 impl IntoElement for Modal {
     type Element = Div;
- 
+
     fn into_element(mut self) -> Self::Element {
         let c = self.child.take();
 
@@ -29,21 +27,21 @@ impl IntoElement for Modal {
             div()
         } else {
             div()
-            .absolute()
-            .left_0()
-            .right_0()
-            .top_0()
-            .bottom_0()
-            .bg(rgba(0x0000007F))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .rounded(px(8.0))
-                    .bg(rgb(0xFFFFFF))
-                    .when(c.is_some(), |el| el.child(c.unwrap()))
-            )
+                .absolute()
+                .left_0()
+                .right_0()
+                .top_0()
+                .bottom_0()
+                .bg(rgba(0x0000007F))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .rounded(px(8.0))
+                        .bg(rgb(0xFFFFFF))
+                        .when(c.is_some(), |el| el.child(c.unwrap())),
+                )
         }
     }
 }

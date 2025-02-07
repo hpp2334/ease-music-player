@@ -1,14 +1,20 @@
 use std::{
-    cell::RefCell, rc::Rc, sync::{atomic::AtomicBool, Arc, RwLock}, thread::ThreadId, time::{Duration, SystemTime}
+    cell::RefCell,
+    rc::Rc,
+    sync::{atomic::AtomicBool, Arc, RwLock},
+    thread::ThreadId,
+    time::{Duration, SystemTime},
 };
 
 use ease_client::{
-    build_client, to_host::connector::IConnectorHost, Action, AndroidRoutesKey, App, AppPod, DesktopRoutesKey, EaseError, EaseResult, IPermissionService, IRouterService, IToastService, IViewStateService, ViewAction, WeakAppPod, WidgetAction
+    build_client, to_host::connector::IConnectorHost, Action, AndroidRoutesKey, App, AppPod,
+    DesktopRoutesKey, EaseError, EaseResult, IPermissionService, IRouterService, IToastService,
+    IViewStateService, ViewAction, WeakAppPod, WidgetAction,
 };
 use ease_client_backend::{Backend, IPlayerDelegate};
 use ease_client_shared::backends::{connector::IConnectorNotifier, music::MusicId, MessagePayload};
 use futures::{channel::mpsc, future::BoxFuture, SinkExt};
-use gpui::Model;
+use gpui::Entity;
 use misty_lifecycle::{ILifecycleExternal, Runnable};
 use std::fmt::Debug;
 
@@ -24,18 +30,26 @@ pub struct AppBridge {
 
 impl AppBridge {
     pub fn dispatch<C>(&self, cx: &mut C, action: Action)
-    where C: gpui::Context {
+    where
+        C: gpui::AppContext,
+    {
         self.pod.get().emit(action);
         self.flush(cx);
     }
     pub fn dispatch_widget<C>(&self, cx: &mut C, action: WidgetAction)
-    where C: gpui::Context {
-        self.pod.get().emit(Action::View(ViewAction::Widget(action)));
+    where
+        C: gpui::AppContext,
+    {
+        self.pod
+            .get()
+            .emit(Action::View(ViewAction::Widget(action)));
         self.flush(cx);
     }
 
     pub fn flush<C>(&self, cx: &mut C)
-    where C: gpui::Context {
+    where
+        C: gpui::AppContext,
+    {
         let v = self.vs.borrow_mut().take();
         if let Some(v) = v {
             self.flush_vs(cx, &v.playlist_list, &self.gpui_vs.playlist_list);
@@ -53,8 +67,11 @@ impl AppBridge {
         }
     }
 
-    fn flush_vs<C, V>(&self, cx: &mut C, vs: &Option<V>, m: &Model<V>)
-    where C: gpui::Context, V: Debug + Clone + 'static {
+    fn flush_vs<C, V>(&self, cx: &mut C, vs: &Option<V>, m: &Entity<V>)
+    where
+        C: gpui::AppContext,
+        V: Debug + Clone + 'static,
+    {
         let u = vs.clone();
         if u.is_some() {
             let state = m.clone();
@@ -153,15 +170,12 @@ impl IPermissionService for PermissionService {
     fn request_storage_permission(&self) {}
 }
 
-
 struct RouterService {
     routes: Rc<RefCell<RouteStack>>,
 }
 impl RouterService {
     pub fn new(routes: Rc<RefCell<RouteStack>>) -> Arc<Self> {
-        Arc::new(Self {
-            routes,
-        })
+        Arc::new(Self { routes })
     }
 }
 impl IRouterService for RouterService {
@@ -238,7 +252,7 @@ impl ILifecycleExternal for LifecycleExternal {
 }
 
 pub fn build_lifecycle(
-    cx: &mut gpui::AppContext,
+    cx: &mut gpui::App,
     foreground_sender: mpsc::Sender<Runnable>,
 ) -> Arc<LifecycleExternal> {
     Arc::new(LifecycleExternal {
@@ -267,10 +281,10 @@ pub fn build_desktop_client(
         Arc::new(GpuiViewStateService::new(rvs.clone())),
         lifecycle_external,
     );
-    
+
     let pod = AppPod::new();
     pod.set(app);
-    
+
     AppBridge {
         pod: Rc::new(pod),
         vs: rvs,

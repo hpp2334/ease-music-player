@@ -1,9 +1,16 @@
 use std::{cell::RefCell, rc::Rc};
 
 use ease_client::{
-    view_models::{storage::state::AllStorageState, view_state::views::{playlist::VPlaylistListState, storage::{VEditStorageState, VStorageListState}}}, DesktopRoutesKey, IViewStateService
+    view_models::{
+        storage::state::AllStorageState,
+        view_state::views::{
+            playlist::VPlaylistListState,
+            storage::{VEditStorageState, VStorageListState},
+        },
+    },
+    DesktopRoutesKey, IViewStateService,
 };
-use gpui::{Context, Model};
+use gpui::{AppContext, Context, Entity};
 
 #[derive(Default, Clone)]
 pub struct RouteStack {
@@ -13,38 +20,39 @@ pub struct RouteStack {
 
 #[derive(Clone)]
 pub struct ViewStates {
-    pub playlist_list: Model<VPlaylistListState>,
-    pub storage_list: Model<VStorageListState>,
-    pub storage_upsert: Model<VEditStorageState>,
-    pub route_stack: Model<RouteStack>,
+    pub playlist_list: Entity<VPlaylistListState>,
+    pub storage_list: Entity<VStorageListState>,
+    pub storage_upsert: Entity<VEditStorageState>,
+    pub route_stack: Entity<RouteStack>,
 }
 
 pub struct GpuiViewStateService {
-    states: Rc<RefCell<Option<ease_client::RootViewModelState>>>
+    states: Rc<RefCell<Option<ease_client::RootViewModelState>>>,
 }
 
 impl RouteStack {
     pub fn current(&self) -> DesktopRoutesKey {
-        self.routes.last().cloned().unwrap_or(DesktopRoutesKey::Home)
+        self.routes
+            .last()
+            .cloned()
+            .unwrap_or(DesktopRoutesKey::Home)
     }
 }
 
 impl ViewStates {
-    pub fn new(cx: &mut gpui::AppContext) -> Self {
+    pub fn new(cx: &mut gpui::App) -> Self {
         Self {
-            playlist_list: cx.new_model(|_| VPlaylistListState::default()),
-            storage_list: cx.new_model(|_| VStorageListState::default()),
-            storage_upsert: cx.new_model(|_| VEditStorageState::default()),
-            route_stack: cx.new_model(|_| RouteStack::default())
+            playlist_list: cx.new(|_| VPlaylistListState::default()),
+            storage_list: cx.new(|_| VStorageListState::default()),
+            storage_upsert: cx.new(|_| VEditStorageState::default()),
+            route_stack: cx.new(|_| RouteStack::default()),
         }
     }
 }
 
 impl GpuiViewStateService {
     pub fn new(states: Rc<RefCell<Option<ease_client::RootViewModelState>>>) -> Self {
-        Self {
-            states,
-        }
+        Self { states }
     }
 }
 

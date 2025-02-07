@@ -1,10 +1,10 @@
-use gpui::{div, prelude::*, px, Div, SharedString, View, ViewContext};
+use gpui::{div, prelude::*, px, Div, Entity, SharedString};
 
 use super::input_base::BaseInputComponent;
 
 pub struct FormInputComponent {
     label: SharedString,
-    base: Option<View<BaseInputComponent>>,
+    base: Option<Entity<BaseInputComponent>>,
 }
 
 impl FormInputComponent {
@@ -20,7 +20,7 @@ impl FormInputComponent {
         self
     }
 
-    pub fn input(mut self, view: View<BaseInputComponent>) -> Self {
+    pub fn input(mut self, view: Entity<BaseInputComponent>) -> Self {
         self.base = Some(view);
         self
     }
@@ -42,7 +42,6 @@ impl IntoElement for FormInputComponent {
             .w_full()
             .text_size(px(12.0))
             .child(self.label.clone())
-            .when(self.base.is_some(), |el| el.child(base.unwrap()))
-    
+            .when(base.is_some(), |el| el.child(base.unwrap()))
     }
 }
