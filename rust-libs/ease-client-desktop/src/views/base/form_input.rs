@@ -1,13 +1,13 @@
-use gpui::{div, prelude::*, px, Div, Entity, SharedString};
+use gpui::{div, prelude::*, px, AnyElement, Div, Entity, SharedString};
 
-use super::input_base::BaseInputComponent;
+use super::text_input::TextInputComponent;
 
-pub struct FormInputComponent {
+pub struct FormWidgetComponent {
     label: SharedString,
-    base: Option<Entity<BaseInputComponent>>,
+    base: Option<AnyElement>,
 }
 
-impl FormInputComponent {
+impl FormWidgetComponent {
     pub fn new() -> Self {
         Self {
             label: Default::default(),
@@ -20,17 +20,17 @@ impl FormInputComponent {
         self
     }
 
-    pub fn input(mut self, view: Entity<BaseInputComponent>) -> Self {
-        self.base = Some(view);
+    pub fn input(mut self, el: impl IntoElement) -> Self {
+        self.base = Some(el.into_any_element());
         self
     }
 }
 
-pub fn form_input() -> FormInputComponent {
-    FormInputComponent::new()
+pub fn form_widget() -> FormWidgetComponent {
+    FormWidgetComponent::new()
 }
 
-impl IntoElement for FormInputComponent {
+impl IntoElement for FormWidgetComponent {
     type Element = Div;
 
     fn into_element(mut self) -> Self::Element {

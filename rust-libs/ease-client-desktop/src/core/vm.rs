@@ -6,6 +6,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use crate::utils::dynamic_lifetime::SharedDynamicLifetime;
+
 use super::routes::Router;
 use ease_client::{
     build_client, to_host::connector::IConnectorHost, Action, AndroidRoutesKey, App, AppPod,
@@ -15,7 +17,7 @@ use ease_client::{
 use ease_client_backend::{Backend, IPlayerDelegate};
 use ease_client_shared::backends::{connector::IConnectorNotifier, music::MusicId, MessagePayload};
 use futures::{channel::mpsc, future::BoxFuture, SinkExt};
-use gpui::Entity;
+use gpui::{AppContext, Entity};
 use misty_lifecycle::{ILifecycleExternal, Runnable};
 use std::fmt::Debug;
 
@@ -24,62 +26,24 @@ use super::view_state::{GpuiViewStateService, ViewStates};
 #[derive(Clone)]
 pub struct AppBridge {
     pod: Rc<AppPod>,
-    vs: Rc<RefCell<Option<ease_client::RootViewModelState>>>,
-    routes: Rc<RefCell<Router>>,
-    gpui_vs: ViewStates,
+    dyn_app: SharedDynamicLifetime<gpui::App>,
 }
 
 impl AppBridge {
-    pub fn dispatch<C>(&self, cx: &mut C, action: Action)
-    where
-        C: gpui::AppContext,
-    {
+    pub fn dispatch(&self, cx: &mut gpui::App, action: Action) {
+        let _guard = self.dyn_app.wrap(cx);
         self.pod.get().emit(action);
-        self.flush(cx);
     }
-    pub fn dispatch_widget<C>(&self, cx: &mut C, action: WidgetAction)
-    where
-        C: gpui::AppContext,
-    {
+    pub fn dispatch_widget(&self, cx: &mut gpui::App, action: WidgetAction) {
+        let _guard = self.dyn_app.wrap(cx);
         self.pod
             .get()
             .emit(Action::View(ViewAction::Widget(action)));
-        self.flush(cx);
     }
 
-    pub fn flush<C>(&self, cx: &mut C)
-    where
-        C: gpui::AppContext,
-    {
-        let v = self.vs.borrow_mut().take();
-        if let Some(v) = v {
-            self.flush_vs(cx, &v.playlist_list, &self.gpui_vs.playlist_list);
-            self.flush_vs(cx, &v.storage_list, &self.gpui_vs.storage_list);
-            self.flush_vs(cx, &v.edit_storage, &self.gpui_vs.storage_upsert);
-        }
-        {
-            let mut v = self.routes.borrow_mut();
-            if let Some(v) = v.get_changed_routes() {
-                self.gpui_vs.routes.update(cx, |dst, _| {
-                    *dst = v.clone();
-                });
-            }
-        }
-    }
-
-    fn flush_vs<C, V>(&self, cx: &mut C, vs: &Option<V>, m: &Entity<V>)
-    where
-        C: gpui::AppContext,
-        V: Debug + Clone + 'static,
-    {
-        let u = vs.clone();
-        if u.is_some() {
-            let state = m.clone();
-            state.update(cx, |v, cx| {
-                *v = u.unwrap();
-                cx.notify();
-            });
-        }
+    pub fn flush_with(&self, cx: &mut gpui::App, block: impl FnOnce()) {
+        let _guard = self.dyn_app.wrap(cx);
+        block();
     }
 }
 
@@ -171,17 +135,22 @@ impl IPermissionService for PermissionService {
 }
 
 struct RouterService {
-    router: Rc<RefCell<Router>>,
+    router: Entity<Router>,
+    dyn_app: SharedDynamicLifetime<gpui::App>,
 }
 impl RouterService {
-    pub fn new(routes: Rc<RefCell<Router>>) -> Arc<Self> {
-        Arc::new(Self { router: routes })
+    pub fn new(router: Entity<Router>, dyn_app: SharedDynamicLifetime<gpui::App>) -> Arc<Self> {
+        Arc::new(Self { router, dyn_app })
     }
 }
 impl IRouterService for RouterService {
     fn navigate(&self, key: AndroidRoutesKey) {}
     fn navigate_desktop(&self, key: DesktopRoutesKey) {
-        self.router.borrow_mut().push(key);
+        let mut cx = self.dyn_app.get();
+        let cx = cx.get();
+        self.router.update(cx, |r, _| {
+            r.push(key);
+        });
     }
     fn pop(&self) {}
 }
@@ -256,29 +225,30 @@ pub fn build_desktop_backend(lifecycle_external: Arc<LifecycleExternal>) -> Back
 }
 
 pub fn build_desktop_client(
+    cx: &mut gpui::App,
     lifecycle_external: Arc<LifecycleExternal>,
     backend: Backend,
-    vs: ViewStates,
-) -> AppBridge {
-    let rvs: Rc<RefCell<Option<ease_client::RootViewModelState>>> = Default::default();
-    let routes: Rc<RefCell<Router>> = Rc::new(RefCell::new(Router::new()));
+) -> (AppBridge, ViewStates) {
+    let vs = ViewStates::new(cx);
+    let dyn_app: SharedDynamicLifetime<gpui::App> = Default::default();
 
     let app = build_client(
         BackendHost::new(backend),
         PermissionService::new(),
-        RouterService::new(routes.clone()),
+        RouterService::new(vs.router.clone(), dyn_app.clone()),
         ToastService::new(),
-        Arc::new(GpuiViewStateService::new(rvs.clone())),
+        Arc::new(GpuiViewStateService::new(vs.clone(), dyn_app.clone())),
         lifecycle_external,
     );
 
     let pod = AppPod::new();
     pod.set(app);
 
-    AppBridge {
-        pod: Rc::new(pod),
-        vs: rvs,
-        routes,
-        gpui_vs: vs,
-    }
+    (
+        AppBridge {
+            pod: Rc::new(pod),
+            dyn_app,
+        },
+        vs,
+    )
 }

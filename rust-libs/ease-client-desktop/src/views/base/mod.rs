@@ -1,4 +1,5 @@
 pub mod button;
-pub mod modal;
 pub mod form_input;
-pub mod input_base;
+pub mod modal;
+pub mod switch_input;
+pub mod text_input;

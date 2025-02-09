@@ -1,4 +1,4 @@
-
+pub const RGB_PRIMARY_200: u32 = 0xBEECFF;
 pub const RGB_PRIMARY: u32 = 0x2E89B0;
 pub const RGB_PRIMARY_700: u32 = 0x1A6F93;
 pub const RGB_PRIMARY_TEXT: u32 = 0x3A3A3A;

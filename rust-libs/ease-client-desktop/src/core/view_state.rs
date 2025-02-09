@@ -1,29 +1,29 @@
-use std::{cell::RefCell, rc::Rc};
+use std::fmt::Debug;
 
 use ease_client::{
-    view_models::{
-        storage::state::AllStorageState,
-        view_state::views::{
-            playlist::VPlaylistListState,
-            storage::{VEditStorageState, VStorageListState},
-        },
+    view_models::view_state::views::{
+        playlist::VPlaylistListState,
+        storage::{VEditStorageState, VStorageListState},
     },
-    DesktopRoutesKey, IViewStateService,
+    IViewStateService,
 };
-use gpui::{AppContext, Context, Entity};
+use gpui::{AppContext, Entity};
 
-use super::routes::{Router, Routes};
+use crate::utils::dynamic_lifetime::SharedDynamicLifetime;
+
+use super::routes::Router;
 
 #[derive(Clone)]
 pub struct ViewStates {
     pub playlist_list: Entity<VPlaylistListState>,
     pub storage_list: Entity<VStorageListState>,
     pub storage_upsert: Entity<VEditStorageState>,
-    pub routes: Entity<Routes>,
+    pub router: Entity<Router>,
 }
 
 pub struct GpuiViewStateService {
-    states: Rc<RefCell<Option<ease_client::RootViewModelState>>>,
+    gpui_vs: ViewStates,
+    dyn_app: SharedDynamicLifetime<gpui::App>,
 }
 
 impl ViewStates {
@@ -32,19 +32,45 @@ impl ViewStates {
             playlist_list: cx.new(|_| VPlaylistListState::default()),
             storage_list: cx.new(|_| VStorageListState::default()),
             storage_upsert: cx.new(|_| VEditStorageState::default()),
-            routes: cx.new(|_| Routes::new()),
+            router: cx.new(|_| Router::new()),
         }
     }
 }
 
 impl GpuiViewStateService {
-    pub fn new(states: Rc<RefCell<Option<ease_client::RootViewModelState>>>) -> Self {
-        Self { states }
+    pub fn new(vs: ViewStates, dyn_app: SharedDynamicLifetime<gpui::App>) -> Self {
+        Self {
+            gpui_vs: vs,
+            dyn_app,
+        }
+    }
+
+    fn flush_impl(&self, cx: &mut gpui::App, v: ease_client::RootViewModelState) {
+        self.flush_vs(cx, &v.playlist_list, &self.gpui_vs.playlist_list);
+        self.flush_vs(cx, &v.storage_list, &self.gpui_vs.storage_list);
+        self.flush_vs(cx, &v.edit_storage, &self.gpui_vs.storage_upsert);
+    }
+
+    fn flush_vs<C, V>(&self, cx: &mut C, vs: &Option<V>, m: &Entity<V>)
+    where
+        C: gpui::AppContext,
+        V: Debug + Clone + 'static,
+    {
+        let u = vs.clone();
+        if u.is_some() {
+            let state = m.clone();
+            state.update(cx, |v, cx| {
+                *v = u.unwrap();
+                cx.notify();
+            });
+        }
     }
 }
 
 impl IViewStateService for GpuiViewStateService {
     fn handle_notify(&self, v: ease_client::RootViewModelState) {
-        *self.states.borrow_mut() = Some(v);
+        let mut app = self.dyn_app.get();
+        let cx = app.get();
+        self.flush_impl(cx, v);
     }
 }

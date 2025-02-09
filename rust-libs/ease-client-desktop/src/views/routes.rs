@@ -13,7 +13,7 @@ pub struct RoutesComponent {
 
 impl RoutesComponent {
     pub fn new(cx: &mut Context<Self>, vs: &ViewStates) -> Self {
-        cx.observe(&vs.routes, |_, _, _| {}).detach();
+        cx.observe(&vs.router, |_, _, _| {}).detach();
         Self {
             vs: vs.clone(),
             view_playlist_list: cx.new(|cx| PlaylistListComponent::new(cx, vs)),
@@ -24,7 +24,7 @@ impl RoutesComponent {
 
 impl Render for RoutesComponent {
     fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let route = self.vs.routes.read(cx).current();
+        let route = self.vs.router.read(cx).current();
 
         div()
             .size_full()

@@ -31,7 +31,7 @@ actions!(
     ]
 );
 
-pub struct BaseInputComponent {
+pub struct TextInputComponent {
     focus_handle: FocusHandle,
     pub content: SharedString,
     placeholder: SharedString,
@@ -43,7 +43,7 @@ pub struct BaseInputComponent {
     is_selecting: bool,
 }
 
-impl BaseInputComponent {
+impl TextInputComponent {
     pub fn new(cx: &mut App) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
@@ -277,7 +277,7 @@ impl BaseInputComponent {
     }
 }
 
-impl EntityInputHandler for BaseInputComponent {
+impl EntityInputHandler for TextInputComponent {
     fn text_for_range(
         &mut self,
         range_utf16: Range<usize>,
@@ -401,7 +401,7 @@ impl EntityInputHandler for BaseInputComponent {
 }
 
 struct TextElement {
-    input: Entity<BaseInputComponent>,
+    input: Entity<TextInputComponent>,
 }
 
 struct PrepaintState {
@@ -572,7 +572,7 @@ impl Element for TextElement {
     }
 }
 
-impl Render for BaseInputComponent {
+impl Render for TextInputComponent {
     fn render(&mut self, _: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex_grow()
@@ -612,7 +612,7 @@ impl Render for BaseInputComponent {
     }
 }
 
-impl Focusable for BaseInputComponent {
+impl Focusable for TextInputComponent {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }

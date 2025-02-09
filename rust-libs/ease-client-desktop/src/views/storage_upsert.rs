@@ -3,10 +3,9 @@ use ease_client::{
     WidgetActionType,
 };
 use ease_client_shared::backends::storage::StorageType;
-use gpui::{div, prelude::*, px, rgb, svg, App, Entity, SharedString};
+use gpui::{div, prelude::*, px, rgb, svg, Entity, SharedString};
 
 use crate::core::{
-    routes::Routes,
     theme::{
         RGB_PRIMARY, RGB_PRIMARY_700, RGB_PRIMARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300, RGB_SURFACE,
     },
@@ -16,9 +15,10 @@ use crate::core::{
 
 use super::base::{
     button::{button, ButtonType},
-    form_input::form_input,
-    input_base::BaseInputComponent,
+    form_input::form_widget,
     modal::modal,
+    switch_input::{switch_input, SwitchInputComponent},
+    text_input::TextInputComponent,
 };
 
 struct StorageBlockComponent {
@@ -30,14 +30,13 @@ struct StorageBlockComponent {
 
 pub struct StorageUpsertModalComponent {
     state: Entity<VEditStorageState>,
-    routes: Entity<Routes>,
     visible: bool,
     view_webdav_block: Entity<StorageBlockComponent>,
     view_onedrive_block: Entity<StorageBlockComponent>,
-    view_input_alias: Entity<BaseInputComponent>,
-    view_input_address: Entity<BaseInputComponent>,
-    view_input_username: Entity<BaseInputComponent>,
-    view_input_password: Entity<BaseInputComponent>,
+    view_input_alias: Entity<TextInputComponent>,
+    view_input_address: Entity<TextInputComponent>,
+    view_input_username: Entity<TextInputComponent>,
+    view_input_password: Entity<TextInputComponent>,
 }
 
 impl Render for StorageBlockComponent {
@@ -66,6 +65,7 @@ impl Render for StorageBlockComponent {
             .text_color(col)
             .bg(bg_col)
             .hover(|style| style.bg(hovered_bg_col))
+            .cursor_pointer()
             .child(svg().size(px(32.0)).text_color(col).path(self.icon_path))
             .child(self.text)
     }
@@ -75,10 +75,10 @@ impl StorageUpsertModalComponent {
     pub fn new(cx: &mut Context<Self>, vs: &ViewStates) -> Self {
         let _ = cx;
         let current_storage_type = vs.storage_upsert.read(cx).info.typ;
-        let view_input_alias = cx.new(|cx| BaseInputComponent::new(cx));
-        let view_input_address = cx.new(|cx| BaseInputComponent::new(cx));
-        let view_input_username = cx.new(|cx| BaseInputComponent::new(cx));
-        let view_input_password = cx.new(|cx| BaseInputComponent::new(cx));
+        let view_input_alias = cx.new(|cx| TextInputComponent::new(cx));
+        let view_input_address = cx.new(|cx| TextInputComponent::new(cx));
+        let view_input_username = cx.new(|cx| TextInputComponent::new(cx));
+        let view_input_password = cx.new(|cx| TextInputComponent::new(cx));
 
         cx.observe(&vs.storage_upsert, move |this, _, cx| {
             let vs = this.state.read(cx).clone();
@@ -156,7 +156,6 @@ impl StorageUpsertModalComponent {
 
         Self {
             state: vs.storage_upsert.clone(),
-            routes: vs.routes.clone(),
             visible: false,
             view_webdav_block: cx.new(|_cx| StorageBlockComponent {
                 icon_path: "drawables://Cloud.svg",
@@ -180,12 +179,13 @@ impl StorageUpsertModalComponent {
 
 impl Render for StorageUpsertModalComponent {
     fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_anonymous = self.state.read(cx).info.is_anonymous;
+
         modal().visible(self.visible).child(
             div()
                 .px(px(42.0))
                 .py(px(42.0))
                 .w(px(750.0))
-                .h(px(442.0))
                 .flex()
                 .flex_col()
                 .child(
@@ -196,40 +196,58 @@ impl Render for StorageUpsertModalComponent {
                         .child(self.view_webdav_block.clone())
                         .child(self.view_onedrive_block.clone()),
                 )
-                .child(div().w_full().h(px(40.0)))
+                .child(div().w_full().h(px(20.0)))
+                .child(
+                    form_widget().label("ANONYMOUS".into()).input(
+                        switch_input(SharedString::new_static("storage-upsert-anonymous").into())
+                            .value(is_anonymous)
+                            .on_click(|_, cx| {
+                                let app = cx.global::<AppBridge>().clone();
+                                app.dispatch_widget(
+                                    cx,
+                                    WidgetAction {
+                                        widget: StorageUpsertWidget::IsAnonymous.into(),
+                                        typ: WidgetActionType::Click,
+                                    },
+                                );
+                            }),
+                    ),
+                )
+                .child(div().w_full().h(px(20.0)))
                 .child(
                     div()
                         .flex()
                         .flex_row()
                         .child(
-                            form_input()
+                            form_widget()
                                 .label("ALIAS".into())
                                 .input(self.view_input_alias.clone()),
                         )
                         .child(div().w(px(32.0)).h_full())
                         .child(
-                            form_input()
+                            form_widget()
                                 .label("ADDRESS".into())
                                 .input(self.view_input_address.clone()),
                         ),
                 )
-                .child(div().w_full().h(px(40.0)))
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .child(
-                            form_input()
-                                .label("USERNAME".into())
-                                .input(self.view_input_username.clone()),
-                        )
-                        .child(div().w(px(32.0)).h_full())
-                        .child(
-                            form_input()
-                                .label("PASSWORD".into())
-                                .input(self.view_input_password.clone()),
-                        ),
-                )
+                .when(!is_anonymous, |el| {
+                    el.child(div().w_full().h(px(20.0))).child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .child(
+                                form_widget()
+                                    .label("USERNAME".into())
+                                    .input(self.view_input_username.clone()),
+                            )
+                            .child(div().w(px(32.0)).h_full())
+                            .child(
+                                form_widget()
+                                    .label("PASSWORD".into())
+                                    .input(self.view_input_password.clone()),
+                            ),
+                    )
+                })
                 .child(div().w_full().h(px(40.0)))
                 .child(
                     div()

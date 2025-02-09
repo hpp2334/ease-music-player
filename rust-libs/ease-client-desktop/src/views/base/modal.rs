@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, rgb, rgba, AnyElement, Div};
+use gpui::{div, prelude::*, px, rgb, rgba, AnyElement, Div, SharedString};
 
 pub struct Modal {
     visible: bool,
@@ -18,15 +18,16 @@ impl Modal {
 }
 
 impl IntoElement for Modal {
-    type Element = Div;
+    type Element = AnyElement;
 
     fn into_element(mut self) -> Self::Element {
         let c = self.child.take();
 
         if !self.visible {
-            div()
+            div().into_any_element()
         } else {
             div()
+                .id(SharedString::new_static("modal-mask"))
                 .absolute()
                 .left_0()
                 .right_0()
@@ -36,12 +37,16 @@ impl IntoElement for Modal {
                 .flex()
                 .items_center()
                 .justify_center()
+                .on_click(|_, _, cx| {
+                    cx.stop_propagation();
+                })
                 .child(
                     div()
                         .rounded(px(8.0))
                         .bg(rgb(0xFFFFFF))
                         .when(c.is_some(), |el| el.child(c.unwrap())),
                 )
+                .into_any_element()
         }
     }
 }

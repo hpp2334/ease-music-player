@@ -128,6 +128,7 @@ impl Render for SettingComponent {
                             .flex()
                             .items_center()
                             .justify_center()
+                            .cursor_pointer()
                             .on_click(|_, _, cx| {
                                 let app = cx.global::<AppBridge>().clone();
                                 app.dispatch_widget(

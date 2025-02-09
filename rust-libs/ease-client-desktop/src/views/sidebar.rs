@@ -8,7 +8,7 @@ use ease_client::{
 use gpui::{div, prelude::*, px, rgb, svg, App, Entity, SharedString};
 
 use crate::core::{
-    routes::Routes,
+    routes::Router,
     theme::{RGB_PRIMARY, RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100},
     view_state::ViewStates,
     vm::AppBridge,
@@ -29,15 +29,18 @@ struct SiderbarHeaderComponentProps {
 }
 
 pub struct SiderbarHeaderComponent {
-    routes: Entity<Routes>,
+    routes: Entity<Router>,
     props: SiderbarHeaderComponentProps,
 }
 
 impl SiderbarHeaderComponent {
-    fn new(cx: &mut App, routes: Entity<Routes>, props: SiderbarHeaderComponentProps) -> Self {
-        cx.observe(&routes, |_, _| {}).detach();
+    fn new(cx: &mut App, router: Entity<Router>, props: SiderbarHeaderComponentProps) -> Self {
+        cx.observe(&router, |_, _| {}).detach();
 
-        Self { routes, props }
+        Self {
+            routes: router,
+            props,
+        }
     }
 }
 
@@ -92,7 +95,7 @@ impl Render for SiderbarHeaderComponent {
 }
 pub struct SidebarComponent {
     playlist_list: Entity<VPlaylistListState>,
-    routes: Entity<Routes>,
+    routes: Entity<Router>,
     view_playlist_header: Entity<SiderbarHeaderComponent>,
     view_setting_header: Entity<SiderbarHeaderComponent>,
 }
@@ -102,7 +105,7 @@ impl SidebarComponent {
         let view_playlist_header = cx.new(|cx| {
             SiderbarHeaderComponent::new(
                 cx,
-                vs.routes.clone(),
+                vs.router.clone(),
                 SiderbarHeaderComponentProps {
                     icon_path: "drawables://AlbumOutline.svg",
                     text: "Playlists",
@@ -114,7 +117,7 @@ impl SidebarComponent {
         let view_setting_header = cx.new(|cx| {
             SiderbarHeaderComponent::new(
                 cx,
-                vs.routes.clone(),
+                vs.router.clone(),
                 SiderbarHeaderComponentProps {
                     icon_path: "drawables://SettingOutline.svg",
                     text: "Setting",
@@ -128,7 +131,7 @@ impl SidebarComponent {
 
         Self {
             playlist_list: vs.playlist_list.clone(),
-            routes: vs.routes.clone(),
+            routes: vs.router.clone(),
             view_playlist_header: view_playlist_header.clone(),
             view_setting_header: view_setting_header.clone(),
         }
