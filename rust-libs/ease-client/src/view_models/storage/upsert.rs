@@ -4,7 +4,7 @@ use crate::{
     actions::{event::ViewAction, Action, Widget, WidgetActionType},
     error::{EaseError, EaseResult},
     view_models::{connector::Connector, main::router::RouterVM},
-    PermissionService, AndroidRoutesKey,
+    AndroidRoutesKey, DesktopRoutesKey, PermissionService,
 };
 use ease_client_shared::backends::{
     generated::{GetRefreshTokenMsg, RemoveStorageMsg, TestStorageMsg, UpsertStorageMsg},
@@ -111,8 +111,9 @@ impl StorageUpsertVM {
     }
 
     fn cancel(&self, cx: &ViewModelContext) -> EaseResult<()> {
-        let mut state = cx.model_mut(&self.edit);
-        state.open = false;
+        let mut edit = cx.model_mut(&self.edit);
+        edit.open = false;
+        RouterVM::of(cx).pop(cx);
         Ok(())
     }
 
@@ -198,6 +199,9 @@ impl StorageUpsertVM {
         } else {
             return Ok(());
         };
+
+        let mut edit = cx.model_mut(&self.edit);
+        edit.open = false;
         RouterVM::of(cx).pop(cx);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             Connector::of(&cx)

@@ -6,6 +6,7 @@ use ease_client_shared::backends::storage::StorageType;
 use gpui::{div, prelude::*, px, rgb, svg, App, Entity, SharedString};
 
 use crate::core::{
+    routes::Routes,
     theme::{
         RGB_PRIMARY, RGB_PRIMARY_700, RGB_PRIMARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300, RGB_SURFACE,
     },
@@ -29,6 +30,7 @@ struct StorageBlockComponent {
 
 pub struct StorageUpsertModalComponent {
     state: Entity<VEditStorageState>,
+    routes: Entity<Routes>,
     visible: bool,
     view_webdav_block: Entity<StorageBlockComponent>,
     view_onedrive_block: Entity<StorageBlockComponent>,
@@ -81,13 +83,13 @@ impl StorageUpsertModalComponent {
         cx.observe(&vs.storage_upsert, move |this, _, cx| {
             let vs = this.state.read(cx).clone();
             let current_storage_type = vs.info.typ;
+            this.visible = vs.open;
             this.view_onedrive_block.update(cx, |v, _cx| {
                 v.current_active = current_storage_type;
             });
             this.view_webdav_block.update(cx, |v, _cx| {
                 v.current_active = current_storage_type;
             });
-            this.visible = vs.open;
             this.view_input_alias.update(cx, |v, _cx| {
                 v.change_content(vs.info.alias.into());
             });
@@ -154,6 +156,7 @@ impl StorageUpsertModalComponent {
 
         Self {
             state: vs.storage_upsert.clone(),
+            routes: vs.routes.clone(),
             visible: false,
             view_webdav_block: cx.new(|_cx| StorageBlockComponent {
                 icon_path: "drawables://Cloud.svg",
@@ -239,7 +242,16 @@ impl Render for StorageUpsertModalComponent {
                             button(SharedString::new_static("storage-upsert-add"))
                                 .typ(ButtonType::Primary)
                                 .text("OK".into())
-                                .on_click(|cx| {}),
+                                .on_click(|cx| {
+                                    let app = cx.global::<AppBridge>().clone();
+                                    app.dispatch_widget(
+                                        cx,
+                                        WidgetAction {
+                                            widget: StorageUpsertWidget::Finish.into(),
+                                            typ: WidgetActionType::Click,
+                                        },
+                                    );
+                                }),
                         )
                         .child(
                             button(SharedString::new_static("storage-upsert-test"))

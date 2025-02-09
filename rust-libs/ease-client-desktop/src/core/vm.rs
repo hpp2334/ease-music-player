@@ -6,6 +6,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use super::routes::Router;
 use ease_client::{
     build_client, to_host::connector::IConnectorHost, Action, AndroidRoutesKey, App, AppPod,
     DesktopRoutesKey, EaseError, EaseResult, IPermissionService, IRouterService, IToastService,
@@ -18,13 +19,13 @@ use gpui::Entity;
 use misty_lifecycle::{ILifecycleExternal, Runnable};
 use std::fmt::Debug;
 
-use super::view_state::{GpuiViewStateService, RouteStack, ViewStates};
+use super::view_state::{GpuiViewStateService, ViewStates};
 
 #[derive(Clone)]
 pub struct AppBridge {
     pod: Rc<AppPod>,
     vs: Rc<RefCell<Option<ease_client::RootViewModelState>>>,
-    routes: Rc<RefCell<RouteStack>>,
+    routes: Rc<RefCell<Router>>,
     gpui_vs: ViewStates,
 }
 
@@ -58,9 +59,8 @@ impl AppBridge {
         }
         {
             let mut v = self.routes.borrow_mut();
-            if v.dirty {
-                v.dirty = false;
-                self.gpui_vs.route_stack.update(cx, |dst, _| {
+            if let Some(v) = v.get_changed_routes() {
+                self.gpui_vs.routes.update(cx, |dst, _| {
                     *dst = v.clone();
                 });
             }
@@ -171,29 +171,19 @@ impl IPermissionService for PermissionService {
 }
 
 struct RouterService {
-    routes: Rc<RefCell<RouteStack>>,
+    router: Rc<RefCell<Router>>,
 }
 impl RouterService {
-    pub fn new(routes: Rc<RefCell<RouteStack>>) -> Arc<Self> {
-        Arc::new(Self { routes })
+    pub fn new(routes: Rc<RefCell<Router>>) -> Arc<Self> {
+        Arc::new(Self { router: routes })
     }
 }
 impl IRouterService for RouterService {
     fn navigate(&self, key: AndroidRoutesKey) {}
     fn navigate_desktop(&self, key: DesktopRoutesKey) {
-        tracing::info!("{:?}", key);
-
-        let routes = self.routes.clone();
-        let mut routes = routes.borrow_mut();
-        routes.dirty = true;
-        routes.routes.push(key);
+        self.router.borrow_mut().push(key);
     }
-    fn pop(&self) {
-        let routes = self.routes.clone();
-        let mut routes = routes.borrow_mut();
-        routes.dirty = true;
-        routes.routes.pop();
-    }
+    fn pop(&self) {}
 }
 
 struct ToastService;
@@ -271,7 +261,7 @@ pub fn build_desktop_client(
     vs: ViewStates,
 ) -> AppBridge {
     let rvs: Rc<RefCell<Option<ease_client::RootViewModelState>>> = Default::default();
-    let routes: Rc<RefCell<RouteStack>> = Default::default();
+    let routes: Rc<RefCell<Router>> = Rc::new(RefCell::new(Router::new()));
 
     let app = build_client(
         BackendHost::new(backend),

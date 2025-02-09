@@ -8,8 +8,9 @@ use ease_client::{
 use gpui::{div, prelude::*, px, rgb, svg, App, Entity, SharedString};
 
 use crate::core::{
+    routes::Routes,
     theme::{RGB_PRIMARY, RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100},
-    view_state::{RouteStack, ViewStates},
+    view_state::ViewStates,
     vm::AppBridge,
 };
 
@@ -28,25 +29,21 @@ struct SiderbarHeaderComponentProps {
 }
 
 pub struct SiderbarHeaderComponent {
-    route_stack: Entity<RouteStack>,
+    routes: Entity<Routes>,
     props: SiderbarHeaderComponentProps,
 }
 
 impl SiderbarHeaderComponent {
-    fn new(
-        cx: &mut App,
-        route_stack: Entity<RouteStack>,
-        props: SiderbarHeaderComponentProps,
-    ) -> Self {
-        cx.observe(&route_stack, |_, _| {}).detach();
+    fn new(cx: &mut App, routes: Entity<Routes>, props: SiderbarHeaderComponentProps) -> Self {
+        cx.observe(&routes, |_, _| {}).detach();
 
-        Self { route_stack, props }
+        Self { routes, props }
     }
 }
 
 impl Render for SiderbarHeaderComponent {
     fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let active = self.route_stack.read(cx).current() == self.props.route;
+        let active = self.routes.read(cx).current() == self.props.route;
         let w = self.props.widget.clone();
 
         div()
@@ -95,7 +92,7 @@ impl Render for SiderbarHeaderComponent {
 }
 pub struct SidebarComponent {
     playlist_list: Entity<VPlaylistListState>,
-    route_stack: Entity<RouteStack>,
+    routes: Entity<Routes>,
     view_playlist_header: Entity<SiderbarHeaderComponent>,
     view_setting_header: Entity<SiderbarHeaderComponent>,
 }
@@ -105,7 +102,7 @@ impl SidebarComponent {
         let view_playlist_header = cx.new(|cx| {
             SiderbarHeaderComponent::new(
                 cx,
-                vs.route_stack.clone(),
+                vs.routes.clone(),
                 SiderbarHeaderComponentProps {
                     icon_path: "drawables://AlbumOutline.svg",
                     text: "Playlists",
@@ -117,7 +114,7 @@ impl SidebarComponent {
         let view_setting_header = cx.new(|cx| {
             SiderbarHeaderComponent::new(
                 cx,
-                vs.route_stack.clone(),
+                vs.routes.clone(),
                 SiderbarHeaderComponentProps {
                     icon_path: "drawables://SettingOutline.svg",
                     text: "Setting",
@@ -131,7 +128,7 @@ impl SidebarComponent {
 
         Self {
             playlist_list: vs.playlist_list.clone(),
-            route_stack: vs.route_stack.clone(),
+            routes: vs.routes.clone(),
             view_playlist_header: view_playlist_header.clone(),
             view_setting_header: view_setting_header.clone(),
         }

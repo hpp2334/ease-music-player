@@ -3,7 +3,7 @@ use ease_client::{
     StorageListWidget, WidgetAction, WidgetActionType,
 };
 use ease_client_shared::backends::storage::StorageType;
-use gpui::{div, prelude::*, px, rgb, svg, Entity, SharedString};
+use gpui::{div, prelude::*, px, rgb, svg, Div, ElementId, Entity, SharedString};
 
 use crate::core::{
     theme::{RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300},
@@ -23,16 +23,18 @@ impl SettingComponent {
     }
 }
 
-fn render_storage_block(
-    cx: &mut Context<SettingComponent>,
-    item: VStorageListItem,
-) -> impl IntoElement {
+fn render_storage_block(item: VStorageListItem) -> impl IntoElement {
     let icon_path = match item.typ {
         StorageType::Local | StorageType::Webdav => "drawables://Cloud.svg",
         StorageType::OneDrive => "drawables://OneDrive.svg",
     };
+    let id = item.storage_id;
 
     div()
+        .id(ElementId::NamedInteger(
+            "storage-block".into(),
+            *item.storage_id.as_ref() as usize,
+        ))
         .w(px(200.0))
         .h(px(80.0))
         .bg(rgb(RGB_SLIGHT_100))
@@ -42,6 +44,18 @@ fn render_storage_block(
         .py(px(24.0))
         .flex()
         .flex_row()
+        .cursor_pointer()
+        .gap(px(12.0))
+        .on_click(move |_, _, cx| {
+            let app = cx.global::<AppBridge>().clone();
+            app.dispatch_widget(
+                cx,
+                WidgetAction {
+                    widget: StorageListWidget::Item { id }.into(),
+                    typ: WidgetActionType::Click,
+                },
+            );
+        })
         .child(
             svg()
                 .size(px(32.0))
@@ -52,9 +66,16 @@ fn render_storage_block(
             div()
                 .flex()
                 .flex_col()
-                .child(div().text_size(px(12.0)).child(item.name))
+                .child(
+                    div()
+                        .text_color(rgb(RGB_PRIMARY_TEXT))
+                        .text_size(px(12.0))
+                        .child(item.name),
+                )
                 .when(!item.sub_title.is_empty(), |el| {
-                    el.text_color(rgb(RGB_SECONDARY_TEXT)).child(item.sub_title)
+                    el.text_color(rgb(RGB_SECONDARY_TEXT))
+                        .text_size(px(10.0))
+                        .child(item.sub_title)
                 }),
         )
 }
@@ -62,9 +83,14 @@ fn render_storage_block(
 impl Render for SettingComponent {
     fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         let storages = self.storage_list.read(cx).clone();
+        let storage_items: Vec<_> = storages
+            .items
+            .into_iter()
+            .filter(|v| v.typ != StorageType::Local)
+            .collect();
         let mut elements = vec![];
-        for item in storages.items.into_iter() {
-            elements.push(render_storage_block(cx, item.clone()));
+        for item in storage_items {
+            elements.push(render_storage_block(item));
         }
 
         div()

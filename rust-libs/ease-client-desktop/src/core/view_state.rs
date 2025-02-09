@@ -12,31 +12,18 @@ use ease_client::{
 };
 use gpui::{AppContext, Context, Entity};
 
-#[derive(Default, Clone)]
-pub struct RouteStack {
-    pub routes: Vec<DesktopRoutesKey>,
-    pub dirty: bool,
-}
+use super::routes::{Router, Routes};
 
 #[derive(Clone)]
 pub struct ViewStates {
     pub playlist_list: Entity<VPlaylistListState>,
     pub storage_list: Entity<VStorageListState>,
     pub storage_upsert: Entity<VEditStorageState>,
-    pub route_stack: Entity<RouteStack>,
+    pub routes: Entity<Routes>,
 }
 
 pub struct GpuiViewStateService {
     states: Rc<RefCell<Option<ease_client::RootViewModelState>>>,
-}
-
-impl RouteStack {
-    pub fn current(&self) -> DesktopRoutesKey {
-        self.routes
-            .last()
-            .cloned()
-            .unwrap_or(DesktopRoutesKey::Home)
-    }
 }
 
 impl ViewStates {
@@ -45,7 +32,7 @@ impl ViewStates {
             playlist_list: cx.new(|_| VPlaylistListState::default()),
             storage_list: cx.new(|_| VStorageListState::default()),
             storage_upsert: cx.new(|_| VEditStorageState::default()),
-            route_stack: cx.new(|_| RouteStack::default()),
+            routes: cx.new(|_| Routes::new()),
         }
     }
 }

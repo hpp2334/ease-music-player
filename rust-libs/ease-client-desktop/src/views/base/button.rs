@@ -62,6 +62,7 @@ impl IntoElement for ButtonComponent {
             .bg(bg_col)
             .text_color(text_col)
             .hover(|style| style.bg(bg_hovered_col))
+            .cursor_pointer()
             .on_click(move |_e, _, cx| {
                 if let Some(on_click) = on_click.as_ref() {
                     on_click(cx);
