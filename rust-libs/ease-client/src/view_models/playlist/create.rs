@@ -175,9 +175,11 @@ impl ViewModel for PlaylistCreateVM {
                         }
                         PlaylistCreateWidget::FinishCreate => {
                             self.finish_create(cx)?;
+                            self.update_modal_open(cx, false);
                         }
                         PlaylistCreateWidget::Cancel => {
                             self.reset(cx)?;
+                            self.update_modal_open(cx, false);
                         }
                         PlaylistCreateWidget::Reset => {
                             self.reset(cx)?;

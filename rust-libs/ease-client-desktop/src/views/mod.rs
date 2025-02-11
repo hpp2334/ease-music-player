@@ -1,8 +1,9 @@
-pub mod sidebar;
-pub mod setting;
-pub mod windowbar;
+pub mod base;
+pub mod playlist_create;
 pub mod playlists;
 pub mod root;
 pub mod routes;
-pub mod base;
+pub mod setting;
+pub mod sidebar;
 pub mod storage_upsert;
+pub mod windowbar;

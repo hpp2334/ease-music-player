@@ -6,8 +6,9 @@ use crate::core::{
 };
 
 use super::{
-    routes::RoutesComponent, sidebar::SidebarComponent,
-    storage_upsert::StorageUpsertModalComponent, windowbar::WindowBarComponent,
+    playlist_create::PlaylistCreateModalComponent, routes::RoutesComponent,
+    sidebar::SidebarComponent, storage_upsert::StorageUpsertModalComponent,
+    windowbar::WindowBarComponent,
 };
 
 pub struct RootComponent {
@@ -15,17 +16,20 @@ pub struct RootComponent {
     window_bar: Entity<WindowBarComponent>,
     view_sidebar: Entity<SidebarComponent>,
     view_modal_storage_upsert: Entity<StorageUpsertModalComponent>,
+    view_modal_playlist_create: Entity<PlaylistCreateModalComponent>,
 }
 
 impl RootComponent {
     pub fn new(cx: &mut Context<Self>, vs: &ViewStates) -> Self {
         let view_modal_storage_upsert = cx.new(|cx| StorageUpsertModalComponent::new(cx, vs));
+        let view_modal_playlist_create = cx.new(|cx| PlaylistCreateModalComponent::new(cx, vs));
 
         Self {
-            window_bar: cx.new(|cx| WindowBarComponent {}),
+            window_bar: cx.new(|_| WindowBarComponent {}),
             routes: cx.new(|cx| RoutesComponent::new(cx, vs)),
             view_sidebar: cx.new(|cx| SidebarComponent::new(cx, vs)),
             view_modal_storage_upsert,
+            view_modal_playlist_create,
         }
     }
 }
@@ -89,7 +93,8 @@ impl Render for RootComponent {
                                 )
                                 .child(div().size_full().child(self.routes.clone())),
                         )
-                        .child(self.view_modal_storage_upsert.clone()),
+                        .child(self.view_modal_storage_upsert.clone())
+                        .child(self.view_modal_playlist_create.clone()),
                 ),
         )
     }

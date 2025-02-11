@@ -1,7 +1,14 @@
-use ease_client::view_models::view_state::views::playlist::VPlaylistListState;
-use gpui::{div, prelude::*, px, rgb, svg, Entity, SharedString};
+use ease_client::{
+    view_models::view_state::views::playlist::VPlaylistListState, PlaylistListWidget, WidgetAction,
+    WidgetActionType,
+};
+use gpui::{div, img, prelude::*, px, rgb, svg, Entity, ImageSource, SharedString};
 
-use crate::core::{theme::RGB_PRIMARY_TEXT, view_state::ViewStates};
+use crate::core::{
+    theme::{RGB_PRIMARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300},
+    view_state::ViewStates,
+    vm::AppBridge,
+};
 
 pub struct PlaylistListComponent {
     playlist_list: Entity<VPlaylistListState>,
@@ -30,18 +37,32 @@ impl Render for PlaylistListComponent {
             .map(|item| {
                 div()
                     .id(*item.id.as_ref() as usize)
-                    .px_2()
                     .cursor_pointer()
+                    .w(px(150.0))
+                    .h(px(200.0))
+                    .p(px(4.0))
+                    .text_ellipsis()
+                    .hover(|style| style.bg(rgb(RGB_SLIGHT_300)))
                     .on_click({
                         let item = item.clone();
                         move |_event, _, cx| {
                             println!("VPlaylistAbstractItem {:?}", item);
                         }
                     })
-                    .w(px(320.0))
-                    .h(px(320.0))
-                    .text_ellipsis()
-                    .child(format!("{}", item.title))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                img(ImageSource::Resource(gpui::Resource::Embedded(
+                                    "drawables://CoverDefault.webp".into(),
+                                )))
+                                .w(px(142.0))
+                                .h(px(142.0)),
+                            )
+                            .child(format!("{}", item.title))
+                            .child(format!("{} Musics · {}", item.count, item.duration)),
+                    )
             })
             .collect();
 
@@ -50,30 +71,30 @@ impl Render for PlaylistListComponent {
             .flex()
             .flex_row()
             .flex_wrap()
+            .p(px(32.0))
             .children(playlist_elements)
             .child(
                 div()
                     .id(SharedString::new_static("main-add-playlist"))
-                    .w(px(320.0))
-                    .h(px(320.0))
+                    .w(px(150.0))
+                    .h(px(200.0))
                     .flex()
                     .items_center()
                     .justify_center()
+                    .bg(rgb(RGB_SLIGHT_100))
+                    .hover(|style| style.bg(rgb(RGB_SLIGHT_300)))
+                    .cursor_pointer()
+                    .rounded(px(20.0))
                     .on_click({
-                        move |_event, _w, _cx| {
-                            // let app = cx.global::<AppPodProxy>().get();
-                            // app.emit(Action::View(ViewAction::Widget(WidgetAction {
-                            //     widget: PlaylistListWidget::Add.into(),
-                            //     typ: WidgetActionType::Click,
-                            // })));
-                            // app.emit(Action::View(ViewAction::Widget(WidgetAction {
-                            //     widget: PlaylistCreateWidget::Name.into(),
-                            //     typ: WidgetActionType::ChangeText { text: "ABC".into() },
-                            // })));
-                            // app.emit(Action::View(ViewAction::Widget(WidgetAction {
-                            //     widget: PlaylistCreateWidget::FinishCreate.into(),
-                            //     typ: WidgetActionType::Click,
-                            // })));
+                        move |_event, _w, cx| {
+                            let app = cx.global::<AppBridge>().clone();
+                            app.dispatch_widget(
+                                cx,
+                                WidgetAction {
+                                    widget: PlaylistListWidget::Add.into(),
+                                    typ: WidgetActionType::Click,
+                                },
+                            );
                         }
                     })
                     .child(
