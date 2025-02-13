@@ -16,7 +16,7 @@ use crate::{
         music::{common::MusicCommonVM, control::MusicControlVM},
         storage::import::StorageImportVM,
     },
-    AndroidRoutesKey,
+    AndroidRoutesKey, DesktopRoutesKey,
 };
 
 use super::{common::PlaylistCommonVM, edit::PlaylistEditVM, state::CurrentPlaylistState};
@@ -77,6 +77,7 @@ impl PlaylistDetailVM {
         }
 
         RouterVM::of(&cx).navigate(&cx, AndroidRoutesKey::Playlist);
+        RouterVM::of(&cx).navigate_desktop(&cx, DesktopRoutesKey::Playlist);
         cx.spawn::<_, _, EaseError>(&self.tasks, move |cx| async move {
             let playlist = Connector::of(&cx)
                 .request::<GetPlaylistMsg>(&cx, id)

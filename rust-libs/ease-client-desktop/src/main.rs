@@ -1,16 +1,11 @@
 use core::{
     assets::Assets,
-    view_state::{GpuiViewStateService, ViewStates},
     vm::{build_desktop_backend, build_desktop_client, build_lifecycle, AppBridge},
 };
 
-use ease_client::{Action, AppPod};
+use ease_client::Action;
 
-use ease_client_shared::backends::{
-    app::ArgInitializeApp,
-    playlist::PlaylistId,
-    storage::{Storage, StorageType},
-};
+use ease_client_shared::backends::app::ArgInitializeApp;
 use futures::{channel::mpsc, StreamExt};
 use gpui::{prelude::*, Application};
 use gpui::{px, size, App, AppContext, Bounds, WindowBounds, WindowOptions};

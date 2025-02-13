@@ -1,6 +1,5 @@
-use gpui::{div, prelude::*, px, AnyElement, Div, Entity, SharedString};
+use gpui::{div, prelude::*, px, AnyElement, Div, SharedString};
 
-use super::text_input::TextInputComponent;
 
 pub struct FormWidgetComponent {
     label: SharedString,

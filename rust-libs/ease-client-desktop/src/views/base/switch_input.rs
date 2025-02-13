@@ -1,6 +1,6 @@
 use gpui::{
     div, prelude::FluentBuilder, px, rgb, App, Div, ElementId, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Window,
+    ParentElement, Render, Stateful, StatefulInteractiveElement, Styled, Window,
 };
 
 use crate::core::theme::{

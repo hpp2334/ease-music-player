@@ -64,6 +64,7 @@ pub struct VCurrentStorageEntriesState {
     pub current_path: String,
     pub disabled_toggle_all: bool,
     pub can_undo: bool,
+    pub open: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, uniffi::Record)]
@@ -205,6 +206,7 @@ pub(crate) fn current_storage_entries_vs(
         storage_items,
         disabled_toggle_all,
         can_undo: !state.undo_stack.is_empty(),
+        open: state.open,
     };
     root.current_storage_entries = Some(current_storage_entries);
 }

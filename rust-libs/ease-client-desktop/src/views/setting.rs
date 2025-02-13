@@ -3,7 +3,7 @@ use ease_client::{
     StorageListWidget, WidgetAction, WidgetActionType,
 };
 use ease_client_shared::backends::storage::StorageType;
-use gpui::{div, prelude::*, px, rgb, svg, Div, ElementId, Entity, SharedString};
+use gpui::{div, prelude::*, px, rgb, svg, ElementId, Entity, SharedString};
 
 use crate::core::{
     theme::{RGB_PRIMARY_TEXT, RGB_SECONDARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300},

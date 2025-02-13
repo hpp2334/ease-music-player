@@ -46,7 +46,14 @@ impl Render for PlaylistListComponent {
                     .on_click({
                         let item = item.clone();
                         move |_event, _, cx| {
-                            println!("VPlaylistAbstractItem {:?}", item);
+                            let app = cx.global::<AppBridge>().clone();
+                            app.dispatch_widget(
+                                cx,
+                                WidgetAction {
+                                    widget: PlaylistListWidget::Item { id: item.id }.into(),
+                                    typ: WidgetActionType::Click,
+                                },
+                            );
                         }
                     })
                     .child(
@@ -58,7 +65,8 @@ impl Render for PlaylistListComponent {
                                     "drawables://CoverDefault.webp".into(),
                                 )))
                                 .w(px(142.0))
-                                .h(px(142.0)),
+                                .h(px(142.0))
+                                .rounded(px(20.0)),
                             )
                             .child(format!("{}", item.title))
                             .child(format!("{} Musics · {}", item.count, item.duration)),

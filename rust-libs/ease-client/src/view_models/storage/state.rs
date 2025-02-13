@@ -47,6 +47,7 @@ pub struct CurrentStorageState {
     pub current_storage_id: Option<StorageId>,
     pub current_path: String,
     pub undo_stack: Vec<String>,
+    pub open: bool,
 }
 
 impl EditStorageFormValidated {

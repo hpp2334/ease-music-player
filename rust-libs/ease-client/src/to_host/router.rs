@@ -1,3 +1,4 @@
+use ease_client_shared::backends::playlist::PlaylistId;
 use misty_vm::misty_to_host;
 
 #[derive(uniffi::Enum)]
@@ -13,6 +14,7 @@ pub enum AndroidRoutesKey {
 pub enum DesktopRoutesKey {
     Home,
     Setting,
+    Playlist,
 }
 
 pub trait IRouterService: 'static {

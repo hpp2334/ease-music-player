@@ -1,4 +1,5 @@
 pub mod base;
+pub mod playlist;
 pub mod playlist_create;
 pub mod playlists;
 pub mod root;

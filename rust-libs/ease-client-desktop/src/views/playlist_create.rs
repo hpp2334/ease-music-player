@@ -1,23 +1,15 @@
 use ease_client::{
-    view_models::view_state::views::{playlist::VCreatePlaylistState, storage::VEditStorageState},
-    PlaylistCreateWidget, StorageUpsertWidget, WidgetAction, WidgetActionType,
+    view_models::view_state::views::playlist::VCreatePlaylistState,
+    PlaylistCreateWidget, WidgetAction, WidgetActionType,
 };
-use ease_client_shared::backends::storage::StorageType;
-use gpui::{div, prelude::*, px, rgb, svg, Entity, SharedString};
+use gpui::{div, prelude::*, px, Entity, SharedString};
 
-use crate::core::{
-    theme::{
-        RGB_PRIMARY, RGB_PRIMARY_700, RGB_PRIMARY_TEXT, RGB_SLIGHT_100, RGB_SLIGHT_300, RGB_SURFACE,
-    },
-    view_state::ViewStates,
-    vm::AppBridge,
-};
+use crate::core::{view_state::ViewStates, vm::AppBridge};
 
 use super::base::{
     button::{button, ButtonType},
     form_input::form_widget,
     modal::modal,
-    switch_input::{switch_input, SwitchInputComponent},
     text_input::TextInputComponent,
 };
 

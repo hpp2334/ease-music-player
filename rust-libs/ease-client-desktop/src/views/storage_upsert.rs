@@ -17,7 +17,7 @@ use super::base::{
     button::{button, ButtonType},
     form_input::form_widget,
     modal::modal,
-    switch_input::{switch_input, SwitchInputComponent},
+    switch_input::switch_input,
     text_input::TextInputComponent,
 };
 

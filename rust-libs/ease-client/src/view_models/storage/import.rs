@@ -339,6 +339,9 @@ impl StorageImportVM {
             }
         }
         RouterVM::of(cx).pop(cx);
+        {
+            cx.model_mut(&self.current).open = false;
+        }
 
         Ok(())
     }
@@ -365,6 +368,7 @@ impl StorageImportVM {
             state.entries.clear();
             state.checked_entries_path.clear();
             state.undo_stack.clear();
+            state.open = true;
 
             if state.current_storage_id.is_none() {
                 state.current_storage_id = Some(store.storage_ids[0]);

@@ -1,11 +1,11 @@
 use ease_client::{
     view_models::{
         main::desktop_sidebar::DesktopSidebarWidget,
-        view_state::views::playlist::VPlaylistListState,
+        view_state::views::playlist::{VCurrentPlaylistState, VPlaylistListState},
     },
     DesktopRoutesKey, WidgetAction, WidgetActionType,
 };
-use gpui::{div, prelude::*, px, rgb, svg, App, Entity, SharedString};
+use gpui::{div, prelude::*, px, rgb, svg, App, ElementId, Entity, SharedString};
 
 use crate::core::{
     routes::Router,
@@ -14,10 +14,11 @@ use crate::core::{
     vm::AppBridge,
 };
 
-fn route_id(key: DesktopRoutesKey) -> &'static str {
+fn route_id(key: DesktopRoutesKey) -> ElementId {
     match key {
-        DesktopRoutesKey::Home => "route-home",
-        DesktopRoutesKey::Setting => "route-setting",
+        DesktopRoutesKey::Home => SharedString::new_static("route-home").into(),
+        DesktopRoutesKey::Setting => SharedString::new_static("route-setting").into(),
+        DesktopRoutesKey::Playlist => SharedString::new_static("route-playlist").into(),
     }
 }
 
@@ -50,7 +51,7 @@ impl Render for SiderbarHeaderComponent {
         let w = self.props.widget.clone();
 
         div()
-            .id(SharedString::new_static(route_id(self.props.route.clone())))
+            .id(route_id(self.props.route.clone()))
             .w_full()
             .h(px(28.0))
             .flex()
@@ -95,6 +96,7 @@ impl Render for SiderbarHeaderComponent {
 }
 pub struct SidebarComponent {
     playlist_list: Entity<VPlaylistListState>,
+    current_playlist: Entity<VCurrentPlaylistState>,
     routes: Entity<Router>,
     view_playlist_header: Entity<SiderbarHeaderComponent>,
     view_setting_header: Entity<SiderbarHeaderComponent>,
@@ -131,6 +133,7 @@ impl SidebarComponent {
 
         Self {
             playlist_list: vs.playlist_list.clone(),
+            current_playlist: vs.playlist.clone(),
             routes: vs.router.clone(),
             view_playlist_header: view_playlist_header.clone(),
             view_setting_header: view_setting_header.clone(),
@@ -141,26 +144,55 @@ impl SidebarComponent {
 impl Render for SidebarComponent {
     fn render(&mut self, _window: &mut gpui::Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.playlist_list.read(cx);
+        let playlist_state = self.current_playlist.read(cx);
 
         let playlist_elements: Vec<_> = state
             .playlist_list
             .clone()
             .into_iter()
             .map(|item| {
+                let active = self.routes.read(cx).current() == DesktopRoutesKey::Playlist
+                    && playlist_state.id == Some(item.id);
+
                 div()
                     .id(*item.id.as_ref() as usize)
-                    .px_2()
+                    .flex()
+                    .flex_row()
+                    .pl(px(40.0))
                     .cursor_pointer()
                     .on_click({
                         let item = item.clone();
-                        move |_event, _win, _cx| {
-                            println!("VPlaylistAbstractItem {:?}", item);
+                        move |_event, _win, cx| {
+                            if !active {
+                                let app = cx.global::<AppBridge>().clone();
+                                app.dispatch_widget(
+                                    cx,
+                                    WidgetAction {
+                                        widget: DesktopSidebarWidget::Playlist { id: item.id }
+                                            .into(),
+                                        typ: WidgetActionType::Click,
+                                    },
+                                );
+                            }
                         }
                     })
                     .w_full()
                     .h_5()
                     .text_ellipsis()
-                    .child(format!("{}", item.title))
+                    .child(
+                        div()
+                            .flex_grow()
+                            .text_color(if active {
+                                rgb(RGB_PRIMARY_TEXT)
+                            } else {
+                                rgb(RGB_SECONDARY_TEXT)
+                            })
+                            .child(item.title),
+                    )
+                    .child(div().w(px(4.0)).h_full())
+                    .child(div().w(px(2.0)).h(px(16.0)).when(active, |el| {
+                        el.child(div().size_full().rounded_xl().bg(rgb(RGB_PRIMARY)))
+                    }))
             })
             .collect();
 

@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, rgb, rgba, AnyElement, Div, SharedString};
+use gpui::{div, prelude::*, px, rgb, rgba, AnyElement, SharedString};
 
 pub struct Modal {
     visible: bool,

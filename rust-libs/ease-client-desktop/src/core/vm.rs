@@ -1,8 +1,6 @@
 use std::{
-    cell::RefCell,
     rc::Rc,
-    sync::{atomic::AtomicBool, Arc, RwLock},
-    thread::ThreadId,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
@@ -10,16 +8,14 @@ use crate::utils::dynamic_lifetime::SharedDynamicLifetime;
 
 use super::routes::Router;
 use ease_client::{
-    build_client, to_host::connector::IConnectorHost, Action, AndroidRoutesKey, App, AppPod,
-    DesktopRoutesKey, EaseError, EaseResult, IPermissionService, IRouterService, IToastService,
-    IViewStateService, ViewAction, WeakAppPod, WidgetAction,
+    build_client, to_host::connector::IConnectorHost, Action, AndroidRoutesKey, AppPod,
+    DesktopRoutesKey, EaseError, EaseResult, IPermissionService, IRouterService, IToastService, ViewAction, WidgetAction,
 };
 use ease_client_backend::{Backend, IPlayerDelegate};
 use ease_client_shared::backends::{connector::IConnectorNotifier, music::MusicId, MessagePayload};
 use futures::{channel::mpsc, future::BoxFuture, SinkExt};
 use gpui::{AppContext, Entity};
 use misty_lifecycle::{ILifecycleExternal, Runnable};
-use std::fmt::Debug;
 
 use super::view_state::{GpuiViewStateService, ViewStates};
 
