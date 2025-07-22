@@ -8,9 +8,6 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-misty-vm = { path = "../../misty-vm/misty-vm" }
-ease-client = { path = "../ease-client" }
-ease-client-shared = { path = "../ease-client-shared" }
 ease-client-backend = { path = "../ease-client-backend" }
 tracing-android = "0.2.0"
 tracing-subscriber = "0.3.0"

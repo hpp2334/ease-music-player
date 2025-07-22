@@ -44,18 +44,6 @@ impl Backend {
         Ok(())
     }
 
-    pub fn flush_spawned_locals(&self) {
-        self.cx.async_runtime().flush_local_spawns();
-    }
-
-    pub fn connect(&self, notifier: Arc<dyn IConnectorNotifier>) -> usize {
-        self.cx.connect(notifier)
-    }
-
-    pub fn disconnect(&self, handle: usize) {
-        self.cx.disconnect(handle);
-    }
-
     pub async fn request(&self, arg: MessagePayload) -> BResult<MessagePayload> {
         let cx = self.cx.clone();
         let res = dispatch_message(&cx, arg).await;
@@ -63,19 +51,6 @@ impl Backend {
             tracing::error!("Backend request fail: {:?}", e);
         }
         res
-    }
-
-    pub fn request_from_host(&self, arg: MessagePayload) {
-        let cx = self.cx.clone();
-        self.cx
-            .async_runtime()
-            .spawn(async move {
-                let res = dispatch_message(&cx, arg).await;
-                if let Err(ref e) = &res {
-                    tracing::error!("Backend request fail: {:?}", e);
-                }
-            })
-            .detach();
     }
 
     pub async fn load_asset(
@@ -92,11 +67,5 @@ impl Backend {
 
     pub fn storage_path(&self) -> String {
         self.cx.get_storage_path()
-    }
-}
-
-impl IOnAsyncRuntime for Backend {
-    fn flush_spawned_locals(&self) {
-        self.flush_spawned_locals();
     }
 }

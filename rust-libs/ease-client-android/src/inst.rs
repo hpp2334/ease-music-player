@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use misty_vm::AppPods;
 use once_cell::sync::Lazy;
 use tokio::runtime::Runtime;
 

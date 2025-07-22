@@ -24,43 +24,6 @@ use crate::{
     inst::{BACKEND, CLIENTS, RT},
 };
 
-pub struct AsyncAdapterDelegate {
-    inner: Arc<dyn IAsyncAdapterForeign>,
-    app_id: Option<u64>,
-    thread_id: ThreadId,
-}
-impl AsyncAdapterDelegate {
-    pub fn new(inner: Arc<dyn IAsyncAdapterForeign>, app_id: Option<u64>) -> Arc<Self> {
-        Arc::new(Self {
-            inner,
-            app_id,
-            thread_id: std::thread::current().id(),
-        })
-    }
-    fn app_id(&self) -> Option<u64> {
-        self.app_id
-    }
-}
-impl IAsyncRuntimeAdapter for AsyncAdapterDelegate {
-    fn is_main_thread(&self) -> bool {
-        std::thread::current().id() == self.thread_id
-    }
-
-    fn on_spawn_locals(&self) {
-        self.inner.on_spawn_locals(self.app_id());
-    }
-
-    fn get_time(&self) -> Duration {
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-    }
-
-    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
-        Box::pin(tokio::time::sleep(duration))
-    }
-}
-
 fn create_log(dir: &str) -> std::fs::File {
     let p = std::path::Path::new(dir).join("latest.log");
     let _r = std::fs::remove_file(&p);
@@ -146,47 +109,6 @@ pub fn api_start_backend(arg: ArgInitializeApp) {
 pub fn api_destroy_backend() {
     let _guard = RT.enter();
     BACKEND.reset_backend();
-}
-
-#[uniffi::export]
-pub fn api_send_backend_player_event(evt: PlayerDelegateEvent) {
-    let _guard = RT.enter();
-    if let Some(backend) = BACKEND.try_backend() {
-        backend.request_from_host(MessagePayload {
-            code: Code::OnPlayerEvent,
-            payload: encode_message_payload(evt),
-        });
-    }
-}
-
-#[uniffi::export]
-pub fn api_backend_play_next() {
-    let _guard = RT.enter();
-    if let Some(backend) = BACKEND.try_backend() {
-        backend.request_from_host(MessagePayload {
-            code: Code::PlayNext,
-            payload: encode_message_payload(()),
-        });
-    }
-}
-
-#[uniffi::export]
-pub fn api_backend_play_previous() {
-    let _guard = RT.enter();
-    if let Some(backend) = BACKEND.try_backend() {
-        backend.request_from_host(MessagePayload {
-            code: Code::PlayPrevious,
-            payload: encode_message_payload(()),
-        });
-    }
-}
-
-#[uniffi::export]
-pub fn api_flush_backend_spawned_local() {
-    let _guard = RT.enter();
-    if let Some(backend) = BACKEND.try_backend() {
-        backend.flush_spawned_locals();
-    }
 }
 
 #[uniffi::export]

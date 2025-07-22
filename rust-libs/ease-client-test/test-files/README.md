@@ -1,1 +1,0 @@
-All audios are from https://pixabay.com/, and may be modified.
