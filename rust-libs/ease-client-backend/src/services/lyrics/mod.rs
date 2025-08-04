@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use ease_client_shared::backends::lyric::Lyrics;
 use nom::IResult;
 use nom::{
     bytes::complete::{tag, take_until},
@@ -10,6 +9,9 @@ use nom::{
     sequence::tuple,
 };
 use thiserror::Error;
+
+use crate::objects::Lyrics;
+use crate::LyricLine;
 
 #[derive(Debug, Error)]
 pub enum LrcParseError {
@@ -105,7 +107,10 @@ pub(crate) fn parse_lrc(lyric: impl Into<String>) -> Result<Lyrics, LrcParseErro
 
                         let text = text.trim().to_string();
                         if !text.is_empty() {
-                            lyrics.lines.push((time, text.to_string()));
+                            lyrics.lines.push(LyricLine {
+                                duration: time,
+                                text: text.to_string(),
+                            });
                         }
                     }
                 }
@@ -116,19 +121,19 @@ pub(crate) fn parse_lrc(lyric: impl Into<String>) -> Result<Lyrics, LrcParseErro
 
     Ok(lyrics)
 }
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use super::parse_lrc;
+    use crate::LyricLine;
 
     #[test]
     fn lrc_1() {
         let res = parse_lrc(
             "[00:12.00]Line 1 lyrics
         [00:17.20]Line 2 lyrics
-        
+
         [00:21.10][00:45.10]Repeating lyrics (e.g. chorus)",
         );
         assert!(res.is_ok());
@@ -136,28 +141,31 @@ mod tests {
         let mut line = res.lines.into_iter();
         assert_eq!(
             line.next(),
-            Some((Duration::from_secs(12), "Line 1 lyrics".to_string()))
+            Some(LyricLine {
+                duration: Duration::from_secs(12),
+                text: "Line 1 lyrics".to_string()
+            })
         );
         assert_eq!(
             line.next(),
-            Some((
-                Duration::from_secs(17) + Duration::from_millis(200),
-                "Line 2 lyrics".to_string()
-            ))
+            Some(LyricLine {
+                duration: Duration::from_secs(17) + Duration::from_millis(200),
+                text: "Line 2 lyrics".to_string()
+            })
         );
         assert_eq!(
             line.next(),
-            Some((
-                Duration::from_secs(21) + Duration::from_millis(100),
-                "Repeating lyrics (e.g. chorus)".to_string()
-            ))
+            Some(LyricLine {
+                duration: Duration::from_secs(21) + Duration::from_millis(100),
+                text: "Repeating lyrics (e.g. chorus)".to_string()
+            })
         );
         assert_eq!(
             line.next(),
-            Some((
-                Duration::from_secs(45) + Duration::from_millis(100),
-                "Repeating lyrics (e.g. chorus)".to_string()
-            ))
+            Some(LyricLine {
+                duration: Duration::from_secs(45) + Duration::from_millis(100),
+                text: "Repeating lyrics (e.g. chorus)".to_string()
+            })
         );
         assert_eq!(line.next(), None);
     }
@@ -174,9 +182,27 @@ mod tests {
         assert!(res.is_ok());
         let res = res.unwrap();
         let mut line = res.lines.into_iter();
-        assert_eq!(line.next(), Some((Duration::from_secs(1), "A".to_string())));
-        assert_eq!(line.next(), Some((Duration::from_secs(2), "B".to_string())));
-        assert_eq!(line.next(), Some((Duration::from_secs(4), "C".to_string())));
+        assert_eq!(
+            line.next(),
+            Some(LyricLine {
+                duration: Duration::from_secs(1),
+                text: "A".to_string()
+            })
+        );
+        assert_eq!(
+            line.next(),
+            Some(LyricLine {
+                duration: Duration::from_secs(2),
+                text: "B".to_string()
+            })
+        );
+        assert_eq!(
+            line.next(),
+            Some(LyricLine {
+                duration: Duration::from_secs(4),
+                text: "C".to_string()
+            })
+        );
         assert_eq!(line.next(), None);
     }
 
@@ -186,7 +212,13 @@ mod tests {
         assert!(res.is_ok());
         let res = res.unwrap();
         let mut line = res.lines.into_iter();
-        assert_eq!(line.next(), Some((Duration::from_secs(1), "A".to_string())));
+        assert_eq!(
+            line.next(),
+            Some(LyricLine {
+                duration: Duration::from_secs(1),
+                text: "A".to_string()
+            })
+        );
         assert_eq!(line.next(), None);
     }
 }

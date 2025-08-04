@@ -1,18 +1,15 @@
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
 use crate::define_id;
 
 use super::{
-    music::{MusicAbstract, MusicId},
-    music_duration::MusicDuration,
-    storage::{DataSourceKey, StorageEntry, StorageEntryLoc},
+    music::MusicAbstract,
+    storage::{DataSourceKey, StorageEntryLoc},
 };
 
 define_id!(PlaylistId);
 
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct PlaylistMeta {
     pub id: PlaylistId,
     pub title: String,
@@ -21,20 +18,20 @@ pub struct PlaylistMeta {
     pub created_time: Duration,
 }
 
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct PlaylistAbstract {
     pub meta: PlaylistMeta,
-    pub music_count: usize,
-    pub duration: Option<MusicDuration>,
+    pub music_count: u64,
+    pub duration: Option<Duration>,
 }
 
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct Playlist {
     pub abstr: PlaylistAbstract,
     pub musics: Vec<MusicAbstract>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, uniffi::Enum)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum CreatePlaylistMode {
     #[default]
     Full,
@@ -75,32 +72,7 @@ impl Playlist {
     pub fn show_cover(&self) -> &Option<DataSourceKey> {
         self.abstr.show_cover()
     }
-    pub fn duration(&self) -> &Option<MusicDuration> {
+    pub fn duration(&self) -> &Option<Duration> {
         &self.abstr.duration
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
-pub struct ArgUpdatePlaylist {
-    pub id: PlaylistId,
-    pub title: String,
-    pub cover: Option<StorageEntryLoc>,
-}
-
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
-pub struct ArgCreatePlaylist {
-    pub title: String,
-    pub cover: Option<StorageEntryLoc>,
-    pub entries: Vec<(StorageEntry, String)>,
-}
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
-pub struct ArgAddMusicsToPlaylist {
-    pub id: PlaylistId,
-    pub entries: Vec<(StorageEntry, String)>,
-}
-
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
-pub struct ArgRemoveMusicFromPlaylist {
-    pub playlist_id: PlaylistId,
-    pub music_id: MusicId,
 }

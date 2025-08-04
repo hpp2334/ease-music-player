@@ -1,58 +1,56 @@
-use ease_client_shared::backends::{
-    playlist::{
-        ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
-        Playlist, PlaylistId,
-    },
-    storage::StorageEntryLoc,
-};
-use futures::try_join;
+use std::sync::Arc;
 
 use crate::{
-    ctx::BackendContext,
     error::BResult,
+    objects::{Playlist, PlaylistAbstract, PlaylistId, StorageEntryLoc},
     repositories::music::ArgDBAddMusic,
     services::{
-        player::player_refresh_current,
-        playlist::{get_playlist, notify_all_playlist_abstracts, notify_playlist},
-        storage::notify_storages,
+        get_all_playlist_abstracts, get_playlist, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
+        ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
     },
+    Backend,
 };
 
-pub(crate) async fn cr_get_playlist(
-    cx: &BackendContext,
-    arg: PlaylistId,
-) -> BResult<Option<Playlist>> {
+#[uniffi::export]
+pub async fn ct_get_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<Option<Playlist>> {
+    let cx = cx.get_context();
     get_playlist(cx, arg).await
 }
 
-pub(crate) async fn cu_update_playlist(cx: &BackendContext, arg: ArgUpdatePlaylist) -> BResult<()> {
+#[uniffi::export]
+pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BResult<()> {
+    let cx = cx.get_context();
     cx.database_server()
         .update_playlist(arg.id, arg.title, arg.cover)?;
-
-    try_join! {
-        notify_playlist(cx, arg.id),
-        notify_all_playlist_abstracts(cx),
-    }?;
 
     Ok(())
 }
 
-pub(crate) async fn cc_create_playlist(
-    cx: &BackendContext,
-    arg: ArgCreatePlaylist,
-) -> BResult<PlaylistId> {
+#[uniffi::export]
+pub async fn ct_list_playlist(cx: Arc<Backend>) -> BResult<Vec<PlaylistAbstract>> {
+    let cx = cx.get_context();
+    return get_all_playlist_abstracts(cx).await;
+}
+
+#[uniffi::export]
+pub async fn ct_create_playlist(cx: Arc<Backend>, arg: ArgCreatePlaylist) -> BResult<PlaylistId> {
+    let cx = cx.get_context();
     let current_time_ms = cx.current_time().as_millis() as i64;
 
     let musics = arg
         .entries
         .clone()
         .into_iter()
-        .map(|(entry, name)| ArgDBAddMusic {
-            loc: StorageEntryLoc {
-                storage_id: entry.storage_id,
-                path: entry.path,
-            },
-            title: name,
+        .map(|arg| {
+            let entry = arg.entry;
+            let name = arg.name;
+            ArgDBAddMusic {
+                loc: StorageEntryLoc {
+                    storage_id: entry.storage_id,
+                    path: entry.path,
+                },
+                title: name,
+            }
         })
         .collect();
 
@@ -63,112 +61,55 @@ pub(crate) async fn cc_create_playlist(
         current_time_ms,
     )?;
 
-    {
-        let rt = cx.async_runtime().clone();
-        let cx = cx.weak();
-        rt.clone()
-            .clone()
-            .spawn_on_main(async move {
-                if let Some(cx) = cx.upgrade() {
-                    for (id, existed) in music_ids {
-                        if !existed {
-                            cx.player_delegate().request_total_duration(
-                                id,
-                                cx.asset_server().serve_music_meta_url(id),
-                            );
-                        }
-                    }
-                }
-            })
-            .await;
-    }
-
-    try_join! {
-        notify_all_playlist_abstracts(&cx),
-        notify_storages(&cx),
-    }?;
-
     Ok(playlist_id)
 }
 
-pub(crate) async fn cu_add_musics_to_playlist(
-    cx: &BackendContext,
+#[uniffi::export]
+pub async fn ct_add_musics_to_playlist(
+    cx: Arc<Backend>,
     arg: ArgAddMusicsToPlaylist,
 ) -> BResult<()> {
-    let playlist_id = arg.id;
+    let cx = cx.get_context();
     let musics = arg
         .entries
         .clone()
         .into_iter()
-        .map(|(entry, name)| ArgDBAddMusic {
-            loc: StorageEntryLoc {
-                storage_id: entry.storage_id,
-                path: entry.path,
-            },
-            title: name,
+        .map(|arg| {
+            let entry = arg.entry;
+            let name = arg.name;
+            ArgDBAddMusic {
+                loc: StorageEntryLoc {
+                    storage_id: entry.storage_id,
+                    path: entry.path,
+                },
+                title: name,
+            }
         })
         .collect();
 
-    let music_ids = cx
+    let _ = cx
         .database_server()
         .add_musics_to_playlist(arg.id, musics)?;
 
-    {
-        let rt = cx.async_runtime().clone();
-        let cx = cx.weak();
-        rt.clone()
-            .clone()
-            .spawn_on_main(async move {
-                if let Some(cx) = cx.upgrade() {
-                    for (id, existed) in music_ids {
-                        if !existed {
-                            cx.player_delegate().request_total_duration(
-                                id,
-                                cx.asset_server().serve_music_meta_url(id),
-                            );
-                        }
-                    }
-                }
-            })
-            .await;
-    }
-
-    player_refresh_current(cx).await?;
-
-    try_join! {
-        notify_playlist(cx, playlist_id),
-        notify_all_playlist_abstracts(cx),
-        notify_storages(cx)
-    }?;
-
     Ok(())
 }
 
-pub(crate) async fn cd_remove_music_from_playlist(
-    cx: &BackendContext,
+#[uniffi::export]
+pub async fn ct_remove_music_from_playlist(
+    cx: Arc<Backend>,
     arg: ArgRemoveMusicFromPlaylist,
 ) -> BResult<()> {
+    let cx = cx.get_context();
     cx.database_server()
         .remove_music_from_playlist(arg.playlist_id, arg.music_id)?;
-    player_refresh_current(cx).await?;
-
-    try_join! {
-        notify_playlist(cx, arg.playlist_id),
-        notify_all_playlist_abstracts(cx),
-        notify_storages(cx),
-    }?;
 
     Ok(())
 }
 
-pub(crate) async fn cd_remove_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<()> {
+#[uniffi::export]
+pub async fn ct_remove_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<()> {
+    let cx = cx.get_context();
     cx.database_server().remove_playlist(arg)?;
-
-    player_refresh_current(cx).await?;
-
-    try_join! {
-        notify_all_playlist_abstracts(cx),
-    }?;
 
     Ok(())
 }

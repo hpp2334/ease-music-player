@@ -1,5 +1,11 @@
-pub mod key;
-pub mod music;
-pub mod playlist;
-pub mod preference;
-pub mod storage;
+mod key;
+mod music;
+mod playlist;
+mod preference;
+mod storage;
+
+pub use key::*;
+pub use music::*;
+pub use playlist::*;
+pub use preference::*;
+pub use storage::*;

@@ -1,15 +1,11 @@
 use std::sync::Arc;
 
-use ease_client_shared::backends::{
-    music::MusicId,
-    playlist::PlaylistId,
-    storage::{BlobId, StorageEntryLoc},
-};
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
 use crate::{
     error::BResult,
-    models::{key::DbKeyAlloc, playlist::PlaylistModel},
+    models::{DbKeyAlloc, PlaylistModel},
+    objects::{BlobId, MusicId, PlaylistId, StorageEntryLoc},
 };
 
 use super::{

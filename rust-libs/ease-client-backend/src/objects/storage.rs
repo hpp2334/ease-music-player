@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{backends::env::EASEM_ONEDRIVE_ID, define_id};
+use crate::{define_id, objects::EASEM_ONEDRIVE_ID};
 
 use super::{music::MusicId, playlist::PlaylistId};
 
@@ -45,18 +45,7 @@ pub enum DataSourceKey {
 }
 
 #[derive(
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    Hash,
-    bitcode::Encode,
-    bitcode::Decode,
-    uniffi::Enum,
+    Clone, Copy, Debug, PartialEq, Eq, Default, Hash, bitcode::Encode, bitcode::Decode, uniffi::Enum,
 )]
 pub enum StorageType {
     Local,
@@ -65,27 +54,18 @@ pub enum StorageType {
     OneDrive,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, uniffi::Record,
+)]
 pub struct StorageEntry {
     pub storage_id: StorageId,
     pub name: String,
     pub path: String,
-    pub size: Option<usize>,
+    pub size: Option<u64>,
     pub is_dir: bool,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Default,
-    bitcode::Encode,
-    bitcode::Decode,
-    uniffi::Record,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, uniffi::Record)]
 pub struct ArgUpsertStorage {
     pub id: Option<StorageId>,
     pub addr: String,
@@ -128,7 +108,7 @@ pub enum StorageEntryType {
     Other,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct Storage {
     pub id: StorageId,
     pub addr: String,
@@ -175,7 +155,7 @@ impl StorageEntry {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
 pub enum ListStorageEntryChildrenResp {
     Ok(Vec<StorageEntry>),
     AuthenticationFailed,

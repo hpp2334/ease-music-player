@@ -1,54 +1,59 @@
+use std::sync::Arc;
 
-use ease_client_shared::backends::storage::{
-    ArgUpsertStorage, ListStorageEntryChildrenResp, StorageConnectionTestResult,
-    StorageEntry, StorageEntryLoc, StorageId,
-};
 use ease_remote_storage::OneDriveBackend;
-use futures::try_join;
 
 use crate::{
-    ctx::BackendContext,
     error::BResult,
-    services::{
-        playlist::notify_all_playlist_abstracts,
-        storage::{
-            build_storage_backend_by_arg, evict_storage_backend_cache,
-            get_storage_backend, notify_storages,
-        },
+    objects::{
+        ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult, StorageEntry,
+        StorageEntryLoc,
     },
+    services::{
+        build_storage_backend_by_arg, evict_storage_backend_cache, get_storage_backend,
+        list_storage,
+    },
+    ArgUpsertStorage, Backend, StorageId,
 };
 
-pub async fn ccu_upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> BResult<()> {
+#[uniffi::export]
+pub async fn ct_list_storage(cx: Arc<Backend>) -> BResult<Vec<Storage>> {
+    let cx = cx.get_context();
+    let storages = list_storage(cx).await?;
+
+    Ok(storages)
+}
+
+#[uniffi::export]
+pub async fn ct_upsert_storage(cx: Arc<Backend>, arg: ArgUpsertStorage) -> BResult<()> {
+    let cx = cx.get_context();
     let id = cx.database_server().upsert_storage(arg)?;
     evict_storage_backend_cache(cx, id);
 
-    try_join! {
-        notify_storages(cx),
-    }?;
     Ok(())
 }
 
-pub async fn cr_get_refresh_token(_cx: &BackendContext, code: String) -> BResult<String> {
+#[uniffi::export]
+pub async fn ct_get_refresh_token(cx: Arc<Backend>, code: String) -> BResult<String> {
+    let cx = cx.get_context();
     let refresh_token = OneDriveBackend::request_refresh_token(code).await?;
     Ok(refresh_token)
 }
 
-pub async fn cd_remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()> {
+#[uniffi::export]
+pub async fn ct_remove_storage(cx: Arc<Backend>, id: StorageId) -> BResult<()> {
+    let cx = cx.get_context();
     cx.database_server().remove_storage(id)?;
     evict_storage_backend_cache(cx, id);
-
-    try_join! {
-        notify_storages(cx),
-        notify_all_playlist_abstracts(cx),
-    }?;
 
     Ok(())
 }
 
-pub async fn cr_test_storage(
-    cx: &BackendContext,
+#[uniffi::export]
+pub async fn ct_test_storage(
+    cx: Arc<Backend>,
     arg: ArgUpsertStorage,
 ) -> BResult<StorageConnectionTestResult> {
+    let cx = cx.get_context();
     let backend = build_storage_backend_by_arg(&cx, arg)?;
     let res = backend.list("/".to_string()).await;
 
@@ -66,10 +71,12 @@ pub async fn cr_test_storage(
     }
 }
 
-pub async fn cr_list_storage_entry_children(
-    cx: &BackendContext,
+#[uniffi::export]
+pub async fn ct_list_storage_entry_children(
+    cx: Arc<Backend>,
     arg: StorageEntryLoc,
 ) -> BResult<ListStorageEntryChildrenResp> {
+    let cx = cx.get_context();
     let backend = get_storage_backend(&cx, arg.storage_id)?;
     if backend.is_none() {
         return Ok(ListStorageEntryChildrenResp::Unknown);
@@ -87,7 +94,7 @@ pub async fn cr_list_storage_entry_children(
                     storage_id: arg.storage_id,
                     name: entry.name,
                     path: entry.path,
-                    size: entry.size,
+                    size: entry.size.map(|s| s as u64),
                     is_dir: entry.is_dir,
                 })
                 .collect();

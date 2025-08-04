@@ -1,27 +1,26 @@
 use std::time::Duration;
 
-use ease_client_shared::backends::{
-    connector::ConnectorAction,
-    music::{MusicAbstract, MusicId},
-    music_duration::MusicDuration,
-    playlist::{Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta},
-    storage::DataSourceKey,
+use crate::{
+    ctx::BackendContext,
+    error::BResult,
+    models::PlaylistModel,
+    objects::{
+        DataSourceKey, MusicAbstract, MusicId, Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta,
+    },
 };
-
-use crate::{ctx::BackendContext, error::BResult, models::playlist::PlaylistModel};
 
 use super::music::build_music_abstract;
 
-fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<MusicDuration> {
+fn compute_musics_duration(list: &Vec<MusicAbstract>) -> Option<Duration> {
     let mut sum: Duration = Default::default();
     for v in list {
         if let Some(v) = v.meta.duration {
-            sum += *v;
+            sum += v;
         } else {
             return None;
         }
     }
-    Some(MusicDuration::new(sum))
+    Some(sum)
 }
 
 pub(crate) fn build_playlist_meta(
@@ -69,37 +68,23 @@ pub(crate) fn build_playlist_abstract(
 
     let abstr = PlaylistAbstract {
         meta,
-        music_count: musics.len(),
+        music_count: musics.len() as u64,
         duration,
     };
 
     Ok((abstr, musics))
 }
 
-pub(crate) async fn get_playlist(
-    cx: &BackendContext,
-    arg: PlaylistId,
-) -> BResult<Option<Playlist>> {
-    let rt = cx.async_runtime();
-    let cx = cx.weak();
-    rt.spawn(async move {
-        let cx = cx.upgrade();
-        if cx.is_none() {
-            return Ok(None);
-        }
-        let cx = cx.unwrap();
+pub async fn get_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
+    let model = cx.database_server().load_playlist(arg)?;
 
-        let model = cx.database_server().load_playlist(arg)?;
+    if model.is_none() {
+        return Ok(None);
+    }
+    let model = model.unwrap();
+    let (abstr, musics) = build_playlist_abstract(&cx, model)?;
 
-        if model.is_none() {
-            return Ok(None);
-        }
-        let model = model.unwrap();
-        let (abstr, musics) = build_playlist_abstract(&cx, model)?;
-
-        Ok(Some(Playlist { abstr, musics }))
-    })
-    .await
+    Ok(Some(Playlist { abstr, musics }))
 }
 
 pub(crate) async fn get_all_playlist_abstracts(
@@ -114,18 +99,4 @@ pub(crate) async fn get_all_playlist_abstracts(
     }
 
     Ok(ret)
-}
-
-pub(crate) async fn notify_all_playlist_abstracts(cx: &BackendContext) -> BResult<()> {
-    let playlists = get_all_playlist_abstracts(cx).await?;
-    cx.notify(ConnectorAction::PlaylistAbstracts(playlists));
-    Ok(())
-}
-
-pub(crate) async fn notify_playlist(cx: &BackendContext, id: PlaylistId) -> BResult<()> {
-    let playlist = get_playlist(cx, id).await?;
-    if let Some(playlist) = playlist {
-        cx.notify(ConnectorAction::Playlist(playlist));
-    }
-    Ok(())
 }

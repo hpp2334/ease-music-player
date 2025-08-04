@@ -1,11 +1,8 @@
-use ease_client_shared::backends::generated::Code;
-
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum BError {
     #[error("remote storage error: {0:?}")]
     RemoteStorageError(#[from] ease_remote_storage::StorageBackendError),
-    #[error("no such message error: code = {0:?}")]
-    NoSuchMessage(Code),
     #[error("failed to load asset: {0:?}")]
     AssetLoadFail(String),
     #[error("asset not found")]

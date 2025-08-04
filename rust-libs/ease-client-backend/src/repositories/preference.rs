@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{error::BResult, models::preference::PreferenceModel};
+use crate::{error::BResult, models::PreferenceModel};
 
 use super::{core::DatabaseServer, defs::TABLE_PREFERENCE};
 

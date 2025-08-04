@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use ease_client_shared::backends::{music::MusicId, storage::{ArgUpsertStorage, BlobId, StorageId}};
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
 use crate::{
     error::BResult,
-    models::{key::DbKeyAlloc, storage::StorageModel},
+    models::{DbKeyAlloc, LegacyMusicModelV2, MusicModel, StorageModel},
+    objects::{ArgUpsertStorage, BlobId, MusicId, StorageId},
 };
 
 use super::{
@@ -168,12 +168,34 @@ impl DatabaseServer {
                 }
                 drop(music_iter);
             }
-            
+
             for (storage_id, music_id) in to_remove {
                 table_storage_musics.remove(storage_id, music_id)?;
             }
         }
 
+        db.commit()?;
+
+        Ok(())
+    }
+
+    pub fn upgrade_schema_to_v3(self: &Arc<Self>) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        {
+            let legacy_table = db.open_table(super::defs::LEGACY_TABLE_MUSIC_V2)?;
+            let mut new_table = db.open_table(TABLE_MUSIC)?;
+
+            let mut iter = legacy_table.iter()?;
+            while let Some(v) = iter.next() {
+                let (k, v) = v?;
+                let legacy: LegacyMusicModelV2 = v.value();
+                let new: MusicModel = legacy.into();
+                new_table.insert(k.value(), new)?;
+            }
+
+            drop(iter);
+            db.delete_table(super::defs::LEGACY_TABLE_MUSIC_V2)?;
+        }
         db.commit()?;
 
         Ok(())

@@ -1,4 +1,4 @@
-use ease_client_shared::backends::storage::{StorageId, StorageType};
+use crate::objects::{StorageId, StorageType};
 
 #[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct StorageModel {

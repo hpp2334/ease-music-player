@@ -1,9 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
-use ease_client_shared::backends::storage::BlobId;
 use redb::{ReadableTable, TableDefinition};
 
-use crate::error::BResult;
+use crate::{error::BResult, objects::BlobId};
 
 use super::bin::BinSerde;
 

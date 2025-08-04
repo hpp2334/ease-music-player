@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use redb::{ReadableTable, WriteTransaction};
 
-use crate::{error::BResult, models::key::DbKeyAlloc};
+use crate::{error::BResult, models::DbKeyAlloc};
 
 use super::{
     blob::BlobManager,

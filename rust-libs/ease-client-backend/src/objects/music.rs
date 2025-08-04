@@ -6,38 +6,27 @@ use crate::define_id;
 
 use super::{
     lyric::Lyrics,
-    music_duration::MusicDuration,
     storage::{DataSourceKey, StorageEntryLoc},
 };
 
 define_id!(MusicId);
 
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
+#[derive(
+    Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone, uniffi::Record,
+)]
 pub struct MusicMeta {
     pub id: MusicId,
     pub title: String,
-    pub duration: Option<MusicDuration>,
+    pub duration: Option<Duration>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct MusicAbstract {
     pub meta: MusicMeta,
     pub cover: Option<DataSourceKey>,
 }
 
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    bitcode::Encode,
-    bitcode::Decode,
-    uniffi::Enum,
-)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum LyricLoadState {
     Loading,
     #[default]
@@ -46,14 +35,14 @@ pub enum LyricLoadState {
     Loaded,
 }
 
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct MusicLyric {
     pub loc: StorageEntryLoc,
     pub data: Lyrics,
     pub loaded_state: LyricLoadState,
 }
 
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct Music {
     pub meta: MusicMeta,
     pub loc: StorageEntryLoc,
@@ -65,7 +54,7 @@ impl Music {
     pub fn id(&self) -> MusicId {
         self.meta.id
     }
-    pub fn duration(&self) -> Option<MusicDuration> {
+    pub fn duration(&self) -> Option<Duration> {
         self.meta.duration
     }
     pub fn title(&self) -> &str {
@@ -86,20 +75,13 @@ impl MusicAbstract {
     pub fn title(&self) -> &str {
         &self.meta.title
     }
-    pub fn duration(&self) -> Option<MusicDuration> {
+    pub fn duration(&self) -> Option<Duration> {
         self.meta.duration
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, uniffi::Record)]
 pub struct ArgUpdateMusicLyric {
     pub id: MusicId,
     pub lyric_loc: Option<StorageEntryLoc>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TimeToPauseInfo {
-    pub enabled: bool,
-    pub expired: Duration,
-    pub left: Duration,
 }

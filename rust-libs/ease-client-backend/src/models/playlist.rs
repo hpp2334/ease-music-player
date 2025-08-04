@@ -1,6 +1,4 @@
-use ease_client_shared::backends::{
-    music::MusicId, playlist::PlaylistId, storage::StorageEntryLoc,
-};
+use crate::objects::{MusicId, PlaylistId, StorageEntryLoc};
 
 #[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
 pub struct PlaylistModel {

@@ -1,16 +1,11 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use ease_client_shared::backends::{
-    music::MusicId,
-    music_duration::MusicDuration,
-    playlist::PlaylistId,
-    storage::{BlobId, StorageEntryLoc},
-};
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, WriteTransaction};
 
 use crate::{
     error::BResult,
-    models::{key::DbKeyAlloc, music::MusicModel},
+    models::{DbKeyAlloc, MusicModel},
+    objects::{BlobId, MusicId, PlaylistId, StorageEntryLoc},
 };
 
 use super::{
@@ -116,7 +111,7 @@ impl DatabaseServer {
     pub fn update_music_total_duration(
         self: &Arc<Self>,
         id: MusicId,
-        duration: MusicDuration,
+        duration: Duration,
     ) -> BResult<()> {
         let db = self.db().begin_write()?;
         {
