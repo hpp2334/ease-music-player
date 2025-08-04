@@ -45,6 +45,12 @@ pub struct ArgRemoveMusicFromPlaylist {
     pub music_id: MusicId,
 }
 
+#[derive(Debug, uniffi::Record)]
+pub struct ArgUpdateMusicLyric {
+    pub id: MusicId,
+    pub lyric_loc: Option<StorageEntryLoc>,
+}
+
 async fn load_lyric(
     cx: &BackendContext,
     loc: Option<StorageEntryLoc>,

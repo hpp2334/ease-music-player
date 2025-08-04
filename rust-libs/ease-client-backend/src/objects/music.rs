@@ -11,9 +11,7 @@ use super::{
 
 define_id!(MusicId);
 
-#[derive(
-    Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, Clone, uniffi::Record,
-)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct MusicMeta {
     pub id: MusicId,
     pub title: String,
@@ -78,10 +76,4 @@ impl MusicAbstract {
     pub fn duration(&self) -> Option<Duration> {
         self.meta.duration
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, uniffi::Record)]
-pub struct ArgUpdateMusicLyric {
-    pub id: MusicId,
-    pub lyric_loc: Option<StorageEntryLoc>,
 }

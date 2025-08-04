@@ -155,7 +155,7 @@ impl StorageEntry {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, uniffi::Enum)]
+#[derive(Debug, Clone, uniffi::Enum)]
 pub enum ListStorageEntryChildrenResp {
     Ok(Vec<StorageEntry>),
     AuthenticationFailed,

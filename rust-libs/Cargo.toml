@@ -2,11 +2,7 @@
 
 [workspace]
 resolver = "2"
-members = [
-    "ease-client-backend",
-    "ease-client-android-ffi-builder",
-    "ease-client-android",
-]
+members = ["ease-client-backend", "ease-client-android-ffi-builder"]
 
 [profile.bench]
 debug = true

@@ -1,6 +1,4 @@
-use std::sync::{atomic::AtomicBool, Arc};
-
-use ease_client_backend::{error::BResult, ArgInitializeApp, Backend};
+use std::sync::atomic::AtomicBool;
 
 use tracing::subscriber::set_global_default;
 
@@ -55,7 +53,7 @@ fn setup_panic_hook() {
     }));
 }
 
-fn init_tracers(dir: &str) {
+pub fn init_infra(dir: &str) {
     static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
     let is_init = IS_INITIALIZED.swap(true, std::sync::atomic::Ordering::SeqCst);
     std::env::set_var("RUST_BACKTRACE", "1");
@@ -63,16 +61,4 @@ fn init_tracers(dir: &str) {
         setup_subscriber(dir);
         setup_panic_hook();
     }
-}
-
-#[uniffi::export]
-pub fn api_build_backend() -> Arc<Backend> {
-    Arc::new(Backend::new())
-}
-
-#[uniffi::export]
-pub async fn api_start_backend(backend: Arc<Backend>, arg: ArgInitializeApp) -> BResult<()> {
-    init_tracers(&arg.app_document_dir);
-    backend.init(arg)?;
-    Ok(())
 }

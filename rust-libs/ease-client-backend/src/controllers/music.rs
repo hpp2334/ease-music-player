@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     error::BResult,
-    objects::{ArgUpdateMusicLyric, Music, MusicId},
-    services::get_music,
+    objects::{Music, MusicId},
+    services::{get_music, ArgUpdateMusicLyric},
     Backend,
 };
 

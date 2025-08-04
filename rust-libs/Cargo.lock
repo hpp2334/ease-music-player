@@ -534,21 +534,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ease-client-android"
-version = "0.1.0"
-dependencies = [
- "ease-client-backend",
- "once_cell",
- "serde_bytes",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-android",
- "tracing-subscriber",
- "uniffi",
-]
-
-[[package]]
 name = "ease-client-android-ffi-builder"
 version = "0.1.0"
 dependencies = [
@@ -580,6 +565,8 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+ "tracing-android",
+ "tracing-subscriber",
  "unicode-segmentation",
  "uniffi",
  "urlencoding",
