@@ -9,6 +9,12 @@ pub struct LocalBackend;
 
 static ANDROID_PREFIX_PATH: &str = "/storage/emulated/0";
 
+impl Default for LocalBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalBackend {
     pub fn new() -> Self {
         Self
@@ -63,7 +69,7 @@ impl LocalBackend {
         let mut file = tokio::fs::File::open(path).await?;
 
         let mut buf: Vec<u8> = Default::default();
-        file.seek(SeekFrom::Start(byte_offset as u64)).await?;
+        file.seek(SeekFrom::Start(byte_offset)).await?;
         file.read_to_end(&mut buf).await?;
         Ok(StreamFile::new_from_bytes(buf.as_slice(), &p, 0))
     }
@@ -140,7 +146,7 @@ mod test {
         let stream = file.into_stream();
         pin_mut!(stream);
         let chunk = stream.next().await;
-        assert_eq!(chunk.is_some(), true);
+        assert!(chunk.is_some());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(chunk.as_ref()), "og.txt");
     }

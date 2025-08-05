@@ -1,8 +1,7 @@
 use std::{
-    collections::HashMap,
     fmt::Debug,
     sync::{
-        atomic::{AtomicU32, AtomicUsize},
+        atomic::AtomicU32,
         Arc, RwLock, Weak,
     },
     time::Duration,
@@ -45,11 +44,13 @@ impl Debug for BackendContext {
 
 impl WeakBackendContext {
     pub fn upgrade(&self) -> Option<BackendContext> {
-        if let Some(internal) = self.internal.upgrade() {
-            Some(BackendContext { internal })
-        } else {
-            None
-        }
+        self.internal.upgrade().map(|internal| BackendContext { internal })
+    }
+}
+
+impl Default for BackendContext {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

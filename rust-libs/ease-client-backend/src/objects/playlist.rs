@@ -67,7 +67,7 @@ impl Playlist {
         self.abstr.created_time()
     }
     pub fn cover(&self) -> &Option<StorageEntryLoc> {
-        &self.abstr.cover()
+        self.abstr.cover()
     }
     pub fn show_cover(&self) -> &Option<DataSourceKey> {
         self.abstr.show_cover()

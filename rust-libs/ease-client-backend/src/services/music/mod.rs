@@ -62,7 +62,7 @@ async fn load_lyric(
             return None;
         }
     };
-    let data = load_storage_entry_data(&cx, &loc).await;
+    let data = load_storage_entry_data(cx, &loc).await;
     if let Err(e) = &data {
         tracing::error!("fail to load entry {:?}: {}", loc, e);
         return Some(MusicLyric {
@@ -203,7 +203,7 @@ pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Optio
         });
     }
 
-    let lyric: Option<MusicLyric> = load_lyric(&cx, lyric_loc, using_fallback).await;
+    let lyric: Option<MusicLyric> = load_lyric(cx, lyric_loc, using_fallback).await;
     let cover = if model.cover.is_none() {
         Default::default()
     } else {

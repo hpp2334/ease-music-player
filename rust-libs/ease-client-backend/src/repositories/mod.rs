@@ -1,8 +1,8 @@
 pub mod app;
-pub(self) mod bin;
+ mod bin;
 pub mod blob;
 pub mod core;
-pub(self) mod defs;
+ mod defs;
 pub mod music;
 pub mod playlist;
 pub mod preference;

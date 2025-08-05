@@ -47,14 +47,14 @@ impl StorageBackendError {
         if let StorageBackendError::RequestFail(e) = self {
             return e.is_timeout();
         }
-        return false;
+        false
     }
 
     pub fn is_unauthorized(&self) -> bool {
         if let StorageBackendError::RequestFail(e) = self {
             return e.status() == Some(StatusCode::UNAUTHORIZED);
         }
-        return false;
+        false
     }
 
     pub fn is_not_found(&self) -> bool {
@@ -74,7 +74,7 @@ pub trait StorageBackend {
 impl StreamFile {
     pub fn new(resp: reqwest::Response, byte_offset: u64) -> Self {
         let url = resp.url().to_string();
-        let name = url.split('/').last().unwrap();
+        let name = url.split('/').next_back().unwrap();
         let header_map = resp.headers();
         let content_length = header_map.get(reqwest::header::CONTENT_LENGTH).map(|v| {
             let v = v.to_str().unwrap();
@@ -92,7 +92,7 @@ impl StreamFile {
         }
     }
     pub fn new_from_bytes(buf: &[u8], name: &str, byte_offset: u64) -> Self {
-        let total: usize = buf.len() as usize;
+        let total: usize = buf.len();
         let buf = bytes::Bytes::copy_from_slice(buf);
         Self {
             inner: StreamFileInner::Total(buf),
@@ -103,14 +103,10 @@ impl StreamFile {
         }
     }
     pub fn size(&self) -> Option<usize> {
-        if let Some(total) = self.total {
-            Some(total - self.byte_offset as usize)
-        } else {
-            None
-        }
+        self.total.map(|total| total - self.byte_offset as usize)
     }
     pub fn content_type(&self) -> Option<&str> {
-        self.content_type.as_ref().map(|v| v.as_str())
+        self.content_type.as_deref()
     }
     pub fn name(&self) -> &str {
         self.name.as_str()

@@ -78,7 +78,7 @@ fn build_authorization_header_value(
     uri: &str,
     method: &str,
 ) -> Option<String> {
-    if www_authenticate == "" {
+    if www_authenticate.is_empty() {
         return None;
     }
     let mut pw_client = http_auth::PasswordClient::try_from(www_authenticate).unwrap();
@@ -91,7 +91,7 @@ fn build_authorization_header_value(
             body: Some(&[]),
         })
         .unwrap();
-    return Some(ret);
+    Some(ret)
 }
 
 fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
@@ -102,7 +102,7 @@ fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
             }
         }
     }
-    return false;
+    false
 }
 
 impl Webdav {
@@ -163,7 +163,7 @@ impl Webdav {
                 }
             }
         }
-        return header_map;
+        header_map
     }
 
     fn get_url(&self, dir: &str) -> StorageBackendResult<Url> {
@@ -272,7 +272,7 @@ impl Webdav {
         let mut headers = self.build_base_header_map(reqwest::Method::GET, &url);
         headers.insert(
             reqwest::header::RANGE,
-            HeaderValue::from_str(format!("bytes={}-", byte_offset).as_str()).unwrap(),
+            HeaderValue::from_str(format!("bytes={byte_offset}-").as_str()).unwrap(),
         );
 
         let resp = self
@@ -380,7 +380,7 @@ mod test {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         SetupServerRes {
-            addr: format!("http://127.0.0.1:{}", port),
+            addr: format!("http://127.0.0.1:{port}"),
             handle,
         }
     }
@@ -426,7 +426,7 @@ mod test {
         let stream = file.into_stream();
         pin_mut!(stream);
         let chunk = stream.next().await;
-        assert_eq!(chunk.is_some(), true);
+        assert!(chunk.is_some());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [49, 50, 51]);
     }
@@ -463,7 +463,7 @@ mod test {
         let stream = file.into_stream();
         pin_mut!(stream);
         let chunk = stream.next().await;
-        assert_eq!(chunk.is_some(), true);
+        assert!(chunk.is_some());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [49, 50, 51]);
     }
@@ -485,7 +485,7 @@ mod test {
         let stream = file.into_stream();
         pin_mut!(stream);
         let chunk = stream.next().await;
-        assert_eq!(chunk.is_some(), true);
+        assert!(chunk.is_some());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [51]);
     }

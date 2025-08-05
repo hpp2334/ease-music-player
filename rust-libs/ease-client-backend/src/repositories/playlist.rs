@@ -38,8 +38,8 @@ impl DatabaseServer {
         let mut ret: Vec<PlaylistModel> = Default::default();
         ret.reserve(len);
 
-        let mut iter = table.iter()?;
-        while let Some(v) = iter.next() {
+        let iter = table.iter()?;
+        for v in iter {
             let v = v?.1.value();
             ret.push(v);
         }
@@ -53,9 +53,9 @@ impl DatabaseServer {
     ) -> BResult<Option<MusicId>> {
         let db = self.db().begin_read()?;
         let table = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
-        let mut iter = table.get(id)?;
+        let iter = table.get(id)?;
 
-        while let Some(id) = iter.next() {
+        for id in iter {
             let id = id?.value();
             let m = self.load_music_impl(&db, id)?.unwrap();
 
@@ -76,14 +76,13 @@ impl DatabaseServer {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
-        let mut ret: Vec<(MusicId, bool)> = Default::default();
-        ret.reserve(musics.len());
+        let mut ret: Vec<(MusicId, bool)> = Vec::with_capacity(musics.len());
 
         let playlist_id = {
             let id = {
                 let id = self.alloc_id(&db, DbKeyAlloc::Playlist)?;
-                let id = PlaylistId::wrap(id);
-                id
+
+                PlaylistId::wrap(id)
             };
 
             let mut playlist = PlaylistModel {
@@ -205,8 +204,7 @@ impl DatabaseServer {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
-        let mut ret: Vec<(MusicId, bool)> = Default::default();
-        ret.reserve(musics.len());
+        let mut ret: Vec<(MusicId, bool)> = Vec::with_capacity(musics.len());
 
         for m in musics {
             let (id, existed) = self.add_music_impl(&db, &rdb, m)?;

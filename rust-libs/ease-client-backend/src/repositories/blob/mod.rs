@@ -35,8 +35,8 @@ impl BlobManager {
             .set_cache_size(20 << 20)
             .create(db_path(&dir))
             .unwrap();
-        let ret = Arc::new(Self { dir, db });
-        ret
+        
+        Arc::new(Self { dir, db })
     }
 
     pub fn read(&self, id: BlobId) -> BResult<Vec<u8>> {

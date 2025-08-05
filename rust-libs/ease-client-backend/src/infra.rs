@@ -5,11 +5,12 @@ use tracing::subscriber::set_global_default;
 fn create_log(dir: &str) -> std::fs::File {
     let p = std::path::Path::new(dir).join("latest.log");
     let _r = std::fs::remove_file(&p);
-    let file = std::fs::File::create(&p).unwrap();
-    file
+
+    std::fs::File::create(&p).unwrap()
 }
 
 fn trace_level() -> tracing::Level {
+    #[allow(clippy::if_same_then_else)]
     if std::env::var("EBUILD").is_ok() {
         tracing::Level::INFO
     } else {

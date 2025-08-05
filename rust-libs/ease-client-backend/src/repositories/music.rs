@@ -28,11 +28,10 @@ impl DatabaseServer {
         let db = self.db().begin_read()?;
         let table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
         let table_music = db.open_table(TABLE_MUSIC)?;
-        let mut iter = table_playlist_musics.get(playlist_id)?;
-        let mut ret: Vec<MusicModel> = Vec::new();
-        ret.reserve(iter.len() as usize);
+        let iter = table_playlist_musics.get(playlist_id)?;
+        let mut ret: Vec<MusicModel> = Vec::with_capacity(iter.len() as usize);
 
-        while let Some(item) = iter.next() {
+        for item in iter {
             let id = item?.value();
 
             let music = table_music.get(id)?.unwrap().value();
@@ -105,7 +104,7 @@ impl DatabaseServer {
         table_storage_music.insert(arg.loc.storage_id, id)?;
         table_music_by_loc.insert(arg.loc, id)?;
 
-        return Ok((id, false));
+        Ok((id, false))
     }
 
     pub fn update_music_total_duration(
@@ -182,7 +181,7 @@ impl DatabaseServer {
         let ref_playlists = table_mp.get(id)?.len();
 
         if ref_playlists == 0 {
-            let m = self.load_music_impl(&rdb, id)?.unwrap();
+            let m = self.load_music_impl(rdb, id)?.unwrap();
 
             let mut table_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
             let mut table_storage = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;

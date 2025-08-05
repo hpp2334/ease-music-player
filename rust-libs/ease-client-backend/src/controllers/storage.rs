@@ -54,7 +54,7 @@ pub async fn ct_test_storage(
     arg: ArgUpsertStorage,
 ) -> BResult<StorageConnectionTestResult> {
     let cx = cx.get_context();
-    let backend = build_storage_backend_by_arg(&cx, arg)?;
+    let backend = build_storage_backend_by_arg(cx, arg)?;
     let res = backend.list("/".to_string()).await;
 
     match res {
@@ -77,7 +77,7 @@ pub async fn ct_list_storage_entry_children(
     arg: StorageEntryLoc,
 ) -> BResult<ListStorageEntryChildrenResp> {
     let cx = cx.get_context();
-    let backend = get_storage_backend(&cx, arg.storage_id)?;
+    let backend = get_storage_backend(cx, arg.storage_id)?;
     if backend.is_none() {
         return Ok(ListStorageEntryChildrenResp::Unknown);
     }

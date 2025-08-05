@@ -85,7 +85,7 @@ fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
             }
         }
     }
-    return false;
+    false
 }
 
 fn build_client() -> StorageBackendResult<reqwest::Client> {
@@ -131,7 +131,7 @@ impl OneDriveBackend {
                 );
             }
         }
-        return header_map;
+        header_map
     }
 
     async fn try_ensure_refresh_token_by_refresh_token(&self) -> StorageBackendResult<()> {
@@ -257,7 +257,7 @@ impl OneDriveBackend {
         let mut headers = self.build_base_header_map().await;
         headers.insert(
             reqwest::header::RANGE,
-            HeaderValue::from_str(format!("bytes={}-", byte_offset).as_str()).unwrap(),
+            HeaderValue::from_str(format!("bytes={byte_offset}-").as_str()).unwrap(),
         );
 
         let resp = self

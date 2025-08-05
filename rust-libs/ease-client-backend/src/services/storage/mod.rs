@@ -109,7 +109,7 @@ pub fn get_storage_backend(
     let storage = model.unwrap();
     let storage = build_storage(storage, music_count);
     let backend = build_storage_backend_by_arg(
-        &cx,
+        cx,
         ArgUpsertStorage {
             id: None,
             addr: storage.addr,

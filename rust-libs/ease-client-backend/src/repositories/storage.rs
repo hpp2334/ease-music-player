@@ -44,11 +44,10 @@ impl DatabaseServer {
         let table = db.open_table(TABLE_STORAGE)?;
         let len = table.len()? as usize;
 
-        let mut ret: Vec<StorageModel> = Default::default();
-        ret.reserve(len);
+        let mut ret: Vec<StorageModel> = Vec::with_capacity(len);
 
-        let mut iter = table.iter()?;
-        while let Some(v) = iter.next() {
+        let iter = table.iter()?;
+        for v in iter {
             let v = v?.1.value();
             ret.push(v);
         }
@@ -66,7 +65,8 @@ impl DatabaseServer {
                 v
             } else {
                 let id = self.alloc_id(&db, DbKeyAlloc::Storage)?;
-                let v = StorageModel {
+
+                StorageModel {
                     id: StorageId::wrap(id),
                     addr: Default::default(),
                     alias: Default::default(),
@@ -74,8 +74,7 @@ impl DatabaseServer {
                     password: Default::default(),
                     is_anonymous: Default::default(),
                     typ: Default::default(),
-                };
-                v
+                }
             };
             let id = model.id;
 
@@ -109,11 +108,11 @@ impl DatabaseServer {
 
             let mut music_iter = table_storage_musics.get(id)?;
 
-            while let Some(v) = music_iter.next() {
+            for v in music_iter.by_ref() {
                 let id = v?.value();
 
                 let mut iter = table_music_playlists.get(id)?;
-                while let Some(v) = iter.next() {
+                for v in iter.by_ref() {
                     let playlist_id = v?.value();
                     table_playlist_musics.remove(playlist_id, id)?;
                 }
@@ -157,7 +156,7 @@ impl DatabaseServer {
             for music_iter in table_storage_musics.iter()? {
                 let (storage_id, mut music_iter) = music_iter?;
                 let storage_id = storage_id.value();
-                while let Some(v) = music_iter.next() {
+                for v in music_iter.by_ref() {
                     let id = v?.value();
                     {
                         let m = self.load_music_impl(&rdb, id)?;
@@ -186,7 +185,7 @@ impl DatabaseServer {
             let mut new_table = db.open_table(TABLE_MUSIC)?;
 
             let mut iter = legacy_table.iter()?;
-            while let Some(v) = iter.next() {
+            for v in iter.by_ref() {
                 let (k, v) = v?;
                 let legacy: LegacyMusicModelV2 = v.value();
                 let new: MusicModel = legacy.into();

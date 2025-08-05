@@ -33,7 +33,7 @@ impl From<LegacyMusicModelV2> for MusicModel {
             id: legacy.id,
             loc: legacy.loc,
             title: legacy.title,
-            duration: legacy.duration.map(|d| Duration::from(d.0)),
+            duration: legacy.duration.map(|d| d.0),
             cover: legacy.cover,
             lyric: legacy.lyric,
             lyric_default: legacy.lyric_default,
