@@ -50,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
@@ -64,24 +65,15 @@ import com.kutedev.easemusicplayer.components.MusicCover
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
-import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import uniffi.ease_client.MusicControlAction
-import uniffi.ease_client.MusicControlWidget
-import uniffi.ease_client.MusicDetailWidget
-import uniffi.ease_client.MusicLyricWidget
-import uniffi.ease_client.VLyricLine
-import uniffi.ease_client.ViewAction
-import uniffi.ease_client_shared.DataSourceKey
-import uniffi.ease_client_shared.LyricLoadState
-import uniffi.ease_client_shared.PlayMode
+import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import kotlin.math.absoluteValue
 import kotlin.math.sign
 
 @Composable
 private fun MusicPlayerHeader(
     hasLyric: Boolean,
+    playerVM: PlayerVM = viewModel()
 ) {
     val bridge = UIBridgeController.current
     var moreMenuExpanded by remember {
@@ -122,6 +114,7 @@ private fun MusicPlayerHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.music_lyric_remove,
                                 onClick = {
+
                                     bridge.dispatchClick(MusicLyricWidget.REMOVE)
                                 }
                             )
@@ -617,11 +610,10 @@ private fun MusicPanel(
 
 @Composable
 fun MusicPlayerPage(
-    evm: EaseViewModel,
+    playerVM: PlayerVM = viewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val currentMusicState by evm.currentMusicState.collectAsState()
-    val currentLyricState by evm.currentMusicLyricState.collectAsState()
+    val currentMusicState = playerVM.musicState.collectAsState().value
+    val currentLyricState = playerVM.lyricState.collectAsState().value
 
     val hasLyric = currentLyricState.loadState != LyricLoadState.MISSING
 

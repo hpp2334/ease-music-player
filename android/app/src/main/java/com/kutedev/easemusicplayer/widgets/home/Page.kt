@@ -12,18 +12,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
+import com.kutedev.easemusicplayer.widgets.RoutesKey
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.getBottomBarSpace
 import com.kutedev.easemusicplayer.widgets.dashboard.DashboardSubpage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsSubpage
 import com.kutedev.easemusicplayer.widgets.settings.SettingSubpage
-import uniffi.ease_client.RoutesKey
 
 @Composable
 fun HomePage(
-    ctx: android.content.Context,
-    evm: EaseViewModel,
     scaffoldPadding: PaddingValues,
 ) {
     val pagerState = rememberPagerState(pageCount = {
@@ -56,7 +53,6 @@ fun HomePage(
         BottomBar(
             currentRoute = RoutesKey.HOME,
             bottomBarPageState = pagerState,
-            evm = evm,
             scaffoldPadding = scaffoldPadding,
         )
     }

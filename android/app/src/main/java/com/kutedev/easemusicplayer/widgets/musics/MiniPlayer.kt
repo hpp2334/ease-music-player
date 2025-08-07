@@ -27,16 +27,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.MusicCover
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import uniffi.ease_client.MainBodyWidget
-import uniffi.ease_client.MusicControlWidget
-import uniffi.ease_client_shared.DataSourceKey
+import com.kutedev.easemusicplayer.viewmodels.PlayerVM
+import com.kutedev.easemusicplayer.widgets.LocalNavController
+import com.kutedev.easemusicplayer.widgets.RoutesKey
+import uniffi.ease_client_backend.DataSourceKey
 
 @Composable
 private fun MiniPlayerCore(
@@ -146,10 +146,10 @@ private fun MiniPlayerCore(
 
 @Composable
 fun MiniPlayer(
-    evm: EaseViewModel
+    playerVM: PlayerVM = viewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val state = evm.currentMusicState.collectAsState().value
+    val state = playerVM.musicState.collectAsState().value
+    val navController = LocalNavController.current
 
     MiniPlayerCore(
         isPlaying = state.playing,
@@ -160,11 +160,11 @@ fun MiniPlayer(
         totalDurationMS = state.totalDurationMs,
         canNext = state.canPlayNext,
         loading = state.loading,
-        onClick = { bridge.dispatchClick(MainBodyWidget.MiniPlayer) },
-        onPlay = { bridge.dispatchClick(MusicControlWidget.PLAY) },
-        onPause = { bridge.dispatchClick(MusicControlWidget.PAUSE) },
-        onStop = { bridge.dispatchClick(MusicControlWidget.STOP) },
-        onNext = { bridge.dispatchClick(MusicControlWidget.PLAY_NEXT) },
+        onClick = { navController.navigate(RoutesKey.MUSIC_PLAYER) },
+        onPlay = { playerVM.resume() },
+        onPause = { playerVM.pause() },
+        onStop = { playerVM.stop() },
+        onNext = { playerVM.playNext() },
     )
 }
 

@@ -18,8 +18,6 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
 import com.kutedev.easemusicplayer.MainActivity
-import uniffi.ease_client_android.apiBackendPlayNext
-import uniffi.ease_client_android.apiBackendPlayPrevious
 
 
 const val PLAYER_TO_PREV_COMMAND = "PLAYER_TO_PREV_COMMAND";
@@ -106,9 +104,9 @@ class PlaybackService : MediaSessionService() {
                     args: Bundle
                 ): ListenableFuture<SessionResult> {
                     if (customCommand.customAction == PLAYER_TO_PREV_COMMAND) {
-                        apiBackendPlayPrevious()
+//                        TODO: apiBackendPlayPrevious()
                     } else if (customCommand.customAction == PLAYER_TO_NEXT_COMMAND) {
-                        apiBackendPlayNext()
+//                        TODO: apiBackendPlayNext()
                     }
                     return super.onCustomCommand(session, controller, customCommand, args)
                 }

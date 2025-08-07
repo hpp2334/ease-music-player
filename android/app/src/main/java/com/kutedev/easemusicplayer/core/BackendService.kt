@@ -1,7 +1,5 @@
 package com.kutedev.easemusicplayer.core
 
-import AsyncRuntimeAdapter
-import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -30,16 +28,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
-import uniffi.ease_client_android.IPlayerDelegateForeign
-import uniffi.ease_client_android.apiBuildBackend
-import uniffi.ease_client_android.apiDestroyBackend
-import uniffi.ease_client_android.apiSendBackendPlayerEvent
-import uniffi.ease_client_android.apiStartBackend
-import uniffi.ease_client_backend.MusicToPlay
-import uniffi.ease_client_shared.ArgInitializeApp
-import uniffi.ease_client_shared.MusicId
-import uniffi.ease_client_shared.PlayerDelegateEvent
-import uniffi.ease_client_shared.PlayerDurations
+import uniffi.ease_client_backend.MusicId
 
 
 const val BACKEND_STARTED_ACTION = "BACKEND_STARTED_ACTION"
@@ -94,211 +83,211 @@ private fun syncMetadataUtil(player: Player, computeShouldSync: (id: MusicId) ->
 
         val shouldSync = computeShouldSync(id)
         if (shouldSync) {
-            apiSendBackendPlayerEvent(PlayerDelegateEvent.Total(id, durationMS))
+//            TODO: apiSendBackendPlayerEvent(PlayerDelegateEvent.Total(id, durationMS))
 
             if (coverData != null) {
-                apiSendBackendPlayerEvent(PlayerDelegateEvent.Cover(id, coverData))
+//                TODO: apiSendBackendPlayerEvent(PlayerDelegateEvent.Cover(id, coverData))
             }
         }
     }
 }
 
-private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
-    private var _internal: MediaController? = null
-    private var _context: android.content.Context? = null
-    private val _requestSemaphore = Semaphore(4)
-    private var _lastSyncMusicId: MusicId? = null
-    val customScope = CoroutineScope(Dispatchers.Main)
-
-    fun onCreate(context: android.content.Context) {
-        _context = context
-
-        val factory = MediaController.Builder(
-            context,
-            SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        ).buildAsync()
-        factory.addListener(
-            {
-                _internal = factory.let {
-                    if (it.isDone) {
-                        val controller = it.get()
-                        initControllerListener(controller)
-                        controller
-                    } else {
-                        null
-                    }
-                }
-            },
-            MoreExecutors.directExecutor()
-        )
-    }
-
-    private fun initControllerListener(player: MediaController) {
-        player.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) {
-                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Play)
-                } else {
-                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Pause)
-                }
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
-                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Complete)
-                } else if (playbackState == Player.STATE_READY) {
-                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Loaded)
-                    syncMetadataImpl()
-                } else if (playbackState == Player.STATE_BUFFERING) {
-                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Loading)
-                }
-            }
-
-            override fun onPositionDiscontinuity(
-                oldPosition: Player.PositionInfo,
-                newPosition: Player.PositionInfo,
-                reason: Int
-            ) {
-                apiSendBackendPlayerEvent(PlayerDelegateEvent.Seek)
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                super.onPlayerError(error)
-                apiSendBackendPlayerEvent(PlayerDelegateEvent.Error(error.toString()))
-            }
-        })
-    }
-
-    fun onDestroy() {
-        _internal?.stop()
-        _internal?.release()
-        _internal = null
-        _context = null
-    }
-
-    override fun isPlaying(): Boolean {
-        val player = _internal ?: return false
-        return player.isPlaying()
-    }
-
-    override fun resume() {
-        val player = _internal ?: return
-
-        player.play()
-    }
-
-    override fun pause() {
-        val player = _internal ?: return
-        player.pause()
-    }
-
-    override fun stop() {
-        val player = _internal ?: return
-        player.stop()
-
-        apiSendBackendPlayerEvent(PlayerDelegateEvent.Stop)
-    }
-
-    override fun seek(arg: ULong) {
-        val player = _internal ?: return
-        // msec
-        player.seekTo(arg.toLong())
-    }
-
-    override fun setMusicUrl(item: MusicToPlay) {
-        val player = _internal ?: return
-
-        val coverURI = if (item.hasCover) {
-            null
-        } else {
-            Uri.parse(DEFAULT_COVER_BASE64)
-        }
-
-        val mediaItem = MediaItem.Builder()
-            .setMediaId(item.id.value.toString())
-            .setUri(item.url)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(item.title)
-                    .setArtworkUri(coverURI)
-                    .build()
-            )
-            .build()
-        player.stop()
-        player.setMediaItem(mediaItem)
-        player.prepare()
-        player.play()
-    }
-
-    override fun getDurations(): PlayerDurations {
-        val player = _internal ?: return PlayerDurations(java.time.Duration.ZERO, java.time.Duration.ZERO)
-
-        val current = java.time.Duration.ofMillis(player.currentPosition);
-        val buffer = java.time.Duration.ofMillis(player.bufferedPosition);
-        return PlayerDurations(current, buffer)
-    }
-
-    override fun requestTotalDuration(id: MusicId, url: String) {
-        val context = _context ?: return
-
-        customScope.launch {
-            _requestSemaphore.acquire()
-            try {
-                val player = ExoPlayer.Builder(context).build()
-                player.addListener(object : Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_READY) {
-                            syncMetadataUtil(player, { true })
-                            player.release()
-                            _requestSemaphore.release()
-                        }
-                    }
-
-                    override fun onPlayerError(error: PlaybackException) {
-                        player.release()
-                        _requestSemaphore.release()
-                    }
-                })
-                val mediaItem = MediaItem.Builder()
-                    .setMediaId(id.value.toString())
-                    .setUri(url)
-                    .build()
-                player.setMediaItem(mediaItem)
-                player.prepare()
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    private fun syncMetadataImpl() {
-        val player = _internal ?: return
-
-        syncMetadataUtil(player, {id ->
-            val shouldSync = this._lastSyncMusicId != id
-            this._lastSyncMusicId = id
-            shouldSync
-        })
-    }
-}
+//private class EaseMusicPlayerDelegate : IPlayerDelegateForeign {
+//    private var _internal: MediaController? = null
+//    private var _context: android.content.Context? = null
+//    private val _requestSemaphore = Semaphore(4)
+//    private var _lastSyncMusicId: MusicId? = null
+//    val customScope = CoroutineScope(Dispatchers.Main)
+//
+//    fun onCreate(context: android.content.Context) {
+//        _context = context
+//
+//        val factory = MediaController.Builder(
+//            context,
+//            SessionToken(context, ComponentName(context, PlaybackService::class.java))
+//        ).buildAsync()
+//        factory.addListener(
+//            {
+//                _internal = factory.let {
+//                    if (it.isDone) {
+//                        val controller = it.get()
+//                        initControllerListener(controller)
+//                        controller
+//                    } else {
+//                        null
+//                    }
+//                }
+//            },
+//            MoreExecutors.directExecutor()
+//        )
+//    }
+//
+//    private fun initControllerListener(player: MediaController) {
+//        player.addListener(object : Player.Listener {
+//            override fun onIsPlayingChanged(isPlaying: Boolean) {
+//                if (isPlaying) {
+//                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Play)
+//                } else {
+//                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Pause)
+//                }
+//            }
+//
+//            override fun onPlaybackStateChanged(playbackState: Int) {
+//                if (playbackState == Player.STATE_ENDED) {
+//                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Complete)
+//                } else if (playbackState == Player.STATE_READY) {
+//                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Loaded)
+//                    syncMetadataImpl()
+//                } else if (playbackState == Player.STATE_BUFFERING) {
+//                    apiSendBackendPlayerEvent(PlayerDelegateEvent.Loading)
+//                }
+//            }
+//
+//            override fun onPositionDiscontinuity(
+//                oldPosition: Player.PositionInfo,
+//                newPosition: Player.PositionInfo,
+//                reason: Int
+//            ) {
+//                apiSendBackendPlayerEvent(PlayerDelegateEvent.Seek)
+//            }
+//
+//            override fun onPlayerError(error: PlaybackException) {
+//                super.onPlayerError(error)
+//                apiSendBackendPlayerEvent(PlayerDelegateEvent.Error(error.toString()))
+//            }
+//        })
+//    }
+//
+//    fun onDestroy() {
+//        _internal?.stop()
+//        _internal?.release()
+//        _internal = null
+//        _context = null
+//    }
+//
+//    override fun isPlaying(): Boolean {
+//        val player = _internal ?: return false
+//        return player.isPlaying()
+//    }
+//
+//    override fun resume() {
+//        val player = _internal ?: return
+//
+//        player.play()
+//    }
+//
+//    override fun pause() {
+//        val player = _internal ?: return
+//        player.pause()
+//    }
+//
+//    override fun stop() {
+//        val player = _internal ?: return
+//        player.stop()
+//
+//        apiSendBackendPlayerEvent(PlayerDelegateEvent.Stop)
+//    }
+//
+//    override fun seek(arg: ULong) {
+//        val player = _internal ?: return
+//        // msec
+//        player.seekTo(arg.toLong())
+//    }
+//
+//    override fun setMusicUrl(item: MusicToPlay) {
+//        val player = _internal ?: return
+//
+//        val coverURI = if (item.hasCover) {
+//            null
+//        } else {
+//            Uri.parse(DEFAULT_COVER_BASE64)
+//        }
+//
+//        val mediaItem = MediaItem.Builder()
+//            .setMediaId(item.id.value.toString())
+//            .setUri(item.url)
+//            .setMediaMetadata(
+//                MediaMetadata.Builder()
+//                    .setTitle(item.title)
+//                    .setArtworkUri(coverURI)
+//                    .build()
+//            )
+//            .build()
+//        player.stop()
+//        player.setMediaItem(mediaItem)
+//        player.prepare()
+//        player.play()
+//    }
+//
+//    override fun getDurations(): PlayerDurations {
+//        val player = _internal ?: return PlayerDurations(java.time.Duration.ZERO, java.time.Duration.ZERO)
+//
+//        val current = java.time.Duration.ofMillis(player.currentPosition);
+//        val buffer = java.time.Duration.ofMillis(player.bufferedPosition);
+//        return PlayerDurations(current, buffer)
+//    }
+//
+//    override fun requestTotalDuration(id: MusicId, url: String) {
+//        val context = _context ?: return
+//
+//        customScope.launch {
+//            _requestSemaphore.acquire()
+//            try {
+//                val player = ExoPlayer.Builder(context).build()
+//                player.addListener(object : Player.Listener {
+//                    override fun onPlaybackStateChanged(playbackState: Int) {
+//                        if (playbackState == Player.STATE_READY) {
+//                            syncMetadataUtil(player, { true })
+//                            player.release()
+//                            _requestSemaphore.release()
+//                        }
+//                    }
+//
+//                    override fun onPlayerError(error: PlaybackException) {
+//                        player.release()
+//                        _requestSemaphore.release()
+//                    }
+//                })
+//                val mediaItem = MediaItem.Builder()
+//                    .setMediaId(id.value.toString())
+//                    .setUri(url)
+//                    .build()
+//                player.setMediaItem(mediaItem)
+//                player.prepare()
+//            } catch (_: Exception) {
+//            }
+//        }
+//    }
+//
+//    private fun syncMetadataImpl() {
+//        val player = _internal ?: return
+//
+//        syncMetadataUtil(player, {id ->
+//            val shouldSync = this._lastSyncMusicId != id
+//            this._lastSyncMusicId = id
+//            shouldSync
+//        })
+//    }
+//}
 
 
 class BackendService : Service() {
     private val _storagePath = "/"
-    @SuppressLint("StaticFieldLeak")
-    private val _playerDelegate = EaseMusicPlayerDelegate()
+//    @SuppressLint("StaticFieldLeak")
+//    private val _playerDelegate = EaseMusicPlayerDelegate()
     private val _channelId: String = "EaseMusicBackendServiceChannel"
 
     override fun onCreate() {
-        _playerDelegate.onCreate(this)
-        apiBuildBackend(
-            AsyncRuntimeAdapter(),
-            _playerDelegate
-        )
-        apiStartBackend(ArgInitializeApp(
-            appDocumentDir = normalizePath(filesDir.absolutePath),
-            appCacheDir = normalizePath(cacheDir.absolutePath),
-            storagePath = _storagePath
-        ))
+//        _playerDelegate.onCreate(this)
+//        apiBuildBackend(
+//            AsyncRuntimeAdapter(),
+//            _playerDelegate
+//        )
+//        apiStartBackend(ArgInitializeApp(
+//            appDocumentDir = normalizePath(filesDir.absolutePath),
+//            appCacheDir = normalizePath(cacheDir.absolutePath),
+//            storagePath = _storagePath
+//        ))
         createNotificationChannel()
     }
 
@@ -316,8 +305,8 @@ class BackendService : Service() {
     }
 
     override fun onDestroy() {
-        apiDestroyBackend()
-        _playerDelegate.onDestroy()
+//        apiDestroyBackend()
+//        _playerDelegate.onDestroy()
     }
 
     override fun onBind(p0: Intent?): IBinder? {

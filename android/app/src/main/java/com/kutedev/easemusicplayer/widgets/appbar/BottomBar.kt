@@ -18,6 +18,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,14 +29,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.dropShadow
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
+import com.kutedev.easemusicplayer.viewmodels.PlayerVM
+import com.kutedev.easemusicplayer.widgets.LocalNavController
+import com.kutedev.easemusicplayer.widgets.RoutesKey
 import com.kutedev.easemusicplayer.widgets.musics.MiniPlayer
 import kotlinx.coroutines.launch
-import uniffi.ease_client.RoutesKey
-import kotlin.math.tan
 
 private interface IBottomItem {
     val painterId: Int;
@@ -86,9 +88,10 @@ fun BottomBarSpacer(
 fun BoxScope.BottomBar(
     currentRoute: RoutesKey,
     bottomBarPageState: PagerState?,
-    evm: EaseViewModel,
     scaffoldPadding: PaddingValues,
+    playerVM: PlayerVM = viewModel()
 ) {
+    val state by playerVM.musicState.collectAsState()
     val items = listOf(
         BPlaylist,
         BDashboard,
@@ -96,7 +99,7 @@ fun BoxScope.BottomBar(
     )
     val animationScope = rememberCoroutineScope()
 
-    val hasCurrentMusic = evm.currentMusicState.collectAsState().value.id != null
+    val hasCurrentMusic = state.id != null
 
     val showBottomBar = currentRoute == RoutesKey.HOME
     val showMiniPlayer = hasCurrentMusic && (currentRoute == RoutesKey.HOME || currentRoute == RoutesKey.PLAYLIST)
@@ -123,9 +126,7 @@ fun BoxScope.BottomBar(
             .fillMaxWidth()
     ) {
         if (showMiniPlayer) {
-            MiniPlayer(
-                evm = evm
-            )
+            MiniPlayer()
         }
         if (showBottomBar && bottomBarPageState != null) {
             Row(

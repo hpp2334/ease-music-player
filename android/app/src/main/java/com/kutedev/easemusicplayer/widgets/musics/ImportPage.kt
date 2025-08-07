@@ -55,6 +55,7 @@ import uniffi.ease_client.VCurrentStorageEntriesStateStorageItem
 import uniffi.ease_client.VCurrentStorageEntry
 import uniffi.ease_client.VSplitPathItem
 import uniffi.ease_client.ViewAction
+import uniffi.ease_client_backend.CurrentStorageStateType
 import uniffi.ease_client_shared.CurrentStorageStateType
 import uniffi.ease_client_shared.StorageEntryType
 

@@ -31,29 +31,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.core.UIBridge
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import uniffi.ease_client.MainBodyWidget
-import uniffi.ease_client.StorageListWidget
-import uniffi.ease_client.VStorageListItem
-import uniffi.ease_client_shared.StorageId
-import uniffi.ease_client_shared.StorageType
+import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
+import com.kutedev.easemusicplayer.viewmodels.StorageVM
+import uniffi.ease_client_backend.Storage
+import uniffi.ease_client_backend.StorageType
 
 private val paddingX = 24.dp
 private val paddingY = 12.dp
-
-private fun toEditStorage(bridge: UIBridge, arg: StorageId?) {
-    if (arg != null) {
-        bridge.dispatchClick(StorageListWidget.Item(arg))
-    } else {
-        bridge.dispatchClick(StorageListWidget.Create)
-    }
-}
 
 @Composable
 private fun Title(title: String) {
@@ -65,9 +54,8 @@ private fun Title(title: String) {
 }
 
 @Composable
-private fun SleepModeBlock(evm: EaseViewModel) {
-    val bridge = UIBridgeController.current
-    val state by evm.timeToPauseState.collectAsState()
+private fun SleepModeBlock(vm: SleepModeVM = viewModel()) {
+    val state by vm.state.collectAsState()
     val blockBg = if (state.enabled) {
         MaterialTheme.colorScheme.secondary
     } else {
@@ -86,7 +74,7 @@ private fun SleepModeBlock(evm: EaseViewModel) {
             .padding(paddingX, 0.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable {
-                bridge.dispatchClick(MainBodyWidget.TimeToPause)
+//                TODO: bridge.dispatchClick(MainBodyWidget.TimeToPause)
             },
     ) {
         Row(
@@ -98,7 +86,8 @@ private fun SleepModeBlock(evm: EaseViewModel) {
                 .padding(32.dp, 24.dp),
         ) {
             Text(
-                text = "${state.leftHour.toString().padStart(2, '0')}:${state.leftMinute.toString().padStart(2, '0')}",
+//                TODO: text = "${state.leftHour.toString().padStart(2, '0')}:${state.leftMinute.toString().padStart(2, '0')}",
+                text = "",
                 fontSize = 32.sp,
                 color = tint,
             )
@@ -112,8 +101,7 @@ private fun SleepModeBlock(evm: EaseViewModel) {
 }
 
 @Composable
-private fun ColumnScope.DevicesBlock(storageItems: List<VStorageListItem>) {
-    val bridge = UIBridgeController.current
+private fun ColumnScope.DevicesBlock(storageItems: List<Storage>) {
     Column(
         modifier = Modifier
             .verticalScroll(rememberScrollState())
@@ -127,7 +115,7 @@ private fun ColumnScope.DevicesBlock(storageItems: List<VStorageListItem>) {
                 .clip(RoundedCornerShape(16.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable {
-                    toEditStorage(bridge, null)
+//                    TODO: toEditStorage(bridge, null)
                 }
             ) {
                 Row(
@@ -154,7 +142,7 @@ private fun ColumnScope.DevicesBlock(storageItems: List<VStorageListItem>) {
                     .fillMaxWidth()
                     .padding(0.dp, 4.dp)
                     .clickable {
-                        toEditStorage(bridge, item.storageId)
+//                        TODO: toEditStorage(bridge, item.storageId)
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -168,13 +156,13 @@ private fun ColumnScope.DevicesBlock(storageItems: List<VStorageListItem>) {
                 )
                 Column {
                     Text(
-                        text = item.name,
+                        text = item.addr,
                         fontSize = 14.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = item.subTitle,
+                        text = item.alias,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         maxLines = 1,
@@ -188,11 +176,10 @@ private fun ColumnScope.DevicesBlock(storageItems: List<VStorageListItem>) {
 
 @Composable
 fun DashboardSubpage(
-    evm: EaseViewModel,
+    storageVM: StorageVM = viewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val storageState by evm.storageListState.collectAsState()
-    val storageItems = storageState.items.filter { v -> v.typ != StorageType.LOCAL }
+    val storages by storageVM.storages.collectAsState()
+    val storageItems = storages.filter { v -> v.typ != StorageType.LOCAL }
 
     Column(
         modifier = Modifier
@@ -207,7 +194,7 @@ fun DashboardSubpage(
         ) {
             Title(title = stringResource(id = R.string.dashboard_sleep_mode))
         }
-        SleepModeBlock(evm = evm)
+        SleepModeBlock()
         Box(modifier = Modifier.height(48.dp))
         Row(
             modifier = Modifier
@@ -222,7 +209,7 @@ fun DashboardSubpage(
                     buttonType = EaseIconButtonType.Primary,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        toEditStorage(bridge, null)
+//                        TODO: toEditStorage(bridge, null)
                     }
                 )
             }
