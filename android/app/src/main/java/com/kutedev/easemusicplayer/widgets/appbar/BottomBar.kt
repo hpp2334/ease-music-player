@@ -35,7 +35,8 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.widgets.LocalNavController
-import com.kutedev.easemusicplayer.widgets.RoutesKey
+import com.kutedev.easemusicplayer.widgets.RouteHome
+import com.kutedev.easemusicplayer.widgets.RoutePlaylist
 import com.kutedev.easemusicplayer.widgets.musics.MiniPlayer
 import kotlinx.coroutines.launch
 
@@ -86,11 +87,13 @@ fun BottomBarSpacer(
 
 @Composable
 fun BoxScope.BottomBar(
-    currentRoute: RoutesKey,
     bottomBarPageState: PagerState?,
     scaffoldPadding: PaddingValues,
     playerVM: PlayerVM = viewModel()
 ) {
+    val navController = LocalNavController.current
+    val currentRoute by navController.currentBackStackEntryAsState()
+
     val state by playerVM.musicState.collectAsState()
     val items = listOf(
         BPlaylist,
@@ -101,8 +104,9 @@ fun BoxScope.BottomBar(
 
     val hasCurrentMusic = state.id != null
 
-    val showBottomBar = currentRoute == RoutesKey.HOME
-    val showMiniPlayer = hasCurrentMusic && (currentRoute == RoutesKey.HOME || currentRoute == RoutesKey.PLAYLIST)
+
+    val showBottomBar = currentRoute == RouteHome
+    val showMiniPlayer = hasCurrentMusic && (currentRoute == RouteHome || currentRoute == RoutePlaylist)
 
     if (!showBottomBar && !showMiniPlayer) {
         Box(modifier = Modifier

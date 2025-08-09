@@ -35,7 +35,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.MusicCover
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.widgets.LocalNavController
-import com.kutedev.easemusicplayer.widgets.RoutesKey
+import com.kutedev.easemusicplayer.widgets.RouteMusicPlayer
 import uniffi.ease_client_backend.DataSourceKey
 
 @Composable
@@ -160,7 +160,7 @@ fun MiniPlayer(
         totalDurationMS = state.totalDurationMs,
         canNext = state.canPlayNext,
         loading = state.loading,
-        onClick = { navController.navigate(RoutesKey.MUSIC_PLAYER) },
+        onClick = { navController.navigate(RouteMusicPlayer) },
         onPlay = { playerVM.resume() },
         onPause = { playerVM.pause() },
         onStop = { playerVM.stop() },

@@ -5,14 +5,33 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
+import kotlinx.serialization.Serializable
+import uniffi.ease_client_backend.MusicId
 
-enum class RoutesKey(val value: String) {
-    HOME("HOME"),
-    ADD_DEVICES("ADD_DEVICES"),
-    PLAYLIST("PLAYLIST"),
-    IMPORT_MUSICS("IMPORT_MUSICS"),
-    MUSIC_PLAYER("MUSIC_PLAYER")
+@Serializable
+object RouteHome
+
+@Serializable
+object RouteAddDevices
+
+@Serializable
+data class RoutePlaylist(
+    val id: Long
+)
+
+enum class RouteImportType {
+    Music,
+    Lyric
 }
+
+@Serializable
+data class RouteImport(
+    val type: RouteImportType,
+    val id: Long,
+)
+
+@Serializable
+object RouteMusicPlayer
 
 val LocalNavController = compositionLocalOf<NavHostController> {
     error("No LocalNavController provided")

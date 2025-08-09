@@ -61,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.CustomAnchoredDraggableState
@@ -72,53 +73,51 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
+import com.kutedev.easemusicplayer.viewmodels.PlaylistVM
+import com.kutedev.easemusicplayer.viewmodels.PlaylistsVM
+import com.kutedev.easemusicplayer.widgets.LocalNavController
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
-import uniffi.ease_client.PlaylistDetailWidget
-import uniffi.ease_client.RoutesKey
-import uniffi.ease_client.VCurrentMusicState
-import uniffi.ease_client.VPlaylistMusicItem
-import uniffi.ease_client_shared.DataSourceKey
-import uniffi.ease_client_shared.MusicId
+import uniffi.ease_client_backend.DataSourceKey
 import kotlin.math.roundToInt
 
 @Composable
 private fun RemovePlaylistDialog(
-    title: String,
-    open: Boolean,
-    onClose: () -> Unit
+    playlistVM: PlaylistVM = viewModel()
 ) {
-    val bridge = UIBridgeController.current
+    val navController = LocalNavController.current
+    val open by playlistVM.removeModalOpen.collectAsState()
+    val playlist by playlistVM.playlist.collectAsState()
+
     ConfirmDialog(
         open = open,
         onConfirm = {
-            onClose()
-            bridge.popRoute()
-            bridge.schedule {
-                bridge.dispatchClick(PlaylistDetailWidget.Remove);
-            }
+            playlistVM.closeRemoveModal()
+            playlistVM.remove()
+            navController.popBackStack()
         },
-        onCancel = onClose
+        onCancel = {
+            playlistVM.closeRemoveModal()
+        }
     ) {
         Text(
-            text = "${stringResource(id = R.string.playlist_remove_dialog_text)} “${title}”"
+            text = "${stringResource(id = R.string.playlist_remove_dialog_text)} “${playlist.abstr.meta.title}”"
         )
     }
 }
 
 @Composable
 private fun PlaylistHeader(
-    cover: DataSourceKey?,
-    title: String,
-    duration: String,
-    items: List<VPlaylistMusicItem>,
-    onRemoveDialogOpen: () -> Unit,
+    playlistVM: PlaylistVM = viewModel()
 ) {
-    val bridge = UIBridgeController.current
+    val navController = LocalNavController.current
+    val playlist by playlistVM.playlist.collectAsState()
+    val musics = playlist.musics
+    val cover = playlist.abstr.meta.cover
+    val title = playlist.abstr.meta.title
+
     var moreMenuExpanded by remember { mutableStateOf(false) }
-    val countSuffixStringId = if (items.size <= 1) {
+    val countSuffixStringId = if (musics.size <= 1) {
         R.string.playlist_list_count_suffix
     } else {
         R.string.playlist_list_count_suffixes
@@ -144,7 +143,7 @@ private fun PlaylistHeader(
                 EaseImage(
                     modifier = Modifier
                         .fillMaxSize(),
-                    dataSourceKey = cover,
+                    dataSourceKey = DataSourceKey.AnyEntry(cover),
                     contentScale = ContentScale.FillWidth
                 )
                 Box(
@@ -165,7 +164,7 @@ private fun PlaylistHeader(
                 buttonType = EaseIconButtonType.Surface,
                 painter = painterResource(id = R.drawable.icon_back),
                 onClick = {
-                    bridge.popRoute()
+                    navController.popBackStack()
                 }
             )
             Box {
@@ -200,7 +199,7 @@ private fun PlaylistHeader(
                                 stringId = R.string.playlist_context_menu_remove,
                                 isError = true,
                                 onClick = {
-                                    onRemoveDialogOpen()
+                                    playlistVM.openRemoveModal()
                                 }
                             ),
                         )

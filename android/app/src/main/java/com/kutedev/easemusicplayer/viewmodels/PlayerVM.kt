@@ -9,6 +9,7 @@ import uniffi.ease_client_backend.DataSourceKey
 import uniffi.ease_client_backend.LrcMetadata
 import uniffi.ease_client_backend.Lyrics
 import uniffi.ease_client_backend.MusicId
+import uniffi.ease_client_backend.PlayMode
 import javax.inject.Inject
 
 data class MusicState(
@@ -16,42 +17,24 @@ data class MusicState(
     val playing: Boolean = false,
     val title: String = "",
     val cover: DataSourceKey? = null,
+    val previousCover: DataSourceKey? = null,
+    val nextCover: DataSourceKey? = null,
     val currentDurationMs: ULong = 0uL,
+    val currentDuration: String = "00:00",
     val totalDuration: String = "00:00",
     val totalDurationMs: ULong = 0uL,
+    val bufferDurationMs: ULong = 0uL,
     val canPlayNext: Boolean = false,
+    val canPlayPrevious: Boolean = false,
     val loading: Boolean = false
-)
-
-enum class LyricLoadedState {
-    Loading,
-    Loaded,
-    Missing,
-}
-
-data class LyricState(
-    val lyrics: Lyrics = Lyrics(
-        metdata = LrcMetadata(
-            artist = "",
-            album = "",
-            title = "",
-            lyricist = "",
-            author = "",
-            length = "",
-            offset = ""
-        ),
-        lines = emptyList()
-    ),
-    val loadedState: LyricLoadedState
 )
 
 @HiltViewModel
 class PlayerVM @Inject constructor() : ViewModel() {
-
     private val _musicState = MutableStateFlow(MusicState())
-    private val _lyricState = MutableStateFlow(LyricLoadedState.Loading)
+    private val _playMode = MutableStateFlow(PlayMode.SINGLE)
     val musicState = _musicState.asStateFlow()
-    val lyricState = _lyricState.asStateFlow()
+    val playMode = _playMode.asStateFlow()
 
     fun resume() {}
 
@@ -64,5 +47,13 @@ class PlayerVM @Inject constructor() : ViewModel() {
 
     fun playPrevious() {}
 
-    fun removeLyric() {}
+    fun remove() {}
+
+    fun seek(ms: ULong) {
+
+    }
+
+    fun changePlayMode() {
+
+    }
 }

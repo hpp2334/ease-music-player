@@ -273,9 +273,7 @@ private fun TimeToPauseModalCore(
 }
 
 @Composable
-fun TimeToPauseModal(
-    evm: EaseViewModel,
-) {
+fun TimeToPauseModal() {
     val bridge = UIBridgeController.current
     val state by evm.timeToPauseState.collectAsState()
     val onClose = {

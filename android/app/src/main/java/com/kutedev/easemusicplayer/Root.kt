@@ -16,7 +16,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.widgets.LocalNavController
-import com.kutedev.easemusicplayer.widgets.RoutesKey
+import com.kutedev.easemusicplayer.widgets.RouteHome
 import com.kutedev.easemusicplayer.widgets.RoutesProvider
 
 @Composable
@@ -44,7 +44,7 @@ fun Root() {
                             modifier = Modifier
                                 .fillMaxSize(),
                             navController = controller,
-                            startDestination = RoutesKey.HOME.value,
+                            startDestination = RouteHome,
                             enterTransition = {
                                 slideIn(
                                     animationSpec = tween(300),
@@ -74,7 +74,7 @@ fun Root() {
                                     })
                             },
                         ) {
-                            composable(RoutesKey.HOME.value) {
+                            composable<RouteHome> {
 //                                HomePage(
 //                                    scaffoldPadding = scaffoldPadding,
 //                                )

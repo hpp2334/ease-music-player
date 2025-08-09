@@ -18,7 +18,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.R
-import uniffi.ease_client.VPlaylistAbstractItem
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -38,19 +38,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
+import com.kutedev.easemusicplayer.viewmodels.PlaylistsVM
+import com.kutedev.easemusicplayer.viewmodels.durationStr
+import com.kutedev.easemusicplayer.widgets.LocalNavController
+import com.kutedev.easemusicplayer.widgets.RoutePlaylist
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
-import uniffi.ease_client.PlaylistListWidget
+import uniffi.ease_client_backend.DataSourceKey
+import uniffi.ease_client_backend.Playlist
+import uniffi.ease_client_backend.PlaylistAbstract
 
 @Composable
 fun PlaylistsSubpage(
-    evm: EaseViewModel,
+    playlistsVM: PlaylistsVM
 ) {
-    val bridge = UIBridgeController.current
-    val state = evm.playlistListState.collectAsState().value
+    val state by playlistsVM.state.collectAsState()
 
-    if (state.playlistList.isEmpty()) {
+    if (state.playlists.isEmpty()) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.fillMaxSize()
@@ -59,7 +62,7 @@ fun PlaylistsSubpage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .clickable {
-                        bridge.dispatchClick(PlaylistListWidget.Add)
+                        playlistsVM.openModal()
                     }
                     .clip(RoundedCornerShape(16.dp))
                     .padding(24.dp, 24.dp),
@@ -87,17 +90,17 @@ fun PlaylistsSubpage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        bridge.dispatchClick(PlaylistListWidget.Add)
+                        playlistsVM.openModal()
                     }
                 )
             }
-            GridPlaylists(playlists = state.playlistList)
+            GridPlaylists(playlists = state.playlists)
         }
     }
 }
 
 @Composable
-private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
+private fun GridPlaylists(playlists: List<PlaylistAbstract>) {
     LazyVerticalGrid(
         modifier = Modifier.fillMaxSize(),
         columns = GridCells.FixedSize(172.dp),
@@ -110,12 +113,13 @@ private fun GridPlaylists(playlists: List<VPlaylistAbstractItem>) {
 }
 
 @Composable
-private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
-    val bridge = UIBridgeController.current
+private fun PlaylistItem(playlist: PlaylistAbstract) {
+    val navController = LocalNavController.current
+
     Box(Modifier
         .clickable(
             onClick = {
-                bridge.dispatchClick(PlaylistListWidget.Item(playlist.id));
+                navController.navigate(RoutePlaylist(playlist.meta.id.value))
             },
         )
     ) {
@@ -127,7 +131,7 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
             Box(
                 modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant).size(136.dp)
             ) {
-                if (playlist.cover == null) {
+                if (playlist.meta.cover == null) {
                     Image(
                         modifier = Modifier.fillMaxSize(),
                         painter = painterResource(id = R.drawable.cover_default_image),
@@ -137,13 +141,13 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
                 } else {
                     EaseImage(
                         modifier = Modifier.fillMaxSize(),
-                        dataSourceKey = playlist.cover!!,
+                        dataSourceKey = DataSourceKey.AnyEntry(playlist.meta.cover!!),
                         contentScale = ContentScale.FillWidth
                     )
                 }
             }
             Text(
-                text = playlist.title,
+                text = playlist.meta.title,
                 fontSize = 14.sp,
                 modifier = Modifier.padding(top = 8.dp),
                 maxLines = 1,
@@ -151,9 +155,9 @@ private fun PlaylistItem(playlist: VPlaylistAbstractItem) {
             )
             Text(
                 text = buildAnnotatedString {
-                    append("${playlist.count} ${stringResource(id = R.string.music_count_unit)}")
+                    append("${playlist.musicCount} ${stringResource(id = R.string.music_count_unit)}")
                     append("  ·  ")
-                    append(playlist.duration)
+                    append(playlist.durationStr())
                 },
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Light,
