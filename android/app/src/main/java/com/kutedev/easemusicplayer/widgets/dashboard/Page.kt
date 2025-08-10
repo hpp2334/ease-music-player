@@ -37,7 +37,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
-import com.kutedev.easemusicplayer.viewmodels.StorageVM
+import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_backend.StorageType
 
@@ -176,7 +176,7 @@ private fun ColumnScope.DevicesBlock(storageItems: List<Storage>) {
 
 @Composable
 fun DashboardSubpage(
-    storageVM: StorageVM = viewModel()
+    storageVM: StoragesVM = viewModel()
 ) {
     val storages by storageVM.storages.collectAsState()
     val storageItems = storages.filter { v -> v.typ != StorageType.LOCAL }

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseIconButton
@@ -52,12 +53,11 @@ import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
 import com.kutedev.easemusicplayer.components.FormWidget
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import uniffi.ease_client.FormFieldStatus
-import uniffi.ease_client.StorageUpsertWidget
-import uniffi.ease_client_shared.StorageConnectionTestResult
-import uniffi.ease_client_shared.StorageType
+import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
+import com.kutedev.easemusicplayer.widgets.LocalNavController
+import kotlinx.coroutines.flow.update
+import uniffi.ease_client_backend.StorageConnectionTestResult
+import uniffi.ease_client_backend.StorageType
 
 
 private fun buildStr(s: String): AnnotatedString {
@@ -82,12 +82,12 @@ private fun buildStr(s: String): AnnotatedString {
 
 @Composable
 private fun RemoveDialog(
-    isOpen: Boolean,
-    onClose: () -> Unit,
-    title: String,
-    musicCount: ULong,
+    editStorageVM: EditStorageVM = viewModel()
 ) {
-    val bridge = UIBridgeController.current
+    val title by editStorageVM.title.collectAsState()
+    val musicCount by editStorageVM.musicCount.collectAsState()
+    val isOpen by editStorageVM.modalOpen.collectAsState()
+
     val mainDesc = buildStr(
         stringResource(R.string.storage_remove_desc_main)
             .replace("E_TITLE", title)
@@ -100,10 +100,12 @@ private fun RemoveDialog(
     ConfirmDialog(
         open = isOpen,
         onConfirm = {
-            onClose()
-            bridge.dispatchClick(StorageUpsertWidget.Remove)
+            editStorageVM.closeModal()
+            editStorageVM.remove()
         },
-        onCancel = onClose,
+        onCancel = {
+            editStorageVM.closeModal()
+        },
     ) {
         Text(
             text = mainDesc,
@@ -153,30 +155,36 @@ private fun StorageBlock(
 
 @Composable
 private fun WebdavConfig(
-    evm: EaseViewModel,
+    editStorageVM: EditStorageVM = viewModel()
 ) {
-    val context = LocalContext.current
-    val bridge = UIBridgeController.current
-    val state by evm.editStorageState.collectAsState();
-    val form = state.info;
-    val validated = state.validated;
+    val form by editStorageVM.form.collectAsState()
+    val validated by editStorageVM.validated.collectAsState()
     val isAnonymous = form.isAnonymous;
 
     FormSwitch(
         label = stringResource(id = R.string.storage_edit_anonymous),
         value = isAnonymous,
-        onChange = { bridge.dispatchClick(StorageUpsertWidget.IsAnonymous); }
+        onChange = { editStorageVM.form.update { storage ->
+            storage.isAnonymous = !storage.isAnonymous
+            storage
+        }}
     )
     FormText(
         label = stringResource(id = R.string.storage_edit_alias),
         value = form.alias,
-        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
+        onChange = { value -> editStorageVM.form.update { storage ->
+            storage.alias = value
+            storage
+        } },
     )
     FormText(
         label = stringResource(id = R.string.storage_edit_addr),
         value = form.addr,
-        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Address, value) },
-        error = if (validated.address == FormFieldStatus.CANNOT_BE_EMPTY) {
+        onChange = { value -> editStorageVM.form.update { storage ->
+            storage.addr = value
+            storage
+        } },
+        error = if (validated.addrEmpty) {
             R.string.storage_edit_form_address
         } else {
             null
@@ -186,8 +194,11 @@ private fun WebdavConfig(
         FormText(
             label = stringResource(id = R.string.storage_edit_username),
             value = form.username,
-            onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Username, value) },
-            error = if (validated.username == FormFieldStatus.CANNOT_BE_EMPTY) {
+            onChange = { value -> editStorageVM.form.update { storage ->
+                storage.username = value
+                storage
+            } },
+            error = if (validated.usernameEmpty) {
                 R.string.storage_edit_form_username
             } else {
                 null
@@ -197,8 +208,11 @@ private fun WebdavConfig(
             label = stringResource(id = R.string.storage_edit_password),
             value = form.password,
             isPassword = true,
-            onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Password, value) },
-            error = if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
+            onChange = { value -> editStorageVM.form.update { storage ->
+                storage.password = value
+                storage
+            } },
+            error = if (validated.passwordEmpty) {
                 R.string.storage_edit_form_password
             } else {
                 null
@@ -209,19 +223,20 @@ private fun WebdavConfig(
 
 @Composable
 private fun OneDriveConfig(
-    evm: EaseViewModel,
+    editStorageVM: EditStorageVM = viewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val state by evm.editStorageState.collectAsState();
-    val connected = state.info.password.isNotEmpty()
-    val form = state.info;
-    val validated = state.validated
+    val form by editStorageVM.form.collectAsState()
+    val validated by editStorageVM.validated.collectAsState()
+    val connected = form.password.isNotEmpty()
 
     FormText(
         label = stringResource(id = R.string.storage_edit_alias),
         value = form.alias,
-        onChange = { value -> bridge.dispatchChangeText(StorageUpsertWidget.Alias, value) },
-        error = if (validated.alias == FormFieldStatus.CANNOT_BE_EMPTY) {
+        onChange = { value -> editStorageVM.form.update { storage ->
+            storage.alias = value
+            storage
+        } },
+        error = if (validated.aliasEmpty) {
             R.string.storage_edit_onedrive_alias_not_empty
         } else {
             null
@@ -236,10 +251,10 @@ private fun OneDriveConfig(
                 type = EaseTextButtonType.PrimaryVariant,
                 size = EaseTextButtonSize.Medium,
                 onClick = {
-                    bridge.dispatchClick(StorageUpsertWidget.ConnectAccount)
+//                    TODO: bridge.dispatchClick(StorageUpsertWidget.ConnectAccount)
                 },
             )
-            if (validated.password == FormFieldStatus.CANNOT_BE_EMPTY) {
+            if (validated.passwordEmpty) {
                 Text(
                     modifier = Modifier.padding(
                         horizontal = 0.dp,
@@ -257,7 +272,7 @@ private fun OneDriveConfig(
                 type = EaseTextButtonType.Error,
                 size = EaseTextButtonSize.Medium,
                 onClick = {
-                    bridge.dispatchClick(StorageUpsertWidget.DisconnectAccount)
+//                    TODO: bridge.dispatchClick(StorageUpsertWidget.DisconnectAccount)
                 },
             )
         }
@@ -266,21 +281,19 @@ private fun OneDriveConfig(
 
 @Composable
 fun EditStoragesPage(
-    evm: EaseViewModel,
+    editStorageVM: EditStorageVM = viewModel()
 ) {
     val context = LocalContext.current
-    val bridge = UIBridgeController.current
+    val navController = LocalNavController.current
     var removeDialogOpen by remember { mutableStateOf(false) }
+    val form by editStorageVM.form.collectAsState();
+    val isCreated by editStorageVM.isCreated.collectAsState();
 
     val toast = remember {
         Toast.makeText(context, "", Toast.LENGTH_SHORT)
     }
-    val state by evm.editStorageState.collectAsState();
-    val form = state.info;
-
-    val isCreated = state.isCreated;
     val storageType = form.typ;
-    val testing = state.test;
+    val testing = StorageConnectionTestResult.NONE;
 
     val testingColors = when (testing) {
         StorageConnectionTestResult.NONE -> null
@@ -340,7 +353,7 @@ fun EditStoragesPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_back),
                     onClick = {
-                        bridge.popRoute()
+                        navController.popBackStack()
                     }
                 )
             }
@@ -361,7 +374,7 @@ fun EditStoragesPage(
                     painter = painterResource(id = R.drawable.icon_wifitethering),
                     overrideColors = testingColors,
                     onClick = {
-                        bridge.dispatchClick(StorageUpsertWidget.Test);
+//                        TODO: bridge.dispatchClick(StorageUpsertWidget.Test);
                     }
                 )
                 EaseIconButton(
@@ -369,7 +382,7 @@ fun EditStoragesPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_ok),
                     onClick = {
-                        bridge.dispatchClick(StorageUpsertWidget.Finish);
+                        editStorageVM.finish()
                     }
                 )
             }
@@ -391,33 +404,26 @@ fun EditStoragesPage(
                         title = "WebDAV",
                         isActive = storageType == StorageType.WEBDAV,
                         onSelect = {
-                            bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.WEBDAV))
+                            editStorageVM.selectStorage(StorageType.WEBDAV)
                         }
                     )
                     StorageBlock(
                         title = "OneDrive",
                         isActive = storageType == StorageType.ONE_DRIVE,
                         onSelect = {
-                            bridge.dispatchClick(StorageUpsertWidget.Type(StorageType.ONE_DRIVE))
+                            editStorageVM.selectStorage(StorageType.ONE_DRIVE)
                         }
                     )
                 }
                 Box(modifier = Modifier.height(30.dp))
                 if (storageType == StorageType.WEBDAV) {
-                    WebdavConfig(evm)
+                    WebdavConfig()
                 }
                 if (storageType == StorageType.ONE_DRIVE) {
-                    OneDriveConfig(evm)
+                    OneDriveConfig()
                 }
             }
         }
     }
-    RemoveDialog(
-        isOpen = removeDialogOpen,
-        onClose = {
-            removeDialogOpen = false
-        },
-        title = state.title,
-        musicCount = state.musicCount,
-    )
+    RemoveDialog()
 }

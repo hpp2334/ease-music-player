@@ -27,23 +27,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.viewmodels.AppVM
 
 
 private val paddingX = 24.dp
-
-private fun getAppVersion(
-    context: android.content.Context,
-): String {
-    val packageManager = context.packageManager
-    val packageName = context.packageName
-    val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
-    } else {
-        packageManager.getPackageInfo(packageName, 0)
-    }
-    return packageInfo.versionName ?: "<unknown>"
-}
 
 @Composable
 private fun Title(title: String) {
@@ -100,7 +89,7 @@ private fun Item(
 }
 
 @Composable
-fun SettingSubpage(ctx: android.content.Context) {
+fun SettingSubpage(appVM: AppVM = viewModel()) {
     val uriHandler = LocalUriHandler.current
     val gitUrl = "https://github.com/hpp2334/ease-music-player";
 
@@ -122,7 +111,7 @@ fun SettingSubpage(ctx: android.content.Context) {
         Item(
             iconPainter = painterResource(R.drawable.icon_info),
             title = stringResource(id = R.string.setting_version),
-            content = getAppVersion(ctx),
+            content = appVM.appVersion,
             onClick = {}
         )
     }

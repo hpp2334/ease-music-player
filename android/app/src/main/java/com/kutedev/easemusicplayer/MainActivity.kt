@@ -9,14 +9,27 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import com.kutedev.easemusicplayer.core.BackendService
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.viewmodels.AppVM
+import com.kutedev.easemusicplayer.viewmodels.AppVMFactory
+import com.kutedev.easemusicplayer.viewmodels.getAppVersion
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
+import dagger.hilt.android.lifecycle.withCreationCallback
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val bridge = Bridge(this);
+    private val _appVM by viewModels<AppVM>(
+        extrasProducer = {
+            defaultViewModelCreationExtras.withCreationCallback<
+                    AppVMFactory> { factory ->
+                factory.create(getAppVersion(context = this.applicationContext))
+            }
+        }
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(null)

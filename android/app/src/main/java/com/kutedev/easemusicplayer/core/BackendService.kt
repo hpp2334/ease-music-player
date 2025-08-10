@@ -24,6 +24,7 @@ import androidx.media3.extractor.metadata.id3.ApicFrame
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -271,6 +272,7 @@ private fun syncMetadataUtil(player: Player, computeShouldSync: (id: MusicId) ->
 //}
 
 
+@AndroidEntryPoint
 class BackendService : Service() {
     private val _storagePath = "/"
 //    @SuppressLint("StaticFieldLeak")

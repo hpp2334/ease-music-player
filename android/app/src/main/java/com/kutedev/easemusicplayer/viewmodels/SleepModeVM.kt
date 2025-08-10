@@ -22,4 +22,8 @@ class SleepModeVM @Inject constructor() : ViewModel() {
     fun openModal() {}
 
     fun closeModal() {}
+
+    fun remove() {}
+
+    fun set(hour: Int, minute: Int) {}
 }

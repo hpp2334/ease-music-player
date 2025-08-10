@@ -18,6 +18,8 @@ import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.widgets.LocalNavController
 import com.kutedev.easemusicplayer.widgets.RouteHome
 import com.kutedev.easemusicplayer.widgets.RoutesProvider
+import com.kutedev.easemusicplayer.widgets.home.HomePage
+import com.kutedev.easemusicplayer.widgets.playlists.CreatePlaylistsDialog
 
 @Composable
 fun Root() {
@@ -75,10 +77,10 @@ fun Root() {
                             },
                         ) {
                             composable<RouteHome> {
-//                                HomePage(
-//                                    scaffoldPadding = scaffoldPadding,
-//                                )
-//                                CreatePlaylistsDialog(evm = evm)
+                                HomePage(
+                                    scaffoldPadding = scaffoldPadding,
+                                )
+                                CreatePlaylistsDialog()
                             }
                             composable(RoutesKey.ADD_DEVICES.value) {
 //                                EditStoragesPage(

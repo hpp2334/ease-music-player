@@ -35,6 +35,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
@@ -49,7 +50,7 @@ import uniffi.ease_client_backend.PlaylistAbstract
 
 @Composable
 fun PlaylistsSubpage(
-    playlistsVM: PlaylistsVM
+    playlistsVM: PlaylistsVM = viewModel()
 ) {
     val state by playlistsVM.state.collectAsState()
 
