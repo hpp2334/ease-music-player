@@ -10,6 +10,7 @@ import uniffi.ease_client_backend.LrcMetadata
 import uniffi.ease_client_backend.Lyrics
 import uniffi.ease_client_backend.MusicId
 import uniffi.ease_client_backend.PlayMode
+import uniffi.ease_client_backend.PlaylistId
 import javax.inject.Inject
 
 data class MusicState(
@@ -52,6 +53,8 @@ class PlayerVM @Inject constructor() : ViewModel() {
     fun seek(ms: ULong) {
 
     }
+
+    fun play(id: MusicId) {}
 
     fun changePlayMode() {
 

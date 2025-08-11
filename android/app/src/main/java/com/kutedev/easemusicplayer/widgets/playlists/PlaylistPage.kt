@@ -73,12 +73,20 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
+import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
+import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.viewmodels.PlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsVM
+import com.kutedev.easemusicplayer.viewmodels.durationStr
 import com.kutedev.easemusicplayer.widgets.LocalNavController
+import com.kutedev.easemusicplayer.widgets.RouteImport
+import com.kutedev.easemusicplayer.widgets.RouteImportType
+import com.kutedev.easemusicplayer.widgets.RouteMusicPlayer
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client_backend.DataSourceKey
+import uniffi.ease_client_backend.MusicAbstract
+import uniffi.ease_client_backend.MusicId
 import kotlin.math.roundToInt
 
 @Composable
@@ -108,13 +116,15 @@ private fun RemovePlaylistDialog(
 
 @Composable
 private fun PlaylistHeader(
-    playlistVM: PlaylistVM = viewModel()
+    playlistVM: PlaylistVM = viewModel(),
+    editPlaylistVM: EditPlaylistVM = viewModel()
 ) {
     val navController = LocalNavController.current
     val playlist by playlistVM.playlist.collectAsState()
     val musics = playlist.musics
     val cover = playlist.abstr.meta.cover
     val title = playlist.abstr.meta.title
+    val duration = playlist.abstr.durationStr()
 
     var moreMenuExpanded by remember { mutableStateOf(false) }
     val countSuffixStringId = if (musics.size <= 1) {
@@ -186,13 +196,16 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
-                                    bridge.dispatchClick(PlaylistDetailWidget.Import);
+                                    navController.navigate(RouteImport(
+                                        type = RouteImportType.Music,
+                                        id = 0,
+                                    ))
                                 }
                             ),
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_edit,
                                 onClick = {
-                                    bridge.dispatchClick(PlaylistDetailWidget.Edit);
+                                    editPlaylistVM.openModal()
                                 }
                             ),
                             EaseContextMenuItem(
@@ -222,7 +235,7 @@ private fun PlaylistHeader(
                 maxLines = 2
             )
             Text(
-                text = "${items.size} ${stringResource(id = countSuffixStringId)} · ${duration}",
+                text = "${musics.size} ${stringResource(id = countSuffixStringId)} · ${duration}",
                 color = MaterialTheme.colorScheme.surface,
                 fontSize = 14.sp,
             )
@@ -260,16 +273,21 @@ private fun EmptyPlaylist() {
 
 @Composable
 private fun PlaylistItem(
-    item: VPlaylistMusicItem,
+    item: MusicAbstract,
     playing: Boolean,
     currentSwipingMusicId: MusicId?,
     onSwipe: () -> Unit,
     onRemove: () -> Unit,
+    playerVM: PlayerVM = viewModel()
 ) {
+    val navController = LocalNavController.current
+
+    val density = LocalDensity.current
     val panelWidthDp = 48.dp
 
-    val bridge = UIBridgeController.current
-    val density = LocalDensity.current
+    val id = item.meta.id
+    val title = item.meta.title
+    val duration = item.durationStr()
 
     val anchoredDraggableState = with(density) {
         rememberCustomAnchoredDraggableState(
@@ -299,7 +317,7 @@ private fun PlaylistItem(
     }
 
     LaunchedEffect(currentSwipingMusicId) {
-        if (currentSwipingMusicId != item.id) {
+        if (currentSwipingMusicId != id) {
             anchoredDraggableState.animateTo(0f)
         }
     }
@@ -326,7 +344,8 @@ private fun PlaylistItem(
                     }
                 )
                 .clickable {
-                    bridge.dispatchClick(PlaylistDetailWidget.Music(item.id));
+                    navController.navigate(RouteMusicPlayer)
+                    playerVM.play(id)
                     onSwipe()
                 }
                 .background(bgColor)
@@ -347,7 +366,7 @@ private fun PlaylistItem(
                         .size(24.dp)
                 )
                 Text(
-                    text = item.title,
+                    text = title,
                     color = color,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -356,7 +375,7 @@ private fun PlaylistItem(
             }
             Box(modifier = Modifier.width(16.dp))
             Text(
-                text = item.duration,
+                text = duration,
                 color = durationColor,
                 maxLines = 1,
                 modifier = Modifier.wrapContentWidth(),
@@ -392,14 +411,15 @@ private fun PlaylistItem(
 
 @Composable
 private fun PlaylistItemsBlock(
-    items: List<VPlaylistMusicItem>,
-    currentMusicState: VCurrentMusicState,
     scaffoldPadding: PaddingValues,
+    playlistVM: PlaylistVM = viewModel(),
+    playerVM: PlayerVM = viewModel()
 ) {
-    val bridge = UIBridgeController.current
     var swipingMusicId by remember {
         mutableStateOf<MusicId?>(null)
     }
+    val playlist by playlistVM.playlist.collectAsState()
+    val currentPlaying by playerVM.musicState.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -409,28 +429,29 @@ private fun PlaylistItemsBlock(
         item {
             Box(modifier = Modifier.height(48.dp))
         }
-        items(items) {
+        items(playlist.musics) {
             val item = it;
-            val playing = item.id == currentMusicState.id
+            val id = item.meta.id
+            val playing = id == currentPlaying.id
 
-            key(item.id) {
+            key(id) {
                 PlaylistItem(
                     item = item,
                     playing = playing,
                     currentSwipingMusicId = swipingMusicId,
-                    onSwipe = {swipingMusicId = item.id},
+                    onSwipe = {swipingMusicId = id},
                     onRemove = {
-                        if (swipingMusicId == item.id) {
+                        if (swipingMusicId == id) {
                             swipingMusicId = null
                         }
-                        bridge.dispatchClick(PlaylistDetailWidget.RemoveMusic(item.id));
+                        playlistVM.removeMusic(id)
                     }
                 )
             }
         }
         item {
             BottomBarSpacer(
-                hasCurrentMusic = currentMusicState.id != null,
+                hasCurrentMusic = currentPlaying.id != null,
                 scaffoldPadding = scaffoldPadding,
             )
         }
@@ -439,15 +460,10 @@ private fun PlaylistItemsBlock(
 
 @Composable
 fun PlaylistPage(
-    evm: EaseViewModel,
+    playlistVM: PlaylistVM = viewModel(),
     scaffoldPadding: PaddingValues,
 ) {
-    val bridge = UIBridgeController.current
-    val state = evm.currentPlaylistState.collectAsState().value
-    val currentMusicState = evm.currentMusicState.collectAsState().value
-    var removeDialogOpen by remember { mutableStateOf(false) }
-
-    val items = state.items
+    val playlist by playlistVM.playlist.collectAsState()
 
     Box(
         modifier = Modifier
@@ -455,21 +471,11 @@ fun PlaylistPage(
             .fillMaxSize()
     ) {
         Column {
-            PlaylistHeader(
-                cover = state.cover,
-                title = state.title,
-                duration = state.duration,
-                items = items,
-                onRemoveDialogOpen = {
-                    removeDialogOpen = true
-                },
-            )
-            if (items.isEmpty()) {
+            PlaylistHeader()
+            if (playlist.musics.isEmpty()) {
                 EmptyPlaylist()
             } else {
                 PlaylistItemsBlock(
-                    items = items,
-                    currentMusicState = currentMusicState,
                     scaffoldPadding = scaffoldPadding,
                 )
             }
@@ -483,22 +489,16 @@ fun PlaylistPage(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
-                disabled = items.isEmpty(),
+                disabled = playlist.musics.isEmpty(),
                 onClick = {
-                    bridge.dispatchClick(PlaylistDetailWidget.PlayAll);
+//                    TODO: bridge.dispatchClick(PlaylistDetailWidget.PlayAll);
                 }
             )
         }
         BottomBar(
-            currentRoute = RoutesKey.PLAYLIST,
             bottomBarPageState = null,
-            evm = evm,
             scaffoldPadding = scaffoldPadding,
         )
     }
-    RemovePlaylistDialog(
-        title = state.title,
-        open = removeDialogOpen,
-        onClose = { removeDialogOpen = false }
-    )
+    RemovePlaylistDialog()
 }

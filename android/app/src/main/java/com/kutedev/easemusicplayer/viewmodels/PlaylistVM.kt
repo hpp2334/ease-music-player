@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import uniffi.ease_client_backend.MusicAbstract
+import uniffi.ease_client_backend.MusicId
 import uniffi.ease_client_backend.Playlist
 import uniffi.ease_client_backend.PlaylistAbstract
 import uniffi.ease_client_backend.PlaylistId
@@ -37,6 +39,8 @@ class PlaylistVM @Inject constructor() : ViewModel() {
 
     fun remove() {}
 
+    fun removeMusic(id: MusicId) {}
+
     fun openRemoveModal() {}
 
     fun closeRemoveModal() {}
@@ -46,9 +50,9 @@ class PlaylistVM @Inject constructor() : ViewModel() {
     fun closeEditModal() {}
 }
 
-fun PlaylistAbstract.durationStr(): String {
+private fun _durationStr(duration: Duration?): String {
     if (duration != null) {
-        val all = duration!!.toMillis()
+        val all = duration.toMillis()
         val h = all / 1000 / 60 / 60
         val m = all / 1000 / 60 % 60
         val s = all / 1000 % 60
@@ -56,4 +60,12 @@ fun PlaylistAbstract.durationStr(): String {
     } else {
         return ""
     }
+}
+
+fun PlaylistAbstract.durationStr(): String {
+    return _durationStr(duration)
+}
+
+fun MusicAbstract.durationStr(): String {
+    return _durationStr(meta.duration)
 }

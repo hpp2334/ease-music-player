@@ -6,7 +6,6 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import kotlinx.serialization.Serializable
-import uniffi.ease_client_backend.MusicId
 
 @Serializable
 object RouteHome
@@ -21,7 +20,9 @@ data class RoutePlaylist(
 
 enum class RouteImportType {
     Music,
-    Lyric
+    Lyric,
+    EditPlaylist,
+    EditPlaylistCover
 }
 
 @Serializable

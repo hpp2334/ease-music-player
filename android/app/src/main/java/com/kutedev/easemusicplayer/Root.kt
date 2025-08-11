@@ -16,10 +16,20 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.widgets.LocalNavController
+import com.kutedev.easemusicplayer.widgets.RouteAddDevices
 import com.kutedev.easemusicplayer.widgets.RouteHome
+import com.kutedev.easemusicplayer.widgets.RouteImport
+import com.kutedev.easemusicplayer.widgets.RouteMusicPlayer
+import com.kutedev.easemusicplayer.widgets.RoutePlaylist
 import com.kutedev.easemusicplayer.widgets.RoutesProvider
+import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
+import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
+import com.kutedev.easemusicplayer.widgets.musics.ImportMusicsPage
+import com.kutedev.easemusicplayer.widgets.musics.MusicPlayerPage
 import com.kutedev.easemusicplayer.widgets.playlists.CreatePlaylistsDialog
+import com.kutedev.easemusicplayer.widgets.playlists.EditPlaylistsDialog
+import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
 
 @Composable
 fun Root() {
@@ -82,28 +92,23 @@ fun Root() {
                                 )
                                 CreatePlaylistsDialog()
                             }
-                            composable(RoutesKey.ADD_DEVICES.value) {
-//                                EditStoragesPage(
-//                                    evm = evm,
-//                                )
+                            composable<RouteAddDevices> {
+                                EditStoragesPage()
                             }
-                            composable(RoutesKey.PLAYLIST.value) {
-//                                PlaylistPage(
-//                                    evm = evm,
-//                                    scaffoldPadding = scaffoldPadding,
-//                                )
-//                                EditPlaylistsDialog(evm = evm)
+                            composable<RoutePlaylist> {
+                                PlaylistPage(
+                                    scaffoldPadding = scaffoldPadding,
+                                )
+                                EditPlaylistsDialog()
                             }
-                            composable(RoutesKey.IMPORT_MUSICS.value) {
-//                                ImportMusicsPage(evm = evm)
+                            composable<RouteImport> {
+                                ImportMusicsPage()
                             }
-                            composable(RoutesKey.MUSIC_PLAYER.value) {
-//                                MusicPlayerPage(
-//                                    evm = evm
-//                                )
+                            composable<RouteMusicPlayer> {
+                                MusicPlayerPage()
                             }
                         }
-//                        TimeToPauseModal(evm = evm)
+                        TimeToPauseModal()
                     }
                 }
             }
