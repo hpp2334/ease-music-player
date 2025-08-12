@@ -2,16 +2,12 @@ use std::{sync::Arc, time::Duration};
 
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, WriteTransaction};
 
-use crate::{
-    error::BResult,
-    models::{DbKeyAlloc, MusicModel},
-    objects::{BlobId, MusicId, PlaylistId, StorageEntryLoc},
-};
+use crate::error::BResult;
 
-use super::{
-    bin::BinSerde,
-    core::DatabaseServer,
-    defs::{TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC},
+use super::core::DatabaseServer;
+use ease_client_schema::{
+    BinSerde, BlobId, DbKeyAlloc, MusicId, MusicModel, PlaylistId, StorageEntryLoc, TABLE_MUSIC,
+    TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC,
 };
 
 #[derive(Debug)]

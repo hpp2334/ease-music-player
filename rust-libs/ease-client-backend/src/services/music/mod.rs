@@ -1,14 +1,12 @@
 use std::time::Duration;
 
+use ease_client_schema::{DataSourceKey, MusicId, MusicModel, PlaylistId, StorageEntryLoc};
+
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    models::MusicModel,
-    objects::{
-        DataSourceKey, LyricLoadState, Music, MusicAbstract, MusicId, MusicLyric, MusicMeta,
-        StorageEntryLoc,
-    },
-    PlaylistId, StorageEntry,
+    objects::{LyricLoadState, Music, MusicAbstract, MusicLyric, MusicMeta},
+    StorageEntry,
 };
 
 use super::{lyrics::parse_lrc, storage::load_storage_entry_data};

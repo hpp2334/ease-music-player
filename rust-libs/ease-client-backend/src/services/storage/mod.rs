@@ -7,9 +7,9 @@ use std::{
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    models::StorageModel,
-    objects::{ArgUpsertStorage, Storage, StorageEntryLoc, StorageId, StorageType},
+    objects::{ArgUpsertStorage, Storage},
 };
+use ease_client_schema::{StorageEntryLoc, StorageId, StorageModel, StorageType};
 use ease_remote_storage::{
     BuildOneDriveArg, BuildWebdavArg, LocalBackend, OneDriveBackend, StorageBackend, Webdav,
 };

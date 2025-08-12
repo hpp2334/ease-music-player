@@ -1,13 +1,8 @@
 use std::time::Duration;
 
-use crate::define_id;
+use ease_client_schema::{DataSourceKey, PlaylistId, StorageEntryLoc};
 
-use super::{
-    music::MusicAbstract,
-    storage::{DataSourceKey, StorageEntryLoc},
-};
-
-define_id!(PlaylistId);
+use super::music::MusicAbstract;
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct PlaylistMeta {

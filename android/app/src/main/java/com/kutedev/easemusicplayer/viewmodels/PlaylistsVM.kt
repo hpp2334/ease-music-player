@@ -16,15 +16,5 @@ data class PlaylistsState(
 @HiltViewModel
 class PlaylistsVM @Inject constructor() : ViewModel() {
     private val _state = MutableStateFlow(PlaylistsState())
-    private val _modalOpen = MutableStateFlow(false)
     val state = _state.asStateFlow()
-    val modalOpen = _modalOpen.asStateFlow()
-
-    fun openModal() {
-
-    }
-
-    fun closeModal() {
-
-    }
 }

@@ -6,7 +6,6 @@ pub(crate) mod controllers;
 pub(crate) mod ctx;
 pub mod error;
 mod infra;
-pub(crate) mod models;
 mod objects;
 pub(crate) mod repositories;
 pub(crate) mod services;

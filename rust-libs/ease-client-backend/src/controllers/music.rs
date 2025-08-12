@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use ease_client_schema::MusicId;
+
 use crate::{
     error::BResult,
-    objects::{Music, MusicId},
+    objects::Music,
     services::{get_music, ArgUpdateMusicLyric},
     Backend,
 };

@@ -1,62 +1,9 @@
+use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc, StorageId, StorageType};
 use serde::{Deserialize, Serialize};
 
-use crate::{define_id, objects::EASEM_ONEDRIVE_ID};
+use crate::objects::EASEM_ONEDRIVE_ID;
 
-use super::{music::MusicId, playlist::PlaylistId};
-
-define_id!(StorageId);
-define_id!(BlobId);
-
-#[derive(
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    Hash,
-    PartialEq,
-    Eq,
-    bitcode::Encode,
-    bitcode::Decode,
-    uniffi::Record,
-    PartialOrd,
-    Ord,
-)]
-pub struct StorageEntryLoc {
-    pub storage_id: StorageId,
-    pub path: String,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Hash,
-    PartialEq,
-    Eq,
-    bitcode::Encode,
-    bitcode::Decode,
-    uniffi::Enum,
-)]
-pub enum DataSourceKey {
-    Music { id: MusicId },
-    Cover { id: MusicId },
-    AnyEntry { entry: StorageEntryLoc },
-}
-
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Default, Hash, bitcode::Encode, bitcode::Decode, uniffi::Enum,
-)]
-pub enum StorageType {
-    Local,
-    #[default]
-    Webdav,
-    OneDrive,
-}
-
-#[derive(
-    Debug, Clone, Serialize, Deserialize, bitcode::Encode, bitcode::Decode, uniffi::Record,
-)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct StorageEntry {
     pub storage_id: StorageId,
     pub name: String,
@@ -76,19 +23,7 @@ pub struct ArgUpsertStorage {
     pub typ: StorageType,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Default,
-    bitcode::Encode,
-    bitcode::Decode,
-    uniffi::Enum,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
 pub enum StorageConnectionTestResult {
     #[default]
     None,

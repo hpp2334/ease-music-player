@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use ease_client_schema::TABLE_SCHEMA_VERSION;
+
 use crate::error::BResult;
 
-use super::{core::DatabaseServer, defs::TABLE_SCHEMA_VERSION};
+use super::core::DatabaseServer;
 
 impl DatabaseServer {
     pub fn get_schema_version(self: &Arc<Self>) -> BResult<u32> {

@@ -1,6 +1,8 @@
-use crate::objects::{MusicId, PlaylistId, StorageEntryLoc};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+use super::super::objects::{MusicId, PlaylistId, StorageEntryLoc};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistModel {
     pub id: PlaylistId,
     pub title: String,
@@ -8,7 +10,7 @@ pub struct PlaylistModel {
     pub picture: Option<StorageEntryLoc>,
 }
 
-#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistMusicModel {
     pub playlist_id: PlaylistId,
     pub music_id: MusicId,

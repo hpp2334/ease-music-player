@@ -2,18 +2,12 @@ use std::sync::Arc;
 
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
-use crate::{
-    error::BResult,
-    models::{DbKeyAlloc, LegacyMusicModelV2, MusicModel, StorageModel},
-    objects::{ArgUpsertStorage, BlobId, MusicId, StorageId},
-};
+use crate::{error::BResult, objects::ArgUpsertStorage};
 
-use super::{
-    core::DatabaseServer,
-    defs::{
-        TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE,
-        TABLE_STORAGE_MUSIC,
-    },
+use super::core::DatabaseServer;
+use ease_client_schema::{
+    BlobId, DbKeyAlloc, MusicId, StorageId, StorageModel, TABLE_MUSIC, TABLE_MUSIC_BY_LOC,
+    TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE, TABLE_STORAGE_MUSIC,
 };
 
 impl DatabaseServer {
@@ -173,28 +167,6 @@ impl DatabaseServer {
             }
         }
 
-        db.commit()?;
-
-        Ok(())
-    }
-
-    pub fn upgrade_schema_to_v3(self: &Arc<Self>) -> BResult<()> {
-        let db = self.db().begin_write()?;
-        {
-            let legacy_table = db.open_table(super::defs::LEGACY_TABLE_MUSIC_V2)?;
-            let mut new_table = db.open_table(TABLE_MUSIC)?;
-
-            let mut iter = legacy_table.iter()?;
-            for v in iter.by_ref() {
-                let (k, v) = v?;
-                let legacy: LegacyMusicModelV2 = v.value();
-                let new: MusicModel = legacy.into();
-                new_table.insert(k.value(), new)?;
-            }
-
-            drop(iter);
-            db.delete_table(super::defs::LEGACY_TABLE_MUSIC_V2)?;
-        }
         db.commit()?;
 
         Ok(())

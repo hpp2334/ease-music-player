@@ -1,18 +1,16 @@
 use std::sync::Arc;
 
+use ease_client_schema::{StorageEntryLoc, StorageId};
 use ease_remote_storage::OneDriveBackend;
 
 use crate::{
     error::BResult,
-    objects::{
-        ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult, StorageEntry,
-        StorageEntryLoc,
-    },
+    objects::{ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult, StorageEntry},
     services::{
         build_storage_backend_by_arg, evict_storage_backend_cache, get_storage_backend,
         list_storage,
     },
-    ArgUpsertStorage, Backend, StorageId,
+    ArgUpsertStorage, Backend,
 };
 
 #[uniffi::export]

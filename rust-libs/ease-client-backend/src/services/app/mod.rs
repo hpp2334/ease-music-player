@@ -1,8 +1,6 @@
-use crate::{
-    ctx::BackendContext,
-    error::BResult,
-    objects::{ArgUpsertStorage, StorageType},
-};
+use ease_client_schema::StorageType;
+
+use crate::{ctx::BackendContext, error::BResult, objects::ArgUpsertStorage};
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ArgInitializeApp {
@@ -33,7 +31,7 @@ fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
         if old_schema_version < 1 {
             init_local_storage(cx)?;
         } else if old_schema_version < 3 {
-            cx.database_server().upgrade_schema_to_v3()?;
+            // cx.database_server().upgrade_schema_to_v3()?;
             if old_schema_version < 2 {
                 cx.database_server()
                     .cleanup_invalid_storage_music_entries()?;

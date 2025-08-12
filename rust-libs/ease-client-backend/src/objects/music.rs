@@ -1,15 +1,8 @@
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use ease_client_schema::{DataSourceKey, MusicId, StorageEntryLoc};
 
-use crate::define_id;
-
-use super::{
-    lyric::Lyrics,
-    storage::{DataSourceKey, StorageEntryLoc},
-};
-
-define_id!(MusicId);
+use super::lyric::Lyrics;
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct MusicMeta {

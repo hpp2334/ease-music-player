@@ -21,7 +21,7 @@ import dagger.hilt.android.lifecycle.withCreationCallback
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    private val bridge = Bridge(this);
+    private lateinit var bridge: Bridge
     private val _appVM by viewModels<AppVM>(
         extrasProducer = {
             defaultViewModelCreationExtras.withCreationCallback<
@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(null)
         enableEdgeToEdge()
 
+        bridge = Bridge(this);
         bridge.initialize();
         startService(Intent(this, BackendService::class.java))
 

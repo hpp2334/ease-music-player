@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
-use crate::{error::BResult, models::PreferenceModel};
+use ease_client_schema::{PreferenceModel, TABLE_PREFERENCE};
 
-use super::{core::DatabaseServer, defs::TABLE_PREFERENCE};
+use crate::error::BResult;
+
+use super::core::DatabaseServer;
 
 impl DatabaseServer {
     pub fn load_preference(self: &Arc<Self>) -> BResult<PreferenceModel> {

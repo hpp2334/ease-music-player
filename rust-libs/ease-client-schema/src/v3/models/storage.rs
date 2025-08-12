@@ -1,6 +1,8 @@
-use crate::objects::{StorageId, StorageType};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+use super::super::objects::{StorageId, StorageType};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageModel {
     pub id: StorageId,
     pub addr: String,

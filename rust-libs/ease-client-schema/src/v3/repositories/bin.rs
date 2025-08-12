@@ -1,4 +1,5 @@
 use redb::TypeName;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Debug)]
@@ -6,13 +7,15 @@ pub struct BinSerde<T>(T);
 
 impl<T> redb::Value for BinSerde<T>
 where
-    T: Debug + bitcode::Encode + for<'a> bitcode::Decode<'a>,
+    T: Debug + Serialize + for<'a> Deserialize<'a>,
 {
-    type SelfType<'a> = T
+    type SelfType<'a>
+        = T
     where
         Self: 'a;
 
-    type AsBytes<'a> = Vec<u8>
+    type AsBytes<'a>
+        = Vec<u8>
     where
         Self: 'a;
 
@@ -24,7 +27,7 @@ where
     where
         Self: 'a,
     {
-        bitcode::decode(data).unwrap()
+        postcard::from_bytes(data).unwrap()
     }
 
     fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
@@ -32,7 +35,7 @@ where
         Self: 'a,
         Self: 'b,
     {
-        bitcode::encode(value)
+        postcard::to_allocvec(value).unwrap()
     }
 
     fn type_name() -> TypeName {
@@ -42,7 +45,7 @@ where
 
 impl<T> redb::Key for BinSerde<T>
 where
-    T: Debug + bitcode::Encode + bitcode::DecodeOwned + Ord,
+    T: Debug + Serialize + for<'a> Deserialize<'a> + Ord,
 {
     fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
         <Self as redb::Value>::from_bytes(data1).cmp(&<Self as redb::Value>::from_bytes(data2))

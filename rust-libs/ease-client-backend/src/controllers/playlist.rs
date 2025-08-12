@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use ease_client_schema::{PlaylistId, StorageEntryLoc};
+
 use crate::{
     error::BResult,
-    objects::{Playlist, PlaylistAbstract, PlaylistId, StorageEntryLoc},
+    objects::{Playlist, PlaylistAbstract},
     repositories::music::ArgDBAddMusic,
     services::{
         get_all_playlist_abstracts, get_playlist, ArgAddMusicsToPlaylist, ArgCreatePlaylist,

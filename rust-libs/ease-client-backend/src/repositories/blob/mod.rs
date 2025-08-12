@@ -1,17 +1,14 @@
 use std::{path::PathBuf, sync::Arc};
 
-use redb::{ReadableTable, TableDefinition};
+use ease_client_schema::{BlobId, TABLE_BLOB};
+use redb::ReadableTable;
 
-use crate::{error::BResult, objects::BlobId};
-
-use super::bin::BinSerde;
+use crate::error::BResult;
 
 pub struct BlobManager {
     dir: String,
     db: redb::Database,
 }
-
-const TABLE_BLOB: TableDefinition<(), BinSerde<BlobId>> = TableDefinition::new("blob");
 
 fn blobs_path(dir: &str) -> PathBuf {
     std::path::Path::new(dir).join("blobs")
@@ -35,7 +32,7 @@ impl BlobManager {
             .set_cache_size(20 << 20)
             .create(db_path(&dir))
             .unwrap();
-        
+
         Arc::new(Self { dir, db })
     }
 

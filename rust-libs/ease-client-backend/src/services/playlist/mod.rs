@@ -1,12 +1,11 @@
 use std::time::Duration;
 
+use ease_client_schema::{DataSourceKey, MusicId, PlaylistId, PlaylistModel};
+
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    models::PlaylistModel,
-    objects::{
-        DataSourceKey, MusicAbstract, MusicId, Playlist, PlaylistAbstract, PlaylistId, PlaylistMeta,
-    },
+    objects::{MusicAbstract, Playlist, PlaylistAbstract, PlaylistMeta},
 };
 
 use super::music::build_music_abstract;
