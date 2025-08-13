@@ -29,7 +29,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
-import uniffi.ease_client_backend.MusicId
+import uniffi.ease_client_schema.MusicId
 
 
 const val BACKEND_STARTED_ACTION = "BACKEND_STARTED_ACTION"

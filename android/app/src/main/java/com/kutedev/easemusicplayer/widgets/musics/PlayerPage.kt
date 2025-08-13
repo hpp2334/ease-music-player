@@ -72,10 +72,10 @@ import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.widgets.LocalNavController
 import com.kutedev.easemusicplayer.widgets.RouteImport
 import com.kutedev.easemusicplayer.widgets.RouteImportType
-import uniffi.ease_client_backend.DataSourceKey
+import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_backend.LyricLine
 import uniffi.ease_client_backend.LyricLoadState
-import uniffi.ease_client_backend.PlayMode
+import uniffi.ease_client_schema.PlayMode
 import java.time.Duration
 import kotlin.math.absoluteValue
 import kotlin.math.sign

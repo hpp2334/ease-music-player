@@ -36,7 +36,7 @@ import com.kutedev.easemusicplayer.components.MusicCover
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.widgets.LocalNavController
 import com.kutedev.easemusicplayer.widgets.RouteMusicPlayer
-import uniffi.ease_client_backend.DataSourceKey
+import uniffi.ease_client_schema.DataSourceKey
 
 @Composable
 private fun MiniPlayerCore(

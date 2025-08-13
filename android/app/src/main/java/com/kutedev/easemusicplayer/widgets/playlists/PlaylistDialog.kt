@@ -197,7 +197,7 @@ private fun FullImportBlock(
 fun CreatePlaylistsDialog(
     editPlaylistVM: EditPlaylistVM = viewModel()
 ) {
-    val isOpen by editPlaylistVM.modalOpen.collectAsState()
+    val isOpen by editPlaylistVM.createModalOpen.collectAsState()
     val mode by editPlaylistVM.mode.collectAsState()
     val name by editPlaylistVM.name.collectAsState()
     val fullImported by editPlaylistVM.fullImported.collectAsState()
@@ -294,7 +294,7 @@ fun EditPlaylistsDialog(
 ) {
     val navController = LocalNavController.current
 
-    val isOpen by editPlaylistVM.modalOpen.collectAsState()
+    val isOpen by editPlaylistVM.editModalOpen.collectAsState()
     val mode by editPlaylistVM.mode.collectAsState()
     val name by editPlaylistVM.name.collectAsState()
     val cover by editPlaylistVM.cover.collectAsState()

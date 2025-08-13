@@ -5,10 +5,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import uniffi.ease_client_backend.MusicAbstract
-import uniffi.ease_client_backend.MusicId
+import uniffi.ease_client_schema.MusicId
 import uniffi.ease_client_backend.Playlist
 import uniffi.ease_client_backend.PlaylistAbstract
-import uniffi.ease_client_backend.PlaylistId
+import uniffi.ease_client_schema.PlaylistId
 import uniffi.ease_client_backend.PlaylistMeta
 import java.time.Duration
 import javax.inject.Inject

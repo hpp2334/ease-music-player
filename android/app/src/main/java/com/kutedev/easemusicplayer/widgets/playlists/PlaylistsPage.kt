@@ -29,7 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.buildAnnotatedString
@@ -39,18 +38,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsVM
 import com.kutedev.easemusicplayer.viewmodels.durationStr
 import com.kutedev.easemusicplayer.widgets.LocalNavController
 import com.kutedev.easemusicplayer.widgets.RoutePlaylist
-import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
-import uniffi.ease_client_backend.DataSourceKey
-import uniffi.ease_client_backend.Playlist
+import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_backend.PlaylistAbstract
 
 @Composable
 fun PlaylistsSubpage(
-    playlistsVM: PlaylistsVM = viewModel()
+    playlistsVM: PlaylistsVM = viewModel(),
+    editPlaylistVM: EditPlaylistVM = viewModel()
 ) {
     val state by playlistsVM.state.collectAsState()
 
@@ -63,7 +62,7 @@ fun PlaylistsSubpage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .clickable {
-                        playlistsVM.openModal()
+                        editPlaylistVM.openCreateModal()
                     }
                     .clip(RoundedCornerShape(16.dp))
                     .padding(24.dp, 24.dp),
@@ -91,7 +90,7 @@ fun PlaylistsSubpage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        playlistsVM.openModal()
+                        editPlaylistVM.openCreateModal()
                     }
                 )
             }

@@ -18,10 +18,11 @@ import com.kutedev.easemusicplayer.viewmodels.getAppVersion
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.lifecycle.withCreationCallback
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    private lateinit var bridge: Bridge
+    @Inject lateinit var bridge: Bridge
     private val _appVM by viewModels<AppVM>(
         extrasProducer = {
             defaultViewModelCreationExtras.withCreationCallback<
@@ -35,7 +36,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(null)
         enableEdgeToEdge()
 
-        bridge = Bridge(this);
         bridge.initialize();
         startService(Intent(this, BackendService::class.java))
 

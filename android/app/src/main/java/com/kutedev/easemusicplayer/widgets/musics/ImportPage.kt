@@ -483,7 +483,7 @@ fun ImportMusicsPage(
     }
     Column(
         modifier = Modifier
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .fillMaxSize()
     ) {
         Row(

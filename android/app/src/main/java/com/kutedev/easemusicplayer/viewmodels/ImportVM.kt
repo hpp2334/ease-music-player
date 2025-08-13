@@ -9,8 +9,8 @@ import uniffi.ease_client_backend.CurrentStorageStateType
 import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_backend.StorageEntry
 import uniffi.ease_client_backend.StorageEntryType
-import uniffi.ease_client_backend.StorageId
-import uniffi.ease_client_backend.StorageType
+import uniffi.ease_client_schema.StorageId
+import uniffi.ease_client_schema.StorageType
 
 data class SplitPathItem(
         val path: String,

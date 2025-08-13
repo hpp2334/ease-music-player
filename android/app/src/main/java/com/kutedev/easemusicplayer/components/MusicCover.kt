@@ -11,7 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import com.kutedev.easemusicplayer.R
-import uniffi.ease_client_backend.DataSourceKey
+import uniffi.ease_client_schema.DataSourceKey
 
 @Composable
 fun MusicCover(

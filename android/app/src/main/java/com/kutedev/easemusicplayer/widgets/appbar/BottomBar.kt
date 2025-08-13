@@ -37,6 +37,7 @@ import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.widgets.LocalNavController
 import com.kutedev.easemusicplayer.widgets.RouteHome
 import com.kutedev.easemusicplayer.widgets.RoutePlaylist
+import com.kutedev.easemusicplayer.widgets.matches
 import com.kutedev.easemusicplayer.widgets.musics.MiniPlayer
 import kotlinx.coroutines.launch
 
@@ -104,9 +105,8 @@ fun BoxScope.BottomBar(
 
     val hasCurrentMusic = state.id != null
 
-
-    val showBottomBar = currentRoute == RouteHome
-    val showMiniPlayer = hasCurrentMusic && (currentRoute == RouteHome || currentRoute == RoutePlaylist)
+    val showBottomBar = currentRoute?.matches<RouteHome>() == true
+    val showMiniPlayer = hasCurrentMusic && (currentRoute?.matches<RouteHome>() == true || currentRoute?.matches<RoutePlaylist>() == true)
 
     if (!showBottomBar && !showMiniPlayer) {
         Box(modifier = Modifier
@@ -126,7 +126,7 @@ fun BoxScope.BottomBar(
                 8.dp,
             )
             .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .fillMaxWidth()
     ) {
         if (showMiniPlayer) {

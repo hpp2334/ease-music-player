@@ -39,7 +39,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import uniffi.ease_client_backend.Storage
-import uniffi.ease_client_backend.StorageType
+import uniffi.ease_client_schema.StorageType
 
 private val paddingX = 24.dp
 private val paddingY = 12.dp

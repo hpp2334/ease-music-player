@@ -57,7 +57,7 @@ import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.widgets.LocalNavController
 import kotlinx.coroutines.flow.update
 import uniffi.ease_client_backend.StorageConnectionTestResult
-import uniffi.ease_client_backend.StorageType
+import uniffi.ease_client_schema.StorageType
 
 
 private fun buildStr(s: String): AnnotatedString {

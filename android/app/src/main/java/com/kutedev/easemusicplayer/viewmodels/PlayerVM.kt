@@ -5,12 +5,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import uniffi.ease_client_backend.DataSourceKey
+import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_backend.LrcMetadata
 import uniffi.ease_client_backend.Lyrics
-import uniffi.ease_client_backend.MusicId
-import uniffi.ease_client_backend.PlayMode
-import uniffi.ease_client_backend.PlaylistId
+import uniffi.ease_client_schema.MusicId
+import uniffi.ease_client_schema.PlayMode
+import uniffi.ease_client_schema.PlaylistId
 import javax.inject.Inject
 
 data class MusicState(

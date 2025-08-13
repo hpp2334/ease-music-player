@@ -5,8 +5,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import uniffi.ease_client_backend.Storage
-import uniffi.ease_client_backend.StorageId
-import uniffi.ease_client_backend.StorageType
+import uniffi.ease_client_schema.StorageId
+import uniffi.ease_client_schema.StorageType
 import javax.inject.Inject
 
 

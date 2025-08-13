@@ -9,7 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import com.kutedev.easemusicplayer.core.DataSourceKeyH
-import uniffi.ease_client_backend.DataSourceKey
+import uniffi.ease_client_schema.DataSourceKey
 
 @Composable
 fun EaseImage(

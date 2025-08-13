@@ -13,9 +13,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import dagger.hilt.android.qualifiers.ApplicationContext
 import uniffi.ease_client_backend.ArgInitializeApp
 import uniffi.ease_client_backend.Backend
 import uniffi.ease_client_backend.createBackend
+import javax.inject.Inject
+import javax.inject.Singleton
 
 
 private fun normalizePath(p: String): String {
@@ -26,7 +29,10 @@ private fun normalizePath(p: String): String {
 }
 
 
-class Bridge(cx: Context) {
+@Singleton
+class Bridge @Inject constructor(
+    @ApplicationContext cx: Context
+)  {
     private val _storagePath = "/"
     private val _backend: Backend = createBackend(
         ArgInitializeApp(

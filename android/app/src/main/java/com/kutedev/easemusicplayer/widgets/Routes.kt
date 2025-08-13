@@ -3,6 +3,7 @@ package com.kutedev.easemusicplayer.widgets
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import kotlinx.serialization.Serializable
@@ -36,6 +37,10 @@ object RouteMusicPlayer
 
 val LocalNavController = compositionLocalOf<NavHostController> {
     error("No LocalNavController provided")
+}
+
+inline fun <reified T: Any> NavBackStackEntry.matches(): Boolean {
+    return T::class.qualifiedName == destination.route
 }
 
 @Composable

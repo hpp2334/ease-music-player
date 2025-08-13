@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_backend.StorageEntry
 import uniffi.ease_client_backend.StorageEntryType
-import uniffi.ease_client_backend.StorageId
+import uniffi.ease_client_schema.StorageId
 
 @HiltViewModel
 class StoragesVM @Inject constructor() : ViewModel() {

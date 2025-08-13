@@ -1,6 +1,6 @@
 package com.kutedev.easemusicplayer.core
 
-import uniffi.ease_client_backend.DataSourceKey
+import uniffi.ease_client_schema.DataSourceKey
 
 
 class DataSourceKeyH(key: DataSourceKey) {
