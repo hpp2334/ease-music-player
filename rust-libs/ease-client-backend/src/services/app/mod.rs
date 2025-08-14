@@ -10,6 +10,7 @@ pub struct ArgInitializeApp {
 }
 
 pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
+    tracing::info!("app bootstrap: {:?}", arg);
     cx.set_storage_path(&arg.storage_path);
     // Init
     init_database(cx, &arg)?;

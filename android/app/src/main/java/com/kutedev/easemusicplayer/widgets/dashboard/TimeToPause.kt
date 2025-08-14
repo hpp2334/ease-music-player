@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.graphics.ColorUtils
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseTextButton
@@ -270,12 +271,10 @@ private fun TimeToPauseModalCore(
 }
 
 @Composable
-fun TimeToPauseModal(sleepModeVM: SleepModeVM = viewModel()) {
+fun TimeToPauseModal(sleepModeVM: SleepModeVM = hiltViewModel()) {
     val state by sleepModeVM.state.collectAsState()
     val modalOpen by sleepModeVM.modalOpen.collectAsState()
-
-    val leftHour = 0
-    val leftMinute = 0
+    val editLeftTime by sleepModeVM.editLeftTime.collectAsState()
 
     val onClose = {
         sleepModeVM.closeModal()
@@ -283,8 +282,8 @@ fun TimeToPauseModal(sleepModeVM: SleepModeVM = viewModel()) {
 
     TimeToPauseModalCore(
         isOpen = modalOpen,
-        initHours = leftHour,
-        initMinutes = leftMinute,
+        initHours = editLeftTime.hour,
+        initMinutes = editLeftTime.minute,
         deleteEnabled = state.enabled,
         onCancel = onClose,
         onConfirm = { hour, minute ->

@@ -12,9 +12,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.kutedev.easemusicplayer.core.BackendService
 import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.viewmodels.AppVM
-import com.kutedev.easemusicplayer.viewmodels.AppVMFactory
-import com.kutedev.easemusicplayer.viewmodels.getAppVersion
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.lifecycle.withCreationCallback
@@ -23,17 +20,9 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     @Inject lateinit var bridge: Bridge
-    private val _appVM by viewModels<AppVM>(
-        extrasProducer = {
-            defaultViewModelCreationExtras.withCreationCallback<
-                    AppVMFactory> { factory ->
-                factory.create(getAppVersion(context = this.applicationContext))
-            }
-        }
-    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(null)
+        super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         bridge.initialize();

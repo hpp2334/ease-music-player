@@ -21,7 +21,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,11 +35,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.viewmodels.SleepModeLeftTime
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import uniffi.ease_client_backend.Storage
@@ -54,7 +60,7 @@ private fun Title(title: String) {
 }
 
 @Composable
-private fun SleepModeBlock(vm: SleepModeVM = viewModel()) {
+private fun SleepModeBlock(vm: SleepModeVM = hiltViewModel()) {
     val state by vm.state.collectAsState()
     val blockBg = if (state.enabled) {
         MaterialTheme.colorScheme.secondary
@@ -67,6 +73,15 @@ private fun SleepModeBlock(vm: SleepModeVM = viewModel()) {
         MaterialTheme.colorScheme.onSurface
     }
 
+    var leftTime by remember { mutableStateOf(SleepModeLeftTime(state.expiredMs - System.currentTimeMillis())) }
+
+    LaunchedEffect(state.expiredMs, state.enabled) {
+        while (true) {
+            kotlinx.coroutines.delay(1_000)
+            leftTime = SleepModeLeftTime(state.expiredMs - System.currentTimeMillis())
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -74,7 +89,7 @@ private fun SleepModeBlock(vm: SleepModeVM = viewModel()) {
             .padding(paddingX, 0.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable {
-//                TODO: bridge.dispatchClick(MainBodyWidget.TimeToPause)
+                vm.openModal(leftTime)
             },
     ) {
         Row(
@@ -86,8 +101,7 @@ private fun SleepModeBlock(vm: SleepModeVM = viewModel()) {
                 .padding(32.dp, 24.dp),
         ) {
             Text(
-//                TODO: text = "${state.leftHour.toString().padStart(2, '0')}:${state.leftMinute.toString().padStart(2, '0')}",
-                text = "",
+                text = "${leftTime.hour.toString().padStart(2, '0')}:${leftTime.minute.toString().padStart(2, '0')}",
                 fontSize = 32.sp,
                 color = tint,
             )
@@ -109,14 +123,15 @@ private fun ColumnScope.DevicesBlock(storageItems: List<Storage>) {
             .padding(paddingX, paddingY)
     ) {
         if (storageItems.isEmpty()) {
-            Box(modifier = Modifier
-                .fillMaxWidth()
-                .height(72.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable {
 //                    TODO: toEditStorage(bridge, null)
-                }
+                    }
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -151,8 +166,9 @@ private fun ColumnScope.DevicesBlock(storageItems: List<Storage>) {
                     painter = painterResource(id = R.drawable.icon_cloud),
                     contentDescription = null
                 )
-                Box(modifier = Modifier
-                    .width(20.dp)
+                Box(
+                    modifier = Modifier
+                        .width(20.dp)
                 )
                 Column {
                     Text(
