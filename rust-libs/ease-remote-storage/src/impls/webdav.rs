@@ -1,7 +1,7 @@
 use crate::backend::{Entry, StorageBackend, StorageBackendResult, StreamFile};
 use crate::StorageBackendError;
 
-
+use ease_client_tokio::tokio_runtime;
 use futures_util::future::BoxFuture;
 use reqwest::header::HeaderValue;
 use reqwest::{StatusCode, Url};
@@ -170,7 +170,7 @@ impl Webdav {
         let mut url = reqwest::Url::parse(&self.addr)
             .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
         let base = url.path();
-        url.set_path(&(base.trim_end_matches('/').to_string() + "/" + dir.trim_start_matches('/')));    
+        url.set_path(&(base.trim_end_matches('/').to_string() + "/" + dir.trim_start_matches('/')));
         Ok(url)
     }
 
@@ -185,19 +185,27 @@ impl Webdav {
         let url = self.get_url(dir)?;
 
         let method = reqwest::Method::from_bytes(b"PROPFIND").unwrap();
-        let resp = self
-            .build_client()?
-            .request(method.clone(), url.clone())
-            .headers(self.build_base_header_map(method.clone(), &url))
-            .header("Depth", 1)
-            .body(
-                r#"<?xml version="1.0" ?>
-            <D:propfind xmlns:D="DAV:">
-            <D:allprop/>
-            </D:propfind>"#,
-            )
-            .send()
-            .await?;
+        let resp = {
+            let client = self.build_client()?;
+            let headers = self.build_base_header_map(method.clone(), &url);
+
+            tokio_runtime()
+                .spawn(async move {
+                    client
+                        .request(method.clone(), url.clone())
+                        .headers(headers)
+                        .header("Depth", 1)
+                        .body(
+                            r#"<?xml version="1.0" ?>
+                <D:propfind xmlns:D="DAV:">
+                <D:allprop/>
+                </D:propfind>"#,
+                        )
+                        .send()
+                        .await
+                })
+                .await??
+        };
         self.post_handle_response(&resp);
 
         Ok(resp)
@@ -275,12 +283,12 @@ impl Webdav {
             HeaderValue::from_str(format!("bytes={byte_offset}-").as_str()).unwrap(),
         );
 
-        let resp = self
-            .build_client()?
-            .get(url.clone())
-            .headers(headers)
-            .send()
-            .await?;
+        let resp = {
+            let client = self.build_client()?;
+            tokio_runtime()
+                .spawn(async move { client.get(url.clone()).headers(headers).send().await })
+                .await??
+        };
         let byte_offset = if resp.headers().get(reqwest::header::CONTENT_RANGE).is_some() {
             0
         } else {

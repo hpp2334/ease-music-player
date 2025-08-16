@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use ctx::BackendContext;
-
 pub(crate) mod controllers;
 pub(crate) mod ctx;
 pub mod error;
@@ -17,7 +15,7 @@ pub use ease_remote_storage::StreamFile;
 use error::BResult;
 
 pub use crate::services::ArgInitializeApp;
-use crate::{infra::init_infra, services::app_bootstrap};
+use crate::{ctx::BackendContext, infra::init_infra, services::app_bootstrap};
 
 uniffi::setup_scaffolding!();
 
@@ -56,4 +54,14 @@ pub fn create_backend(arg: ArgInitializeApp) -> Arc<Backend> {
     let cx = Arc::new(BackendContext::new());
     init_infra(&arg.app_document_dir);
     Arc::new(Backend { cx, arg })
+}
+
+#[uniffi::export]
+pub fn ease_log(msg: &str) {
+    tracing::info!("{}", msg);
+}
+
+#[uniffi::export]
+pub fn ease_error(msg: &str) {
+    tracing::error!("{}", msg);
 }

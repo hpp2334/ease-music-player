@@ -34,8 +34,8 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.MusicCover
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
-import com.kutedev.easemusicplayer.widgets.LocalNavController
-import com.kutedev.easemusicplayer.widgets.RouteMusicPlayer
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import uniffi.ease_client_schema.DataSourceKey
 
 @Composable

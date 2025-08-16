@@ -1,4 +1,4 @@
-package com.kutedev.easemusicplayer.widgets
+package com.kutedev.easemusicplayer.core
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider

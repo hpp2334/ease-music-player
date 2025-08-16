@@ -41,9 +41,12 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.viewmodels.SleepModeLeftTime
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.viewmodels.StoragesVM
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteAddDevices
 import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_schema.StorageType
 
@@ -77,8 +80,12 @@ private fun SleepModeBlock(vm: SleepModeVM = hiltViewModel()) {
 
     LaunchedEffect(state.expiredMs, state.enabled) {
         while (true) {
-            kotlinx.coroutines.delay(1_000)
             leftTime = SleepModeLeftTime(state.expiredMs - System.currentTimeMillis())
+
+            if (!state.enabled) {
+                break
+            }
+            kotlinx.coroutines.delay(1_000)
         }
     }
 
@@ -115,7 +122,12 @@ private fun SleepModeBlock(vm: SleepModeVM = hiltViewModel()) {
 }
 
 @Composable
-private fun ColumnScope.DevicesBlock(storageItems: List<Storage>) {
+private fun ColumnScope.DevicesBlock(
+    storageItems: List<Storage>,
+    editStoragesVM: EditStorageVM = hiltViewModel()
+) {
+    val navController = LocalNavController.current
+
     Column(
         modifier = Modifier
             .verticalScroll(rememberScrollState())
@@ -130,7 +142,8 @@ private fun ColumnScope.DevicesBlock(storageItems: List<Storage>) {
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable {
-//                    TODO: toEditStorage(bridge, null)
+                        editStoragesVM.prepareFormCreate()
+                        navController.navigate(RouteAddDevices)
                     }
             ) {
                 Row(
@@ -192,8 +205,10 @@ private fun ColumnScope.DevicesBlock(storageItems: List<Storage>) {
 
 @Composable
 fun DashboardSubpage(
-    storageVM: StoragesVM = viewModel()
+    storageVM: StoragesVM = viewModel(),
+    editStoragesVM: EditStorageVM = hiltViewModel()
 ) {
+    val navController = LocalNavController.current
     val storages by storageVM.storages.collectAsState()
     val storageItems = storages.filter { v -> v.typ != StorageType.LOCAL }
 
@@ -225,7 +240,8 @@ fun DashboardSubpage(
                     buttonType = EaseIconButtonType.Primary,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-//                        TODO: toEditStorage(bridge, null)
+                        editStoragesVM.prepareFormCreate()
+                        navController.navigate(RouteAddDevices)
                     }
                 )
             }

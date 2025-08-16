@@ -42,6 +42,8 @@ class Bridge @Inject constructor(
         )
     )
 
+    val backend: Backend get() = _backend
+
     fun initialize() {
         _backend.init();
     }

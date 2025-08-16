@@ -15,13 +15,13 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
-import com.kutedev.easemusicplayer.widgets.LocalNavController
-import com.kutedev.easemusicplayer.widgets.RouteAddDevices
-import com.kutedev.easemusicplayer.widgets.RouteHome
-import com.kutedev.easemusicplayer.widgets.RouteImport
-import com.kutedev.easemusicplayer.widgets.RouteMusicPlayer
-import com.kutedev.easemusicplayer.widgets.RoutePlaylist
-import com.kutedev.easemusicplayer.widgets.RoutesProvider
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteAddDevices
+import com.kutedev.easemusicplayer.core.RouteHome
+import com.kutedev.easemusicplayer.core.RouteImport
+import com.kutedev.easemusicplayer.core.RouteMusicPlayer
+import com.kutedev.easemusicplayer.core.RoutePlaylist
+import com.kutedev.easemusicplayer.core.RoutesProvider
 import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
@@ -91,6 +91,7 @@ fun Root() {
                                     scaffoldPadding = scaffoldPadding,
                                 )
                                 CreatePlaylistsDialog()
+                                TimeToPauseModal()
                             }
                             composable<RouteAddDevices> {
                                 EditStoragesPage()
@@ -106,9 +107,9 @@ fun Root() {
                             }
                             composable<RouteMusicPlayer> {
                                 MusicPlayerPage()
+                                TimeToPauseModal()
                             }
                         }
-                        TimeToPauseModal()
                     }
                 }
             }

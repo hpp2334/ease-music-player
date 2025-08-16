@@ -608,6 +608,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ease-client-tokio"
+version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "tokio",
+]
+
+[[package]]
 name = "ease-remote-storage"
 version = "0.1.0"
 dependencies = [
@@ -615,6 +623,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "dav-server",
+ "ease-client-tokio",
  "futures-util",
  "http-auth",
  "hyper",

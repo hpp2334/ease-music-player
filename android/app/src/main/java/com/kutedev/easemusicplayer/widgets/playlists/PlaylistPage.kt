@@ -63,10 +63,10 @@ import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.viewmodels.PlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.durationStr
-import com.kutedev.easemusicplayer.widgets.LocalNavController
-import com.kutedev.easemusicplayer.widgets.RouteImport
-import com.kutedev.easemusicplayer.widgets.RouteImportType
-import com.kutedev.easemusicplayer.widgets.RouteMusicPlayer
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteImport
+import com.kutedev.easemusicplayer.core.RouteImportType
+import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client_schema.DataSourceKey

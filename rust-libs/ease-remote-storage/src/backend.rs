@@ -34,6 +34,8 @@ pub enum StorageBackendError {
     ParseXMLFail,
     #[error(transparent)]
     TokioIO(#[from] tokio::io::Error),
+    #[error(transparent)]
+    TokioJoinError(#[from] tokio::task::JoinError),
     #[error("Url Parse Error")]
     UrlParseError(String),
     #[error("Serde Json Error: {0}")]

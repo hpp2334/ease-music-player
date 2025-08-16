@@ -1,17 +1,15 @@
 package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.kutedev.easemusicplayer.repositories.PlayerRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-data class SleepModeState(
-    val enabled: Boolean = false,
-    val expiredMs: Long = 0
-)
-
+import kotlin.math.max
 
 class SleepModeLeftTime(ms: Long) {
     private val remainingMs = if (ms > 0) ms else 0L
@@ -22,12 +20,14 @@ class SleepModeLeftTime(ms: Long) {
 }
 
 @HiltViewModel
-class SleepModeVM @Inject constructor() : ViewModel() {
-    private val _state = MutableStateFlow(SleepModeState())
+class SleepModeVM @Inject constructor(
+    val playerRepository: PlayerRepository
+) : ViewModel() {
     private val _modalOpen = MutableStateFlow(false)
     private val _editLeftTime = MutableStateFlow(SleepModeLeftTime(0))
 
-    val state = _state.asStateFlow()
+    val state = playerRepository.sleepState
+
     val modalOpen = _modalOpen.asStateFlow()
     val editLeftTime = _editLeftTime.asStateFlow()
 
@@ -35,8 +35,9 @@ class SleepModeVM @Inject constructor() : ViewModel() {
         _editLeftTime.value = leftTime
         _modalOpen.value = true
     }
+
     fun openModal() {
-        openModal(SleepModeLeftTime(_state.value.expiredMs - System.currentTimeMillis()))
+        openModal(SleepModeLeftTime(state.value.expiredMs - System.currentTimeMillis()))
     }
 
     fun closeModal() {
@@ -44,13 +45,12 @@ class SleepModeVM @Inject constructor() : ViewModel() {
     }
 
     fun remove() {
-        _state.update { state ->
-            state.copy(enabled = false, expiredMs = 0)
-        }
+        playerRepository.cancelSleep()
     }
 
     fun set(hour: Int, minute: Int) {
-        val newExpiredMs = hour.toLong() * 3600_000 + minute.toLong() * 60_000
-        _state.update { state -> state.copy(enabled = true, expiredMs = newExpiredMs) }
+        val newExpiredMs = System.currentTimeMillis() + hour.toLong() * 3600_000 + minute.toLong() * 60_000
+
+        playerRepository.scheduleSleep(newExpiredMs)
     }
 }

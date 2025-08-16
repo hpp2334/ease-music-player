@@ -41,8 +41,8 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsVM
 import com.kutedev.easemusicplayer.viewmodels.durationStr
-import com.kutedev.easemusicplayer.widgets.LocalNavController
-import com.kutedev.easemusicplayer.widgets.RoutePlaylist
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RoutePlaylist
 import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_backend.PlaylistAbstract
 

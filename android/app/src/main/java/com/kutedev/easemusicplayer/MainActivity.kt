@@ -9,17 +9,19 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
 import com.kutedev.easemusicplayer.core.BackendService
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.repositories.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
-import dagger.hilt.android.lifecycle.withCreationCallback
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     @Inject lateinit var bridge: Bridge
+    @Inject lateinit var storageRepository: StorageRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,7 +53,9 @@ class MainActivity : ComponentActivity() {
         intent?.data?.let { uri ->
             val code = uri.getQueryParameter("code")
             if (code != null) {
-                // TODO: impl
+                lifecycleScope.launch {
+                    storageRepository.updateRefreshToken(code)
+                }
             }
         }
     }

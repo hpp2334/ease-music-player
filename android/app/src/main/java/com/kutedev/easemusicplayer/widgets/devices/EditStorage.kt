@@ -1,5 +1,8 @@
 package com.kutedev.easemusicplayer.widgets.devices
 
+import android.content.Intent
+import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,10 +58,14 @@ import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
 import com.kutedev.easemusicplayer.components.FormWidget
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
-import com.kutedev.easemusicplayer.widgets.LocalNavController
+import com.kutedev.easemusicplayer.core.LocalNavController
 import kotlinx.coroutines.flow.update
 import uniffi.ease_client_backend.StorageConnectionTestResult
+import uniffi.ease_client_backend.ctOnedriveOauthUrl
 import uniffi.ease_client_schema.StorageType
+import androidx.core.net.toUri
+import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.launch
 
 
 private fun buildStr(s: String): AnnotatedString {
@@ -82,11 +90,11 @@ private fun buildStr(s: String): AnnotatedString {
 
 @Composable
 private fun RemoveDialog(
-    editStorageVM: EditStorageVM = viewModel()
+    editStorageVM: EditStorageVM = hiltViewModel()
 ) {
     val title by editStorageVM.title.collectAsState()
     val musicCount by editStorageVM.musicCount.collectAsState()
-    val isOpen by editStorageVM.modalOpen.collectAsState()
+    val isOpen by editStorageVM.removeModalOpen.collectAsState()
 
     val mainDesc = buildStr(
         stringResource(R.string.storage_remove_desc_main)
@@ -100,11 +108,11 @@ private fun RemoveDialog(
     ConfirmDialog(
         open = isOpen,
         onConfirm = {
-            editStorageVM.closeModal()
+            editStorageVM.closeRemoveModal()
             editStorageVM.remove()
         },
         onCancel = {
-            editStorageVM.closeModal()
+            editStorageVM.closeRemoveModal()
         },
     ) {
         Text(
@@ -155,7 +163,7 @@ private fun StorageBlock(
 
 @Composable
 private fun WebdavConfig(
-    editStorageVM: EditStorageVM = viewModel()
+    editStorageVM: EditStorageVM = hiltViewModel()
 ) {
     val form by editStorageVM.form.collectAsState()
     val validated by editStorageVM.validated.collectAsState()
@@ -164,7 +172,7 @@ private fun WebdavConfig(
     FormSwitch(
         label = stringResource(id = R.string.storage_edit_anonymous),
         value = isAnonymous,
-        onChange = { editStorageVM.form.update { storage ->
+        onChange = { editStorageVM.updateForm { storage ->
             storage.isAnonymous = !storage.isAnonymous
             storage
         }}
@@ -172,7 +180,7 @@ private fun WebdavConfig(
     FormText(
         label = stringResource(id = R.string.storage_edit_alias),
         value = form.alias,
-        onChange = { value -> editStorageVM.form.update { storage ->
+        onChange = { value -> editStorageVM.updateForm { storage ->
             storage.alias = value
             storage
         } },
@@ -180,7 +188,7 @@ private fun WebdavConfig(
     FormText(
         label = stringResource(id = R.string.storage_edit_addr),
         value = form.addr,
-        onChange = { value -> editStorageVM.form.update { storage ->
+        onChange = { value -> editStorageVM.updateForm { storage ->
             storage.addr = value
             storage
         } },
@@ -194,7 +202,7 @@ private fun WebdavConfig(
         FormText(
             label = stringResource(id = R.string.storage_edit_username),
             value = form.username,
-            onChange = { value -> editStorageVM.form.update { storage ->
+            onChange = { value -> editStorageVM.updateForm { storage ->
                 storage.username = value
                 storage
             } },
@@ -208,7 +216,7 @@ private fun WebdavConfig(
             label = stringResource(id = R.string.storage_edit_password),
             value = form.password,
             isPassword = true,
-            onChange = { value -> editStorageVM.form.update { storage ->
+            onChange = { value -> editStorageVM.updateForm { storage ->
                 storage.password = value
                 storage
             } },
@@ -223,8 +231,9 @@ private fun WebdavConfig(
 
 @Composable
 private fun OneDriveConfig(
-    editStorageVM: EditStorageVM = viewModel()
+    editStorageVM: EditStorageVM = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val form by editStorageVM.form.collectAsState()
     val validated by editStorageVM.validated.collectAsState()
     val connected = form.password.isNotEmpty()
@@ -232,7 +241,7 @@ private fun OneDriveConfig(
     FormText(
         label = stringResource(id = R.string.storage_edit_alias),
         value = form.alias,
-        onChange = { value -> editStorageVM.form.update { storage ->
+        onChange = { value -> editStorageVM.updateForm { storage ->
             storage.alias = value
             storage
         } },
@@ -251,7 +260,9 @@ private fun OneDriveConfig(
                 type = EaseTextButtonType.PrimaryVariant,
                 size = EaseTextButtonSize.Medium,
                 onClick = {
-//                    TODO: bridge.dispatchClick(StorageUpsertWidget.ConnectAccount)
+                    val intent = Intent(Intent.ACTION_VIEW, ctOnedriveOauthUrl().toUri())
+                    intent.flags = FLAG_ACTIVITY_NEW_TASK
+                    context.startActivity(intent)
                 },
             )
             if (validated.passwordEmpty) {
@@ -272,7 +283,10 @@ private fun OneDriveConfig(
                 type = EaseTextButtonType.Error,
                 size = EaseTextButtonSize.Medium,
                 onClick = {
-//                    TODO: bridge.dispatchClick(StorageUpsertWidget.DisconnectAccount)
+                    editStorageVM.updateForm { storage ->
+                        storage.password = ""
+                        storage
+                    }
                 },
             )
         }
@@ -281,19 +295,19 @@ private fun OneDriveConfig(
 
 @Composable
 fun EditStoragesPage(
-    editStorageVM: EditStorageVM = viewModel()
+    editStorageVM: EditStorageVM = hiltViewModel()
 ) {
     val context = LocalContext.current
     val navController = LocalNavController.current
-    var removeDialogOpen by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
     val form by editStorageVM.form.collectAsState();
     val isCreated by editStorageVM.isCreated.collectAsState();
+    val testing by editStorageVM.testResult.collectAsState()
 
     val toast = remember {
         Toast.makeText(context, "", Toast.LENGTH_SHORT)
     }
     val storageType = form.typ;
-    val testing = StorageConnectionTestResult.NONE;
 
     val testingColors = when (testing) {
         StorageConnectionTestResult.NONE -> null
@@ -364,7 +378,7 @@ fun EditStoragesPage(
                         buttonType = EaseIconButtonType.Error,
                         painter = painterResource(id = R.drawable.icon_deleteseep),
                         onClick = {
-                            removeDialogOpen = true
+                            editStorageVM.openRemoveModal()
                         }
                     )
                 }
@@ -374,7 +388,7 @@ fun EditStoragesPage(
                     painter = painterResource(id = R.drawable.icon_wifitethering),
                     overrideColors = testingColors,
                     onClick = {
-//                        TODO: bridge.dispatchClick(StorageUpsertWidget.Test);
+                        editStorageVM.test()
                     }
                 )
                 EaseIconButton(
@@ -382,7 +396,12 @@ fun EditStoragesPage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_ok),
                     onClick = {
-                        editStorageVM.finish()
+                        coroutineScope.launch {
+                            val finished = editStorageVM.finish()
+                            if (finished) {
+                                navController.popBackStack()
+                            }
+                        }
                     }
                 )
             }
@@ -404,14 +423,20 @@ fun EditStoragesPage(
                         title = "WebDAV",
                         isActive = storageType == StorageType.WEBDAV,
                         onSelect = {
-                            editStorageVM.selectStorage(StorageType.WEBDAV)
+                            editStorageVM.updateForm { storage ->
+                                storage.typ = StorageType.WEBDAV
+                                storage
+                            }
                         }
                     )
                     StorageBlock(
                         title = "OneDrive",
                         isActive = storageType == StorageType.ONE_DRIVE,
                         onSelect = {
-                            editStorageVM.selectStorage(StorageType.ONE_DRIVE)
+                            editStorageVM.updateForm { storage ->
+                                storage.typ = StorageType.ONE_DRIVE
+                                storage
+                            }
                         }
                     )
                 }

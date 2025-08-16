@@ -39,9 +39,9 @@ import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.ImportCover
 import com.kutedev.easemusicplayer.components.SimpleFormText
 import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
-import com.kutedev.easemusicplayer.widgets.LocalNavController
-import com.kutedev.easemusicplayer.widgets.RouteImport
-import com.kutedev.easemusicplayer.widgets.RouteImportType
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteImport
+import com.kutedev.easemusicplayer.core.RouteImportType
 import uniffi.ease_client_backend.CreatePlaylistMode
 
 @Composable

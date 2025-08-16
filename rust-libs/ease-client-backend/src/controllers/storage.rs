@@ -6,6 +6,7 @@ use ease_remote_storage::OneDriveBackend;
 use crate::{
     error::BResult,
     objects::{ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult, StorageEntry},
+    onedrive_oauth_url,
     services::{
         build_storage_backend_by_arg, evict_storage_backend_cache, get_storage_backend,
         list_storage,
@@ -109,4 +110,9 @@ pub async fn ct_list_storage_entry_children(
             }
         }
     }
+}
+
+#[uniffi::export]
+pub fn ct_onedrive_oauth_url() -> String {
+    onedrive_oauth_url()
 }
