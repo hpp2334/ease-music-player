@@ -49,7 +49,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseContextMenu
@@ -60,14 +59,14 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
-import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
+import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.viewmodels.PlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.durationStr
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
-import com.kutedev.easemusicplayer.core.RouteImportType
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
+import com.kutedev.easemusicplayer.repositories.RouteImportType
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client_schema.DataSourceKey
@@ -102,7 +101,7 @@ private fun RemovePlaylistDialog(
 @Composable
 private fun PlaylistHeader(
     playlistVM: PlaylistVM = hiltViewModel(),
-    editPlaylistVM: EditPlaylistVM = hiltViewModel()
+    editPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val playlist by playlistVM.playlist.collectAsState()
@@ -181,10 +180,7 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
-                                    navController.navigate(RouteImport(
-                                        type = RouteImportType.Music,
-                                        id = 0,
-                                    ))
+                                    navController.navigate(RouteImport(RouteImportType.Music))
                                 }
                             ),
                             EaseContextMenuItem(
@@ -329,7 +325,7 @@ private fun PlaylistItem(
                     }
                 )
                 .clickable {
-                    navController.navigate(RouteMusicPlayer)
+                    navController.navigate(RouteMusicPlayer())
                     playerVM.play(id)
                     onSwipe()
                 }

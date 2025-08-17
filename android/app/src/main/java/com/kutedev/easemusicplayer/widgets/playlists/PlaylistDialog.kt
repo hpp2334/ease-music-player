@@ -32,17 +32,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.ImportCover
 import com.kutedev.easemusicplayer.components.SimpleFormText
-import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
+import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
-import com.kutedev.easemusicplayer.core.RouteImportType
+import com.kutedev.easemusicplayer.repositories.RouteImportType
 import uniffi.ease_client_backend.CreatePlaylistMode
 
 @Composable
@@ -94,7 +93,7 @@ private fun FullImportHeader(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FullImportBlock(
-    editPlaylistVM: EditPlaylistVM = hiltViewModel()
+    editPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
 
@@ -111,10 +110,7 @@ private fun FullImportBlock(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .clickable {
-                    navController.navigate(RouteImport(
-                        type = RouteImportType.EditPlaylist,
-                        id = 0,
-                    ))
+                    navController.navigate(RouteImport(RouteImportType.EditPlaylist))
                 }
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(0.dp, 32.dp),
@@ -181,10 +177,7 @@ private fun FullImportBlock(
             ImportCover(
                 dataSourceKey = cover,
                 onAdd = {
-                    navController.navigate(RouteImport(
-                        type = RouteImportType.EditPlaylistCover,
-                        id = 0,
-                    ))
+                    navController.navigate(RouteImport(RouteImportType.EditPlaylistCover))
                 },
                 onRemove = {
                     editPlaylistVM.clearCover()
@@ -196,7 +189,7 @@ private fun FullImportBlock(
 
 @Composable
 fun CreatePlaylistsDialog(
-    editPlaylistVM: EditPlaylistVM = hiltViewModel()
+    editPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
     val isOpen by editPlaylistVM.createModalOpen.collectAsState()
     val mode by editPlaylistVM.mode.collectAsState()
@@ -291,7 +284,7 @@ fun CreatePlaylistsDialog(
 
 @Composable
 fun EditPlaylistsDialog(
-    editPlaylistVM: EditPlaylistVM = hiltViewModel()
+    editPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
 
@@ -334,10 +327,7 @@ fun EditPlaylistsDialog(
             ImportCover(
                 dataSourceKey = cover,
                 onAdd = {
-                    navController.navigate(RouteImport(
-                        type = RouteImportType.EditPlaylistCover,
-                        id = 0,
-                    ))
+                    navController.navigate(RouteImport(RouteImportType.EditPlaylistCover))
                 },
                 onRemove = {
                     editPlaylistVM.clearCover()

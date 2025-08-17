@@ -129,7 +129,7 @@ private fun ImportEntry(
     entry: StorageEntry,
     checked: Boolean,
     allowTypes: List<StorageEntryType>,
-    onClickEntry: (path: String) -> Unit
+    onClickEntry: (entry: StorageEntry) -> Unit
 ) {
     val entryTyp = entry.entryTyp()
     val canCheck = allowTypes.any({t -> t == entryTyp })
@@ -140,7 +140,7 @@ private fun ImportEntry(
         else -> painterResource(id = R.drawable.icon_file)
     }
     val onClick = {
-        onClickEntry(entry.path);
+        onClickEntry(entry);
     }
 
     Row(
@@ -268,7 +268,9 @@ private fun ImportEntries(
                         entry = it,
                         checked = canCheck,
                         allowTypes = allowTypes,
-                        onClickEntry = { path -> importVM.toggleSelect(path) },
+                        onClickEntry = { entry ->
+                            importVM.clickEntry(entry)
+                        },
                     )
                 }
                 item {

@@ -35,11 +35,10 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
+import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.PlaylistsVM
 import com.kutedev.easemusicplayer.viewmodels.durationStr
 import com.kutedev.easemusicplayer.core.LocalNavController
@@ -50,7 +49,7 @@ import uniffi.ease_client_backend.PlaylistAbstract
 @Composable
 fun PlaylistsSubpage(
     playlistsVM: PlaylistsVM = hiltViewModel(),
-    editPlaylistVM: EditPlaylistVM = hiltViewModel()
+    editPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
     val state by playlistsVM.state.collectAsState()
 
@@ -120,7 +119,7 @@ private fun PlaylistItem(playlist: PlaylistAbstract) {
     Box(Modifier
         .clickable(
             onClick = {
-                navController.navigate(RoutePlaylist(playlist.meta.id.value))
+                navController.navigate(RoutePlaylist(playlist.meta.id.value.toString()))
             },
         )
     ) {

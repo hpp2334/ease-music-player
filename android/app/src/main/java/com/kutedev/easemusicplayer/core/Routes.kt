@@ -6,41 +6,39 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
+import com.kutedev.easemusicplayer.repositories.RouteImportType
 import kotlinx.serialization.Serializable
 
-@Serializable
-object RouteHome
-
-@Serializable
-object RouteAddDevices
-
-@Serializable
-data class RoutePlaylist(
-    val id: Long
-)
-
-enum class RouteImportType {
-    Music,
-    Lyric,
-    EditPlaylist,
-    EditPlaylistCover
+fun RouteHome(): String {
+    return "Home"
 }
 
-@Serializable
-data class RouteImport(
-    val type: RouteImportType,
-    val id: Long,
-)
+fun isRouteHome(route: String): Boolean {
+    return route == "Home"
+}
 
-@Serializable
-object RouteMusicPlayer
+fun RouteAddDevices(id: String): String {
+    return "AddDevices/${id}"
+}
+
+fun RoutePlaylist(id: String): String {
+    return "Playlist/${id}"
+}
+
+fun isRoutePlaylist(route: String): Boolean {
+    return route.startsWith("Playlist/")
+}
+
+fun RouteImport(type: String): String {
+    return "Import/${type}"
+}
+
+fun RouteMusicPlayer(): String {
+    return "MusicPlayer"
+}
 
 val LocalNavController = compositionLocalOf<NavHostController> {
     error("No LocalNavController provided")
-}
-
-inline fun <reified T: Any> NavBackStackEntry.matches(): Boolean {
-    return T::class.qualifiedName == destination.route
 }
 
 @Composable

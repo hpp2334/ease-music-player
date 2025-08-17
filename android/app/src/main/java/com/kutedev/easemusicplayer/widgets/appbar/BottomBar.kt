@@ -34,7 +34,8 @@ import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteHome
 import com.kutedev.easemusicplayer.core.RoutePlaylist
-import com.kutedev.easemusicplayer.core.matches
+import com.kutedev.easemusicplayer.core.isRouteHome
+import com.kutedev.easemusicplayer.core.isRoutePlaylist
 import com.kutedev.easemusicplayer.widgets.musics.MiniPlayer
 import kotlinx.coroutines.launch
 
@@ -90,7 +91,8 @@ fun BoxScope.BottomBar(
     playerVM: PlayerVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
-    val currentRoute by navController.currentBackStackEntryAsState()
+    val _currentRoute by navController.currentBackStackEntryAsState()
+    val currentRoute = if (_currentRoute?.destination?.route != null) _currentRoute!!.destination.route!! else ""
 
     val state by playerVM.musicState.collectAsState()
     val items = listOf(
@@ -102,8 +104,8 @@ fun BoxScope.BottomBar(
 
     val hasCurrentMusic = state.id != null
 
-    val showBottomBar = currentRoute?.matches<RouteHome>() == true
-    val showMiniPlayer = hasCurrentMusic && (currentRoute?.matches<RouteHome>() == true || currentRoute?.matches<RoutePlaylist>() == true)
+    val showBottomBar = isRouteHome(currentRoute)
+    val showMiniPlayer = hasCurrentMusic && (isRouteHome(currentRoute) || isRoutePlaylist(currentRoute))
 
     if (!showBottomBar && !showMiniPlayer) {
         Box(modifier = Modifier

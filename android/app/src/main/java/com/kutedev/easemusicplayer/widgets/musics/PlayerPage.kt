@@ -72,7 +72,7 @@ import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
-import com.kutedev.easemusicplayer.core.RouteImportType
+import com.kutedev.easemusicplayer.repositories.RouteImportType
 import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_backend.LyricLine
 import uniffi.ease_client_backend.LyricLoadState
@@ -138,10 +138,7 @@ private fun MusicPlayerHeader(
                                 onClick = {
                                     if (state.id != null) {
                                         navController.navigate(
-                                            RouteImport(
-                                                type = RouteImportType.Lyric,
-                                                id = state.id!!.value,
-                                            )
+                                            RouteImport(RouteImportType.Lyric)
                                         )
                                     }
                                 }
@@ -698,10 +695,7 @@ fun MusicPlayerPage(
                     lyrics = currentLyricState.lyrics.lines,
                     onClickAddLyric = {
                         if (currentMusicState.id != null) {
-                            navController.navigate(RouteImport(
-                                type = RouteImportType.Lyric,
-                                id = currentMusicState.id!!.value
-                            ))
+                            navController.navigate(RouteImport(RouteImportType.Lyric))
                         }
                     }
                 )

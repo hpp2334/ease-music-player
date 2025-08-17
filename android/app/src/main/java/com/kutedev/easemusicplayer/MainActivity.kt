@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
         bridge.initialize();
         startService(Intent(this, BackendService::class.java))
 
+
         setContent {
             Root()
         }
@@ -38,6 +39,10 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         ensurePostNotificationsPermission()
+
+        lifecycleScope.launch {
+            storageRepository.reload()
+        }
     }
 
     override fun onStop() {

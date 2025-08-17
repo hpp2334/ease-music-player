@@ -10,13 +10,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteAddDevices
@@ -37,9 +40,6 @@ import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
 
 @Composable
 fun Root() {
-    val context = LocalContext.current as ComponentActivity
-    val _editStorageVM: EditStorageVM = hiltViewModel(context)
-
     RoutesProvider {
         val controller = LocalNavController.current
 
@@ -63,7 +63,7 @@ fun Root() {
                             modifier = Modifier
                                 .fillMaxSize(),
                             navController = controller,
-                            startDestination = RouteHome,
+                            startDestination = RouteHome(),
                             enterTransition = {
                                 slideIn(
                                     animationSpec = tween(300),
@@ -93,26 +93,35 @@ fun Root() {
                                     })
                             },
                         ) {
-                            composable<RouteHome> {
+                            composable(RouteHome()) {
                                 HomePage(
                                     scaffoldPadding = scaffoldPadding,
                                 )
                                 CreatePlaylistsDialog()
                                 TimeToPauseModal()
                             }
-                            composable<RouteAddDevices> {
+                            composable(
+                                RouteAddDevices("{id}"),
+                                arguments = listOf(navArgument("id") { type = NavType.LongType })
+                            ) {
                                 EditStoragesPage()
                             }
-                            composable<RoutePlaylist> {
+                            composable(
+                                RoutePlaylist("{id}"),
+                                arguments = listOf(navArgument("id") { type = NavType.LongType })
+                            ) {
                                 PlaylistPage(
                                     scaffoldPadding = scaffoldPadding,
                                 )
                                 EditPlaylistsDialog()
                             }
-                            composable<RouteImport> {
+                            composable(
+                                RouteImport("{type}"),
+                                arguments = listOf(navArgument("type") { type = NavType.StringType } )
+                            ){
                                 ImportMusicsPage()
                             }
-                            composable<RouteMusicPlayer> {
+                            composable(RouteMusicPlayer()) {
                                 MusicPlayerPage()
                                 TimeToPauseModal()
                             }

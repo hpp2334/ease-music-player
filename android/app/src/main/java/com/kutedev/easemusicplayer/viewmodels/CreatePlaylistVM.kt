@@ -2,6 +2,7 @@ package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kutedev.easemusicplayer.repositories.ImportRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -9,10 +10,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import uniffi.ease_client_backend.CreatePlaylistMode
+import uniffi.ease_client_backend.StorageEntry
+import uniffi.ease_client_backend.StorageEntryType
 import uniffi.ease_client_schema.DataSourceKey
+import uniffi.ease_client_schema.StorageEntryLoc
 import javax.inject.Inject
+import kotlin.collections.firstOrNull
+import kotlin.collections.map
 
 private enum class Status {
     Closed,
@@ -21,17 +26,19 @@ private enum class Status {
 }
 
 @HiltViewModel
-class EditPlaylistVM @Inject constructor() : ViewModel() {
+class CreatePlaylistVM @Inject constructor(
+    private val importRepository: ImportRepository
+) : ViewModel() {
+    private val _modalOpen = MutableStateFlow(Status.Closed)
     private val _mode = MutableStateFlow(CreatePlaylistMode.FULL)
     private val _fullImported = MutableStateFlow(false)
-    private val _musicCount = MutableStateFlow(0)
+    private val _entries = MutableStateFlow(listOf<StorageEntry>())
     private val _name = MutableStateFlow("")
     private val _cover = MutableStateFlow<DataSourceKey?>(null)
-    private val _modalOpen = MutableStateFlow(Status.Closed)
-    private val _canSubmit = MutableStateFlow(false)
-
     val mode = _mode.asStateFlow()
-    val musicCount = _musicCount.asStateFlow()
+    val musicCount = _entries.map { entries ->
+        entries.count { entry ->  entry.entryTyp() == StorageEntryType.MUSIC }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
     val name = _name.asStateFlow()
     val recommendPlaylistNames = MutableStateFlow(listOf<String>())
     val cover = _cover.asStateFlow()
@@ -46,7 +53,19 @@ class EditPlaylistVM @Inject constructor() : ViewModel() {
         initialValue = false
     )
     val fullImported = _fullImported.asStateFlow()
-    val canSubmit = _canSubmit.asStateFlow()
+
+    val canSubmit = combine(name, mode, musicCount, cover) {
+            name, mode, musicCount, cover ->
+        if (mode == CreatePlaylistMode.FULL) {
+             name.isNotBlank() && (musicCount > 0 || cover != null)
+        } else {
+            name.isNotBlank()
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Lazily,
+        initialValue = false
+    )
 
     fun updateName(name: String) {
         _name.value = name
@@ -54,6 +73,10 @@ class EditPlaylistVM @Inject constructor() : ViewModel() {
 
     fun clearCover() {
         _cover.value = null
+    }
+
+    fun updateMode(mode: CreatePlaylistMode) {
+        _mode.value = mode
     }
 
     fun openEditModal() {
@@ -67,18 +90,25 @@ class EditPlaylistVM @Inject constructor() : ViewModel() {
     fun closeModal() {
         _modalOpen.value = Status.Closed
 
+        reset()
+    }
+
+    fun reset() {
         _mode.value = CreatePlaylistMode.FULL
         _fullImported.value = false
-        _musicCount.value = 0
         _name.value = ""
         _cover.value = null
     }
 
-    fun updateMode(mode: CreatePlaylistMode) {
-        _mode.value = mode
+    fun prepareImportCreate() {
+        importRepository.prepare(listOf(StorageEntryType.MUSIC, StorageEntryType.IMAGE)) {
+                entries ->
+            _entries.value = entries.filter { v -> v.entryTyp() == StorageEntryType.IMAGE }
+            _cover.value = entries.filter { v -> v.entryTyp() == StorageEntryType.IMAGE }.map { v -> DataSourceKey.AnyEntry(
+                StorageEntryLoc(v.storageId, v.path)) }.firstOrNull()
+        }
     }
 
-    fun reset() {}
-
-    fun finish() {}
+    fun finish() {
+    }
 }

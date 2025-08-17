@@ -2,6 +2,7 @@ package com.kutedev.easemusicplayer.repositories
 
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.core.Bridge
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -13,9 +14,11 @@ import uniffi.ease_client_backend.ctUpsertStorage
 import uniffi.ease_client_schema.StorageType
 import javax.inject.Inject
 import javax.inject.Singleton
+
 @Singleton
 class StorageRepository @Inject constructor(
     private val bridge: Bridge,
+    private val scope: CoroutineScope
 ) {
     private val _oauthRefreshToken = MutableStateFlow("")
     private val _storages = MutableStateFlow(listOf<Storage>())

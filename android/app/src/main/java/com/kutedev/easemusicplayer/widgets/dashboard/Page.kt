@@ -142,8 +142,7 @@ private fun ColumnScope.DevicesBlock(
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable {
-                        editStoragesVM.prepareFormCreate()
-                        navController.navigate(RouteAddDevices)
+                        navController.navigate(RouteAddDevices((-1).toString()))
                     }
             ) {
                 Row(
@@ -170,8 +169,7 @@ private fun ColumnScope.DevicesBlock(
                     .fillMaxWidth()
                     .padding(0.dp, 4.dp)
                     .clickable {
-                        editStoragesVM.prepareFormEdit(item)
-                        navController.navigate(RouteAddDevices)
+                        navController.navigate(RouteAddDevices(item.id.value.toString()))
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -245,8 +243,7 @@ fun DashboardSubpage(
                     buttonType = EaseIconButtonType.Primary,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        editStoragesVM.prepareFormCreate()
-                        navController.navigate(RouteAddDevices)
+                        navController.navigate(RouteAddDevices((-1).toString()))
                     }
                 )
             }
