@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
@@ -146,7 +147,7 @@ private fun MiniPlayerCore(
 
 @Composable
 fun MiniPlayer(
-    playerVM: PlayerVM = viewModel()
+    playerVM: PlayerVM = hiltViewModel()
 ) {
     val state = playerVM.musicState.collectAsState().value
     val navController = LocalNavController.current

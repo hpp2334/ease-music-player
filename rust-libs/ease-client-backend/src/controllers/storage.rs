@@ -14,6 +14,14 @@ use crate::{
     ArgUpsertStorage, Backend,
 };
 
+fn normalize_arg_upsert_storage(mut arg: ArgUpsertStorage) -> ArgUpsertStorage {
+    if arg.is_anonymous {
+        arg.username = Default::default();
+        arg.password = Default::default();
+    }
+    arg
+}
+
 #[uniffi::export]
 pub async fn ct_list_storage(cx: Arc<Backend>) -> BResult<Vec<Storage>> {
     let cx = cx.get_context();
@@ -24,6 +32,8 @@ pub async fn ct_list_storage(cx: Arc<Backend>) -> BResult<Vec<Storage>> {
 
 #[uniffi::export]
 pub async fn ct_upsert_storage(cx: Arc<Backend>, arg: ArgUpsertStorage) -> BResult<()> {
+    let arg = normalize_arg_upsert_storage(arg);
+
     let cx = cx.get_context();
     let id = cx.database_server().upsert_storage(arg)?;
     evict_storage_backend_cache(cx, id);
@@ -52,6 +62,7 @@ pub async fn ct_test_storage(
     cx: Arc<Backend>,
     arg: ArgUpsertStorage,
 ) -> BResult<StorageConnectionTestResult> {
+    let arg = normalize_arg_upsert_storage(arg);
     let cx = cx.get_context();
     let backend = build_storage_backend_by_arg(cx, arg)?;
     let res = backend.list("/".to_string()).await;

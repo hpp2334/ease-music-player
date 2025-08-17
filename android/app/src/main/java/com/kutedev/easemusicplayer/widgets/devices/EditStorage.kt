@@ -66,6 +66,7 @@ import uniffi.ease_client_schema.StorageType
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
+import uniffi.ease_client_backend.ArgUpsertStorage
 
 
 private fun buildStr(s: String): AnnotatedString {
@@ -423,20 +424,14 @@ fun EditStoragesPage(
                         title = "WebDAV",
                         isActive = storageType == StorageType.WEBDAV,
                         onSelect = {
-                            editStorageVM.updateForm { storage ->
-                                storage.typ = StorageType.WEBDAV
-                                storage
-                            }
+                            editStorageVM.changeType(StorageType.WEBDAV)
                         }
                     )
                     StorageBlock(
                         title = "OneDrive",
                         isActive = storageType == StorageType.ONE_DRIVE,
                         onSelect = {
-                            editStorageVM.updateForm { storage ->
-                                storage.typ = StorageType.ONE_DRIVE
-                                storage
-                            }
+                            editStorageVM.changeType(StorageType.ONE_DRIVE)
                         }
                     )
                 }

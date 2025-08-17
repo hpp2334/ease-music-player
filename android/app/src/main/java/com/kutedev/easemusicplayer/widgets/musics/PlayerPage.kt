@@ -50,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseContextMenu
@@ -83,8 +84,8 @@ import kotlin.math.sign
 @Composable
 private fun MusicPlayerHeader(
     hasLyric: Boolean,
-    playerVM: PlayerVM = viewModel(),
-    lyricVM: LyricVM = viewModel()
+    playerVM: PlayerVM = hiltViewModel(),
+    lyricVM: LyricVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val state by playerVM.musicState.collectAsState()
@@ -558,8 +559,8 @@ private fun MusicPlayerBody(
 
 @Composable
 private fun MusicPanel(
-    playerVM: PlayerVM = viewModel(),
-    sleepModeVM: SleepModeVM = viewModel()
+    playerVM: PlayerVM = hiltViewModel(),
+    sleepModeVM: SleepModeVM = hiltViewModel()
 ) {
     val state by playerVM.musicState.collectAsState()
     val playMode by playerVM.playMode.collectAsState()
@@ -656,8 +657,8 @@ private fun MusicPanel(
 
 @Composable
 fun MusicPlayerPage(
-    playerVM: PlayerVM = viewModel(),
-    lyricVM: LyricVM = viewModel()
+    playerVM: PlayerVM = hiltViewModel(),
+    lyricVM: LyricVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val currentMusicState by playerVM.musicState.collectAsState()

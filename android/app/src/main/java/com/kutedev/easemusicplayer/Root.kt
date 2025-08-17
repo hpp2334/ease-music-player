@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer
 
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideOut
@@ -10,8 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
@@ -22,6 +25,7 @@ import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.core.RoutePlaylist
 import com.kutedev.easemusicplayer.core.RoutesProvider
+import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
@@ -33,6 +37,9 @@ import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
 
 @Composable
 fun Root() {
+    val context = LocalContext.current as ComponentActivity
+    val _editStorageVM: EditStorageVM = hiltViewModel(context)
+
     RoutesProvider {
         val controller = LocalNavController.current
 

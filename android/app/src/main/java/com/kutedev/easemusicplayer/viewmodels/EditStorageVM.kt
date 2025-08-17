@@ -3,6 +3,7 @@ package com.kutedev.easemusicplayer.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.repositories.EditStorageRepository
 import com.kutedev.easemusicplayer.repositories.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.ArgUpsertStorage
+import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_backend.StorageConnectionTestResult
 import uniffi.ease_client_backend.ctRemoveStorage
 import uniffi.ease_client_backend.ctTestStorage
@@ -22,75 +24,41 @@ import uniffi.ease_client_schema.StorageType
 import javax.inject.Inject
 
 
-data class Validated(
-    val addrEmpty: Boolean = false,
-    val aliasEmpty: Boolean = false,
-    val usernameEmpty: Boolean = false,
-    val passwordEmpty: Boolean = false,
-) {
-    fun valid(): Boolean {
-        return !addrEmpty && !aliasEmpty && !usernameEmpty && !passwordEmpty
-    }
-}
-
-fun defaultArgUpsertStorage(): ArgUpsertStorage {
-    return ArgUpsertStorage(
-        id = null,
-        addr = "",
-        alias = "",
-        username = "",
-        password = "",
-        isAnonymous = true,
-        typ = StorageType.WEBDAV,
-    )
-}
 
 @HiltViewModel
 class EditStorageVM @Inject constructor(
     private val bridge: Bridge,
-    private val storageRepository: StorageRepository
+    private val editStorageRepository: EditStorageRepository
 ) : ViewModel() {
-    private val _title = MutableStateFlow("")
-    private val _musicCount = MutableStateFlow(0L)
     private val _removeModalOpen = MutableStateFlow(false)
     private val _testResult = MutableStateFlow(StorageConnectionTestResult.NONE)
     private var _testJob: Job? = null
 
-    private val _form = MutableStateFlow(defaultArgUpsertStorage())
+    val form = editStorageRepository.form
+    val musicCount = editStorageRepository.musicCount
+    val title = editStorageRepository.title
+    val validated = editStorageRepository.validated
 
-    val title = _title.asStateFlow()
     val removeModalOpen = _removeModalOpen.asStateFlow()
-    val isCreated = _form.map { form -> form.id == null }
+    val isCreated = form.map { form -> form.id == null }
         .stateIn(viewModelScope, SharingStarted.Lazily, true)
     val testResult = _testResult.asStateFlow()
 
-    val form = _form.asStateFlow()
-    val musicCount = _musicCount.asStateFlow()
-
-    val validated = MutableStateFlow(Validated())
-
-    init {
-        viewModelScope.launch {
-            storageRepository.oauthRefreshToken.collect {
-                refreshToken ->
-                    updateForm { storage ->
-                        if (storage.typ == StorageType.ONE_DRIVE) {
-                            storage.password = refreshToken
-                        }
-                        storage
-                    }
-            }
-        }
-    }
 
     fun prepareFormCreate() {
-        _form.value = defaultArgUpsertStorage()
-        _title.value = ""
-        _musicCount.value = 0
+        editStorageRepository.prepareFormCreate()
+    }
+
+    fun prepareFormEdit(storage: Storage) {
+        editStorageRepository.prepareFormEdit(storage)
     }
 
     fun updateForm(block: (form: ArgUpsertStorage) -> ArgUpsertStorage) {
-        _form.value = block(form.value.copy())
+        editStorageRepository.updateForm(block)
+    }
+
+    fun changeType(typ: StorageType) {
+        editStorageRepository.changeType(typ)
     }
 
     fun test() {
@@ -117,33 +85,17 @@ class EditStorageVM @Inject constructor(
     }
 
     fun remove() {
-        val id = _form.value.id
-
         viewModelScope.launch {
-            if (id != null) {
-                ctRemoveStorage(bridge.backend, id)
-            }
+            editStorageRepository.remove()
         }
     }
 
     suspend fun finish(): Boolean {
-        if (!validate()) {
-            return false
-        }
-
-        ctUpsertStorage(bridge.backend, _form.value)
-        return true
+        return editStorageRepository.finish()
     }
 
     private fun validate(): Boolean {
-        val f = form.value
-        validated.value = Validated(
-            addrEmpty = f.addr.isBlank(),
-            aliasEmpty = f.alias.isBlank(),
-            usernameEmpty = !f.isAnonymous && f.username.isBlank(),
-            passwordEmpty = !f.isAnonymous && f.password.isBlank(),
-        )
-        return validated.value.valid()
+        return editStorageRepository.validate()
     }
 
     private fun resetTestResult() {

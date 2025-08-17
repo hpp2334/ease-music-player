@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
@@ -75,7 +76,7 @@ import uniffi.ease_client_schema.MusicId
 
 @Composable
 private fun RemovePlaylistDialog(
-    playlistVM: PlaylistVM = viewModel()
+    playlistVM: PlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val open by playlistVM.removeModalOpen.collectAsState()
@@ -100,8 +101,8 @@ private fun RemovePlaylistDialog(
 
 @Composable
 private fun PlaylistHeader(
-    playlistVM: PlaylistVM = viewModel(),
-    editPlaylistVM: EditPlaylistVM = viewModel()
+    playlistVM: PlaylistVM = hiltViewModel(),
+    editPlaylistVM: EditPlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val playlist by playlistVM.playlist.collectAsState()
@@ -262,7 +263,7 @@ private fun PlaylistItem(
     currentSwipingMusicId: MusicId?,
     onSwipe: () -> Unit,
     onRemove: () -> Unit,
-    playerVM: PlayerVM = viewModel()
+    playerVM: PlayerVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
 
@@ -396,8 +397,8 @@ private fun PlaylistItem(
 @Composable
 private fun PlaylistItemsBlock(
     scaffoldPadding: PaddingValues,
-    playlistVM: PlaylistVM = viewModel(),
-    playerVM: PlayerVM = viewModel()
+    playlistVM: PlaylistVM = hiltViewModel(),
+    playerVM: PlayerVM = hiltViewModel()
 ) {
     var swipingMusicId by remember {
         mutableStateOf<MusicId?>(null)
@@ -444,7 +445,7 @@ private fun PlaylistItemsBlock(
 
 @Composable
 fun PlaylistPage(
-    playlistVM: PlaylistVM = viewModel(),
+    playlistVM: PlaylistVM = hiltViewModel(),
     scaffoldPadding: PaddingValues,
 ) {
     val playlist by playlistVM.playlist.collectAsState()

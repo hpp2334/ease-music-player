@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
@@ -22,7 +23,7 @@ import com.kutedev.easemusicplayer.widgets.settings.SettingSubpage
 
 @Composable
 fun HomePage(
-    playerVM: PlayerVM = viewModel(),
+    playerVM: PlayerVM = hiltViewModel(),
     scaffoldPadding: PaddingValues,
 ) {
     val pagerState = rememberPagerState(pageCount = {

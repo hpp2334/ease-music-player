@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
+import com.kutedev.easemusicplayer.repositories.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,10 +12,14 @@ import uniffi.ease_client_backend.StorageEntryType
 import uniffi.ease_client_schema.StorageId
 
 @HiltViewModel
-class StoragesVM @Inject constructor() : ViewModel() {
-    private val _storages = MutableStateFlow(listOf<Storage>())
-    val storages = _storages.asStateFlow()
+class StoragesVM @Inject constructor(
+    private val storageRepository: StorageRepository
+) : ViewModel() {
+    val storages = storageRepository.storages
 
+    suspend fun reload() {
+        storageRepository.reload()
+    }
 }
 
 val MUSIC_EXTS = arrayOf(".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a")

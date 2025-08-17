@@ -170,7 +170,8 @@ private fun ColumnScope.DevicesBlock(
                     .fillMaxWidth()
                     .padding(0.dp, 4.dp)
                     .clickable {
-//                        TODO: toEditStorage(bridge, item.storageId)
+                        editStoragesVM.prepareFormEdit(item)
+                        navController.navigate(RouteAddDevices)
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -205,12 +206,16 @@ private fun ColumnScope.DevicesBlock(
 
 @Composable
 fun DashboardSubpage(
-    storageVM: StoragesVM = viewModel(),
+    storageVM: StoragesVM = hiltViewModel(),
     editStoragesVM: EditStorageVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val storages by storageVM.storages.collectAsState()
     val storageItems = storages.filter { v -> v.typ != StorageType.LOCAL }
+
+    LaunchedEffect(Unit) {
+        storageVM.reload()
+    }
 
     Column(
         modifier = Modifier

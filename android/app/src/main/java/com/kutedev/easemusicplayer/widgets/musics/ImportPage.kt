@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseCheckbox
@@ -189,7 +190,7 @@ private fun ImportEntry(
 
 @Composable
 private fun ImportEntries(
-    importVM: ImportVM = viewModel()
+    importVM: ImportVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val splitPaths by importVM.splitPaths.collectAsState()
@@ -298,8 +299,8 @@ private fun ImportEntries(
 
 @Composable
 private fun ImportStorages(
-    storagesVM: StoragesVM = viewModel(),
-    importVM: ImportVM = viewModel()
+    storagesVM: StoragesVM = hiltViewModel(),
+    importVM: ImportVM = hiltViewModel()
 ) {
     val storageItems by storagesVM.storages.collectAsState()
     val selectedStorageId by importVM.selectedStorageId.collectAsState()
@@ -424,7 +425,7 @@ private fun ImportMusicsWarningImpl(
 
 @Composable
 private fun ImportMusicsError(
-    importVM: ImportVM = viewModel()
+    importVM: ImportVM = hiltViewModel()
 ) {
     val type by importVM.loadState.collectAsState()
 
@@ -460,8 +461,8 @@ private fun ImportMusicsError(
 
 @Composable
 fun ImportMusicsPage(
-    importVM: ImportVM = viewModel(),
-    storagesVM: StoragesVM = viewModel()
+    importVM: ImportVM = hiltViewModel(),
+    storagesVM: StoragesVM = hiltViewModel()
 ) {
     val storageItems by storagesVM.storages.collectAsState()
     val selectedCount by importVM.selectedCount.collectAsState()

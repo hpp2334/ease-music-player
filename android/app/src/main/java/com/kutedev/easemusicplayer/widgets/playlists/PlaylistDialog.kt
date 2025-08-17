@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseTextButton
@@ -93,7 +94,7 @@ private fun FullImportHeader(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FullImportBlock(
-    editPlaylistVM: EditPlaylistVM = viewModel()
+    editPlaylistVM: EditPlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
 
@@ -195,7 +196,7 @@ private fun FullImportBlock(
 
 @Composable
 fun CreatePlaylistsDialog(
-    editPlaylistVM: EditPlaylistVM = viewModel()
+    editPlaylistVM: EditPlaylistVM = hiltViewModel()
 ) {
     val isOpen by editPlaylistVM.createModalOpen.collectAsState()
     val mode by editPlaylistVM.mode.collectAsState()
@@ -290,7 +291,7 @@ fun CreatePlaylistsDialog(
 
 @Composable
 fun EditPlaylistsDialog(
-    editPlaylistVM: EditPlaylistVM = viewModel()
+    editPlaylistVM: EditPlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
 
