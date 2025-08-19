@@ -197,6 +197,7 @@ private fun ImportEntries(
     val entries by importVM.entries.collectAsState()
     val selectedCount by importVM.selectedCount.collectAsState()
     val allowTypes by importVM.allowTypes.collectAsState()
+    val selected by importVM.selected.collectAsState()
 
     @Composable
     fun PathTab(
@@ -262,11 +263,9 @@ private fun ImportEntries(
                     .padding(28.dp, 0.dp)
             ) {
                 items(entries) {
-                    val canCheck = allowTypes.contains(it.entryTyp())
-
                     ImportEntry(
                         entry = it,
-                        checked = canCheck,
+                        checked = selected.contains(it.path),
                         allowTypes = allowTypes,
                         onClickEntry = { entry ->
                             importVM.clickEntry(entry)

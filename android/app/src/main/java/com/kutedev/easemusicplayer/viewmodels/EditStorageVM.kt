@@ -94,7 +94,7 @@ class EditStorageVM @Inject constructor(
         _musicCount.value = 0u
 
         val id: Long? = savedStateHandle["id"]
-        val storage = storageRepository.storages.value.find { v -> v.id == StorageId(id!!) }
+        val storage = storageRepository.storages.value.find { v -> id != null && v.id == StorageId(id) }
         if (storage != null) {
             _form.value = ArgUpsertStorage(
                 id = storage.id,

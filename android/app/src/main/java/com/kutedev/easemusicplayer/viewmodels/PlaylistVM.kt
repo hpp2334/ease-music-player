@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
+import com.kutedev.easemusicplayer.repositories.PlaylistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,7 +17,9 @@ import javax.inject.Inject
 
 
 @HiltViewModel
-class PlaylistVM @Inject constructor() : ViewModel() {
+class PlaylistVM @Inject constructor(
+    private val playlistRepository: PlaylistRepository
+) : ViewModel() {
     private val _removeModalOpen = MutableStateFlow(false)
     private val _editModalOpen = MutableStateFlow(false)
     private val _playlist = MutableStateFlow(Playlist(

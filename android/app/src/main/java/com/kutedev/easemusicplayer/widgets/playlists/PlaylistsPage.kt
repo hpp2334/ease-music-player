@@ -51,9 +51,9 @@ fun PlaylistsSubpage(
     playlistsVM: PlaylistsVM = hiltViewModel(),
     editPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
-    val state by playlistsVM.state.collectAsState()
+    val playlists by playlistsVM.playlists.collectAsState()
 
-    if (state.playlists.isEmpty()) {
+    if (playlists.isEmpty()) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.fillMaxSize()
@@ -62,7 +62,7 @@ fun PlaylistsSubpage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .clickable {
-                        editPlaylistVM.openCreateModal()
+                        editPlaylistVM.openModal()
                     }
                     .clip(RoundedCornerShape(16.dp))
                     .padding(24.dp, 24.dp),
@@ -90,11 +90,11 @@ fun PlaylistsSubpage(
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        editPlaylistVM.openCreateModal()
+                        editPlaylistVM.openModal()
                     }
                 )
             }
-            GridPlaylists(playlists = state.playlists)
+            GridPlaylists(playlists = playlists)
         }
     }
 }

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import uniffi.ease_client_backend.StorageEntry
 import uniffi.ease_client_backend.StorageEntryType
 import javax.inject.Inject
+import javax.inject.Singleton
 
 typealias ImportHandler = (entries: List<StorageEntry>) -> Unit
 
@@ -18,11 +19,8 @@ object RouteImportType {
     val EditPlaylistCover = "EditPlaylistCover"
 }
 
-class ImportRepository @Inject constructor(
-    private val bridge: Bridge,
-    private val storageRepository: StorageRepository,
-    private val scope: CoroutineScope
-) {
+@Singleton
+class ImportRepository @Inject constructor() {
     private val _allowTypes = MutableStateFlow(listOf<StorageEntryType>())
     private var _importCallback: ((List<StorageEntry>) -> Unit)? = null
 

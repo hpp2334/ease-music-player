@@ -186,7 +186,7 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_edit,
                                 onClick = {
-                                    editPlaylistVM.openEditModal()
+                                    editPlaylistVM.openModal()
                                 }
                             ),
                             EaseContextMenuItem(

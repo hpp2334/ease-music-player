@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import com.kutedev.easemusicplayer.core.BackendService
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.repositories.PlaylistRepository
 import com.kutedev.easemusicplayer.repositories.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
@@ -22,6 +23,7 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
     @Inject lateinit var bridge: Bridge
     @Inject lateinit var storageRepository: StorageRepository
+    @Inject lateinit var playlistRepository: PlaylistRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +44,7 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             storageRepository.reload()
+            playlistRepository.reload()
         }
     }
 

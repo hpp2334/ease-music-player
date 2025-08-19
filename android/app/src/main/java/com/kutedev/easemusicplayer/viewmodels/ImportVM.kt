@@ -6,6 +6,9 @@ import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.repositories.ImportRepository
 import com.kutedev.easemusicplayer.repositories.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.collections.immutable.immutableListOf
+import kotlinx.collections.immutable.persistentHashSetOf
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineScope
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,26 +62,30 @@ class ImportVM @Inject constructor(
 
         splitPaths
     }.stateIn(viewModelScope, SharingStarted.Lazily, defaultSplitPaths())
-    private val _selected = MutableStateFlow(HashSet<String>())
+    private val _selected = MutableStateFlow(persistentHashSetOf<String>())
     private val _entries = MutableStateFlow(listOf<StorageEntry>())
     private val _selectedStorageId = MutableStateFlow(storageRepository.storages.value.firstOrNull()?.id)
     private val _loadState = MutableStateFlow(CurrentStorageStateType.LOADING)
     private val _disabledToggleAll = _entries.map { entries ->
         entries.all { it.isDir }
     }.stateIn(viewModelScope, SharingStarted.Lazily, true)
-    private val _undoStack = MutableStateFlow(mutableListOf<String>())
+    private val _undoStack = MutableStateFlow(persistentListOf<String>())
 
     val splitPaths = _splitPaths
     val selectedCount = _selected.combine(_entries) { selected, entries ->
         entries.count { entry -> selected.contains(entry.path) }
     }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
     val entries = _entries.asStateFlow()
+    val selected = _selected.asStateFlow()
     val allowTypes = importRepository.allowTypes
     val selectedStorageId = _selectedStorageId.asStateFlow()
     val loadState = _loadState.asStateFlow()
     val disabledToggleAll = _disabledToggleAll
     val canUndo =
-        _undoStack.map { undoStack -> undoStack.isEmpty() }.stateIn(viewModelScope, SharingStarted.Lazily, false)
+        _undoStack.map {
+            undoStack -> undoStack.isNotEmpty()
+        }.stateIn(viewModelScope, SharingStarted.Lazily, false)
+
 
     init {
         viewModelScope.launch {
@@ -98,7 +105,7 @@ class ImportVM @Inject constructor(
     fun clickEntry(entry: StorageEntry) {
         if (entry.isDir) {
             navigateDir(entry.path)
-        } else {
+        } else if (allowTypes.value.contains(entry.entryTyp())) {
             toggleSelect(entry.path)
         }
     }
@@ -110,16 +117,19 @@ class ImportVM @Inject constructor(
 
     private fun toggleSelect(path: String) {
         val selected = _selected.value
-        if (selected.contains(path)) {
-            selected.remove(path)
-        } else {
-            selected.add(path)
-        }
-        _selected.value = selected
+        val next = {
+            if (selected.contains(path)) {
+                selected.remove(path)
+            } else {
+                selected.add(path)
+            }
+        }()
+        _selected.value = next
     }
 
     fun finish() {
-        importRepository.onFinish(_entries.value)
+        val v = _entries.value.filter { entry -> _selected.value.contains(entry.path) }
+        importRepository.onFinish(v)
     }
 
     fun selectStorage(storageId: StorageId) {
@@ -203,17 +213,17 @@ class ImportVM @Inject constructor(
 
     private fun pushCurrentToUndoStack() {
         val currentUndoStack = _undoStack.value
-        currentUndoStack.add(currentPath())
-        _undoStack.value = currentUndoStack
+        val nextUndoStack = currentUndoStack.add(currentPath())
+        _undoStack.value = nextUndoStack
     }
 
     private fun popCurrentFromUndoStack(): String? {
         val currentUndoStack = _undoStack.value
         val current = currentUndoStack.lastOrNull()
         if (current != null) {
-            currentUndoStack.removeAt(currentUndoStack.lastIndex)
+            val next = currentUndoStack.removeAt(currentUndoStack.lastIndex)
+            _undoStack.value = next
         }
-        _undoStack.value = currentUndoStack
         return current
     }
 
@@ -222,7 +232,6 @@ class ImportVM @Inject constructor(
         _currentPath.value = path
         _selected.update { selected ->
             selected.clear()
-            selected
         }
 
         reload()
