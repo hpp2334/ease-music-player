@@ -67,6 +67,7 @@ import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.repositories.RouteImportType
+import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
 import uniffi.ease_client_schema.DataSourceKey
@@ -101,7 +102,7 @@ private fun RemovePlaylistDialog(
 @Composable
 private fun PlaylistHeader(
     playlistVM: PlaylistVM = hiltViewModel(),
-    editPlaylistVM: CreatePlaylistVM = hiltViewModel()
+    editPlaylistVM: EditPlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val playlist by playlistVM.playlist.collectAsState()

@@ -1,16 +1,24 @@
 package com.kutedev.easemusicplayer.viewmodels
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.repositories.PlaylistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.MusicAbstract
 import uniffi.ease_client_schema.MusicId
 import uniffi.ease_client_backend.Playlist
 import uniffi.ease_client_backend.PlaylistAbstract
 import uniffi.ease_client_schema.PlaylistId
 import uniffi.ease_client_backend.PlaylistMeta
+import uniffi.ease_client_backend.ctGetPlaylist
+import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
+import uniffi.ease_client_backend.ctRemovePlaylist
 import java.time.Duration
 import javax.inject.Inject
 
@@ -18,10 +26,12 @@ import javax.inject.Inject
 
 @HiltViewModel
 class PlaylistVM @Inject constructor(
-    private val playlistRepository: PlaylistRepository
+    private val bridge: Bridge,
+    private val playlistRepository: PlaylistRepository,
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+    private val _id: PlaylistId = PlaylistId(savedStateHandle["id"]!!)
     private val _removeModalOpen = MutableStateFlow(false)
-    private val _editModalOpen = MutableStateFlow(false)
     private val _playlist = MutableStateFlow(Playlist(
         abstr = PlaylistAbstract(
             meta = PlaylistMeta(
@@ -36,21 +46,40 @@ class PlaylistVM @Inject constructor(
         ),
         musics = emptyList()
     ))
-    val editModalOpen = _editModalOpen.asStateFlow()
     val removeModalOpen = _removeModalOpen.asStateFlow()
     val playlist = _playlist.asStateFlow()
 
-    fun remove() {}
+    init {
+        viewModelScope.launch {
+            val playlist = ctGetPlaylist(bridge.backend, _id)
+            if (playlist != null) {
+                _playlist.value = playlist
+            }
+        }
+    }
 
-    fun removeMusic(id: MusicId) {}
+    fun remove() {
+        viewModelScope.launch {
+            ctRemovePlaylist(bridge.backend, _id)
+        }
+    }
 
-    fun openRemoveModal() {}
+    fun removeMusic(id: MusicId) {
+        viewModelScope.launch {
+            ctRemoveMusicFromPlaylist(bridge.backend, ArgRemoveMusicFromPlaylist(
+                playlistId = _id,
+                musicId = id
+            ))
+        }
+    }
 
-    fun closeRemoveModal() {}
+    fun openRemoveModal() {
+        _removeModalOpen.value = true
+    }
 
-    fun openEditModal() {}
-
-    fun closeEditModal() {}
+    fun closeRemoveModal() {
+        _removeModalOpen.value = false
+    }
 }
 
 private fun _durationStr(duration: Duration?): String {
@@ -61,7 +90,7 @@ private fun _durationStr(duration: Duration?): String {
         val s = all / 1000 % 60
         return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
     } else {
-        return ""
+        return "--:--:--"
     }
 }
 

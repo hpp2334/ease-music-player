@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.ArgCreatePlaylist
 import uniffi.ease_client_backend.ArgUpdatePlaylist
 import uniffi.ease_client_backend.CreatePlaylistMode
@@ -57,6 +58,15 @@ class EditPlaylistVM @Inject constructor(
 
     fun openModal() {
         _modalOpen.value = true
+
+
+        val list = playlistRepository.playlists.value
+        val item = list.find { v -> v.meta.id == _id }
+
+        if (item != null) {
+            _name.value = item.meta.title
+            _cover.value = item.meta.cover
+        }
     }
 
     fun closeModal() {
@@ -70,11 +80,23 @@ class EditPlaylistVM @Inject constructor(
         _cover.value = null
     }
 
+    fun prepareImportCover() {
+        importRepository.prepare(listOf(StorageEntryType.IMAGE)) {
+            entries ->
+                _cover.value = entries.map { entry -> StorageEntryLoc(
+                    storageId = entry.storageId,
+                    path = entry.path
+                ) }.firstOrNull()
+        }
+    }
+
     fun finish() {
         playlistRepository.editPlaylist(ArgUpdatePlaylist(
             id = _id,
             title = _name.value,
             cover = _cover.value,
         ))
+
+        closeModal()
     }
 }

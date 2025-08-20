@@ -293,6 +293,7 @@ fun EditPlaylistsDialog(
     val isOpen by editPlaylistVM.modalOpen.collectAsState()
     val name by editPlaylistVM.name.collectAsState()
     val cover by editPlaylistVM.cover.collectAsState()
+    val canSubmit by editPlaylistVM.canSubmit.collectAsState()
 
     val onDismissRequest = {
         editPlaylistVM.closeModal()
@@ -328,6 +329,7 @@ fun EditPlaylistsDialog(
             ImportCover(
                 dataSourceKey = cover.let { cover -> if (cover != null) DataSourceKey.AnyEntry(cover) else null },
                 onAdd = {
+                    editPlaylistVM.prepareImportCover()
                     navController.navigate(RouteImport(RouteImportType.EditPlaylistCover))
                 },
                 onRemove = {
@@ -349,6 +351,7 @@ fun EditPlaylistsDialog(
                     text = stringResource(id = R.string.playlists_dialog_button_ok),
                     type = EaseTextButtonType.Primary,
                     size = EaseTextButtonSize.Medium,
+                    disabled = !canSubmit,
                     onClick = {
                         editPlaylistVM.finish()
                     }
