@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.repositories.PlaylistRepository
 import com.kutedev.easemusicplayer.repositories.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -53,6 +54,7 @@ private fun defaultArgUpsertStorage(): ArgUpsertStorage {
 class EditStorageVM @Inject constructor(
     private val bridge: Bridge,
     private val storageRepository: StorageRepository,
+    private val playlistRepository: PlaylistRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -175,6 +177,9 @@ class EditStorageVM @Inject constructor(
         if (id != null) {
             viewModelScope.launch {
                 ctRemoveStorage(bridge.backend, id)
+
+                playlistRepository.reload()
+                storageRepository.reload()
             }
         }
     }

@@ -93,6 +93,7 @@ private fun buildStr(s: String): AnnotatedString {
 private fun RemoveDialog(
     editStorageVM: EditStorageVM = hiltViewModel()
 ) {
+    val navController = LocalNavController.current
     val title by editStorageVM.title.collectAsState()
     val musicCount by editStorageVM.musicCount.collectAsState()
     val isOpen by editStorageVM.removeModalOpen.collectAsState()
@@ -111,6 +112,7 @@ private fun RemoveDialog(
         onConfirm = {
             editStorageVM.closeRemoveModal()
             editStorageVM.remove()
+            navController.popBackStack()
         },
         onCancel = {
             editStorageVM.closeRemoveModal()

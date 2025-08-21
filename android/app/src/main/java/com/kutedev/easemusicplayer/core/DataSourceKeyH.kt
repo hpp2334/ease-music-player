@@ -27,6 +27,12 @@ class DataSourceKeyH(key: DataSourceKey) {
     }
 
     override fun hashCode(): Int {
-        return _key.hashCode()
+        return when (_key) {
+            is DataSourceKey.Music -> _key.id.value.toInt().shl(2).or(0)
+            is DataSourceKey.Cover -> _key.id.value.toInt().shl(2).or(1)
+            is DataSourceKey.AnyEntry -> {
+                (_key.entry.storageId.value.hashCode() * 31 + _key.entry.path.hashCode()).shl(2).or(2)
+            }
+        }
     }
 }

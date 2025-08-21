@@ -40,17 +40,22 @@ class CreatePlaylistVM @Inject constructor(
     val name = _name.asStateFlow()
     val recommendPlaylistNames = _entries.map { entries ->
         var l = mutableListOf<String>()
+        var set = HashSet<String>()
 
         for (entry in entries) {
-            for (p in entry.path.split("/")) {
+            for (p in entry.path.split("/").let { list -> if (list.size == 0) emptyList() else list.take(list.size - 1) }) {
                 if (p.isNotBlank()) {
                     val x = URLDecoder.decode(p.trim(), "UTF-8");
-                    l.add(x)
+                    
+                    if (!set.contains(x)) {
+                        set.add(x)
+                        l.add(x)
+                    }
                 }
             }
         }
 
-        l.toList()
+        l.takeLast(6)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Lazily,

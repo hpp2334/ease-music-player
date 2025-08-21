@@ -181,6 +181,7 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
+                                    playlistVM.prepareImportMusics()
                                     navController.navigate(RouteImport(RouteImportType.Music))
                                 }
                             ),

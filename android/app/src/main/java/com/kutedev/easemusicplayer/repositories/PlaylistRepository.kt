@@ -11,7 +11,9 @@ import uniffi.ease_client_backend.ArgUpdatePlaylist
 import uniffi.ease_client_backend.PlaylistAbstract
 import uniffi.ease_client_backend.ctCreatePlaylist
 import uniffi.ease_client_backend.ctListPlaylist
+import uniffi.ease_client_backend.ctRemovePlaylist
 import uniffi.ease_client_backend.ctUpdatePlaylist
+import uniffi.ease_client_schema.PlaylistId
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,12 +30,21 @@ class PlaylistRepository @Inject constructor(
     fun createPlaylist(arg: ArgCreatePlaylist) {
         _scope.launch {
             ctCreatePlaylist(bridge.backend, arg)
+            reload()
         }
     }
 
     fun editPlaylist(arg: ArgUpdatePlaylist) {
         _scope.launch {
             ctUpdatePlaylist(bridge.backend, arg)
+            reload()
+        }
+    }
+
+    fun removePlaylist(id: PlaylistId) {
+        _scope.launch {
+            ctRemovePlaylist(bridge.backend, id)
+            reload()
         }
     }
 

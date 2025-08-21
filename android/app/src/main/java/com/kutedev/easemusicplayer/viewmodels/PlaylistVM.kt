@@ -4,11 +4,13 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.core.Bridge
+import com.kutedev.easemusicplayer.repositories.ImportRepository
 import com.kutedev.easemusicplayer.repositories.PlaylistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import uniffi.ease_client_backend.ArgAddMusicsToPlaylist
 import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.MusicAbstract
 import uniffi.ease_client_schema.MusicId
@@ -16,6 +18,9 @@ import uniffi.ease_client_backend.Playlist
 import uniffi.ease_client_backend.PlaylistAbstract
 import uniffi.ease_client_schema.PlaylistId
 import uniffi.ease_client_backend.PlaylistMeta
+import uniffi.ease_client_backend.StorageEntryType
+import uniffi.ease_client_backend.ToAddMusicEntry
+import uniffi.ease_client_backend.ctAddMusicsToPlaylist
 import uniffi.ease_client_backend.ctGetPlaylist
 import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.ctRemovePlaylist
@@ -28,6 +33,7 @@ import javax.inject.Inject
 class PlaylistVM @Inject constructor(
     private val bridge: Bridge,
     private val playlistRepository: PlaylistRepository,
+    private val importRepository: ImportRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val _id: PlaylistId = PlaylistId(savedStateHandle["id"]!!)
@@ -51,17 +57,15 @@ class PlaylistVM @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val playlist = ctGetPlaylist(bridge.backend, _id)
-            if (playlist != null) {
-                _playlist.value = playlist
+            reload()
+            playlistRepository.playlists.collect {
+                    _ -> reload()
             }
         }
     }
 
     fun remove() {
-        viewModelScope.launch {
-            ctRemovePlaylist(bridge.backend, _id)
-        }
+        playlistRepository.removePlaylist(_id)
     }
 
     fun removeMusic(id: MusicId) {
@@ -70,6 +74,24 @@ class PlaylistVM @Inject constructor(
                 playlistId = _id,
                 musicId = id
             ))
+            playlistRepository.reload()
+        }
+    }
+
+    fun prepareImportMusics() {
+        importRepository.prepare(listOf(StorageEntryType.MUSIC)) {
+            entries ->
+                viewModelScope.launch {
+                    ctAddMusicsToPlaylist(bridge.backend, ArgAddMusicsToPlaylist(
+                        id = _id,
+                        entries = entries.map { entry -> ToAddMusicEntry(
+                            entry = entry,
+                            name = entry.name
+                        ) }
+                    ))
+
+                    playlistRepository.reload()
+                }
         }
     }
 
@@ -79,6 +101,13 @@ class PlaylistVM @Inject constructor(
 
     fun closeRemoveModal() {
         _removeModalOpen.value = false
+    }
+
+    private suspend fun reload() {
+        val playlist = ctGetPlaylist(bridge.backend, _id)
+        if (playlist != null) {
+            _playlist.value = playlist
+        }
     }
 }
 

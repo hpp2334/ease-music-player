@@ -33,6 +33,7 @@ class ImportRepository @Inject constructor() {
 
     fun onFinish(entries: List<StorageEntry>) {
         val c = _importCallback
+        _importCallback = null
         if (c != null) {
             c(entries)
         }
