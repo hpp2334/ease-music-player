@@ -1,9 +1,10 @@
 package com.kutedev.easemusicplayer.viewmodels
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.kutedev.easemusicplayer.repositories.ImportRepository
-import com.kutedev.easemusicplayer.repositories.PlaylistRepository
+import com.kutedev.easemusicplayer.singleton.ImportRepository
+import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -123,10 +124,10 @@ class CreatePlaylistVM @Inject constructor(
         }
     }
 
-    fun finish() {
+    fun finish(context: Context) {
         val entries = _entries.value.map { entry -> ToAddMusicEntry(entry, entry.name) }
 
-        playlistRepository.createPlaylist(ArgCreatePlaylist(
+        playlistRepository.createPlaylist(context, ArgCreatePlaylist(
             title = _name.value,
             cover = _cover.value,
             entries = entries

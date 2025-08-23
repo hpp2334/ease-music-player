@@ -1,9 +1,8 @@
-package com.kutedev.easemusicplayer.repositories
+package com.kutedev.easemusicplayer.singleton
 
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.core.DataSourceKeyH
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,7 +22,7 @@ class AssetRepository @Inject constructor(private val bridge: Bridge) {
         }
 
         return try {
-            val buf = ctGetAsset(bridge.backend, key)
+            val buf = bridge.run { ctGetAsset(it, key) }
             if (buf != null) {
                 bufCache[keyH] = buf
             }

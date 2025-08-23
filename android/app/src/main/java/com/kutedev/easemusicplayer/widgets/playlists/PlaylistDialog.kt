@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -41,7 +42,7 @@ import com.kutedev.easemusicplayer.components.SimpleFormText
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
-import com.kutedev.easemusicplayer.repositories.RouteImportType
+import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import uniffi.ease_client_backend.CreatePlaylistMode
 import uniffi.ease_client_schema.DataSourceKey
@@ -193,6 +194,7 @@ private fun FullImportBlock(
 fun CreatePlaylistsDialog(
     createPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val isOpen by createPlaylistVM.modalOpen.collectAsState()
     val mode by createPlaylistVM.mode.collectAsState()
     val name by createPlaylistVM.name.collectAsState()
@@ -273,7 +275,7 @@ fun CreatePlaylistsDialog(
                         size = EaseTextButtonSize.Medium,
                         disabled = !canSubmit,
                         onClick = {
-                            createPlaylistVM.finish()
+                            createPlaylistVM.finish(context)
                             onDismissRequest()
                         }
                     )

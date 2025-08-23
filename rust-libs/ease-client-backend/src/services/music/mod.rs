@@ -149,11 +149,12 @@ pub fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<Vec<u8
     }
 }
 
-pub(crate) struct ArgUpdateMusicDuration {
+#[derive(uniffi::Record)]
+pub struct ArgUpdateMusicDuration {
     pub id: MusicId,
     pub duration: Duration,
 }
-pub(crate) async fn update_music_duration(
+pub(crate) fn update_music_duration(
     cx: &BackendContext,
     arg: ArgUpdateMusicDuration,
 ) -> BResult<()> {
@@ -162,14 +163,12 @@ pub(crate) async fn update_music_duration(
     Ok(())
 }
 
-pub(crate) struct ArgUpdateMusicCover {
+#[derive(uniffi::Record)]
+pub struct ArgUpdateMusicCover {
     pub id: MusicId,
     pub cover: Vec<u8>,
 }
-pub(crate) async fn update_music_cover(
-    cx: &BackendContext,
-    arg: ArgUpdateMusicCover,
-) -> BResult<()> {
+pub(crate) fn update_music_cover(cx: &BackendContext, arg: ArgUpdateMusicCover) -> BResult<()> {
     cx.database_server()
         .update_music_cover(arg.id, arg.cover.clone())?;
     Ok(())
@@ -215,4 +214,25 @@ pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Optio
         lyric,
     };
     Ok(Some(music))
+}
+
+pub(crate) fn get_music_abstract(
+    cx: &BackendContext,
+    id: MusicId,
+) -> BResult<Option<MusicAbstract>> {
+    let model = cx.database_server().load_music(id)?;
+    if model.is_none() {
+        return Ok(None);
+    }
+
+    let model = model.unwrap();
+    let meta = build_music_meta(model.clone());
+    let cover = if model.cover.is_none() {
+        Default::default()
+    } else {
+        Some(DataSourceKey::Cover { id: model.id })
+    };
+
+    let abstract_music = MusicAbstract { cover, meta };
+    Ok(Some(abstract_music))
 }

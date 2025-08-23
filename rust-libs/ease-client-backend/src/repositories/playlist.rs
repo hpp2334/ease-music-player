@@ -10,6 +10,12 @@ use ease_client_schema::{
     TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC,
 };
 
+#[derive(Debug, uniffi::Record)]
+pub struct AddedMusic {
+    pub id: MusicId,
+    pub existed: bool,
+}
+
 impl DatabaseServer {
     pub fn load_playlist(self: &Arc<Self>, id: PlaylistId) -> BResult<Option<PlaylistModel>> {
         let db = self.db().begin_read()?;
@@ -68,11 +74,11 @@ impl DatabaseServer {
         picture: Option<StorageEntryLoc>,
         musics: Vec<ArgDBAddMusic>,
         current_time_ms: i64,
-    ) -> BResult<(PlaylistId, Vec<(MusicId, bool)>)> {
+    ) -> BResult<(PlaylistId, Vec<AddedMusic>)> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
-        let mut ret: Vec<(MusicId, bool)> = Vec::with_capacity(musics.len());
+        let mut ret: Vec<AddedMusic> = Vec::with_capacity(musics.len());
 
         let playlist_id = {
             let id = {
@@ -105,7 +111,7 @@ impl DatabaseServer {
             table_pm.insert(playlist_id, id)?;
             table_mp.insert(id, playlist_id)?;
 
-            ret.push((id, existed));
+            ret.push(AddedMusic { id, existed });
         }
 
         db.commit()?;
@@ -196,11 +202,11 @@ impl DatabaseServer {
         self: &Arc<Self>,
         playlist_id: PlaylistId,
         musics: Vec<ArgDBAddMusic>,
-    ) -> BResult<Vec<(MusicId, bool)>> {
+    ) -> BResult<Vec<AddedMusic>> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
-        let mut ret: Vec<(MusicId, bool)> = Vec::with_capacity(musics.len());
+        let mut ret: Vec<AddedMusic> = Vec::with_capacity(musics.len());
 
         for m in musics {
             let (id, existed) = self.add_music_impl(&db, &rdb, m)?;
@@ -210,7 +216,7 @@ impl DatabaseServer {
             table_pm.insert(playlist_id, id)?;
             table_mp.insert(id, playlist_id)?;
 
-            ret.push((id, existed));
+            ret.push(AddedMusic { id, existed });
         }
         db.commit()?;
         Ok(ret)

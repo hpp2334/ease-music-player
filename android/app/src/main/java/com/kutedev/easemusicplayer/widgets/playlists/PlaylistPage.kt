@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -59,14 +60,13 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.easeIconButtonSizeToDp
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
-import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.viewmodels.PlaylistVM
 import com.kutedev.easemusicplayer.viewmodels.durationStr
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
-import com.kutedev.easemusicplayer.repositories.RouteImportType
+import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
@@ -105,6 +105,7 @@ private fun PlaylistHeader(
     editPlaylistVM: EditPlaylistVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
+    val context = LocalContext.current
     val playlist by playlistVM.playlist.collectAsState()
     val musics = playlist.musics
     val cover = playlist.abstr.meta.cover
@@ -181,7 +182,7 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
-                                    playlistVM.prepareImportMusics()
+                                    playlistVM.prepareImportMusics(context)
                                     navController.navigate(RouteImport(RouteImportType.Music))
                                 }
                             ),

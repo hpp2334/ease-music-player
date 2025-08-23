@@ -2,20 +2,17 @@ package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.repositories.ImportRepository
-import com.kutedev.easemusicplayer.repositories.StorageRepository
+import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.ImportRepository
+import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.collections.immutable.immutableListOf
 import kotlinx.collections.immutable.persistentHashSetOf
 import kotlinx.collections.immutable.persistentListOf
-import kotlinx.coroutines.CoroutineScope
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -24,7 +21,6 @@ import uniffi.ease_client_backend.CurrentStorageStateType
 import uniffi.ease_client_backend.ListStorageEntryChildrenResp
 import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_backend.StorageEntry
-import uniffi.ease_client_backend.StorageEntryType
 import uniffi.ease_client_backend.ctListStorageEntryChildren
 import uniffi.ease_client_schema.StorageEntryLoc
 import uniffi.ease_client_schema.StorageId
@@ -162,12 +158,14 @@ class ImportVM @Inject constructor(
         _entries.value = emptyList()
 
         viewModelScope.launch {
-            val resp = ctListStorageEntryChildren(
-                bridge.backend, StorageEntryLoc(
-                    storageId = storageId,
-                    path = currentPath()
+            val resp = bridge.runRaw {
+                ctListStorageEntryChildren(
+                    it, StorageEntryLoc(
+                        storageId = storageId,
+                        path = currentPath()
+                    )
                 )
-            )
+            }
 
             when (resp) {
                 is ListStorageEntryChildrenResp.Ok -> {

@@ -18,12 +18,28 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
 import com.kutedev.easemusicplayer.MainActivity
+import com.kutedev.easemusicplayer.singleton.PlayerRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import uniffi.ease_client_backend.Playlist
+import uniffi.ease_client_backend.ctGetMusic
+import javax.inject.Inject
+import com.kutedev.easemusicplayer.singleton.Bridge
+import uniffi.ease_client_backend.MusicAbstract
 
 
 const val PLAYER_TO_PREV_COMMAND = "PLAYER_TO_PREV_COMMAND";
 const val PLAYER_TO_NEXT_COMMAND = "PLAYER_TO_NEXT_COMMAND";
 
+
+
 class PlaybackService : MediaSessionService() {
+    @Inject lateinit var playerRepository: PlayerRepository
+    @Inject lateinit var bridge: Bridge
+    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var _mediaSession: MediaSession? = null
 
     override fun onCreate() {
@@ -104,15 +120,39 @@ class PlaybackService : MediaSessionService() {
                     args: Bundle
                 ): ListenableFuture<SessionResult> {
                     if (customCommand.customAction == PLAYER_TO_PREV_COMMAND) {
-//                        TODO: apiBackendPlayPrevious()
+                        playPrevious()
                     } else if (customCommand.customAction == PLAYER_TO_NEXT_COMMAND) {
-//                        TODO: apiBackendPlayNext()
+                        playNext()
                     }
                     return super.onCustomCommand(session, controller, customCommand, args)
                 }
             })
             .build()
 
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playerRepository.setIsPlaying(isPlaying)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    playOnComplete()
+                } else if (playbackState == Player.STATE_READY) {
+                    playerRepository.setIsLoading(false)
+                    syncMetadataUtil(serviceScope, bridge, player)
+                } else if (playbackState == Player.STATE_BUFFERING) {
+                    playerRepository.setIsLoading(true)
+                }
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                playerRepository.notifyDurationChanged()
+            }
+        })
     }
 
 
@@ -130,5 +170,41 @@ class PlaybackService : MediaSessionService() {
         _mediaSession?.player?.release()
         _mediaSession?.release()
         _mediaSession = null
+        serviceScope.cancel()
+    }
+
+
+    fun play(musicAbstract: MusicAbstract, playlist: Playlist) {
+        val player = _mediaSession?.player ?: return
+
+        serviceScope.launch {
+            val music = bridge.run { ctGetMusic(it, musicAbstract.meta.id) } ?: return@launch
+            playerRepository.setCurrent(music, playlist)
+            playUtil(musicAbstract, player)
+        }
+    }
+
+    private fun playOnComplete() {
+        val m = playerRepository.onCompleteMusic.value
+        val p = playerRepository.playlist.value
+        if (m != null && p != null) {
+            play(m, p)
+        }
+    }
+
+    private fun playNext() {
+        val m = playerRepository.nextMusic.value
+        val p = playerRepository.playlist.value
+        if (m != null && p != null) {
+            play(m, p)
+        }
+    }
+
+    private fun playPrevious() {
+        val m = playerRepository.previousMusic.value
+        val p = playerRepository.playlist.value
+        if (m != null && p != null) {
+            play(m, p)
+        }
     }
 }

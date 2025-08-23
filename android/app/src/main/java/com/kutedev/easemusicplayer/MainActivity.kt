@@ -10,10 +10,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
-import com.kutedev.easemusicplayer.core.BackendService
-import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.repositories.PlaylistRepository
-import com.kutedev.easemusicplayer.repositories.StorageRepository
+import com.kutedev.easemusicplayer.core.PlaybackService
+import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.PlaylistRepository
+import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.launch
@@ -30,7 +30,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         bridge.initialize();
-        startService(Intent(this, BackendService::class.java))
+        startService(Intent(this, PlaybackService::class.java))
 
 
         setContent {

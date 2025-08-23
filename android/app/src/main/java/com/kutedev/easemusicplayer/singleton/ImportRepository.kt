@@ -1,7 +1,5 @@
-package com.kutedev.easemusicplayer.repositories
+package com.kutedev.easemusicplayer.singleton
 
-import com.kutedev.easemusicplayer.core.Bridge
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import uniffi.ease_client_backend.StorageEntry

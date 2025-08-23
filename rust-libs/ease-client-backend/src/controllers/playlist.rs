@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use ease_client_schema::{PlaylistId, StorageEntryLoc};
+use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc};
 
 use crate::{
     error::BResult,
     objects::{Playlist, PlaylistAbstract},
-    repositories::music::ArgDBAddMusic,
+    repositories::{music::ArgDBAddMusic, playlist::AddedMusic},
     services::{
         get_all_playlist_abstracts, get_playlist, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
         ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
@@ -34,8 +34,17 @@ pub async fn ct_list_playlist(cx: Arc<Backend>) -> BResult<Vec<PlaylistAbstract>
     return get_all_playlist_abstracts(cx).await;
 }
 
+#[derive(uniffi::Record)]
+pub struct RetCreatePlaylist {
+    id: PlaylistId,
+    music_ids: Vec<AddedMusic>,
+}
+
 #[uniffi::export]
-pub async fn ct_create_playlist(cx: Arc<Backend>, arg: ArgCreatePlaylist) -> BResult<PlaylistId> {
+pub async fn ct_create_playlist(
+    cx: Arc<Backend>,
+    arg: ArgCreatePlaylist,
+) -> BResult<RetCreatePlaylist> {
     let cx = cx.get_context();
     let current_time_ms = cx.current_time().as_millis() as i64;
 
@@ -63,14 +72,17 @@ pub async fn ct_create_playlist(cx: Arc<Backend>, arg: ArgCreatePlaylist) -> BRe
         current_time_ms,
     )?;
 
-    Ok(playlist_id)
+    Ok(RetCreatePlaylist {
+        id: playlist_id,
+        music_ids,
+    })
 }
 
 #[uniffi::export]
 pub async fn ct_add_musics_to_playlist(
     cx: Arc<Backend>,
     arg: ArgAddMusicsToPlaylist,
-) -> BResult<()> {
+) -> BResult<Vec<AddedMusic>> {
     let cx = cx.get_context();
     let musics = arg
         .entries
@@ -89,11 +101,11 @@ pub async fn ct_add_musics_to_playlist(
         })
         .collect();
 
-    let _ = cx
+    let ret = cx
         .database_server()
         .add_musics_to_playlist(arg.id, musics)?;
 
-    Ok(())
+    Ok(ret)
 }
 
 #[uniffi::export]

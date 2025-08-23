@@ -1,22 +1,15 @@
-package com.kutedev.easemusicplayer.core
+package com.kutedev.easemusicplayer.singleton
 
-import android.annotation.SuppressLint
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.Service
-import android.app.Service.START_NOT_STICKY
 import android.content.Context
-import android.content.Intent
-import android.os.IBinder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
-import androidx.core.app.NotificationCompat
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import uniffi.ease_client_backend.ArgInitializeApp
 import uniffi.ease_client_backend.Backend
 import uniffi.ease_client_backend.createBackend
+import uniffi.ease_client_backend.easeError
+import java.lang.Exception
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -42,7 +35,27 @@ class Bridge @Inject constructor(
         )
     )
 
-    val backend: Backend get() = _backend
+    suspend fun<R> run(block: suspend (backend: Backend) -> R): R? {
+        try {
+            return block(_backend)
+        } catch (e: Exception) {
+            easeError("run bridge failed: $e")
+            return null
+        }
+    }
+
+    suspend fun<R> runRaw(block: suspend (backend: Backend) -> R): R {
+        return block(_backend)
+    }
+
+    fun<R> runSync(block: (backend: Backend) -> R): R? {
+        try {
+            return block(_backend)
+        } catch (e: Exception) {
+            easeError("run bridge failed: $e")
+            return null
+        }
+    }
 
     fun initialize() {
         _backend.init();

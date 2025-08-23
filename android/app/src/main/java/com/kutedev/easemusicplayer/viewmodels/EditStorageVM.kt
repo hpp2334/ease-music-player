@@ -3,9 +3,9 @@ package com.kutedev.easemusicplayer.viewmodels
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.repositories.PlaylistRepository
-import com.kutedev.easemusicplayer.repositories.StorageRepository
+import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.PlaylistRepository
+import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -16,11 +16,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.ArgUpsertStorage
-import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_backend.StorageConnectionTestResult
 import uniffi.ease_client_backend.ctRemoveStorage
 import uniffi.ease_client_backend.ctTestStorage
-import uniffi.ease_client_backend.ctUpsertStorage
 import uniffi.ease_client_schema.StorageId
 import uniffi.ease_client_schema.StorageType
 import javax.inject.Inject
@@ -119,7 +117,7 @@ class EditStorageVM @Inject constructor(
         }
 
         _testJob = viewModelScope.launch {
-            _testResult.value = ctTestStorage(bridge.backend, form.value)
+            _testResult.value = bridge.runRaw { ctTestStorage(it, form.value) }
 
             delay(5000)
             resetTestResult()
@@ -176,7 +174,7 @@ class EditStorageVM @Inject constructor(
 
         if (id != null) {
             viewModelScope.launch {
-                ctRemoveStorage(bridge.backend, id)
+                bridge.run { ctRemoveStorage(it, id) }
 
                 playlistRepository.reload()
                 storageRepository.reload()

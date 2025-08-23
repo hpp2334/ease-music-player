@@ -1,67 +1,72 @@
 package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
-import com.kutedev.easemusicplayer.repositories.PlayerRepository
+import androidx.lifecycle.viewModelScope
+import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
+import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import com.kutedev.easemusicplayer.utils.formatDuration
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_schema.MusicId
 import uniffi.ease_client_schema.PlaylistId
 import java.time.Duration
 import javax.inject.Inject
-
-
-
-
-data class MusicState(
-    val id: MusicId? = null,
-    val playing: Boolean = false,
-    val title: String = "",
-    val cover: DataSourceKey? = null,
-    val previousCover: DataSourceKey? = null,
-    val nextCover: DataSourceKey? = null,
-    val currentDurationMs: ULong = 0uL,
-    val currentDuration: String = formatDuration(null as Duration?),
-    val totalDuration: String = formatDuration(null as Duration?),
-    val totalDurationMs: ULong = 0uL,
-    val bufferDurationMs: ULong = 0uL,
-    val canPlayNext: Boolean = false,
-    val canPlayPrevious: Boolean = false,
-    val loading: Boolean = false
-)
-
+import kotlin.time.DurationUnit
+import kotlin.time.toDuration
+import kotlin.time.toJavaDuration
 
 @HiltViewModel
 class PlayerVM @Inject constructor(
-    private val playerRepository: PlayerRepository
+    private val playerRepository: PlayerRepository,
+    private val playerControllerRepository: PlayerControllerRepository
 ) : ViewModel() {
+    private val _currentDuration = MutableStateFlow(Duration.ZERO)
+    private val _bufferDuration = MutableStateFlow(Duration.ZERO)
     val music = playerRepository.music
     val previousMusic = playerRepository.previousMusic
     val nextMusic = playerRepository.nextMusic
     val playing = playerRepository.playing
-    val currentDuration = playerRepository.currentDuration
-    val bufferDuration = playerRepository.bufferDuration
+    val currentDuration = _currentDuration.asStateFlow()
+    val bufferDuration = _bufferDuration.asStateFlow()
     val playMode = playerRepository.playMode
     val loading = playerRepository.loading
+
+    init {
+        viewModelScope.launch {
+            while (true) {
+                syncPosition()
+                delay(1000)
+            }
+        }
+        viewModelScope.launch {
+            playerRepository.durationChanged.collect {
+                syncPosition()
+            }
+        }
+    }
 
     fun resume() {
         playerRepository.remove()
     }
 
     fun pause() {
-        playerRepository.pause()
+        playerControllerRepository.pause()
     }
 
     fun stop() {
-        playerRepository.stop()
+        playerControllerRepository.stop()
     }
 
     fun playNext() {
-        playerRepository.playNext()
+        playerControllerRepository.playNext()
     }
 
     fun playPrevious() {
-        playerRepository.playPrevious()
+        playerControllerRepository.playPrevious()
     }
 
     fun remove() {
@@ -69,14 +74,21 @@ class PlayerVM @Inject constructor(
     }
 
     fun seek(ms: ULong) {
-        playerRepository.seek(ms)
+        playerControllerRepository.seek(ms)
     }
 
     fun play(id: MusicId, playlistId: PlaylistId) {
-        playerRepository.play(id, playlistId)
+        playerControllerRepository.play(id, playlistId)
     }
 
     fun changePlayModeToNext() {
         playerRepository.changePlayModeToNext()
+    }
+
+    fun syncPosition() {
+        _currentDuration.value = playerControllerRepository.getCurrentPosition().toDuration(
+            DurationUnit.MILLISECONDS).toJavaDuration()
+        _bufferDuration.value = playerControllerRepository.getBufferedPosition().toDuration(
+            DurationUnit.MILLISECONDS).toJavaDuration()
     }
 }

@@ -71,7 +71,7 @@ import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
-import com.kutedev.easemusicplayer.repositories.RouteImportType
+import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.utils.formatDuration
 import com.kutedev.easemusicplayer.utils.toMusicDurationMs
 import uniffi.ease_client_schema.DataSourceKey

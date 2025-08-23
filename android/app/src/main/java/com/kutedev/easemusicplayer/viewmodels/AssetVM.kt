@@ -1,17 +1,10 @@
 package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import com.kutedev.easemusicplayer.core.Bridge
-import com.kutedev.easemusicplayer.repositories.AssetRepository
-import com.kutedev.easemusicplayer.repositories.ImportRepository
-import com.kutedev.easemusicplayer.repositories.PlaylistRepository
+import com.kutedev.easemusicplayer.singleton.AssetRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import uniffi.ease_client_backend.ctGetAsset
-import uniffi.ease_client_backend.easeError
 import uniffi.ease_client_schema.DataSourceKey
-import uniffi.ease_client_schema.StorageEntryLoc
 import javax.inject.Inject
 
 

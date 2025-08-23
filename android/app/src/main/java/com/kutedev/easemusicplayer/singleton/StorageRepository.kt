@@ -1,17 +1,13 @@
-package com.kutedev.easemusicplayer.repositories
+package com.kutedev.easemusicplayer.singleton
 
-import androidx.lifecycle.viewModelScope
-import com.kutedev.easemusicplayer.core.Bridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.ArgUpsertStorage
 import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_backend.ctGetRefreshToken
 import uniffi.ease_client_backend.ctListStorage
 import uniffi.ease_client_backend.ctUpsertStorage
-import uniffi.ease_client_schema.StorageType
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,16 +23,16 @@ class StorageRepository @Inject constructor(
     val storages = _storages.asStateFlow()
 
     suspend fun updateRefreshToken(code: String) {
-        val token = ctGetRefreshToken(bridge.backend, code)
+        val token = bridge.run { ctGetRefreshToken(it, code) } ?: return
         _oauthRefreshToken.value = token
     }
 
     suspend fun upsertStorage(arg: ArgUpsertStorage) {
-        ctUpsertStorage(bridge.backend, arg)
+        bridge.run { ctUpsertStorage(it, arg) }
         reload()
     }
 
     suspend fun reload() {
-        _storages.value = ctListStorage(bridge.backend)
+        _storages.value = bridge.run { ctListStorage(it) } ?: emptyList()
     }
 }
