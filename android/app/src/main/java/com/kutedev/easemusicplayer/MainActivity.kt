@@ -2,6 +2,7 @@ package com.kutedev.easemusicplayer
 
 import android.Manifest.permission.POST_NOTIFICATIONS
 import android.app.Application
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -10,8 +11,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.MoreExecutors
 import com.kutedev.easemusicplayer.core.PlaybackService
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -24,14 +29,13 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var bridge: Bridge
     @Inject lateinit var storageRepository: StorageRepository
     @Inject lateinit var playlistRepository: PlaylistRepository
+    @Inject lateinit var playerControllerRepository: PlayerControllerRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         bridge.initialize();
-        startService(Intent(this, PlaybackService::class.java))
-
 
         setContent {
             Root()
@@ -45,7 +49,29 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             storageRepository.reload()
             playlistRepository.reload()
+            setupMediaController()
         }
+    }
+
+    private fun setupMediaController() {
+        val factory = MediaController.Builder(
+            this,
+            SessionToken(this, ComponentName(this, PlaybackService::class.java))
+        ).buildAsync()
+        factory.addListener(
+            {
+                factory.let {
+                    if (it.isDone) {
+                        val controller = it.get()
+                        playerControllerRepository.setupMediaController(controller)
+                        controller
+                    } else {
+                        null
+                    }
+                }
+            },
+            MoreExecutors.directExecutor()
+        )
     }
 
     override fun onStop() {

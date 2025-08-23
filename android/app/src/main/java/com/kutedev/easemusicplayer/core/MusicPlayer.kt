@@ -28,7 +28,9 @@ import uniffi.ease_client_backend.Playlist
 import uniffi.ease_client_backend.ctGetMusic
 import javax.inject.Inject
 import com.kutedev.easemusicplayer.singleton.Bridge
+import dagger.hilt.android.AndroidEntryPoint
 import uniffi.ease_client_backend.MusicAbstract
+import uniffi.ease_client_backend.easeLog
 
 
 const val PLAYER_TO_PREV_COMMAND = "PLAYER_TO_PREV_COMMAND";
@@ -36,6 +38,7 @@ const val PLAYER_TO_NEXT_COMMAND = "PLAYER_TO_NEXT_COMMAND";
 
 
 
+@AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
     @Inject lateinit var playerRepository: PlayerRepository
     @Inject lateinit var bridge: Bridge
@@ -44,6 +47,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        easeLog("Playback service creating...")
         val context = this
 
         val intent = Intent(this, MainActivity::class.java).apply {
@@ -153,6 +157,7 @@ class PlaybackService : MediaSessionService() {
                 playerRepository.notifyDurationChanged()
             }
         })
+        easeLog("Playback service created")
     }
 
 

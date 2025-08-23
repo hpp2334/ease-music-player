@@ -9,6 +9,7 @@ import uniffi.ease_client_backend.ArgInitializeApp
 import uniffi.ease_client_backend.Backend
 import uniffi.ease_client_backend.createBackend
 import uniffi.ease_client_backend.easeError
+import uniffi.ease_client_backend.easeLog
 import java.lang.Exception
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,7 +25,8 @@ private fun normalizePath(p: String): String {
 
 @Singleton
 class Bridge @Inject constructor(
-    @ApplicationContext cx: Context
+    @ApplicationContext cx: Context,
+    private val toastRepository: ToastRepository
 )  {
     private val _storagePath = "/"
     private val _backend: Backend = createBackend(
@@ -53,12 +55,14 @@ class Bridge @Inject constructor(
             return block(_backend)
         } catch (e: Exception) {
             easeError("run bridge failed: $e")
+            toastRepository.emitToast(e.toString())
             return null
         }
     }
 
     fun initialize() {
         _backend.init();
+        easeLog("bridge initialized")
     }
 }
 

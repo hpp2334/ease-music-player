@@ -29,6 +29,7 @@ import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.core.RoutePlaylist
 import com.kutedev.easemusicplayer.core.RoutesProvider
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
+import com.kutedev.easemusicplayer.widgets.ToastFrame
 import com.kutedev.easemusicplayer.widgets.dashboard.TimeToPauseModal
 import com.kutedev.easemusicplayer.widgets.devices.EditStoragesPage
 import com.kutedev.easemusicplayer.widgets.home.HomePage
@@ -127,6 +128,7 @@ fun Root() {
                             }
                         }
                     }
+                    ToastFrame()
                 }
             }
         }

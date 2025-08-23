@@ -300,16 +300,12 @@ private fun OneDriveConfig(
 fun EditStoragesPage(
     editStorageVM: EditStorageVM = hiltViewModel()
 ) {
-    val context = LocalContext.current
     val navController = LocalNavController.current
     val coroutineScope = rememberCoroutineScope()
     val form by editStorageVM.form.collectAsState();
     val isCreated by editStorageVM.isCreated.collectAsState();
     val testing by editStorageVM.testResult.collectAsState()
 
-    val toast = remember {
-        Toast.makeText(context, "", Toast.LENGTH_SHORT)
-    }
     val storageType = form.typ;
 
     val testingColors = when (testing) {
@@ -326,30 +322,6 @@ fun EditStoragesPage(
             buttonBg = Color.Transparent,
             iconTint = MaterialTheme.colorScheme.error,
         )
-    }
-
-    LaunchedEffect(testing) {
-        if (testing == StorageConnectionTestResult.NONE || testing == StorageConnectionTestResult.TESTING) {
-            return@LaunchedEffect;
-        }
-
-        when (testing) {
-            StorageConnectionTestResult.SUCCESS -> {
-                toast.setText(R.string.storage_edit_testing_toast_success)
-            }
-            StorageConnectionTestResult.TIMEOUT -> {
-                toast.setText(R.string.storage_edit_testing_toast_timeout)
-            }
-            StorageConnectionTestResult.UNAUTHORIZED -> {
-                toast.setText(R.string.storage_edit_testing_toast_unauth)
-            }
-            StorageConnectionTestResult.OTHER_ERROR -> {
-                toast.setText(R.string.storage_edit_testing_toast_other_error)
-            }
-            else -> {}
-        }
-        toast.cancel()
-        toast.show()
     }
 
     Column(

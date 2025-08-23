@@ -3,9 +3,11 @@ package com.kutedev.easemusicplayer.viewmodels
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
+import com.kutedev.easemusicplayer.singleton.ToastRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -53,6 +55,7 @@ class EditStorageVM @Inject constructor(
     private val bridge: Bridge,
     private val storageRepository: StorageRepository,
     private val playlistRepository: PlaylistRepository,
+    private val toastRepository: ToastRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -118,9 +121,33 @@ class EditStorageVM @Inject constructor(
 
         _testJob = viewModelScope.launch {
             _testResult.value = bridge.runRaw { ctTestStorage(it, form.value) }
+            sendTestToast()
 
             delay(5000)
             resetTestResult()
+        }
+    }
+
+    private fun sendTestToast() {
+        val testing = _testResult.value
+        if (testing == StorageConnectionTestResult.NONE || testing == StorageConnectionTestResult.TESTING) {
+            return;
+        }
+
+        when (testing) {
+            StorageConnectionTestResult.SUCCESS -> {
+                toastRepository.emitToastRes(R.string.storage_edit_testing_toast_success)
+            }
+            StorageConnectionTestResult.TIMEOUT -> {
+                toastRepository.emitToastRes(R.string.storage_edit_testing_toast_timeout)
+            }
+            StorageConnectionTestResult.UNAUTHORIZED -> {
+                toastRepository.emitToastRes(R.string.storage_edit_testing_toast_unauth)
+            }
+            StorageConnectionTestResult.OTHER_ERROR -> {
+                toastRepository.emitToastRes(R.string.storage_edit_testing_toast_other_error)
+            }
+            else -> {}
         }
     }
 

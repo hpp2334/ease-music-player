@@ -8,6 +8,7 @@ import androidx.media3.common.Player.COMMAND_STOP
 import androidx.media3.session.MediaController
 import com.kutedev.easemusicplayer.core.playUtil
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
@@ -16,6 +17,7 @@ import uniffi.ease_client_backend.ctGetMusic
 import uniffi.ease_client_backend.ctGetPlaylist
 import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.easeError
+import uniffi.ease_client_backend.easeLog
 import uniffi.ease_client_schema.MusicId
 import uniffi.ease_client_schema.PlaylistId
 import java.time.Duration
@@ -25,6 +27,7 @@ import javax.inject.Singleton
 @Singleton
 class PlayerControllerRepository @Inject constructor(
     private val playerRepository: PlayerRepository,
+    private val toastRepository: ToastRepository,
     private val bridge: Bridge,
     private val _scope: CoroutineScope
 ) {
@@ -33,9 +36,6 @@ class PlayerControllerRepository @Inject constructor(
     private val _music = playerRepository.music
     private val nextMusic = playerRepository.nextMusic
     private val previousMusic = playerRepository.previousMusic
-    private val _error = MutableSharedFlow<PlaybackException>()
-
-    val error = _error.asSharedFlow()
 
     fun setupMediaController(mediaController: MediaController) {
         _mediaController = mediaController
@@ -45,10 +45,11 @@ class PlayerControllerRepository @Inject constructor(
                 super.onPlayerError(error)
 
                 _scope.launch {
-                    _error.emit(error)
+                    toastRepository.emitToast(error.toString())
                 }
             }
         })
+        easeLog("media controller setup")
     }
 
     fun getCurrentPosition(): Long {
@@ -67,7 +68,7 @@ class PlayerControllerRepository @Inject constructor(
             return
         }
 
-        _scope.launch {
+        _scope.launch(Dispatchers.Main) {
             val music = bridge.run { ctGetMusic(it, id) }
             val playlist = bridge.run { ctGetPlaylist(it, playlistId) }
             val inPlaylist = music != null && playlist != null && playlist.musics.find { music -> music.meta.id == id }.let { it -> it != null }
