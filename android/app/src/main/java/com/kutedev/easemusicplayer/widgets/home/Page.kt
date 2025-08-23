@@ -29,8 +29,7 @@ fun HomePage(
     val pagerState = rememberPagerState(pageCount = {
         3
     })
-    val musicState by playerVM.musicState.collectAsState()
-    val isPlaying = musicState.playing
+    val isPlaying by playerVM.playing.collectAsState()
 
     Box(
         modifier = Modifier.fillMaxSize(),

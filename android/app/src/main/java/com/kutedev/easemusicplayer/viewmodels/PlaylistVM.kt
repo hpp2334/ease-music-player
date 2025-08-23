@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.core.Bridge
 import com.kutedev.easemusicplayer.repositories.ImportRepository
 import com.kutedev.easemusicplayer.repositories.PlaylistRepository
+import com.kutedev.easemusicplayer.utils.formatDuration
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -111,22 +112,10 @@ class PlaylistVM @Inject constructor(
     }
 }
 
-private fun _durationStr(duration: Duration?): String {
-    if (duration != null) {
-        val all = duration.toMillis()
-        val h = all / 1000 / 60 / 60
-        val m = all / 1000 / 60 % 60
-        val s = all / 1000 % 60
-        return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
-    } else {
-        return "--:--:--"
-    }
-}
-
 fun PlaylistAbstract.durationStr(): String {
-    return _durationStr(duration)
+    return formatDuration(duration)
 }
 
 fun MusicAbstract.durationStr(): String {
-    return _durationStr(meta.duration)
+    return formatDuration(meta.duration)
 }

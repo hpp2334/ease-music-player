@@ -94,7 +94,7 @@ fun BoxScope.BottomBar(
     val _currentRoute by navController.currentBackStackEntryAsState()
     val currentRoute = if (_currentRoute?.destination?.route != null) _currentRoute!!.destination.route!! else ""
 
-    val state by playerVM.musicState.collectAsState()
+    val current by playerVM.music.collectAsState()
     val items = listOf(
         BPlaylist,
         BDashboard,
@@ -102,7 +102,7 @@ fun BoxScope.BottomBar(
     )
     val animationScope = rememberCoroutineScope()
 
-    val hasCurrentMusic = state.id != null
+    val hasCurrentMusic = current?.meta?.id != null
 
     val showBottomBar = isRouteHome(currentRoute)
     val showMiniPlayer = hasCurrentMusic && (isRouteHome(currentRoute) || isRoutePlaylist(currentRoute))

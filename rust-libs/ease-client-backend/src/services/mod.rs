@@ -8,4 +8,5 @@ mod storage;
 pub use app::*;
 pub use music::*;
 pub use playlist::*;
+pub use preference::*;
 pub use storage::*;

@@ -261,6 +261,7 @@ private fun PlaylistItem(
     currentSwipingMusicId: MusicId?,
     onSwipe: () -> Unit,
     onRemove: () -> Unit,
+    playlistVM: PlaylistVM = hiltViewModel(),
     playerVM: PlayerVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
@@ -268,6 +269,7 @@ private fun PlaylistItem(
     val density = LocalDensity.current
     val panelWidthDp = 48.dp
 
+    val playlist by playlistVM.playlist.collectAsState()
     val id = item.meta.id
     val title = item.meta.title
     val duration = item.durationStr()
@@ -328,7 +330,7 @@ private fun PlaylistItem(
                 )
                 .clickable {
                     navController.navigate(RouteMusicPlayer())
-                    playerVM.play(id)
+                    playerVM.play(id, playlist.abstr.meta.id)
                     onSwipe()
                 }
                 .background(bgColor)
@@ -402,7 +404,7 @@ private fun PlaylistItemsBlock(
         mutableStateOf<MusicId?>(null)
     }
     val playlist by playlistVM.playlist.collectAsState()
-    val currentPlaying by playerVM.musicState.collectAsState()
+    val currentPlaying by playerVM.music.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -415,7 +417,7 @@ private fun PlaylistItemsBlock(
         items(playlist.musics) {
             val item = it;
             val id = item.meta.id
-            val playing = id == currentPlaying.id
+            val playing = id == currentPlaying?.meta?.id
 
             key(id) {
                 PlaylistItem(
@@ -434,7 +436,7 @@ private fun PlaylistItemsBlock(
         }
         item {
             BottomBarSpacer(
-                hasCurrentMusic = currentPlaying.id != null,
+                hasCurrentMusic = currentPlaying?.meta?.id != null,
                 scaffoldPadding = scaffoldPadding,
             )
         }

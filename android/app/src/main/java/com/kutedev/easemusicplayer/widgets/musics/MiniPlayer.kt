@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +38,8 @@ import com.kutedev.easemusicplayer.components.MusicCover
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
+import com.kutedev.easemusicplayer.utils.formatDuration
+import com.kutedev.easemusicplayer.utils.toMusicDurationMs
 import uniffi.ease_client_schema.DataSourceKey
 
 @Composable
@@ -149,18 +152,21 @@ private fun MiniPlayerCore(
 fun MiniPlayer(
     playerVM: PlayerVM = hiltViewModel()
 ) {
-    val state = playerVM.musicState.collectAsState().value
     val navController = LocalNavController.current
+    val isPlaying by playerVM.playing.collectAsState()
+    val music by playerVM.music.collectAsState()
+    val loading by playerVM.loading.collectAsState()
+    val nextMusic by playerVM.nextMusic.collectAsState()
 
     MiniPlayerCore(
-        isPlaying = state.playing,
-        title = state.title,
-        cover = state.cover,
-        currentDurationMS = state.currentDurationMs,
-        totalDuration = state.totalDuration,
-        totalDurationMS = state.totalDurationMs,
-        canNext = state.canPlayNext,
-        loading = state.loading,
+        isPlaying = isPlaying,
+        title = music?.meta?.title ?: "",
+        cover = music?.cover,
+        currentDurationMS = toMusicDurationMs(music),
+        totalDuration = formatDuration(music),
+        totalDurationMS = toMusicDurationMs(music),
+        canNext = nextMusic != null,
+        loading = loading,
         onClick = { navController.navigate(RouteMusicPlayer()) },
         onPlay = { playerVM.resume() },
         onPause = { playerVM.pause() },

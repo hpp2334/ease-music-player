@@ -51,7 +51,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
@@ -73,6 +72,8 @@ import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.repositories.RouteImportType
+import com.kutedev.easemusicplayer.utils.formatDuration
+import com.kutedev.easemusicplayer.utils.toMusicDurationMs
 import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_backend.LyricLine
 import uniffi.ease_client_backend.LyricLoadState
@@ -88,7 +89,7 @@ private fun MusicPlayerHeader(
     lyricVM: LyricVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
-    val state by playerVM.musicState.collectAsState()
+    val currentPlaying by playerVM.music.collectAsState()
 
 
     var moreMenuExpanded by remember {
@@ -136,7 +137,7 @@ private fun MusicPlayerHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.music_lyric_add,
                                 onClick = {
-                                    if (state.id != null) {
+                                    if (currentPlaying?.meta?.id != null) {
                                         navController.navigate(
                                             RouteImport(RouteImportType.Lyric)
                                         )
@@ -559,9 +560,12 @@ private fun MusicPanel(
     playerVM: PlayerVM = hiltViewModel(),
     sleepModeVM: SleepModeVM = hiltViewModel()
 ) {
-    val state by playerVM.musicState.collectAsState()
     val playMode by playerVM.playMode.collectAsState()
     val timeToPauseState by sleepModeVM.state.collectAsState()
+    val previousMusic by playerVM.previousMusic.collectAsState()
+    val nextMusic by playerVM.nextMusic.collectAsState()
+    val playing by playerVM.playing.collectAsState()
+    val loading by playerVM.loading.collectAsState()
 
     val isTimeToPauseOpen = timeToPauseState.enabled
     val modeDrawable = when (playMode) {
@@ -599,18 +603,18 @@ private fun MusicPanel(
             sizeType = EaseIconButtonSize.Medium,
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_play_previous),
-            disabled = !state.canPlayPrevious,
+            disabled = previousMusic == null,
             onClick = {
                 playerVM.playPrevious()
             }
         )
-        if (!state.playing) {
+        if (!playing) {
             EaseIconButton(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
-                disabled = state.loading,
-                overrideColors = if (state.loading) {
+                disabled = loading,
+                overrideColors = if (loading) {
                     EaseIconButtonColors(
                         buttonDisabledBg = MaterialTheme.colorScheme.secondary,
                     )
@@ -622,7 +626,7 @@ private fun MusicPanel(
                 }
             )
         }
-        if (state.playing) {
+        if (playing) {
             EaseIconButton(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
@@ -636,7 +640,7 @@ private fun MusicPanel(
             sizeType = EaseIconButtonSize.Medium,
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_play_next),
-            disabled = !state.canPlayNext,
+            disabled = nextMusic == null,
             onClick = {
                 playerVM.playNext()
             }
@@ -646,7 +650,7 @@ private fun MusicPanel(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = modeDrawable),
             onClick = {
-                playerVM.changePlayMode()
+                playerVM.changePlayModeToNext()
             }
         )
     }
@@ -658,7 +662,11 @@ fun MusicPlayerPage(
     lyricVM: LyricVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
-    val currentMusicState by playerVM.musicState.collectAsState()
+    val currentMusic by playerVM.music.collectAsState()
+    val currentDuration by playerVM.currentDuration.collectAsState()
+    val previousMusic by playerVM.previousMusic.collectAsState()
+    val nextMusic by playerVM.nextMusic.collectAsState()
+    val bufferDuration by playerVM.bufferDuration.collectAsState()
     val currentLyricState by lyricVM.lyricState.collectAsState()
     val currentLyricIndex by lyricVM.lyricIndex.collectAsState()
 
@@ -685,16 +693,16 @@ fun MusicPlayerPage(
                     onNext = {
                         playerVM.playNext()
                     },
-                    cover = currentMusicState.cover,
-                    prevCover = currentMusicState.previousCover,
-                    nextCover = currentMusicState.nextCover,
-                    canPrev = currentMusicState.canPlayPrevious,
-                    canNext = currentMusicState.canPlayNext,
+                    cover = currentMusic?.cover,
+                    prevCover = previousMusic?.cover,
+                    nextCover = nextMusic?.cover,
+                    canPrev = previousMusic != null,
+                    canNext = nextMusic != null,
                     lyricIndex = currentLyricIndex,
                     lyricLoadedState = currentLyricState.loadedState,
                     lyrics = currentLyricState.lyrics.lines,
                     onClickAddLyric = {
-                        if (currentMusicState.id != null) {
+                        if (currentMusic != null) {
                             navController.navigate(RouteImport(RouteImportType.Lyric))
                         }
                     }
@@ -704,18 +712,18 @@ fun MusicPlayerPage(
                 modifier = Modifier.padding(36.dp, 10.dp)
             ) {
                 Text(
-                    text = currentMusicState.title,
+                    text = currentMusic?.meta?.title ?: "",
                     maxLines = 3,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 20.sp,
                     modifier = Modifier.padding(0.dp, 10.dp)
                 )
                 MusicSlider(
-                    currentDuration = currentMusicState.currentDuration,
-                    _currentDurationMS = currentMusicState.currentDurationMs,
-                    bufferDurationMS = currentMusicState.bufferDurationMs,
-                    totalDuration = currentMusicState.totalDuration,
-                    totalDurationMS = currentMusicState.totalDurationMs,
+                    currentDuration = formatDuration(currentDuration),
+                    _currentDurationMS = toMusicDurationMs(currentDuration),
+                    bufferDurationMS = bufferDuration.toMillis().toULong(),
+                    totalDuration = formatDuration(currentMusic),
+                    totalDurationMS = toMusicDurationMs(currentMusic),
                     onChangeMusicPosition = { nextMS ->
                         playerVM.seek(nextMS)
                     }
