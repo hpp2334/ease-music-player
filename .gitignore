@@ -49,3 +49,5 @@ rust-libs/ease-remote-storage/src/generated.rs
 
 **/target
 **/node_modules
+
+.fuse*

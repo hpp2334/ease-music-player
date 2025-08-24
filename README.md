@@ -1,12 +1,12 @@
 # Ease Music Player
 
-Ease Music Player is a lightweight music player, written in Rust and Jetpack Compose. 
+Ease Music Player is a lightweight music player, written in Rust and Jetpack Compose.
 
 Features
 ----
 
-- WebDAV and OneDrive support  
-- Playlist-based, music cover and lyric support  
+- WebDAV and OneDrive support
+- Playlist-based, music cover and lyric support
 
 ScreenShot
 ----
@@ -40,4 +40,4 @@ Due to the reasons above, the current version uses Jetpack Compose to better int
 License
 ----
 
-GPL v3
+GPL-3.0
