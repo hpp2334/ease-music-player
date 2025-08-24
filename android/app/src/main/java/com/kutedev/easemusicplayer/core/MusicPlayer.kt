@@ -49,7 +49,6 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var bridge: Bridge
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var _mediaSession: MediaSession? = null
-    private val _channelId: String = "EaseMusicBackendServiceChannel"
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -165,35 +164,7 @@ class PlaybackService : MediaSessionService() {
                 playerRepository.notifyDurationChanged()
             }
         })
-        createNotificationChannel()
         easeLog("Playback service created")
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val res = super.onStartCommand(intent, flags, startId)
-
-        val notification = NotificationCompat.Builder(this, _channelId)
-            .setContentTitle("Ease Music Player Backend")
-            .setContentText("Ease Music Player Backend Service is running")
-            .setOngoing(true)
-            .build();
-
-        startForeground(1, notification);
-
-        return res
-    }
-
-    private fun createNotificationChannel() {
-        val serviceChannel = NotificationChannel(
-            _channelId,
-            "Foreground Service Channel",
-            NotificationManager.IMPORTANCE_LOW
-        )
-
-        val manager = getSystemService(
-            NotificationManager::class.java
-        )
-        manager?.createNotificationChannel(serviceChannel)
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {

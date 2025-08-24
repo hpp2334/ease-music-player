@@ -5,7 +5,7 @@ resolver = "2"
 members = [
     "ease-client-backend",
     "ease-client-android-ffi-builder",
-    "ease-client-schema", "ease-client-tokio",
+    "ease-client-schema", "ease-client-tokio", "ease-order-key",
 ]
 
 [profile.bench]

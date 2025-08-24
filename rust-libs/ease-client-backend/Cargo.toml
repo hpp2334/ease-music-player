@@ -2,6 +2,7 @@
 name = "ease-client-backend"
 version = "0.2.0"
 edition = "2021"
+license = "GPL-3.0"
 publish = false
 
 [lib]
