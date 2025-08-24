@@ -126,8 +126,6 @@ class PlaylistVM @Inject constructor(
         if (playlist != null) {
             _playlist.value = playlist
         }
-
-
     }
 }
 

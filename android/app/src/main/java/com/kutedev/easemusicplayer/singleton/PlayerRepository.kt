@@ -34,7 +34,8 @@ data class SleepModeState(
 @Singleton
 class PlayerRepository @Inject constructor(
     private val bridge: Bridge,
-    private val _scope: CoroutineScope
+    private val _scope: CoroutineScope,
+    private val preferenceRepository: PreferenceRepository
 ) {
     private val _sleep = MutableStateFlow(SleepModeState())
     private val _music = MutableStateFlow(null as Music?)
@@ -50,10 +51,9 @@ class PlayerRepository @Inject constructor(
     }
 
     private var _sleepJob: Job? = null
-    private val _playMode = MutableStateFlow(PlayMode.SINGLE)
     private val _loading = MutableStateFlow(false)
     private val _durationChanged = MutableSharedFlow<Unit>()
-    val playMode = _playMode.asStateFlow()
+    val playMode = preferenceRepository.playMode
 
     val sleepState = _sleep.asStateFlow()
     val durationChanged = _durationChanged.asSharedFlow()
@@ -62,7 +62,7 @@ class PlayerRepository @Inject constructor(
     val playing = _playing.asStateFlow()
     val loading = _loading.asStateFlow()
 
-    val previousMusic = combine(_playMode, _musicIndex, _playlist) {
+    val previousMusic = combine(playMode, _musicIndex, _playlist) {
         playMode, musicIndex, playlist ->
             if (musicIndex == -1 || playlist == null || playlist.musics.size == 0) {
                 null
@@ -74,7 +74,7 @@ class PlayerRepository @Inject constructor(
             }
     }.stateIn(_scope, SharingStarted.Lazily, null)
 
-    val nextMusic = combine(_playMode, _musicIndex, _playlist) {
+    val nextMusic = combine(playMode, _musicIndex, _playlist) {
             playMode, musicIndex, playlist ->
         if (musicIndex == -1 || playlist == null || playlist.musics.size == 0) {
             null
@@ -86,7 +86,7 @@ class PlayerRepository @Inject constructor(
         }
     }.stateIn(_scope, SharingStarted.Lazily, null)
 
-    val onCompleteMusic = combine(_playMode, _musicIndex, _playlist) {
+    val onCompleteMusic = combine(playMode, _musicIndex, _playlist) {
             playMode, musicIndex, playlist ->
         if (musicIndex == -1 || playlist == null || playlist.musics.size == 0) {
             null
@@ -98,7 +98,7 @@ class PlayerRepository @Inject constructor(
             val i = (musicIndex + 1) % playlist.musics.size
             playlist.musics[i]
         }
-    }.stateIn(_scope, SharingStarted.Lazily, null)
+    }.stateIn(_scope, SharingStarted.Eagerly, null)
 
     fun setIsPlaying(playing: Boolean) {
         _playing.value = playing
@@ -160,21 +160,21 @@ class PlayerRepository @Inject constructor(
     }
 
     fun changePlayModeToNext() {
-        when (_playMode.value) {
+        val nextPlayMode = when (playMode.value) {
             PlayMode.SINGLE -> {
-                _playMode.value = PlayMode.SINGLE_LOOP
+                PlayMode.SINGLE_LOOP
             }
             PlayMode.SINGLE_LOOP -> {
-                _playMode.value = PlayMode.LIST
+                PlayMode.LIST
             }
             PlayMode.LIST -> {
-                _playMode.value = PlayMode.LIST_LOOP
+                PlayMode.LIST_LOOP
             }
             PlayMode.LIST_LOOP -> {
-                _playMode.value = PlayMode.SINGLE
+                PlayMode.SINGLE
             }
         }
 
-        bridge.runSync { ctsSavePreferencePlaymode(it, _playMode.value) }
+        preferenceRepository.savePlayMode(nextPlayMode)
     }
 }

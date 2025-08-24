@@ -8,3 +8,8 @@ pub(crate) fn save_preference_playmode(cx: &BackendContext, arg: PlayMode) -> BR
     cx.database_server().save_preference(data)?;
     Ok(())
 }
+
+pub(crate) fn get_preference_playmode(cx: &BackendContext) -> BResult<PlayMode> {
+    let data = cx.database_server().load_preference()?;
+    Ok(data.playmode)
+}
