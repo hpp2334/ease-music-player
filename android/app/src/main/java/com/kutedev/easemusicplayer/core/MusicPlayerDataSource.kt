@@ -10,6 +10,7 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import com.kutedev.easemusicplayer.singleton.Bridge
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -18,8 +19,10 @@ import uniffi.ease_client_backend.ctGetAssetStream
 import uniffi.ease_client_backend.easeError
 import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_schema.MusicId
+import java.io.IOException
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -28,9 +31,9 @@ class MusicPlayerDataSource(
     private val bridge: Bridge,
     private val scope: CoroutineScope
 ) : DataSource {
-    private var _loadJob: Job? = null
     private var _currentUri: Uri? = null
     private var _inputStream: PipedInputStream? = null
+    private var _loadJob: Job? = null
 
     override fun addTransferListener(transferListener: TransferListener) {
         // noop
@@ -49,7 +52,7 @@ class MusicPlayerDataSource(
         _currentUri = dataSpec.uri
 
         val assetStream = runBlocking {
-            bridge.run { ctGetAssetStream(it, DataSourceKey.Music(musicId)) }
+            bridge.run { ctGetAssetStream(it, DataSourceKey.Music(musicId), dataSpec.position.toULong()) }
         }
         if (assetStream == null) {
             throw RuntimeException("music $raw not found")
@@ -58,14 +61,19 @@ class MusicPlayerDataSource(
         val input = PipedInputStream()
         val output = PipedOutputStream(input)
         _inputStream = input
-        _loadJob = scope.launch {
+
+        _loadJob = scope.launch(Dispatchers.IO) {
             while (true) {
+
                 try {
                     val b = assetStream.next()
+
                     if (b == null) {
                         break
                     }
                     output.write(b)
+                } catch (e: IOException) {
+                    break
                 } catch (e: Exception) {
                     easeError("load chunk failed, $e")
                     break
@@ -96,7 +104,10 @@ class MusicPlayerDataSource(
     ): Int {
         val stream = _inputStream ?: return RESULT_END_OF_INPUT
         val read = stream.read(buffer, offset, length)
-        return if (read == -1) RESULT_END_OF_INPUT else read
+        if (read == -1) {
+            return RESULT_END_OF_INPUT
+        }
+        return read
     }
 
     private fun reset() {

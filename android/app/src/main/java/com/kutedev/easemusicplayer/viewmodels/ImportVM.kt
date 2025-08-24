@@ -137,13 +137,10 @@ class ImportVM @Inject constructor(
         if (allSelected) {
             _selected.update { selected ->
                 selected.clear()
-                selected
             }
         } else {
             _selected.update { selected ->
-                selected.clear()
-                selected.addAll(_entries.value.map { it.path })
-                selected
+                selected.clear().addAll(_entries.value.map { it.path })
             }
         }
     }

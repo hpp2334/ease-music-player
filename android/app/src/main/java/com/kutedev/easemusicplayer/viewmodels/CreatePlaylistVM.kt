@@ -117,7 +117,7 @@ class CreatePlaylistVM @Inject constructor(
                 StorageEntryLoc(v.storageId, v.path) }.firstOrNull()
             _fullImported.value = true
 
-            val name = recommendPlaylistNames.value.firstOrNull()
+            val name = recommendPlaylistNames.value.lastOrNull()
             if (name != null) {
                 _name.value = name
             }

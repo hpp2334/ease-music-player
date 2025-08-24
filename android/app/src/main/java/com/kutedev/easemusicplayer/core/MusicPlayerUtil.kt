@@ -118,7 +118,7 @@ fun playUtil(cx: BuildMediaContext, music: MusicAbstract, player: Player) {
     playUtil(cx, MusicOrMusicAbstract.VMusicAbstract(music), player)
 }
 
-fun syncMetadataUtil(scope: CoroutineScope, bridge: Bridge, player: Player) {
+fun syncMetadataUtil(scope: CoroutineScope, bridge: Bridge, player: Player, onUpdated: () -> Unit = {}) {
     if (!player.isCommandAvailable(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)) {
         return
     }
@@ -148,6 +148,7 @@ fun syncMetadataUtil(scope: CoroutineScope, bridge: Bridge, player: Player) {
                     cover = coverData
                 )) }
             }
+            onUpdated()
         }
     }
 }

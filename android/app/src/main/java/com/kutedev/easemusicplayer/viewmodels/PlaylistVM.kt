@@ -71,6 +71,11 @@ class PlaylistVM @Inject constructor(
                     _ -> reload()
             }
         }
+        viewModelScope.launch {
+            playlistRepository.syncedTotalDuration.collect {
+                reload()
+            }
+        }
     }
 
     fun remove() {

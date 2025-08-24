@@ -13,7 +13,10 @@ import com.kutedev.easemusicplayer.core.MusicPlayerDataSource
 import com.kutedev.easemusicplayer.core.buildMediaItem
 import com.kutedev.easemusicplayer.core.syncMetadataUtil
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -26,6 +29,7 @@ import uniffi.ease_client_backend.ctListPlaylist
 import uniffi.ease_client_backend.ctRemovePlaylist
 import uniffi.ease_client_backend.ctUpdatePlaylist
 import uniffi.ease_client_backend.ctsGetMusicAbstract
+import uniffi.ease_client_backend.easeError
 import uniffi.ease_client_schema.MusicId
 import uniffi.ease_client_schema.PlaylistId
 import javax.inject.Inject
@@ -39,8 +43,10 @@ class PlaylistRepository @Inject constructor(
 ) {
     private val _requestSemaphore = Semaphore(4)
     private val _playlists = MutableStateFlow(listOf<PlaylistAbstract>())
+    private val _syncedTotalDuration = MutableSharedFlow<MusicId>()
 
     val playlists = _playlists.asStateFlow()
+    val syncedTotalDuration = _syncedTotalDuration.asSharedFlow()
 
     fun createPlaylist(context: Context, arg: ArgCreatePlaylist) {
         _scope.launch {
@@ -81,7 +87,7 @@ class PlaylistRepository @Inject constructor(
             return
         }
 
-        _scope.launch {
+        _scope.launch(Dispatchers.Main) {
             _requestSemaphore.acquire()
 
             try {
@@ -95,15 +101,22 @@ class PlaylistRepository @Inject constructor(
                                 scope = _scope,
                                 bridge = bridge,
                                 player = player
-                            )
+                            ) {
+                                _scope.launch {
+                                    _syncedTotalDuration.emit(id)
+                                    reload()
+                                }
+                            }
                             player.release()
                             _requestSemaphore.release()
+
                         }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
                         player.release()
                         _requestSemaphore.release()
+                        easeError("request total duration failed: $error")
                     }
                 })
 
@@ -113,7 +126,8 @@ class PlaylistRepository @Inject constructor(
                 ), musicAbstract)
                 player.setMediaItem(mediaItem)
                 player.prepare()
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                easeError("request total duration failed: $error")
             }
         }
     }

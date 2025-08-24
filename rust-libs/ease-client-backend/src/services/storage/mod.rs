@@ -157,13 +157,14 @@ pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
 async fn get_asset_file_by_loc(
     cx: &BackendContext,
     entry: StorageEntryLoc,
+    byte_offset: u64,
 ) -> BResult<Option<StreamFile>> {
     let storage_backend = get_storage_backend(cx, entry.storage_id)?;
     let Some(storage_backend) = storage_backend else {
         return Ok(None);
     };
 
-    let file = storage_backend.get(entry.path, 0).await;
+    let file = storage_backend.get(entry.path, byte_offset).await;
     if let Err(e) = &file {
         if e.is_not_found() {
             return Ok(None);
@@ -176,6 +177,7 @@ async fn get_asset_file_by_loc(
 pub(crate) async fn get_asset_file(
     cx: &BackendContext,
     key: DataSourceKey,
+    byte_offset: u64,
 ) -> BResult<Option<StreamFile>> {
     match key {
         DataSourceKey::Music { id } => {
@@ -183,9 +185,9 @@ pub(crate) async fn get_asset_file(
             let Some(m) = m else {
                 return Ok(None);
             };
-            get_asset_file_by_loc(cx, m.loc).await
+            get_asset_file_by_loc(cx, m.loc, byte_offset).await
         }
         DataSourceKey::Cover { id } => todo!(),
-        DataSourceKey::AnyEntry { entry } => get_asset_file_by_loc(cx, entry).await,
+        DataSourceKey::AnyEntry { entry } => get_asset_file_by_loc(cx, entry, byte_offset).await,
     }
 }
