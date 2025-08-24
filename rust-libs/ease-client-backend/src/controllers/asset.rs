@@ -1,37 +1,62 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use ease_client_schema::{DataSourceKey, StorageEntryLoc};
-use ease_remote_storage::StorageBackendError;
+use bytes::Bytes;
+use ease_client_schema::DataSourceKey;
+use ease_remote_storage::{StorageBackendError, StorageBackendResult};
 
-use crate::{
-    error::{BError, BResult},
-    services::get_storage_backend,
-    Backend,
-};
+use crate::{error::BResult, services::get_asset_file, Backend};
 
 #[uniffi::export]
 pub async fn ct_get_asset(cx: Arc<Backend>, key: DataSourceKey) -> BResult<Option<Vec<u8>>> {
     let cx = cx.get_context();
+    let file = get_asset_file(cx, key).await?;
+    let Some(file) = file else {
+        return Ok(None);
+    };
 
-    match key {
-        DataSourceKey::Music { id } => todo!(),
-        DataSourceKey::Cover { id } => todo!(),
-        DataSourceKey::AnyEntry { entry } => {
-            let storage_backend = get_storage_backend(cx, entry.storage_id)?;
-            let Some(storage_backend) = storage_backend else {
-                return Ok(None);
-            };
+    let buf = file.bytes().await?;
+    Ok(Some(buf.to_vec()))
+}
 
-            let file = storage_backend.get(entry.path, 0).await;
-            if let Err(e) = &file {
-                if e.is_not_found() {
-                    return Ok(None);
-                }
-            }
-            let file = file?;
+#[derive(uniffi::Object)]
+pub struct AssetStream {
+    stream: async_channel::Receiver<StorageBackendResult<Bytes>>,
+    size: Option<u64>,
+}
 
-            let buf = file.bytes().await?;
-            Ok(Some(buf.to_vec()))
+#[uniffi::export]
+impl AssetStream {
+    pub async fn next(&self) -> BResult<Option<Vec<u8>>> {
+        if let Ok(result) = self.stream.recv().await {
+            let result = result?;
+            Ok(Some(result.to_vec()))
+        } else {
+            Ok(None)
         }
     }
+
+    pub fn size(&self) -> Option<u64> {
+        self.size
+    }
+}
+
+#[uniffi::export]
+pub async fn ct_get_asset_stream(
+    cx: Arc<Backend>,
+    key: DataSourceKey,
+) -> BResult<Option<Arc<AssetStream>>> {
+    let cx = cx.get_context();
+    let file = get_asset_file(cx, key).await?;
+    let Some(file) = file else {
+        return Ok(None);
+    };
+
+    let len = file.size();
+    let stream = file.into_rx();
+    let stream = Arc::new(AssetStream {
+        stream,
+        size: len.map(|v| v as u64),
+    });
+
+    Ok(Some(stream))
 }

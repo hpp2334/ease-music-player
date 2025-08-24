@@ -8,6 +8,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.extractor.metadata.flac.PictureFrame
 import androidx.media3.extractor.metadata.id3.ApicFrame
 import com.kutedev.easemusicplayer.singleton.Bridge
@@ -59,7 +60,13 @@ private sealed class MusicOrMusicAbstract {
     ) : MusicOrMusicAbstract() {}
 }
 
-private fun buildMediaItem(music: MusicOrMusicAbstract): MediaItem {
+data class BuildMediaContext(
+    val bridge: Bridge,
+    val scope: CoroutineScope
+)
+
+@OptIn(UnstableApi::class)
+private fun buildMediaItem(cx: BuildMediaContext, music: MusicOrMusicAbstract): MediaItem {
     val cover = when(music) {
         is MusicOrMusicAbstract.VMusic -> music.v1.cover
         is MusicOrMusicAbstract.VMusicAbstract -> music.v1.cover
@@ -77,7 +84,7 @@ private fun buildMediaItem(music: MusicOrMusicAbstract): MediaItem {
 
     val mediaItem = MediaItem.Builder()
         .setMediaId(meta.id.value.toString())
-        .setUri("content://com.kutedev.easemusicplayer/music/${meta.id.value}")
+        .setUri("ease://data?music=${meta.id.value}")
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(meta.title)
@@ -85,28 +92,30 @@ private fun buildMediaItem(music: MusicOrMusicAbstract): MediaItem {
                 .build()
         )
         .build()
+
     return mediaItem
 }
 
-fun buildMediaItem(music: Music): MediaItem {
-    return buildMediaItem(MusicOrMusicAbstract.VMusic(music))
+fun buildMediaItem(cx: BuildMediaContext, music: Music): MediaItem {
+    return buildMediaItem(cx, MusicOrMusicAbstract.VMusic(music))
 }
-fun buildMediaItem(music: MusicAbstract): MediaItem {
-    return buildMediaItem(MusicOrMusicAbstract.VMusicAbstract(music))
+fun buildMediaItem(cx: BuildMediaContext, music: MusicAbstract): MediaItem {
+    return buildMediaItem(cx, MusicOrMusicAbstract.VMusicAbstract(music))
 }
 
-private fun playUtil(music: MusicOrMusicAbstract, player: Player) {
-    val mediaItem = buildMediaItem(music)
+@OptIn(UnstableApi::class)
+private fun playUtil(cx: BuildMediaContext, music: MusicOrMusicAbstract, player: Player) {
+    val mediaItem = buildMediaItem(cx, music)
     player.stop()
     player.setMediaItem(mediaItem)
     player.prepare()
     player.play()
 }
-fun playUtil(music: Music, player: Player) {
-    playUtil(MusicOrMusicAbstract.VMusic(music), player)
+fun playUtil(cx: BuildMediaContext, music: Music, player: Player) {
+    playUtil(cx, MusicOrMusicAbstract.VMusic(music), player)
 }
-fun playUtil(music: MusicAbstract, player: Player) {
-    playUtil(MusicOrMusicAbstract.VMusicAbstract(music), player)
+fun playUtil(cx: BuildMediaContext, music: MusicAbstract, player: Player) {
+    playUtil(cx, MusicOrMusicAbstract.VMusicAbstract(music), player)
 }
 
 fun syncMetadataUtil(scope: CoroutineScope, bridge: Bridge, player: Player) {

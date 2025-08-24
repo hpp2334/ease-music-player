@@ -5,7 +5,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.Player.COMMAND_PLAY_PAUSE
 import androidx.media3.common.Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM
 import androidx.media3.common.Player.COMMAND_STOP
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
+import com.kutedev.easemusicplayer.core.BuildMediaContext
 import com.kutedev.easemusicplayer.core.playUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,7 +78,7 @@ class PlayerControllerRepository @Inject constructor(
             if (inPlaylist) {
                 playerRepository.setCurrent(music, playlist)
 
-                playUtil(music, mediaController)
+                playUtil(BuildMediaContext(bridge = bridge, scope = _scope), music, mediaController)
             } else {
                 playerRepository.resetCurrent()
             }

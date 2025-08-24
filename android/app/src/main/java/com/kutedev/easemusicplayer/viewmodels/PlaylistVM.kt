@@ -8,7 +8,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import com.kutedev.easemusicplayer.core.buildMediaItem
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.core.syncMetadataUtil
 import com.kutedev.easemusicplayer.singleton.ImportRepository

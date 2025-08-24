@@ -1,10 +1,15 @@
 package com.kutedev.easemusicplayer.singleton
 
 import android.content.Context
-import androidx.lifecycle.viewModelScope
+import androidx.annotation.OptIn
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import com.kutedev.easemusicplayer.core.BuildMediaContext
+import com.kutedev.easemusicplayer.core.MusicPlayerDataSource
 import com.kutedev.easemusicplayer.core.buildMediaItem
 import com.kutedev.easemusicplayer.core.syncMetadataUtil
 import kotlinx.coroutines.CoroutineScope
@@ -69,6 +74,7 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
+    @OptIn(UnstableApi::class)
     private fun requestTotalDuration(context: Context, id: MusicId) {
         val musicAbstract = bridge.runSync { ctsGetMusicAbstract(it, id) } ?: return
         if (musicAbstract.meta.duration != null) {
@@ -79,7 +85,9 @@ class PlaylistRepository @Inject constructor(
             _requestSemaphore.acquire()
 
             try {
-                val player = ExoPlayer.Builder(context).build()
+                val player = ExoPlayer.Builder(context)
+                    .setMediaSourceFactory(ProgressiveMediaSource.Factory(DataSource.Factory { MusicPlayerDataSource(bridge, _scope) }) )
+                    .build()
                 player.addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
@@ -99,7 +107,10 @@ class PlaylistRepository @Inject constructor(
                     }
                 })
 
-                val mediaItem = buildMediaItem(musicAbstract)
+                val mediaItem = buildMediaItem(BuildMediaContext(
+                    bridge = bridge,
+                    scope = _scope,
+                ), musicAbstract)
                 player.setMediaItem(mediaItem)
                 player.prepare()
             } catch (_: Exception) {

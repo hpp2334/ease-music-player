@@ -9,7 +9,9 @@ import androidx.media3.common.C
 import androidx.media3.common.C.WAKE_MODE_NETWORK
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -45,6 +47,7 @@ class PlaybackService : MediaSessionService() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var _mediaSession: MediaSession? = null
 
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         easeLog("Playback service creating...")
@@ -66,6 +69,7 @@ class PlaybackService : MediaSessionService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(WAKE_MODE_NETWORK)
+            .setMediaSourceFactory(ProgressiveMediaSource.Factory(DataSource.Factory { MusicPlayerDataSource(bridge, serviceScope) }) )
             .build()
         _mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
@@ -185,7 +189,7 @@ class PlaybackService : MediaSessionService() {
         serviceScope.launch {
             val music = bridge.run { ctGetMusic(it, musicAbstract.meta.id) } ?: return@launch
             playerRepository.setCurrent(music, playlist)
-            playUtil(musicAbstract, player)
+            playUtil(BuildMediaContext(bridge = bridge, scope = serviceScope), musicAbstract, player as ExoPlayer)
         }
     }
 

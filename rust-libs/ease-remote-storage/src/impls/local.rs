@@ -162,10 +162,9 @@ mod test {
         let cwd = cwd.to_string_lossy().to_string();
         let file = backend.get(cwd, 3).await.unwrap();
 
-        let stream = file.into_stream();
-        pin_mut!(stream);
-        let chunk = stream.next().await;
-        assert!(chunk.is_some());
+        let stream = file.into_rx();
+        let chunk = stream.recv().await;
+        assert!(chunk.is_ok());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(chunk.as_ref()), "og.txt");
     }

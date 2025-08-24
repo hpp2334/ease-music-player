@@ -338,7 +338,6 @@ mod test {
     use std::{convert::Infallible, net::SocketAddr, time::Duration};
 
     use dav_server::{fakels::FakeLs, localfs::LocalFs, DavHandler};
-    use futures_util::{pin_mut, StreamExt};
     use tokio::task::JoinHandle;
 
     use crate::backend::StorageBackend;
@@ -431,10 +430,9 @@ mod test {
         let file = backend.get(item.path, 0).await.unwrap();
         assert_eq!(file.size(), Some(3));
 
-        let stream = file.into_stream();
-        pin_mut!(stream);
-        let chunk = stream.next().await;
-        assert!(chunk.is_some());
+        let stream = file.into_rx();
+        let chunk = stream.recv().await;
+        assert!(chunk.is_ok());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [49, 50, 51]);
     }
@@ -468,10 +466,9 @@ mod test {
         let file = backend.get(item.path.to_string(), 0).await.unwrap();
         assert_eq!(file.size(), Some(3));
 
-        let stream = file.into_stream();
-        pin_mut!(stream);
-        let chunk = stream.next().await;
-        assert!(chunk.is_some());
+        let stream = file.into_rx();
+        let chunk = stream.recv().await;
+        assert!(chunk.is_ok());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [49, 50, 51]);
     }
@@ -490,10 +487,9 @@ mod test {
         let file = backend.get("/a.bin".to_string(), 2).await.unwrap();
         assert_eq!(file.size(), Some(1));
 
-        let stream = file.into_stream();
-        pin_mut!(stream);
-        let chunk = stream.next().await;
-        assert!(chunk.is_some());
+        let stream = file.into_rx();
+        let chunk = stream.recv().await;
+        assert!(chunk.is_ok());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [51]);
     }

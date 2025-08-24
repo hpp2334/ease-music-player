@@ -1,9 +1,10 @@
-use std::io::ErrorKind;
+use std::{io::ErrorKind, process::Output};
 
-use async_stream::stream;
 use bytes::Bytes;
+use ease_client_tokio::tokio_runtime;
 use futures_util::future::BoxFuture;
 use reqwest::StatusCode;
+use tokio::sync::oneshot::error;
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -40,6 +41,14 @@ pub enum StorageBackendError {
     UrlParseError(String),
     #[error("Serde Json Error: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
+}
+
+#[derive(thiserror::Error, Debug)]
+enum SendChunkError {
+    #[error(transparent)]
+    RequestFail(#[from] reqwest::Error),
+    #[error("mpsc send error: {0}")]
+    MpscSendError(#[from] async_channel::SendError<StorageBackendResult<Bytes>>),
 }
 
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
@@ -114,34 +123,55 @@ impl StreamFile {
         self.name.as_str()
     }
 
-    pub fn into_stream(self) -> impl futures_util::Stream<Item = StorageBackendResult<Bytes>> {
-        stream! {
-            match self.inner {
-                StreamFileInner::Response(mut response) => {
-                    let mut remaining = self.byte_offset as usize;
-                    while let Some(chunk) = response.chunk().await? {
-                        if chunk.len() <= remaining {
-                            remaining -= chunk.len();
-                        } else if remaining > 0 {
-                            let chunk = Bytes::copy_from_slice(&chunk[remaining..]);
-                            remaining = 0;
-                            yield(Ok(chunk))
-                        } else {
-                            yield(Ok(chunk))
+    pub fn into_rx(self) -> async_channel::Receiver<StorageBackendResult<Bytes>> {
+        let (mut tx, rx) = async_channel::bounded::<StorageBackendResult<Bytes>>(10);
+
+        let _ = tokio_runtime().spawn(async move {
+            let f = || async {
+                match self.inner {
+                    StreamFileInner::Response(mut response) => {
+                        let mut remaining = self.byte_offset as usize;
+
+                        while let Some(chunk) = response.chunk().await? {
+                            if chunk.len() <= remaining {
+                                remaining -= chunk.len();
+                            } else if remaining > 0 {
+                                let chunk = Bytes::copy_from_slice(&chunk[remaining..]);
+                                remaining = 0;
+                                tx.send(Ok(chunk)).await?;
+                            } else {
+                                tx.send(Ok(chunk)).await?;
+                            }
                         }
                     }
-                },
-                StreamFileInner::Total(buf) => {
-                    let offset = self.byte_offset as usize;
-                    if offset == 0 {
-                        yield(Ok(buf));
-                    } else {
-                        let buf = Bytes::copy_from_slice(&buf[offset..]);
-                        yield(Ok(buf))
+                    StreamFileInner::Total(buf) => {
+                        let offset = self.byte_offset as usize;
+                        if offset == 0 {
+                            tx.send(Ok(buf)).await?;
+                        } else {
+                            let buf = Bytes::copy_from_slice(&buf[offset..]);
+                            tx.send(Ok(buf)).await?;
+                        }
                     }
-                },
+                }
+
+                Ok(())
+            };
+
+            let res: Result<(), SendChunkError> = f().await;
+            if let Err(e) = res {
+                let e: Option<StorageBackendError> = match e {
+                    SendChunkError::RequestFail(e) => Some(e.into()),
+                    _ => None,
+                };
+                if let Some(e) = e {
+                    let _ = tx.send(Err(e)).await;
+                }
             }
-        }
+            let _ = tx.close();
+        });
+
+        rx
     }
 
     pub async fn bytes(self) -> StorageBackendResult<Bytes> {

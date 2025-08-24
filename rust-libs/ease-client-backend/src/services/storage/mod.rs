@@ -8,10 +8,12 @@ use crate::{
     ctx::BackendContext,
     error::BResult,
     objects::{ArgUpsertStorage, Storage},
+    services::{get_music, get_music_abstract},
 };
-use ease_client_schema::{StorageEntryLoc, StorageId, StorageModel, StorageType};
+use ease_client_schema::{DataSourceKey, StorageEntryLoc, StorageId, StorageModel, StorageType};
 use ease_remote_storage::{
-    BuildOneDriveArg, BuildWebdavArg, LocalBackend, OneDriveBackend, StorageBackend, Webdav,
+    BuildOneDriveArg, BuildWebdavArg, LocalBackend, OneDriveBackend, StorageBackend, StreamFile,
+    Webdav,
 };
 use tracing::instrument;
 
@@ -150,4 +152,40 @@ pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
     });
 
     Ok(storages)
+}
+
+async fn get_asset_file_by_loc(
+    cx: &BackendContext,
+    entry: StorageEntryLoc,
+) -> BResult<Option<StreamFile>> {
+    let storage_backend = get_storage_backend(cx, entry.storage_id)?;
+    let Some(storage_backend) = storage_backend else {
+        return Ok(None);
+    };
+
+    let file = storage_backend.get(entry.path, 0).await;
+    if let Err(e) = &file {
+        if e.is_not_found() {
+            return Ok(None);
+        }
+    }
+    let file = file?;
+    Ok(Some(file))
+}
+
+pub(crate) async fn get_asset_file(
+    cx: &BackendContext,
+    key: DataSourceKey,
+) -> BResult<Option<StreamFile>> {
+    match key {
+        DataSourceKey::Music { id } => {
+            let m = get_music(cx, id).await?;
+            let Some(m) = m else {
+                return Ok(None);
+            };
+            get_asset_file_by_loc(cx, m.loc).await
+        }
+        DataSourceKey::Cover { id } => todo!(),
+        DataSourceKey::AnyEntry { entry } => get_asset_file_by_loc(cx, entry).await,
+    }
 }
