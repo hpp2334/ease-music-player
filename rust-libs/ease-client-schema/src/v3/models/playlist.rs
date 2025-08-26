@@ -8,6 +8,7 @@ pub struct PlaylistModel {
     pub title: String,
     pub created_time: i64,
     pub picture: Option<StorageEntryLoc>,
+    pub order: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

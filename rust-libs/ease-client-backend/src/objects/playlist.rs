@@ -11,6 +11,7 @@ pub struct PlaylistMeta {
     pub cover: Option<StorageEntryLoc>,
     pub show_cover: Option<DataSourceKey>,
     pub created_time: Duration,
+    pub order: Vec<u32>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

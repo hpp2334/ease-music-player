@@ -5,7 +5,9 @@ resolver = "2"
 members = [
     "ease-client-backend",
     "ease-client-android-ffi-builder",
-    "ease-client-schema", "ease-client-tokio", "ease-order-key",
+    "ease-client-schema",
+    "ease-client-tokio",
+    "ease-order-key",
 ]
 
 [profile.bench]
@@ -22,3 +24,4 @@ futures = "0.3.30"
 async-channel = "2.5.0"
 ease-client-schema = { path = "./ease-client-schema" }
 ease-client-tokio = { path = "./ease-client-tokio" }
+ease-order-key = { path = "./ease-order-key" }

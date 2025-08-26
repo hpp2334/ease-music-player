@@ -54,7 +54,8 @@ class PlaylistVM @Inject constructor(
                 title = "",
                 cover = null,
                 showCover = null,
-                createdTime = Duration.ofMillis(0L)
+                createdTime = Duration.ofMillis(0L),
+                order = listOf(0u)
             ),
             musicCount = 0uL,
             duration = null

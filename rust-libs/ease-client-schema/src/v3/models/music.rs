@@ -13,4 +13,5 @@ pub struct MusicModel {
     pub cover: Option<BlobId>,
     pub lyric: Option<StorageEntryLoc>,
     pub lyric_default: bool,
+    pub order: Vec<u32>,
 }

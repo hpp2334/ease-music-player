@@ -189,7 +189,7 @@ class EditStorageVM @Inject constructor(
         val f = form.value
         _validated.value = Validated(
             addrEmpty = f.addr.isBlank(),
-            aliasEmpty = f.alias.isBlank(),
+            aliasEmpty = if (f.typ == StorageType.ONE_DRIVE) { f.alias.isBlank() } else { false },
             usernameEmpty = !f.isAnonymous && f.username.isBlank(),
             passwordEmpty = !f.isAnonymous && f.password.isBlank(),
         )

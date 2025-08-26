@@ -44,6 +44,7 @@ pub(crate) fn build_playlist_meta(
         cover: cover_loc,
         show_cover,
         created_time: Duration::from_millis(model.created_time as u64),
+        order: model.order,
     }
 }
 
@@ -70,7 +71,7 @@ pub(crate) fn build_playlist_abstract(
     Ok((abstr, musics))
 }
 
-pub async fn get_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
+pub fn get_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
     let model = cx.database_server().load_playlist(arg)?;
 
     if model.is_none() {
@@ -82,9 +83,7 @@ pub async fn get_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<Optio
     Ok(Some(Playlist { abstr, musics }))
 }
 
-pub(crate) async fn get_all_playlist_abstracts(
-    cx: &BackendContext,
-) -> BResult<Vec<PlaylistAbstract>> {
+pub(crate) fn get_all_playlist_abstracts(cx: &BackendContext) -> BResult<Vec<PlaylistAbstract>> {
     let models = cx.database_server().load_playlists()?;
 
     let mut ret: Vec<PlaylistAbstract> = Default::default();

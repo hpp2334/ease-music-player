@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use ease_order_key::OrderKey;
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, WriteTransaction};
 
 use crate::error::BResult;
@@ -33,6 +34,9 @@ impl DatabaseServer {
             let music = table_music.get(id)?.unwrap().value();
             ret.push(music);
         }
+
+        ret.sort_by(|lhs, rhs| lhs.order.cmp(&rhs.order));
+
         Ok(ret)
     }
 
@@ -74,6 +78,7 @@ impl DatabaseServer {
         db: &WriteTransaction,
         rdb: &ReadTransaction,
         arg: ArgDBAddMusic,
+        order: OrderKey,
     ) -> BResult<(MusicId, bool)> {
         let music = self.load_music_by_key_impl(rdb, arg.loc.clone())?;
         if let Some(music) = music {
@@ -95,6 +100,7 @@ impl DatabaseServer {
                 cover: None,
                 lyric: None,
                 lyric_default: true,
+                order: order.into_raw(),
             },
         )?;
         table_storage_music.insert(arg.loc.storage_id, id)?;

@@ -19,8 +19,8 @@ import com.kutedev.easemusicplayer.core.KeepBackendService
 import com.kutedev.easemusicplayer.core.PlaybackService
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
+import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
-import com.kutedev.easemusicplayer.singleton.PreferenceRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var storageRepository: StorageRepository
     @Inject lateinit var playlistRepository: PlaylistRepository
     @Inject lateinit var playerControllerRepository: PlayerControllerRepository
-    @Inject lateinit var preferenceRepository: PreferenceRepository
+    @Inject lateinit var playerRepository: PlayerRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
         ensurePostNotificationsPermission()
 
         lifecycleScope.launch {
-            preferenceRepository.reload()
+            playerRepository.reload()
             storageRepository.reload()
             playlistRepository.reload()
             setupMediaController()

@@ -131,7 +131,8 @@ private fun PlaylistItem(playlist: PlaylistAbstract) {
             Box(
                 modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant).size(136.dp)
             ) {
-                if (playlist.meta.cover == null) {
+                val cover = playlist.meta.showCover
+                if (cover == null) {
                     Image(
                         modifier = Modifier.fillMaxSize(),
                         painter = painterResource(id = R.drawable.cover_default_image),
@@ -141,7 +142,7 @@ private fun PlaylistItem(playlist: PlaylistAbstract) {
                 } else {
                     EaseImage(
                         modifier = Modifier.fillMaxSize(),
-                        dataSourceKey = DataSourceKey.AnyEntry(playlist.meta.cover!!),
+                        dataSourceKey = cover,
                         contentScale = ContentScale.FillWidth
                     )
                 }

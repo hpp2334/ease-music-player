@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use ease_order_key::OrderKey;
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
-use crate::error::BResult;
+use crate::{error::BResult, services::get_playlist};
 
 use super::{core::DatabaseServer, music::ArgDBAddMusic};
 use ease_client_schema::{
@@ -46,6 +47,8 @@ impl DatabaseServer {
             ret.push(v);
         }
 
+        ret.sort_by_key(|v| OrderKey::wrap(v.order.clone()));
+
         Ok(ret)
     }
 
@@ -74,6 +77,7 @@ impl DatabaseServer {
         picture: Option<StorageEntryLoc>,
         musics: Vec<ArgDBAddMusic>,
         current_time_ms: i64,
+        order: OrderKey,
     ) -> BResult<(PlaylistId, Vec<AddedMusic>)> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
@@ -92,6 +96,7 @@ impl DatabaseServer {
                 title: Default::default(),
                 created_time: Default::default(),
                 picture: Default::default(),
+                order: order.into_raw(),
             };
 
             playlist.title = title;
@@ -103,8 +108,11 @@ impl DatabaseServer {
 
             id
         };
+
+        let mut order = OrderKey::default();
         for m in musics {
-            let (id, existed) = self.add_music_impl(&db, &rdb, m)?;
+            let (id, existed) = self.add_music_impl(&db, &rdb, m, order.clone())?;
+            order = OrderKey::greater(&order);
 
             let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
             let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
@@ -202,14 +210,17 @@ impl DatabaseServer {
         self: &Arc<Self>,
         playlist_id: PlaylistId,
         musics: Vec<ArgDBAddMusic>,
+        last_order: OrderKey,
     ) -> BResult<Vec<AddedMusic>> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
         let mut ret: Vec<AddedMusic> = Vec::with_capacity(musics.len());
 
+        let mut order = OrderKey::greater(&last_order);
         for m in musics {
-            let (id, existed) = self.add_music_impl(&db, &rdb, m)?;
+            let (id, existed) = self.add_music_impl(&db, &rdb, m, order.clone())?;
+            order = OrderKey::greater(&order);
 
             let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
             let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;

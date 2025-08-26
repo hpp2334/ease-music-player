@@ -1,3 +1,5 @@
+use ease_client_schema::PlaylistId;
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum BError {
@@ -7,6 +9,8 @@ pub enum BError {
     AssetLoadFail(String),
     #[error("asset not found")]
     AssetNotFound,
+    #[error("playlist not found")]
+    PlaylistNotFound(PlaylistId),
     #[error("redb error: {0:?}")]
     RedbError(#[from] redb::Error),
     #[error("redb transaction error: {0:?}")]

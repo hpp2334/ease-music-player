@@ -1,10 +1,9 @@
-use std::u32;
+use std::{borrow::Cow, u32};
 
 #[derive(Debug, Clone)]
 pub struct OrderKey {
     value: Vec<u32>,
 }
-
 const DEFAULT: u32 = u32::MAX / 2;
 
 const fn mid(a: u32, b: u32) -> u32 {
@@ -41,15 +40,17 @@ impl Ord for OrderKey {
     }
 }
 
-impl OrderKey {
-    pub fn wrap(value: Vec<u32>) -> Self {
-        Self { value }
-    }
-
-    pub fn default() -> Self {
+impl Default for OrderKey {
+    fn default() -> Self {
         Self {
             value: vec![DEFAULT],
         }
+    }
+}
+
+impl OrderKey {
+    pub fn wrap(value: Vec<u32>) -> Self {
+        Self { value }
     }
 
     fn min() -> Self {
@@ -64,7 +65,7 @@ impl OrderKey {
         !self.value.is_empty()
     }
 
-    pub fn build_greater(a: &OrderKey) -> Self {
+    pub fn greater(a: &OrderKey) -> Self {
         if !a.is_valid() {
             return Self::default();
         }
@@ -83,15 +84,15 @@ impl OrderKey {
         }
     }
 
-    pub fn build_less(a: &OrderKey) -> Self {
+    pub fn less(a: &OrderKey) -> Self {
         if !a.is_valid() || a.is_min() {
             return a.clone();
         }
 
-        Self::build_between(&Self::min(), a)
+        Self::between(&Self::min(), a)
     }
 
-    pub fn build_between(a: &OrderKey, b: &OrderKey) -> Self {
+    pub fn between(a: &OrderKey, b: &OrderKey) -> Self {
         #[derive(Debug, PartialEq, Eq)]
         enum LeftFill {
             None,
@@ -169,13 +170,13 @@ mod tests {
         let a = OrderKey::wrap(vec![2]);
         let b = OrderKey::wrap(vec![4]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert_eq!(m, OrderKey::wrap(vec![3]));
 
-        let l = OrderKey::build_less(&a);
+        let l = OrderKey::less(&a);
         assert_eq!(l, OrderKey::wrap(vec![1]));
 
-        let r = OrderKey::build_greater(&b);
+        let r = OrderKey::greater(&b);
         assert_eq!(r, OrderKey::wrap(vec![((u32::MAX as u64 + 4) / 2) as u32]));
     }
 
@@ -184,13 +185,13 @@ mod tests {
         let a = OrderKey::wrap(vec![2]);
         let b = OrderKey::wrap(vec![2, 1]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert_eq!(m, OrderKey::wrap(vec![2, 0, u32::MAX / 2]));
 
-        let l = OrderKey::build_less(&a);
+        let l = OrderKey::less(&a);
         assert_eq!(l, OrderKey::wrap(vec![1]));
 
-        let r = OrderKey::build_greater(&b);
+        let r = OrderKey::greater(&b);
         assert_eq!(
             r,
             OrderKey::wrap(vec![2, ((u32::MAX as u64 + 2) / 2) as u32])
@@ -202,13 +203,13 @@ mod tests {
         let a = OrderKey::wrap(vec![2]);
         let b = OrderKey::wrap(vec![2, 2]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert_eq!(m, OrderKey::wrap(vec![2, 1]));
 
-        let l = OrderKey::build_less(&a);
+        let l = OrderKey::less(&a);
         assert_eq!(l, OrderKey::wrap(vec![1]));
 
-        let r = OrderKey::build_greater(&b);
+        let r = OrderKey::greater(&b);
         assert_eq!(
             r,
             OrderKey::wrap(vec![2, ((u32::MAX as u64 + 1) / 2) as u32])
@@ -221,16 +222,16 @@ mod tests {
         let b = OrderKey::wrap(vec![2, 3]);
 
         assert!(a < b);
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert_eq!(
             m,
             OrderKey::wrap(vec![2, 2, ((u32::MAX as u64 + 4) / 2) as u32])
         );
 
-        let l = OrderKey::build_less(&a);
+        let l = OrderKey::less(&a);
         assert_eq!(l, OrderKey::wrap(vec![1]));
 
-        let r = OrderKey::build_greater(&b);
+        let r = OrderKey::greater(&b);
         assert_eq!(
             r,
             OrderKey::wrap(vec![2, ((u32::MAX as u64 + 3) / 2) as u32])
@@ -242,16 +243,16 @@ mod tests {
         let a = OrderKey::wrap(vec![2, 2, u32::MAX, u32::MAX]);
         let b = OrderKey::wrap(vec![2, 3]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert_eq!(
             m,
             OrderKey::wrap(vec![2, 2, u32::MAX, u32::MAX, u32::MAX / 2])
         );
 
-        let l = OrderKey::build_less(&a);
+        let l = OrderKey::less(&a);
         assert_eq!(l, OrderKey::wrap(vec![1]));
 
-        let r = OrderKey::build_greater(&b);
+        let r = OrderKey::greater(&b);
         assert_eq!(
             r,
             OrderKey::wrap(vec![2, ((u32::MAX as u64 + 3) / 2) as u32])
@@ -263,13 +264,13 @@ mod tests {
         let a = OrderKey::wrap(vec![0]);
         let b = OrderKey::wrap(vec![1]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert_eq!(m, OrderKey::wrap(vec![0, u32::MAX / 2]));
 
-        let l = OrderKey::build_less(&a);
+        let l = OrderKey::less(&a);
         assert_eq!(l, OrderKey::wrap(vec![0]));
 
-        let r = OrderKey::build_greater(&b);
+        let r = OrderKey::greater(&b);
         assert_eq!(r, OrderKey::wrap(vec![((u32::MAX as u64 + 1) / 2) as u32]));
     }
 
@@ -278,7 +279,7 @@ mod tests {
         let a = OrderKey::wrap(vec![5, 10]);
         let b = OrderKey::wrap(vec![5, 10]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert!(a <= m && m <= b);
     }
 
@@ -287,10 +288,10 @@ mod tests {
         let a = OrderKey::wrap(vec![u32::MAX - 1]);
         let b = OrderKey::wrap(vec![u32::MAX]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert!(a < m && m < b);
 
-        let r = OrderKey::build_greater(&b);
+        let r = OrderKey::greater(&b);
         assert!(b < r);
     }
 
@@ -310,7 +311,7 @@ mod tests {
         assert!(min_key.is_min());
         assert_eq!(min_key, OrderKey::wrap(vec![0]));
 
-        let less_than_min = OrderKey::build_less(&min_key);
+        let less_than_min = OrderKey::less(&min_key);
         assert_eq!(less_than_min, min_key); // Should return same key
     }
 
@@ -319,13 +320,13 @@ mod tests {
         let a = OrderKey::wrap(vec![1, 2, 3, 4, 5]);
         let b = OrderKey::wrap(vec![1, 2, 3, 4, 7]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert!(a < m && m < b);
 
         let c = OrderKey::wrap(vec![1, 2, 3, 4, 5, u32::MAX]);
         let d = OrderKey::wrap(vec![1, 2, 3, 4, 6]);
 
-        let m2 = OrderKey::build_between(&c, &d);
+        let m2 = OrderKey::between(&c, &d);
         assert!(c < m2 && m2 < d);
     }
 
@@ -334,7 +335,7 @@ mod tests {
         let a = OrderKey::wrap(vec![1, 0, 0]);
         let b = OrderKey::wrap(vec![1, 0, 1]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert!(a < m && m < b);
 
         // Test that trailing zeros are handled correctly
@@ -348,7 +349,7 @@ mod tests {
         let a = OrderKey::wrap(vec![0]);
         let b = OrderKey::wrap(vec![u32::MAX]);
 
-        let m = OrderKey::build_between(&a, &b);
+        let m = OrderKey::between(&a, &b);
         assert!(a < m && m < b);
         assert_eq!(m, OrderKey::wrap(vec![u32::MAX / 2]));
     }
@@ -362,7 +363,7 @@ mod tests {
         // Insert 10 keys consecutively
         for _ in 0..10 {
             let last = keys.last().unwrap();
-            let next = OrderKey::build_greater(last);
+            let next = OrderKey::greater(last);
             keys.push(next);
         }
 

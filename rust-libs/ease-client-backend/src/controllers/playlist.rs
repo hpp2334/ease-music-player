@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc};
+use ease_order_key::OrderKey;
 
 use crate::{
-    error::BResult,
+    error::{BError, BResult},
     objects::{Playlist, PlaylistAbstract},
     repositories::{music::ArgDBAddMusic, playlist::AddedMusic},
     services::{
@@ -16,7 +17,7 @@ use crate::{
 #[uniffi::export]
 pub async fn ct_get_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<Option<Playlist>> {
     let cx = cx.get_context();
-    get_playlist(cx, arg).await
+    get_playlist(cx, arg)
 }
 
 #[uniffi::export]
@@ -31,7 +32,7 @@ pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BRe
 #[uniffi::export]
 pub async fn ct_list_playlist(cx: Arc<Backend>) -> BResult<Vec<PlaylistAbstract>> {
     let cx = cx.get_context();
-    return get_all_playlist_abstracts(cx).await;
+    return get_all_playlist_abstracts(cx);
 }
 
 #[derive(uniffi::Record)]
@@ -65,11 +66,17 @@ pub async fn ct_create_playlist(
         })
         .collect();
 
+    let last_order = get_all_playlist_abstracts(cx)?
+        .last()
+        .map(|v| OrderKey::wrap(v.meta.order.clone()))
+        .unwrap_or_default();
+
     let (playlist_id, music_ids) = cx.database_server().create_playlist(
         arg.title,
         arg.cover.clone(),
         musics,
         current_time_ms,
+        OrderKey::greater(&last_order),
     )?;
 
     Ok(RetCreatePlaylist {
@@ -101,9 +108,18 @@ pub async fn ct_add_musics_to_playlist(
         })
         .collect();
 
+    let Some(playlist) = get_playlist(cx, arg.id)? else {
+        return Err(BError::PlaylistNotFound(arg.id));
+    };
+    let last_order = playlist
+        .musics
+        .last()
+        .map(|v| OrderKey::wrap(v.meta.order.clone()))
+        .unwrap_or(OrderKey::default());
+
     let ret = cx
         .database_server()
-        .add_musics_to_playlist(arg.id, musics)?;
+        .add_musics_to_playlist(arg.id, musics, last_order)?;
 
     Ok(ret)
 }

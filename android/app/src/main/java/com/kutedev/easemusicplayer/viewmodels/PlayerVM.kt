@@ -9,7 +9,10 @@ import com.kutedev.easemusicplayer.utils.formatDuration
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_schema.MusicId
@@ -35,6 +38,11 @@ class PlayerVM @Inject constructor(
     val bufferDuration = _bufferDuration.asStateFlow()
     val playMode = playerRepository.playMode
     val loading = playerRepository.loading
+
+    val lyricIndex = combine(currentDuration, music) {
+        currentDuration, music ->
+            music?.lyric?.data?.lines?.indexOfLast { it.duration <= currentDuration } ?: -1
+    }.stateIn(viewModelScope, SharingStarted.Lazily, -1)
 
     init {
         viewModelScope.launch {
@@ -84,6 +92,10 @@ class PlayerVM @Inject constructor(
 
     fun changePlayModeToNext() {
         playerRepository.changePlayModeToNext()
+    }
+
+    fun removeLyric() {
+        playerRepository.removeLyric()
     }
 
     fun syncPosition() {

@@ -108,7 +108,7 @@ private fun PlaylistHeader(
     val context = LocalContext.current
     val playlist by playlistVM.playlist.collectAsState()
     val musics = playlist.musics
-    val cover = playlist.abstr.meta.cover
+    val cover = playlist.abstr.meta.showCover
     val title = playlist.abstr.meta.title
     val duration = playlist.abstr.durationStr()
 
@@ -139,7 +139,7 @@ private fun PlaylistHeader(
                 EaseImage(
                     modifier = Modifier
                         .fillMaxSize(),
-                    dataSourceKey = DataSourceKey.AnyEntry(cover),
+                    dataSourceKey = cover,
                     contentScale = ContentScale.FillWidth
                 )
                 Box(
@@ -447,8 +447,10 @@ private fun PlaylistItemsBlock(
 @Composable
 fun PlaylistPage(
     playlistVM: PlaylistVM = hiltViewModel(),
+    playerVM: PlayerVM = hiltViewModel(),
     scaffoldPadding: PaddingValues,
 ) {
+    val navController = LocalNavController.current
     val playlist by playlistVM.playlist.collectAsState()
 
     Box(
@@ -477,7 +479,11 @@ fun PlaylistPage(
                 painter = painterResource(id = R.drawable.icon_play),
                 disabled = playlist.musics.isEmpty(),
                 onClick = {
-//                    TODO: bridge.dispatchClick(PlaylistDetailWidget.PlayAll);
+                    val m = playlist.musics.firstOrNull()
+                    if (m != null) {
+                        navController.navigate(RouteMusicPlayer())
+                        playerVM.play(m.meta.id, playlist.abstr.meta.id)
+                    }
                 }
             )
         }

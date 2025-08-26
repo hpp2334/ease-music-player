@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use ease_client_schema::{DataSourceKey, MusicId, StorageEntryLoc};
+use ease_order_key::OrderKey;
 
 use super::lyric::Lyrics;
 
@@ -9,6 +10,7 @@ pub struct MusicMeta {
     pub id: MusicId,
     pub title: String,
     pub duration: Option<Duration>,
+    pub order: Vec<u32>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

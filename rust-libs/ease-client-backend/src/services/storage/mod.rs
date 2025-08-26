@@ -8,7 +8,7 @@ use crate::{
     ctx::BackendContext,
     error::BResult,
     objects::{ArgUpsertStorage, Storage},
-    services::{get_music, get_music_abstract},
+    services::{get_music, get_music_abstract, get_music_cover_bytes},
 };
 use ease_client_schema::{DataSourceKey, StorageEntryLoc, StorageId, StorageModel, StorageType};
 use ease_remote_storage::{
@@ -187,7 +187,14 @@ pub(crate) async fn get_asset_file(
             };
             get_asset_file_by_loc(cx, m.loc, byte_offset).await
         }
-        DataSourceKey::Cover { id } => todo!(),
+        DataSourceKey::Cover { id } => {
+            let buf = get_music_cover_bytes(cx, id)?;
+            if buf.is_empty() {
+                return Ok(None);
+            }
+            let file = StreamFile::new_from_bytes(buf.as_slice(), "Default", byte_offset);
+            Ok(Some(file))
+        }
         DataSourceKey::AnyEntry { entry } => get_asset_file_by_loc(cx, entry, byte_offset).await,
     }
 }

@@ -13,9 +13,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
+import uniffi.ease_client_backend.ArgUpdateMusicLyric
 import uniffi.ease_client_backend.Music
 import uniffi.ease_client_backend.Playlist
 import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
+import uniffi.ease_client_backend.ctUpdateMusicLyric
+import uniffi.ease_client_backend.ctsGetPreferencePlaymode
 import uniffi.ease_client_backend.ctsSavePreferencePlaymode
 import uniffi.ease_client_backend.easeLog
 import uniffi.ease_client_schema.PlayMode
@@ -34,8 +37,7 @@ data class SleepModeState(
 @Singleton
 class PlayerRepository @Inject constructor(
     private val bridge: Bridge,
-    private val _scope: CoroutineScope,
-    private val preferenceRepository: PreferenceRepository
+    private val _scope: CoroutineScope
 ) {
     private val _sleep = MutableStateFlow(SleepModeState())
     private val _music = MutableStateFlow(null as Music?)
@@ -53,7 +55,8 @@ class PlayerRepository @Inject constructor(
     private var _sleepJob: Job? = null
     private val _loading = MutableStateFlow(false)
     private val _durationChanged = MutableSharedFlow<Unit>()
-    val playMode = preferenceRepository.playMode
+    private val _playMode = MutableStateFlow(PlayMode.SINGLE)
+    val playMode = _playMode.asStateFlow()
 
     val sleepState = _sleep.asStateFlow()
     val durationChanged = _durationChanged.asSharedFlow()
@@ -175,6 +178,28 @@ class PlayerRepository @Inject constructor(
             }
         }
 
-        preferenceRepository.savePlayMode(nextPlayMode)
+        savePlayMode(nextPlayMode)
+    }
+
+    fun removeLyric() {
+        val m = _music.value
+        if (m == null) {
+            return
+        }
+
+        _scope.launch {
+            bridge.run { ctUpdateMusicLyric(it, ArgUpdateMusicLyric(id = m.meta.id, lyricLoc = null)) }
+            reload()
+        }
+    }
+
+    private fun savePlayMode(playMode: PlayMode) {
+        bridge.runSync { ctsSavePreferencePlaymode(it, playMode) }
+
+        reload()
+    }
+
+    fun reload() {
+        bridge.runSync { ctsGetPreferencePlaymode(it) }?.let { _playMode.value = it }
     }
 }

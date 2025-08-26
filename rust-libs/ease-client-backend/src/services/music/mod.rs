@@ -111,6 +111,7 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
         id: model.id,
         title: model.title,
         duration: model.duration,
+        order: model.order,
     }
 }
 

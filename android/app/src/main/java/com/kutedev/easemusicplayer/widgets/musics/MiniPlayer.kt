@@ -157,12 +157,13 @@ fun MiniPlayer(
     val music by playerVM.music.collectAsState()
     val loading by playerVM.loading.collectAsState()
     val nextMusic by playerVM.nextMusic.collectAsState()
+    val currentDuration by playerVM.currentDuration.collectAsState()
 
     MiniPlayerCore(
         isPlaying = isPlaying,
         title = music?.meta?.title ?: "",
         cover = music?.cover,
-        currentDurationMS = toMusicDurationMs(music),
+        currentDurationMS = toMusicDurationMs(currentDuration),
         totalDuration = formatDuration(music),
         totalDurationMS = toMusicDurationMs(music),
         canNext = nextMusic != null,

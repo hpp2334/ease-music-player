@@ -66,7 +66,6 @@ import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
-import com.kutedev.easemusicplayer.viewmodels.LyricVM
 import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.core.LocalNavController
@@ -77,8 +76,10 @@ import com.kutedev.easemusicplayer.utils.toMusicDurationMs
 import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_backend.LyricLine
 import uniffi.ease_client_backend.LyricLoadState
+import uniffi.ease_client_backend.Lyrics
 import uniffi.ease_client_schema.PlayMode
 import java.time.Duration
+import kotlin.collections.emptyList
 import kotlin.math.absoluteValue
 import kotlin.math.sign
 
@@ -86,7 +87,6 @@ import kotlin.math.sign
 private fun MusicPlayerHeader(
     hasLyric: Boolean,
     playerVM: PlayerVM = hiltViewModel(),
-    lyricVM: LyricVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val currentPlaying by playerVM.music.collectAsState()
@@ -130,7 +130,7 @@ private fun MusicPlayerHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.music_lyric_remove,
                                 onClick = {
-                                    lyricVM.remove()
+                                    playerVM.removeLyric()
                                 }
                             )
                         } else {
@@ -659,7 +659,6 @@ private fun MusicPanel(
 @Composable
 fun MusicPlayerPage(
     playerVM: PlayerVM = hiltViewModel(),
-    lyricVM: LyricVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val currentMusic by playerVM.music.collectAsState()
@@ -667,10 +666,11 @@ fun MusicPlayerPage(
     val previousMusic by playerVM.previousMusic.collectAsState()
     val nextMusic by playerVM.nextMusic.collectAsState()
     val bufferDuration by playerVM.bufferDuration.collectAsState()
-    val currentLyricState by lyricVM.lyricState.collectAsState()
-    val currentLyricIndex by lyricVM.lyricIndex.collectAsState()
+    val currentLyricIndex by playerVM.lyricIndex.collectAsState()
+    val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.LOADING
+    val lyrics = currentMusic?.lyric?.data?.lines ?: emptyList()
 
-    val hasLyric = currentLyricState.loadedState != LyricLoadState.MISSING
+    val hasLyric = lyricLoadedState != LyricLoadState.MISSING
 
     Box(
         modifier = Modifier
@@ -699,8 +699,8 @@ fun MusicPlayerPage(
                     canPrev = previousMusic != null,
                     canNext = nextMusic != null,
                     lyricIndex = currentLyricIndex,
-                    lyricLoadedState = currentLyricState.loadedState,
-                    lyrics = currentLyricState.lyrics.lines,
+                    lyricLoadedState = lyricLoadedState,
+                    lyrics = lyrics,
                     onClickAddLyric = {
                         if (currentMusic != null) {
                             navController.navigate(RouteImport(RouteImportType.Lyric))
