@@ -6,12 +6,19 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.kutedev.easemusicplayer.singleton.Bridge
+import dagger.hilt.android.AndroidEntryPoint
+import uniffi.ease_client_backend.easeLog
+import javax.inject.Inject
 
 
+@AndroidEntryPoint
 class KeepBackendService : Service() {
+    @Inject lateinit var bridge: Bridge
     private val _channelId: String = "EaseMusicBackendServiceChannel"
 
     override fun onCreate() {
+        super.onCreate()
         createNotificationChannel()
     }
 
@@ -23,6 +30,9 @@ class KeepBackendService : Service() {
             .build();
 
         startForeground(1, notification)
+
+        bridge.initialize()
+        easeLog("KeepBackendService started")
         return START_NOT_STICKY
     }
 
@@ -32,6 +42,11 @@ class KeepBackendService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         stopSelf()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        bridge.destroy()
     }
 
     private fun createNotificationChannel() {

@@ -29,17 +29,21 @@ class Bridge @Inject constructor(
     private val toastRepository: ToastRepository
 )  {
     private val _storagePath = "/"
-    private val _backend: Backend = createBackend(
-        ArgInitializeApp(
-            appDocumentDir = normalizePath(cx.filesDir.absolutePath),
-            appCacheDir = normalizePath(cx.cacheDir.absolutePath),
-            storagePath = _storagePath
-        )
+    private var _isInit = false
+    private val _arg = ArgInitializeApp(
+        appDocumentDir = normalizePath(cx.filesDir.absolutePath),
+        appCacheDir = normalizePath(cx.cacheDir.absolutePath),
+        storagePath = _storagePath
     )
+    private var _backend: Backend? = null
+
+    private fun internal(): Backend {
+        return _backend!!
+    }
 
     suspend fun<R> run(block: suspend (backend: Backend) -> R): R? {
         try {
-            return block(_backend)
+            return block(internal())
         } catch (e: Exception) {
             easeError("run bridge failed: $e")
             return null
@@ -47,12 +51,12 @@ class Bridge @Inject constructor(
     }
 
     suspend fun<R> runRaw(block: suspend (backend: Backend) -> R): R {
-        return block(_backend)
+        return block(internal())
     }
 
     fun<R> runSync(block: (backend: Backend) -> R): R? {
         try {
-            return block(_backend)
+            return block(internal())
         } catch (e: Exception) {
             easeError("run bridge failed: $e")
             toastRepository.emitToast(e.toString())
@@ -61,8 +65,24 @@ class Bridge @Inject constructor(
     }
 
     fun initialize() {
-        _backend.init();
+        easeLog("bridge is init $_isInit")
+        if (_isInit) {
+            return
+        }
+        _backend = createBackend(_arg)
+        _backend!!.init();
         easeLog("bridge initialized")
+        _isInit = true
+    }
+
+    fun destroy() {
+        if (!_isInit) {
+            return
+        }
+        _backend!!.destroy()
+        _backend = null
+        _isInit = false
+        easeLog("bridge destroyed")
     }
 }
 

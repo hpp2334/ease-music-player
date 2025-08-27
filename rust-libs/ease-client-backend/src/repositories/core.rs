@@ -45,6 +45,13 @@ impl DatabaseServer {
         self.init_database().unwrap();
     }
 
+    pub fn destroy(&self) {
+        {
+            let mut w = self._db.write().unwrap();
+            *w = None;
+        }
+    }
+
     fn init_database(&self) -> BResult<()> {
         let db = self.db().begin_write()?;
         db.open_table(TABLE_ID_ALLOC)?;

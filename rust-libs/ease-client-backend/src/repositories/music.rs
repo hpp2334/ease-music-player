@@ -172,6 +172,22 @@ impl DatabaseServer {
         Ok(())
     }
 
+    pub fn set_music_order(self: &Arc<Self>, id: MusicId, order: OrderKey) -> BResult<()> {
+        let db = self.db().begin_write()?;
+
+        {
+            let mut table_music = db.open_table(TABLE_MUSIC)?;
+            let m = table_music.get(id)?.map(|v| v.value());
+
+            if let Some(mut m) = m {
+                m.order = order.into_raw();
+                table_music.insert(id, m)?;
+            }
+        };
+        db.commit()?;
+        Ok(())
+    }
+
     pub fn compact_music_impl(
         self: &Arc<Self>,
         db: &WriteTransaction,

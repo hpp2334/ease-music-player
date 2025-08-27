@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +72,11 @@ import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBarSpacer
+import sh.calvin.reorderable.ReorderableCollectionItemScope
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.ScrollMoveMode
+import sh.calvin.reorderable.rememberReorderableLazyGridState
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import uniffi.ease_client_schema.DataSourceKey
 import uniffi.ease_client_backend.MusicAbstract
 import uniffi.ease_client_schema.MusicId
@@ -80,7 +87,7 @@ private fun RemovePlaylistDialog(
 ) {
     val navController = LocalNavController.current
     val open by playlistVM.removeModalOpen.collectAsState()
-    val playlist by playlistVM.playlist.collectAsState()
+    val playlistAbstr by playlistVM.playlistAbstr.collectAsState()
 
     ConfirmDialog(
         open = open,
@@ -94,7 +101,7 @@ private fun RemovePlaylistDialog(
         }
     ) {
         Text(
-            text = "${stringResource(id = R.string.playlist_remove_dialog_text)} “${playlist.abstr.meta.title}”"
+            text = "${stringResource(id = R.string.playlist_remove_dialog_text)} “${playlistAbstr.meta.title}”"
         )
     }
 }
@@ -106,11 +113,11 @@ private fun PlaylistHeader(
 ) {
     val navController = LocalNavController.current
     val context = LocalContext.current
-    val playlist by playlistVM.playlist.collectAsState()
-    val musics = playlist.musics
-    val cover = playlist.abstr.meta.showCover
-    val title = playlist.abstr.meta.title
-    val duration = playlist.abstr.durationStr()
+    val playlistAbstr by playlistVM.playlistAbstr.collectAsState()
+    val musics by playlistVM.playlistMusics.collectAsState()
+    val cover = playlistAbstr.meta.showCover
+    val title = playlistAbstr.meta.title
+    val duration = playlistAbstr.durationStr()
 
     var moreMenuExpanded by remember { mutableStateOf(false) }
     val countSuffixStringId = if (musics.size <= 1) {
@@ -256,8 +263,9 @@ private fun EmptyPlaylist() {
 }
 
 @Composable
-private fun PlaylistItem(
+private fun ReorderableCollectionItemScope.PlaylistItem(
     item: MusicAbstract,
+    index: Int,
     playing: Boolean,
     currentSwipingMusicId: MusicId?,
     onSwipe: () -> Unit,
@@ -270,7 +278,7 @@ private fun PlaylistItem(
     val density = LocalDensity.current
     val panelWidthDp = 48.dp
 
-    val playlist by playlistVM.playlist.collectAsState()
+    val playlistAbstr by playlistVM.playlistAbstr.collectAsState()
     val id = item.meta.id
     val title = item.meta.title
     val duration = item.durationStr()
@@ -297,6 +305,11 @@ private fun PlaylistItem(
         Color.Transparent
     }
     val durationColor = if (playing) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val dragHandleColor = if (playing) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
@@ -331,7 +344,7 @@ private fun PlaylistItem(
                 )
                 .clickable {
                     navController.navigate(RouteMusicPlayer())
-                    playerVM.play(id, playlist.abstr.meta.id)
+                    playerVM.play(id, playlistAbstr.meta.id)
                     onSwipe()
                 }
                 .background(bgColor)
@@ -344,12 +357,12 @@ private fun PlaylistItem(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.icon_music_note),
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier
-                        .size(24.dp)
+                Text(
+                    modifier = Modifier.draggableHandle(),
+                    text = (index + 1).toString(),
+                    color = dragHandleColor,
+                    maxLines = 1,
+                    fontSize = 14.sp,
                 )
                 Text(
                     text = title,
@@ -404,28 +417,36 @@ private fun PlaylistItemsBlock(
     var swipingMusicId by remember {
         mutableStateOf<MusicId?>(null)
     }
-    val playlist by playlistVM.playlist.collectAsState()
+    val musics by playlistVM.playlistMusics.collectAsState()
     val currentPlaying by playerVM.music.collectAsState()
+
+    val lazyListState = rememberLazyListState()
+    val reorderableLazyListState =
+        rememberReorderableLazyListState(lazyListState = lazyListState) { from, to ->
+            playlistVM.musicMoveTo(from.index - 1, to.index - 1)
+        }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(0.dp)
+            .padding(0.dp),
+        state = lazyListState
     ) {
         item {
             Box(modifier = Modifier.height(48.dp))
         }
-        items(playlist.musics) {
-            val item = it;
+        items(musics.size, key = { musics[it].meta.id.value }) {
+            val item = musics[it];
             val id = item.meta.id
             val playing = id == currentPlaying?.meta?.id
 
-            key(id) {
+            ReorderableItem(reorderableLazyListState, key = item.meta.id.value) { isDragging ->
                 PlaylistItem(
                     item = item,
+                    index = it,
                     playing = playing,
                     currentSwipingMusicId = swipingMusicId,
-                    onSwipe = {swipingMusicId = id},
+                    onSwipe = { swipingMusicId = id },
                     onRemove = {
                         if (swipingMusicId == id) {
                             swipingMusicId = null
@@ -451,7 +472,8 @@ fun PlaylistPage(
     scaffoldPadding: PaddingValues,
 ) {
     val navController = LocalNavController.current
-    val playlist by playlistVM.playlist.collectAsState()
+    val musics by playlistVM.playlistMusics.collectAsState()
+    val playlistAbstr by playlistVM.playlistAbstr.collectAsState()
 
     Box(
         modifier = Modifier
@@ -460,7 +482,7 @@ fun PlaylistPage(
     ) {
         Column {
             PlaylistHeader()
-            if (playlist.musics.isEmpty()) {
+            if (musics.isEmpty()) {
                 EmptyPlaylist()
             } else {
                 PlaylistItemsBlock(
@@ -477,12 +499,12 @@ fun PlaylistPage(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
-                disabled = playlist.musics.isEmpty(),
+                disabled = musics.isEmpty(),
                 onClick = {
-                    val m = playlist.musics.firstOrNull()
+                    val m = musics.firstOrNull()
                     if (m != null) {
                         navController.navigate(RouteMusicPlayer())
-                        playerVM.play(m.meta.id, playlist.abstr.meta.id)
+                        playerVM.play(m.meta.id, playlistAbstr.meta.id)
                     }
                 }
             )

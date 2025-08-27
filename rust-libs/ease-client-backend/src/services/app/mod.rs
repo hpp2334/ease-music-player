@@ -17,6 +17,12 @@ pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> 
     Ok(())
 }
 
+pub fn app_destroy(cx: &BackendContext) -> BResult<()> {
+    cx.database_server().destroy();
+    tracing::info!("app destroyed");
+    Ok(())
+}
+
 fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
     static SCHEMA_VERSION: u32 = 3;
 

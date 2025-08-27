@@ -52,25 +52,6 @@ impl DatabaseServer {
         Ok(ret)
     }
 
-    pub fn load_playlist_first_cover_id(
-        self: &Arc<Self>,
-        id: PlaylistId,
-    ) -> BResult<Option<MusicId>> {
-        let db = self.db().begin_read()?;
-        let table = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
-        let iter = table.get(id)?;
-
-        for id in iter {
-            let id = id?.value();
-            let m = self.load_music_impl(&db, id)?.unwrap();
-
-            if m.cover.is_some() {
-                return Ok(Some(m.id));
-            }
-        }
-        Ok(None)
-    }
-
     pub fn create_playlist(
         self: &Arc<Self>,
         title: String,
@@ -136,16 +117,36 @@ impl DatabaseServer {
         let rdb = self.db().begin_read()?;
 
         {
-            let mut playlist = self.load_playlist_impl(&rdb, id)?.unwrap();
+            let playlist = self.load_playlist_impl(&rdb, id)?;
 
-            playlist.title = title;
-            playlist.picture = picture;
+            if let Some(mut playlist) = playlist {
+                playlist.title = title;
+                playlist.picture = picture;
 
-            let mut table = db.open_table(TABLE_PLAYLIST)?;
-            table.insert(id, playlist)?;
+                let mut table = db.open_table(TABLE_PLAYLIST)?;
+                table.insert(id, playlist)?;
+            }
         };
         db.commit()?;
         Ok(id)
+    }
+
+    pub fn set_playlist_order(self: &Arc<Self>, id: PlaylistId, order: OrderKey) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        let rdb = self.db().begin_read()?;
+
+        {
+            let playlist = self.load_playlist_impl(&rdb, id)?;
+
+            if let Some(mut playlist) = playlist {
+                playlist.order = order.into_raw();
+
+                let mut table = db.open_table(TABLE_PLAYLIST)?;
+                table.insert(id, playlist)?;
+            }
+        };
+        db.commit()?;
+        Ok(())
     }
 
     pub fn remove_playlist(self: &Arc<Self>, playlist_id: PlaylistId) -> BResult<()> {

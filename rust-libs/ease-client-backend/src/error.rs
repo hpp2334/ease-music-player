@@ -1,4 +1,5 @@
-use ease_client_schema::PlaylistId;
+use ease_client_schema::{MusicId, PlaylistId};
+use ease_order_key::OrderKeyError;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
@@ -11,6 +12,8 @@ pub enum BError {
     AssetNotFound,
     #[error("playlist not found")]
     PlaylistNotFound(PlaylistId),
+    #[error("music not found")]
+    MusicNotFound(MusicId),
     #[error("redb error: {0:?}")]
     RedbError(#[from] redb::Error),
     #[error("redb transaction error: {0:?}")]
@@ -23,6 +26,8 @@ pub enum BError {
     RedbCommitError(#[from] redb::CommitError),
     #[error("io error: {0:?}")]
     IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    OrderKeyError(#[from] OrderKeyError),
 }
 
 pub type BResult<T> = Result<T, BError>;

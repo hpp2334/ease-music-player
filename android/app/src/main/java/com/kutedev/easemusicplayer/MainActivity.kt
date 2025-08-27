@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        playerControllerRepository.destroyMediaController()
     }
 
     override fun onDestroy() {

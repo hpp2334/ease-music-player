@@ -25,6 +25,7 @@ import uniffi.ease_client_backend.ctListStorageEntryChildren
 import uniffi.ease_client_schema.StorageEntryLoc
 import uniffi.ease_client_schema.StorageId
 import uniffi.ease_client_schema.StorageType
+import java.net.URLDecoder
 
 data class SplitPathItem(
     val path: String,
@@ -53,7 +54,12 @@ class ImportVM @Inject constructor(
             } else {
                 "$currentPath/$component"
             }
-            splitPaths.add(SplitPathItem(currentPath, component))
+            val name = try {
+                URLDecoder.decode(component, "UTF-8")
+            } catch (e: Exception) {
+                component
+            }
+            splitPaths.add(SplitPathItem(currentPath, name))
         }
 
         splitPaths

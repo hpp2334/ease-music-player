@@ -15,4 +15,8 @@ class PlaylistsVM @Inject constructor(
     private val playlistRepository: PlaylistRepository
 ) : ViewModel() {
     val playlists = playlistRepository.playlists
+
+    fun moveTo(fromIndex: Int, toIndex: Int) {
+        playlistRepository.playlistMoveTo(fromIndex, toIndex)
+    }
 }

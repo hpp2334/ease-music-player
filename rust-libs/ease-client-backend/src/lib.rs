@@ -15,7 +15,11 @@ pub use ease_remote_storage::StreamFile;
 use error::BResult;
 
 pub use crate::services::ArgInitializeApp;
-use crate::{ctx::BackendContext, infra::init_infra, services::app_bootstrap};
+use crate::{
+    ctx::BackendContext,
+    infra::init_infra,
+    services::{app_bootstrap, app_destroy},
+};
 
 uniffi::setup_scaffolding!();
 
@@ -35,6 +39,10 @@ impl Drop for Backend {
 impl Backend {
     pub fn init(&self) -> BResult<()> {
         app_bootstrap(&self.cx, self.arg.clone())?;
+        Ok(())
+    }
+    pub fn deinit(&self) -> BResult<()> {
+        app_destroy(&self.cx)?;
         Ok(())
     }
 }

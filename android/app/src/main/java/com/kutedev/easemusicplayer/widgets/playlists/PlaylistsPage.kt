@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
@@ -43,7 +44,10 @@ import com.kutedev.easemusicplayer.viewmodels.PlaylistsVM
 import com.kutedev.easemusicplayer.viewmodels.durationStr
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RoutePlaylist
-import uniffi.ease_client_schema.DataSourceKey
+import sh.calvin.reorderable.ReorderableCollectionItemScope
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.ScrollMoveMode
+import sh.calvin.reorderable.rememberReorderableLazyGridState
 import uniffi.ease_client_backend.PlaylistAbstract
 
 @Composable
@@ -94,29 +98,42 @@ fun PlaylistsSubpage(
                     }
                 )
             }
-            GridPlaylists(playlists = playlists)
+            GridPlaylists()
         }
     }
 }
 
 @Composable
-private fun GridPlaylists(playlists: List<PlaylistAbstract>) {
+private fun GridPlaylists(
+    playlistsVM: PlaylistsVM = hiltViewModel()
+) {
+    val playlists by playlistsVM.playlists.collectAsState()
+
+    val lazyGridState = rememberLazyGridState()
+    val reorderableLazyListState = rememberReorderableLazyGridState(lazyGridState = lazyGridState, scrollMoveMode = ScrollMoveMode.INSERT) { from, to ->
+        playlistsVM.moveTo(from.index, to.index)
+    }
+
     LazyVerticalGrid(
         modifier = Modifier.fillMaxSize(),
         columns = GridCells.FixedSize(172.dp),
         horizontalArrangement = Arrangement.Center,
+        state = lazyGridState
     ) {
-        items(playlists) { playlist ->
-            PlaylistItem(playlist = playlist)
+        items(playlists, key = { it.meta.id.value }) {
+            ReorderableItem(reorderableLazyListState, key = it.meta.id.value) { isDragging ->
+                PlaylistItem(playlist = it)
+            }
         }
     }
 }
 
 @Composable
-private fun PlaylistItem(playlist: PlaylistAbstract) {
+private fun ReorderableCollectionItemScope.PlaylistItem(playlist: PlaylistAbstract) {
     val navController = LocalNavController.current
 
     Box(Modifier
+        .draggableHandle()
         .clickable(
             onClick = {
                 navController.navigate(RoutePlaylist(playlist.meta.id.value.toString()))

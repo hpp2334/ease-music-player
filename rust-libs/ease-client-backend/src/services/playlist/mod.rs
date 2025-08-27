@@ -53,9 +53,10 @@ pub(crate) fn build_playlist_abstract(
     model: PlaylistModel,
 ) -> BResult<(PlaylistAbstract, Vec<MusicAbstract>)> {
     let id = model.id;
-    let first_cover_music_id = cx.database_server().load_playlist_first_cover_id(id)?;
-    let meta = build_playlist_meta(cx, model, first_cover_music_id);
     let musics = cx.database_server().load_musics_by_playlist_id(id)?;
+    let first_cover_music_id = musics.iter().find(|m| m.cover.is_some()).map(|v| v.id);
+    let meta = build_playlist_meta(cx, model, first_cover_music_id);
+
     let musics = musics
         .into_iter()
         .map(|v| build_music_abstract(cx, v))

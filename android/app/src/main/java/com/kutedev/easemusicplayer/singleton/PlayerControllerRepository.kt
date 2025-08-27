@@ -54,6 +54,11 @@ class PlayerControllerRepository @Inject constructor(
         easeLog("media controller setup")
     }
 
+    fun destroyMediaController() {
+        _mediaController?.release()
+        _mediaController = null
+    }
+
     fun getCurrentPosition(): Long {
         return _mediaController?.currentPosition ?: 0
     }

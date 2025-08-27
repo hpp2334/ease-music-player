@@ -46,7 +46,11 @@ class CreatePlaylistVM @Inject constructor(
         for (entry in entries) {
             for (p in entry.path.split("/").let { list -> if (list.size == 0) emptyList() else list.take(list.size - 1) }) {
                 if (p.isNotBlank()) {
-                    val x = URLDecoder.decode(p.trim(), "UTF-8");
+                    val x = try {
+                        URLDecoder.decode(p.trim(), "UTF-8")
+                    } catch (e: Exception) {
+                        p.trim()
+                    }
                     
                     if (!set.contains(x)) {
                         set.add(x)
