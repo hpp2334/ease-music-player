@@ -13,6 +13,7 @@ import uniffi.ease_client_backend.easeLog
 import java.lang.Exception
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.stackTrace
 
 
 private fun normalizePath(p: String): String {
@@ -46,11 +47,16 @@ class Bridge @Inject constructor(
             return block(internal())
         } catch (e: Exception) {
             easeError("run bridge failed: $e")
+            easeError("run bridge failed stacktrace: ${e.stackTraceToString()}")
             return null
         }
     }
 
     suspend fun<R> runRaw(block: suspend (backend: Backend) -> R): R {
+        return block(internal())
+    }
+
+    fun<R> runSyncRaw(block: (backend: Backend) -> R): R {
         return block(internal())
     }
 
@@ -83,19 +89,5 @@ class Bridge @Inject constructor(
         _backend = null
         _isInit = false
         easeLog("bridge destroyed")
-    }
-}
-
-val LocalBridge = compositionLocalOf<Bridge> {
-    error("No UIBridge provided")
-}
-
-@Composable
-fun BridgeProvider(
-    bridge: Bridge,
-    content: @Composable () -> Unit
-) {
-    CompositionLocalProvider(LocalBridge provides bridge) {
-        content()
     }
 }

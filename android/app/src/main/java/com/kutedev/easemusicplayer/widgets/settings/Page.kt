@@ -31,9 +31,12 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteDebugMore
+import com.kutedev.easemusicplayer.core.RouteLog
 
 
-private val paddingX = 24.dp
+private val paddingX = SettingPaddingX
 
 
 fun getAppVersion(
@@ -70,16 +73,16 @@ private fun Title(title: String) {
 private fun Item(
     iconPainter: Painter,
     title: String,
-    content: String,
+    content: String?,
     onClick: () -> Unit
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .padding(0.dp, 4.dp)
             .fillMaxWidth()
             .clickable { onClick() }
     ) {
+        Box(modifier = Modifier.height(56.dp))
         Icon(
             painter = iconPainter,
             contentDescription = null,
@@ -94,20 +97,22 @@ private fun Item(
                 text = title,
                 fontSize = 14.sp,
             )
-            Text(
-                text = content,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-            )
+            if (content != null) {
+                Text(
+                    text = content,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                )
+            }
         }
     }
 }
 @Composable
 fun SettingSubpage() {
-
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val gitUrl = "https://github.com/hpp2334/ease-music-player";
+    val navController = LocalNavController.current
 
     Column(
         modifier = Modifier
@@ -115,6 +120,23 @@ fun SettingSubpage() {
             .padding(paddingX, paddingX)
             .verticalScroll(rememberScrollState())
     ) {
+        Title(title = stringResource(id = R.string.setting_debug))
+        Item(
+            iconPainter = painterResource(R.drawable.icon_log),
+            title = stringResource(id = R.string.setting_log),
+            content = null,
+            onClick = {
+                navController.navigate(RouteLog())
+            }
+        )
+        Item(
+            iconPainter = painterResource(R.drawable.icon_vertialcal_more),
+            title = stringResource(id = R.string.setting_more),
+            content = null,
+            onClick = {
+                navController.navigate(RouteDebugMore())
+            }
+        )
         Title(title = stringResource(id = R.string.setting_about))
         Item(
             iconPainter = painterResource(R.drawable.icon_github),

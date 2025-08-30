@@ -36,3 +36,4 @@ redb = { workspace = true }
 uniffi = { workspace = true }
 ease-client-schema = { workspace = true }
 ease-order-key = { workspace = true }
+chrono = { workspace = true }

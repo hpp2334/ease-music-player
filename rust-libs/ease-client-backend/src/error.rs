@@ -28,6 +28,8 @@ pub enum BError {
     IoError(#[from] std::io::Error),
     #[error(transparent)]
     OrderKeyError(#[from] OrderKeyError),
+    #[error("custom: {message}")]
+    CustomError { message: String },
 }
 
 pub type BResult<T> = Result<T, BError>;

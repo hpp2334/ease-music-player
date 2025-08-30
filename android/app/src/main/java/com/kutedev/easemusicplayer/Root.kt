@@ -23,8 +23,10 @@ import androidx.navigation.navArgument
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteAddDevices
+import com.kutedev.easemusicplayer.core.RouteDebugMore
 import com.kutedev.easemusicplayer.core.RouteHome
 import com.kutedev.easemusicplayer.core.RouteImport
+import com.kutedev.easemusicplayer.core.RouteLog
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.core.RoutePlaylist
 import com.kutedev.easemusicplayer.core.RoutesProvider
@@ -38,6 +40,8 @@ import com.kutedev.easemusicplayer.widgets.musics.MusicPlayerPage
 import com.kutedev.easemusicplayer.widgets.playlists.CreatePlaylistsDialog
 import com.kutedev.easemusicplayer.widgets.playlists.EditPlaylistsDialog
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
+import com.kutedev.easemusicplayer.widgets.settings.DebugMorePage
+import com.kutedev.easemusicplayer.widgets.settings.LogPage
 
 @Composable
 fun Root() {
@@ -125,6 +129,12 @@ fun Root() {
                             composable(RouteMusicPlayer()) {
                                 MusicPlayerPage()
                                 TimeToPauseModal()
+                            }
+                            composable(RouteLog()) {
+                                LogPage()
+                            }
+                            composable(RouteDebugMore()) {
+                                DebugMorePage()
                             }
                         }
                     }

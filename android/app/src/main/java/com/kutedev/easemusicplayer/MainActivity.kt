@@ -25,7 +25,9 @@ import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.launch
+import uniffi.ease_client_backend.easeLog
 import javax.inject.Inject
+import kotlin.system.exitProcess
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -41,6 +43,7 @@ class MainActivity : ComponentActivity() {
 
         startService(Intent(this, KeepBackendService::class.java))
         bridge.initialize();
+        setupExceptionHandler()
 
         setContent {
             Root()
@@ -78,6 +81,16 @@ class MainActivity : ComponentActivity() {
             },
             MoreExecutors.directExecutor()
         )
+    }
+
+    private fun setupExceptionHandler() {
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            easeLog("on uncaught exception: $throwable")
+            easeLog("on uncaught exception stacktrace: ${throwable.stackTraceToString()}")
+
+            android.os.Process.killProcess(android.os.Process.myPid())
+            exitProcess(1)
+        }
     }
 
     override fun onStop() {

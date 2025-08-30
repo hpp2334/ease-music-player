@@ -1,12 +1,52 @@
-use std::sync::atomic::AtomicBool;
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
+};
 
 use tracing::subscriber::set_global_default;
 
-fn create_log(dir: &str) -> std::fs::File {
-    let p = std::path::Path::new(dir).join("latest.log");
-    let _r = std::fs::remove_file(&p);
+pub fn logs_dir(dir: &str) -> PathBuf {
+    Path::new(dir).join("logs")
+}
 
-    std::fs::File::create(&p).unwrap()
+fn create_log(dir: &str) -> (PathBuf, std::fs::File) {
+    const MAX_LOGS: usize = 30 - 1;
+
+    let dir = logs_dir(dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    {
+        let f = || {
+            let mut entries: Vec<_> = std::fs::read_dir(&dir)?.into_iter().collect();
+            if entries.len() >= MAX_LOGS {
+                entries.sort_by(|a, b| match (a, b) {
+                    (Ok(a), Ok(b)) => a.file_name().cmp(&b.file_name()),
+                    _ => std::cmp::Ordering::Equal,
+                });
+                for entry in entries[..entries.len() - MAX_LOGS].iter() {
+                    if let Ok(entry) = entry {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
+                }
+            }
+
+            Ok::<(), Box<dyn std::error::Error>>(())
+        };
+        let _ = f();
+    }
+
+    let log_name = {
+        let now = chrono::Local::now();
+        let f = now.format("%Y-%m-%d_%H-%M-%S").to_string();
+        format!("{}.txt", f)
+    };
+    let log_file = dir.join(log_name);
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&log_file)
+        .unwrap();
+    (log_file, file)
 }
 
 fn trace_level() -> tracing::Level {
@@ -21,7 +61,7 @@ fn trace_level() -> tracing::Level {
 #[cfg(target_os = "android")]
 fn setup_subscriber(dir: &str) {
     use tracing_subscriber::layer::SubscriberExt;
-    let log_file = create_log(dir);
+    let (p, log_file) = create_log(dir);
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(trace_level())
         .with_writer(log_file)
@@ -29,11 +69,12 @@ fn setup_subscriber(dir: &str) {
         .finish();
     let subscriber = subscriber.with(tracing_android::layer("com.ease_music_player").unwrap());
     set_global_default(subscriber).unwrap();
+    tracing::info!("open log file: {:?}", p);
 }
 
 #[cfg(not(target_os = "android"))]
 fn setup_subscriber(dir: &str) {
-    let log_file = create_log(dir);
+    let (p, log_file) = create_log(dir);
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(trace_level())
         .with_writer(log_file)
@@ -41,6 +82,7 @@ fn setup_subscriber(dir: &str) {
         .finish();
 
     set_global_default(subscriber).unwrap();
+    tracing::info!("open log file: {:?}", p);
 }
 
 fn setup_panic_hook() {

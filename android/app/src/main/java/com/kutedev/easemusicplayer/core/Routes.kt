@@ -34,6 +34,14 @@ fun RouteMusicPlayer(): String {
     return "MusicPlayer"
 }
 
+fun RouteLog(): String {
+    return "Debug/Log"
+}
+
+fun RouteDebugMore(): String {
+    return "Debug/More"
+}
+
 val LocalNavController = compositionLocalOf<NavHostController> {
     error("No LocalNavController provided")
 }
