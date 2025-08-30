@@ -72,7 +72,7 @@ fun ImportCover(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White)
+                        .background(MaterialTheme.colorScheme.surface)
                         .width(8.dp)
                         .height(2.dp)
                 )

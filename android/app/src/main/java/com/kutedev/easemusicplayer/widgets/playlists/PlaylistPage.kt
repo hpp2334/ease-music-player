@@ -57,6 +57,7 @@ import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
+import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
@@ -166,6 +167,7 @@ private fun PlaylistHeader(
                 sizeType = EaseIconButtonSize.Medium,
                 buttonType = EaseIconButtonType.Surface,
                 painter = painterResource(id = R.drawable.icon_back),
+                overrideColors = EaseIconButtonColors().copy(iconTint = Color.White),
                 onClick = {
                     navController.popBackStack()
                 }
@@ -174,6 +176,7 @@ private fun PlaylistHeader(
                 EaseIconButton(
                     sizeType = EaseIconButtonSize.Medium,
                     buttonType = EaseIconButtonType.Surface,
+                    overrideColors = EaseIconButtonColors().copy(iconTint = Color.White),
                     painter = painterResource(id = R.drawable.icon_vertialcal_more),
                     onClick = { moreMenuExpanded = true; }
                 )
@@ -219,7 +222,7 @@ private fun PlaylistHeader(
             Text(
                 text = title,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.surface,
+                color = Color.White,
                 fontSize = 24.sp,
                 lineHeight = 26.sp,
                 overflow = TextOverflow.Ellipsis,
@@ -227,7 +230,7 @@ private fun PlaylistHeader(
             )
             Text(
                 text = "${musics.size} ${stringResource(id = countSuffixStringId)} · ${duration}",
-                color = MaterialTheme.colorScheme.surface,
+                color = Color.White,
                 fontSize = 14.sp,
             )
         }
@@ -477,7 +480,7 @@ fun PlaylistPage(
 
     Box(
         modifier = Modifier
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .fillMaxSize()
     ) {
         Column {

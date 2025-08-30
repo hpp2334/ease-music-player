@@ -675,7 +675,7 @@ fun MusicPlayerPage(
     Box(
         modifier = Modifier
             .clipToBounds()
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .fillMaxSize()
     ) {
         Column {

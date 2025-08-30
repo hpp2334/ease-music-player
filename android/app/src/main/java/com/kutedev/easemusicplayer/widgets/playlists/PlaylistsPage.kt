@@ -129,7 +129,7 @@ fun PlaylistsSubpage(
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.icon_yes),
-                        tint = MaterialTheme.colorScheme.surface,
+                        tint = Color.White,
                         contentDescription = null,
                     )
                 }
@@ -240,7 +240,7 @@ private fun ReorderableCollectionItemScope.PlaylistItem(
                 Icon(
                     modifier = Modifier.size(12.dp),
                     painter = painterResource(id = R.drawable.icon_drag),
-                    tint = MaterialTheme.colorScheme.surface,
+                    tint = Color.White,
                     contentDescription = null,
                 )
             }

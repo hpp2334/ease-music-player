@@ -97,7 +97,7 @@ fun EaseIconButton(
         } else {
             overrideColors?.iconTint
                 ?: when (buttonType) {
-                    EaseIconButtonType.Primary -> MaterialTheme.colorScheme.surface
+                    EaseIconButtonType.Primary -> Color.White
                     EaseIconButtonType.Surface -> MaterialTheme.colorScheme.surface
                     EaseIconButtonType.Default -> MaterialTheme.colorScheme.onSurface
                     EaseIconButtonType.Error -> MaterialTheme.colorScheme.error

@@ -158,7 +158,7 @@ private fun ImportEntry(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1.0F)
         ) {
-            Image(
+            Icon(
                 painter = painter,
                 contentDescription = null,
                 modifier = Modifier
@@ -323,9 +323,9 @@ private fun ImportStorages(
                 MaterialTheme.colorScheme.surfaceVariant
             }
             val textColor = if (selected) {
-                MaterialTheme.colorScheme.surface
+                Color.White
             } else {
-                Color.Unspecified
+                MaterialTheme.colorScheme.onSurface
             }
 
             Box(
