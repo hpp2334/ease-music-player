@@ -47,7 +47,7 @@ jobs:
         run: bun install
       - name: Install cargo-ndk
         run: |
-          cargo install --locked cargo-ndk || true
+          cargo install --locked cargo-ndk@3.5.4 || true
           rustup target add aarch64-linux-android
       - name: Install cargo nextest
         run: curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
