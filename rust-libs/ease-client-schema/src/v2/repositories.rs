@@ -45,7 +45,7 @@ where
     }
 
     fn type_name() -> TypeName {
-        TypeName::new(&format!("BinSerde<{}>", std::any::type_name::<T>()))
+        TypeName::new(&format!("BinSerde<{}>", T::NAME))
     }
 }
 
@@ -59,42 +59,42 @@ where
 }
 
 impl BinSerdeTN for DbKeyAlloc {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_backend::models::key::DbKeyAlloc";
 }
 impl BinSerdeTN for PlaylistId {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_shared::backends::playlist::PlaylistId";
 }
 
 impl BinSerdeTN for MusicId {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_shared::backends::music::MusicId";
 }
 
 impl BinSerdeTN for StorageEntryLoc {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_shared::backends::storage::StorageEntryLoc";
 }
 
 impl BinSerdeTN for StorageId {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_shared::backends::storage::StorageId";
 }
 
 impl BinSerdeTN for BlobId {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_shared::backends::storage::BlobId";
 }
 
 impl BinSerdeTN for PlaylistModel {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_backend::models::playlist::PlaylistModel";
 }
 
 impl BinSerdeTN for MusicModel {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_backend::models::music::MusicModel";
 }
 
 impl BinSerdeTN for StorageModel {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_backend::models::storage::StorageModel";
 }
 
 impl BinSerdeTN for PreferenceModel {
-    const NAME: &'static str = "";
+    const NAME: &'static str = "ease_client_backend::models::preference::PreferenceModel";
 }
 
 pub const TABLE_ID_ALLOC: TableDefinition<BinSerde<DbKeyAlloc>, i64> =
