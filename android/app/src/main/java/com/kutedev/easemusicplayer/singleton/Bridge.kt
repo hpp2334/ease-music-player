@@ -71,7 +71,6 @@ class Bridge @Inject constructor(
     }
 
     fun initialize() {
-        easeLog("bridge is init $_isInit")
         if (_isInit) {
             return
         }
