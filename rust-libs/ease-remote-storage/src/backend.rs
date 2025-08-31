@@ -41,6 +41,8 @@ pub enum StorageBackendError {
     UrlParseError(String),
     #[error("Serde Json Error: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
+    #[error("QuickXML De Error: {0}")]
+    QuickXMLDeError(#[from] quick_xml::DeError),
 }
 
 #[derive(thiserror::Error, Debug)]

@@ -214,7 +214,10 @@ impl Webdav {
     async fn list_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
         let resp = self.list_core(dir).await?.error_for_status()?;
         let text: String = resp.text().await?;
-        let obj: webdav_list_types::Root = quick_xml::de::from_str(&text).unwrap();
+        let obj: webdav_list_types::Root = quick_xml::de::from_str(&text).map_err(|e| {
+            tracing::error!("webdav list resp: {text}");
+            e
+        })?;
 
         let mut ret: Vec<Entry> = Default::default();
         for item in obj.response {

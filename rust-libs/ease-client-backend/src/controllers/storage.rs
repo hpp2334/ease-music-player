@@ -70,6 +70,7 @@ pub async fn ct_test_storage(
     match res {
         Ok(_) => Ok(StorageConnectionTestResult::Success),
         Err(e) => {
+            tracing::warn!("ct_test_storage, {e:?}");
             if e.is_unauthorized() {
                 Ok(StorageConnectionTestResult::Unauthorized)
             } else if e.is_timeout() {
@@ -111,7 +112,7 @@ pub async fn ct_list_storage_entry_children(
             Ok(ListStorageEntryChildrenResp::Ok(entries))
         }
         Err(e) => {
-            tracing::error!("{}", e);
+            tracing::warn!("ct_list_storage_entry_children, {e:?}");
             if e.is_unauthorized() {
                 Ok(ListStorageEntryChildrenResp::AuthenticationFailed)
             } else if e.is_timeout() {

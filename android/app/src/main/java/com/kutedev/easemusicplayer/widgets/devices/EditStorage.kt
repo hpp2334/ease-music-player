@@ -360,6 +360,7 @@ fun EditStoragesPage(
                 EaseIconButton(
                     sizeType = EaseIconButtonSize.Medium,
                     buttonType = EaseIconButtonType.Default,
+                    disabled = testing == StorageConnectionTestResult.TESTING,
                     painter = painterResource(id = R.drawable.icon_wifitethering),
                     overrideColors = testingColors,
                     onClick = {

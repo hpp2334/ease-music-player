@@ -118,6 +118,7 @@ class EditStorageVM @Inject constructor(
         if (!validate()) {
             return
         }
+        _testResult.value = StorageConnectionTestResult.TESTING
 
         _testJob = viewModelScope.launch {
             _testResult.value = bridge.runRaw { ctTestStorage(it, form.value) }
@@ -188,10 +189,10 @@ class EditStorageVM @Inject constructor(
     private fun validate(): Boolean {
         val f = form.value
         _validated.value = Validated(
-            addrEmpty = f.addr.isBlank(),
-            aliasEmpty = if (f.typ == StorageType.ONE_DRIVE) { f.alias.isBlank() } else { false },
-            usernameEmpty = !f.isAnonymous && f.username.isBlank(),
-            passwordEmpty = !f.isAnonymous && f.password.isBlank(),
+            addrEmpty = if (f.typ == StorageType.LOCAL) {  f.addr.isBlank() } else { false },
+            aliasEmpty = if (f.typ == StorageType.LOCAL) { false } else { f.alias.isBlank() },
+            usernameEmpty = if (f.typ == StorageType.LOCAL) { !f.isAnonymous && f.username.isBlank() } else { false },
+            passwordEmpty = if (f.typ == StorageType.LOCAL) { !f.isAnonymous && f.password.isBlank() } else { f.password.isBlank() },
         )
         return _validated.value.valid()
     }

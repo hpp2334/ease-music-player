@@ -16,6 +16,8 @@ opt-level = 3
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
+serde_with = "3.14.0"
+serde_json = "1.0"
 redb = "2.2.0"
 uniffi = "=0.28.3"
 bitcode = "0.6.3"

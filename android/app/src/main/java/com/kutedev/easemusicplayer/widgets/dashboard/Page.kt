@@ -167,12 +167,17 @@ private fun ColumnScope.DevicesBlock(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(0.dp, 4.dp)
                     .clickable {
                         navController.navigate(RouteAddDevices(item.id.value.toString()))
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val title = item.alias.ifBlank {
+                    item.addr
+                }
+                val subTitle = item.addr
+
+                Box(modifier = Modifier.height(48.dp))
                 Icon(
                     modifier = Modifier.size(32.dp),
                     painter = painterResource(id = R.drawable.icon_cloud),
@@ -184,18 +189,20 @@ private fun ColumnScope.DevicesBlock(
                 )
                 Column {
                     Text(
-                        text = item.addr,
+                        text = title,
                         fontSize = 14.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = item.alias,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (subTitle.isNotBlank()) {
+                        Text(
+                            text = subTitle,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }

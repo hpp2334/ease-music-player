@@ -26,15 +26,19 @@ pub struct OneDriveBackend {
 
 mod onedrive_types {
     use serde::Deserialize;
+    use serde_with::{serde_as, DefaultOnError};
 
     #[derive(Deserialize, Debug)]
     pub struct RedeemCodeResp {
         pub access_token: String,
         pub refresh_token: String,
     }
+
+    #[serde_as]
     #[derive(Debug, Deserialize)]
     pub struct ListItemResponse {
-        pub value: Vec<ListItem>,
+        #[serde_as(deserialize_as = "Vec<DefaultOnError>")]
+        pub value: Vec<Option<ListItem>>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -99,12 +103,17 @@ async fn refresh_token_by_code_impl(code: String) -> StorageBackendResult<Auth> 
     let body =
         format!("client_id={client_id}&redirect_uri={ONEDRIVE_REDIRECT_URI}&code={code}&grant_type=authorization_code");
 
-    let resp = build_client()?
-        .request(reqwest::Method::POST, format!("{ONEDRIVE_API_BASE}/token"))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body)
-        .send()
-        .await?;
+    let resp = tokio_runtime()
+        .spawn(async move {
+            let ret = build_client()?
+                .request(reqwest::Method::POST, format!("{ONEDRIVE_API_BASE}/token"))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body)
+                .send()
+                .await?;
+            Ok::<_, StorageBackendError>(ret)
+        })
+        .await??;
     let resp_text = resp.text().await?;
     let value = serde_json::from_str::<onedrive_types::RedeemCodeResp>(&resp_text)?;
     Ok(Auth {
@@ -214,10 +223,13 @@ impl OneDriveBackend {
     async fn list_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
         let resp = self.list_core(dir).await?.error_for_status()?;
         let text: String = resp.text().await?;
-        let obj: onedrive_types::ListItemResponse = serde_json::from_str(&text)?;
+        let obj: onedrive_types::ListItemResponse = serde_json::from_str(&text).map_err(|e| {
+            tracing::warn!("onedrive list resp: {text}");
+            e
+        })?;
 
         let mut ret: Vec<Entry> = Default::default();
-        for item in obj.value {
+        for item in obj.value.into_iter().flatten() {
             let name = item.name;
             let path = dir.to_string() + "/" + name.as_str();
             match item.kind {
