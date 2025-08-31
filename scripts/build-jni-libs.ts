@@ -1,15 +1,7 @@
 import { execSync } from "node:child_process";
-import { ENVS, ROOT, RUST_LIBS_ROOTS } from "./base";
+import { BUILD_GRADLE_KTS, ENVS, ROOT, RUST_LIBS_ROOTS, TARGETS } from "./base";
 import path from "node:path";
-
-// [
-//     'x86_64',
-//     'x86',
-//     'arm64-v8a',
-//     'armeabi-v7a'
-// ]
-
-const TARGETS = ["arm64-v8a"];
+import { readFileSync } from "node:fs";
 
 console.log("Build ease-client in debug mode");
 execSync(`cargo build -p ease-client-backend`, {
