@@ -455,7 +455,11 @@ private fun ImportMusicsError(
         color = MaterialTheme.colorScheme.error,
         iconPainter = painterResource(id = R.drawable.icon_warning),
         onClick = {
-            importVM.reload()
+            if (type == CurrentStorageStateType.NEED_PERMISSION) {
+                importVM.requestPermission()
+            } else {
+                importVM.reload()
+            }
         }
     )
 }

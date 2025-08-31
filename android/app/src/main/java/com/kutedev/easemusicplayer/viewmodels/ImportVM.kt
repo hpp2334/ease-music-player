@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.ImportRepository
+import com.kutedev.easemusicplayer.singleton.PermissionRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.persistentHashSetOf
@@ -40,6 +41,7 @@ private fun defaultSplitPaths(): List<SplitPathItem> {
 class ImportVM @Inject constructor(
     private val storageRepository: StorageRepository,
     private val importRepository: ImportRepository,
+    private val permissionRepository: PermissionRepository,
     private val bridge: Bridge
 ) : ViewModel() {
     private val _currentPath = MutableStateFlow("/")
@@ -99,8 +101,14 @@ class ImportVM @Inject constructor(
 
                 reload()
             }
-
+        }
+        viewModelScope.launch {
             reload()
+        }
+        viewModelScope.launch {
+            permissionRepository.havePermission.collect {
+                reload()
+            }
         }
     }
 
@@ -134,8 +142,14 @@ class ImportVM @Inject constructor(
         importRepository.onFinish(v)
     }
 
+    fun requestPermission() {
+        permissionRepository.requestStoragePermission()
+    }
+
     fun selectStorage(storageId: StorageId) {
         _selectedStorageId.value = storageId
+
+        reload()
     }
 
     fun toggleAll() {
@@ -152,8 +166,10 @@ class ImportVM @Inject constructor(
     }
 
     fun reload() {
-        val storageId = _selectedStorageId.value
-        if (storageId == null) {
+        val storage = currentStorage() ?: return
+
+        if (storage.typ == StorageType.LOCAL && !permissionRepository.havePermission.value) {
+            _loadState.value = CurrentStorageStateType.NEED_PERMISSION
             return
         }
 
@@ -164,7 +180,7 @@ class ImportVM @Inject constructor(
             val resp = bridge.runRaw {
                 ctListStorageEntryChildren(
                     it, StorageEntryLoc(
-                        storageId = storageId,
+                        storageId = storage.id,
                         path = currentPath()
                     )
                 )
