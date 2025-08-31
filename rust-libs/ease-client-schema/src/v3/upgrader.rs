@@ -128,7 +128,6 @@ pub fn upgrade_v2_to_v3(database: &Arc<redb::Database>) -> anyhow::Result<()> {
         convert_table(db, v2::TABLE_STORAGE, v3::TABLE_STORAGE)?;
         convert_multi_table(db, v2::TABLE_STORAGE_MUSIC, v3::TABLE_STORAGE_MUSIC)?;
         convert_table(db, v2::TABLE_PREFERENCE, v3::TABLE_PREFERENCE)?;
-        convert_table(db, v2::TABLE_SCHEMA_VERSION, v3::TABLE_SCHEMA_VERSION)?;
         convert_table(db, v2::TABLE_BLOB, v3::TABLE_BLOB)?;
         tracing::info!("v2 -> v3: finish to upgrade to postcard");
     }
@@ -142,7 +141,6 @@ pub fn upgrade_v2_to_v3(database: &Arc<redb::Database>) -> anyhow::Result<()> {
         db.delete_table(v2::TABLE_STORAGE)?;
         db.delete_multimap_table(v2::TABLE_STORAGE_MUSIC)?;
         db.delete_table(v2::TABLE_PREFERENCE)?;
-        db.delete_table(v2::TABLE_SCHEMA_VERSION)?;
         db.delete_table(v2::TABLE_BLOB)?;
         tracing::info!("v2 -> v3: finish to delete old tables");
     }

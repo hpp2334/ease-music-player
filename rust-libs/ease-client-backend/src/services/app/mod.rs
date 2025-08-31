@@ -44,11 +44,10 @@ fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
     }
 
     let schema_version = cx.database_server().get_schema_version()?;
-    assert_eq!(schema_version, SCHEMA_VERSION);
     tracing::info!(
         "old schema version is {}, now is {}",
         old_schema_version,
-        SCHEMA_VERSION
+        schema_version
     );
 
     Ok(())

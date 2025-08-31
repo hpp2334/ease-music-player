@@ -1,6 +1,6 @@
 use redb::{MultimapTableDefinition, TableDefinition};
 
-use crate::{BinSerdeTN, BlobId};
+use crate::{BinSerdeTN, BlobId, v2};
 
 use super::super::{
     models::{DbKeyAlloc, MusicModel, PlaylistModel, PreferenceModel, StorageModel},
@@ -67,6 +67,5 @@ pub const TABLE_STORAGE_MUSIC: MultimapTableDefinition<BinSerde<StorageId>, BinS
     MultimapTableDefinition::new("v3_storage_music");
 pub const TABLE_PREFERENCE: TableDefinition<(), BinSerde<PreferenceModel>> =
     TableDefinition::new("v3_preference");
-pub const TABLE_SCHEMA_VERSION: TableDefinition<(), u32> =
-    TableDefinition::new("v3_schema_version");
+pub use v2::TABLE_SCHEMA_VERSION;
 pub const TABLE_BLOB: TableDefinition<(), BinSerde<BlobId>> = TableDefinition::new("v3_blob");
