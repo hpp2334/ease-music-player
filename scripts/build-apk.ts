@@ -53,7 +53,7 @@ writeFileSync(
 );
 console.log(`${keyPropertiesPath} written`);
 
-execSync("./gradlew assembleRelease", {
+execSync("./gradlew assembleRelease --info", {
   stdio: "inherit",
   cwd: androidDir,
 });
