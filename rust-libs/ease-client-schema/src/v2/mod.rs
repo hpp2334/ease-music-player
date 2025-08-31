@@ -1,9 +1,9 @@
 mod models;
-mod objects;
 mod repositories;
+mod shared;
 mod upgrader;
 
 pub use models::*;
-pub use objects::*;
 pub use repositories::*;
+pub use shared::*;
 pub use upgrader::*;

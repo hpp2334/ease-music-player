@@ -624,6 +624,7 @@ dependencies = [
 name = "ease-client-backend"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
  "async-channel",
  "async-stream",
  "axum",
@@ -658,10 +659,13 @@ dependencies = [
 name = "ease-client-schema"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bitcode",
  "postcard",
  "redb",
  "serde",
+ "thiserror 1.0.63",
+ "tracing",
  "uniffi",
 ]
 

@@ -30,6 +30,8 @@ pub enum BError {
     OrderKeyError(#[from] OrderKeyError),
     #[error("custom: {message}")]
     CustomError { message: String },
+    #[error(transparent)]
+    AnyHowError(#[from] anyhow::Error),
 }
 
 pub type BResult<T> = Result<T, BError>;

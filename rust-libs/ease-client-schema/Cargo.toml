@@ -10,3 +10,6 @@ redb = { workspace = true }
 uniffi = { workspace = true }
 bitcode = { workspace = true }
 postcard = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

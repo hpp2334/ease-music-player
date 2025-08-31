@@ -137,38 +137,4 @@ impl DatabaseServer {
 
         Ok(())
     }
-
-    pub fn cleanup_invalid_storage_music_entries(self: &Arc<Self>) -> BResult<()> {
-        let db = self.db().begin_write()?;
-        let rdb = self.db().begin_read()?;
-
-        {
-            let mut table_storage_musics = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
-
-            let mut to_remove: Vec<(StorageId, MusicId)> = Default::default();
-
-            for music_iter in table_storage_musics.iter()? {
-                let (storage_id, mut music_iter) = music_iter?;
-                let storage_id = storage_id.value();
-                for v in music_iter.by_ref() {
-                    let id = v?.value();
-                    {
-                        let m = self.load_music_impl(&rdb, id)?;
-                        if m.is_none() {
-                            to_remove.push((storage_id, id));
-                        }
-                    }
-                }
-                drop(music_iter);
-            }
-
-            for (storage_id, music_id) in to_remove {
-                table_storage_musics.remove(storage_id, music_id)?;
-            }
-        }
-
-        db.commit()?;
-
-        Ok(())
-    }
 }

@@ -1,4 +1,4 @@
-use ease_client_schema::StorageType;
+use ease_client_schema::{upgrade_v1_to_v2, upgrade_v2_to_v3, StorageType};
 
 use crate::{ctx::BackendContext, error::BResult, objects::ArgUpsertStorage};
 
@@ -28,25 +28,29 @@ fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
 
     cx.database_server().init(arg.app_document_dir.clone());
     let old_schema_version = cx.database_server().get_schema_version()?;
+
+    if old_schema_version < SCHEMA_VERSION {
+        if old_schema_version < 1 {
+            init_local_storage(cx)?;
+            cx.database_server().save_schema_version(SCHEMA_VERSION)?;
+        } else {
+            if old_schema_version < 2 {
+                upgrade_v1_to_v2(&cx.database_server().db())?;
+            }
+            if old_schema_version < 3 {
+                upgrade_v2_to_v3(&cx.database_server().db())?;
+            }
+        }
+    }
+
+    let schema_version = cx.database_server().get_schema_version()?;
+    assert_eq!(schema_version, SCHEMA_VERSION);
     tracing::info!(
         "old schema version is {}, now is {}",
         old_schema_version,
         SCHEMA_VERSION
     );
 
-    if old_schema_version < SCHEMA_VERSION {
-        if old_schema_version < 1 {
-            init_local_storage(cx)?;
-        } else if old_schema_version < 3 {
-            // cx.database_server().upgrade_schema_to_v3()?;
-            if old_schema_version < 2 {
-                cx.database_server()
-                    .cleanup_invalid_storage_music_entries()?;
-            }
-        }
-    }
-
-    cx.database_server().save_schema_version(SCHEMA_VERSION)?;
     Ok(())
 }
 

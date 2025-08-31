@@ -5,9 +5,13 @@ use std::fmt::Debug;
 #[derive(Debug)]
 pub struct BinSerde<T>(T);
 
+pub trait BinSerdeTN {
+    const NAME: &'static str;
+}
+
 impl<T> redb::Value for BinSerde<T>
 where
-    T: Debug + Serialize + for<'a> Deserialize<'a>,
+    T: Debug + Serialize + BinSerdeTN + for<'a> Deserialize<'a>,
 {
     type SelfType<'a>
         = T
@@ -39,13 +43,13 @@ where
     }
 
     fn type_name() -> TypeName {
-        TypeName::new(&format!("BinSerde<{}>", std::any::type_name::<T>()))
+        TypeName::new(&format!("BinSerdeV3<{}>", T::NAME))
     }
 }
 
 impl<T> redb::Key for BinSerde<T>
 where
-    T: Debug + Serialize + for<'a> Deserialize<'a> + Ord,
+    T: Debug + Serialize + BinSerdeTN + for<'a> Deserialize<'a> + Ord,
 {
     fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
         <Self as redb::Value>::from_bytes(data1).cmp(&<Self as redb::Value>::from_bytes(data2))

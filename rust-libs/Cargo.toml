@@ -24,6 +24,8 @@ futures = "0.3.30"
 async-channel = "2.5.0"
 thiserror = "1.0.57"
 chrono = "0.4.41"
+anyhow = "1.0"
+tracing = "0.1"
 ease-client-schema = { path = "./ease-client-schema" }
 ease-client-tokio = { path = "./ease-client-tokio" }
 ease-order-key = { path = "./ease-order-key" }
