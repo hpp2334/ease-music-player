@@ -469,7 +469,7 @@ fun ImportMusicsPage(
     importVM: ImportVM = hiltViewModel(),
     storagesVM: StoragesVM = hiltViewModel()
 ) {
-    val storageItems by storagesVM.storages.collectAsState()
+    val navController = LocalNavController.current
     val selectedCount by importVM.selectedCount.collectAsState()
     val canUndo by importVM.canUndo.collectAsState()
     val disabledToggleAll by importVM.disabledToggleAll.collectAsState()
@@ -481,7 +481,11 @@ fun ImportMusicsPage(
         else -> "${selectedCount} ${stringResource(id = R.string.import_musics_title_multi_suffix)}"
     }
     fun doUndo() {
-        importVM.undo()
+        if (canUndo) {
+            importVM.undo()
+        } else {
+            navController.popBackStack()
+        }
     }
 
     BackHandler(enabled = canUndo) {
