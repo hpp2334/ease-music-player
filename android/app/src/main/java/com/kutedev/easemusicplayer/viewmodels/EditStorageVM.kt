@@ -54,7 +54,6 @@ private fun defaultArgUpsertStorage(): ArgUpsertStorage {
 class EditStorageVM @Inject constructor(
     private val bridge: Bridge,
     private val storageRepository: StorageRepository,
-    private val playlistRepository: PlaylistRepository,
     private val toastRepository: ToastRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -202,10 +201,7 @@ class EditStorageVM @Inject constructor(
 
         if (id != null) {
             viewModelScope.launch {
-                bridge.run { ctRemoveStorage(it, id) }
-
-                playlistRepository.reload()
-                storageRepository.reload()
+                storageRepository.remove(id)
             }
         }
     }

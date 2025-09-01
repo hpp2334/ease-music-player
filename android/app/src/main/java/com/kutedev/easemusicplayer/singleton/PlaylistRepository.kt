@@ -2,6 +2,7 @@ package com.kutedev.easemusicplayer.singleton
 
 import android.content.Context
 import androidx.annotation.OptIn
+import androidx.lifecycle.viewModelScope
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -25,11 +26,13 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.time.debounce
 import uniffi.ease_client_backend.AddedMusic
 import uniffi.ease_client_backend.ArgCreatePlaylist
+import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.ArgReorderPlaylist
 import uniffi.ease_client_backend.ArgUpdatePlaylist
 import uniffi.ease_client_backend.PlaylistAbstract
 import uniffi.ease_client_backend.ctCreatePlaylist
 import uniffi.ease_client_backend.ctListPlaylist
+import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.ctRemovePlaylist
 import uniffi.ease_client_backend.ctUpdatePlaylist
 import uniffi.ease_client_backend.ctsGetMusicAbstract
@@ -52,10 +55,12 @@ class PlaylistRepository @Inject constructor(
     private val _syncedTotalDuration = MutableSharedFlow<MusicId>()
     private val _debouncedReloadEvent = MutableSharedFlow<Unit>()
     private val _preRemovePlaylistEvent = MutableSharedFlow<PlaylistId>()
+    private val _preRemoveMusicEvent = MutableSharedFlow<ArgRemoveMusicFromPlaylist>()
 
     val playlists = _playlists.asStateFlow()
     val syncedTotalDuration = _syncedTotalDuration.asSharedFlow()
     val preRemovePlaylistEvent = _preRemovePlaylistEvent.asSharedFlow()
+    val preRemoveMusicEvent = _preRemoveMusicEvent.asSharedFlow()
 
     init {
         _scope.launch {
@@ -116,6 +121,18 @@ class PlaylistRepository @Inject constructor(
             }
             scheduleReload()
         }
+    }
+
+
+    suspend fun removeMusic(playlistId: PlaylistId, musicId: MusicId) {
+        val arg = ArgRemoveMusicFromPlaylist(
+            playlistId = playlistId,
+            musicId = musicId
+        )
+        _preRemoveMusicEvent.emit(arg)
+        bridge.run { backend -> ctRemoveMusicFromPlaylist(backend, arg)}
+
+        reload()
     }
 
     @OptIn(UnstableApi::class)

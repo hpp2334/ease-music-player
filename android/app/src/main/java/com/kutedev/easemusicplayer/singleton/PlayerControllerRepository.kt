@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.ctGetMusic
@@ -30,6 +31,8 @@ import javax.inject.Singleton
 class PlayerControllerRepository @Inject constructor(
     private val playerRepository: PlayerRepository,
     private val toastRepository: ToastRepository,
+    private val playlistRepository: PlaylistRepository,
+    private val storageRepository: StorageRepository,
     private val bridge: Bridge,
     private val _scope: CoroutineScope
 ) {
@@ -38,6 +41,30 @@ class PlayerControllerRepository @Inject constructor(
     private val _music = playerRepository.music
     private val nextMusic = playerRepository.nextMusic
     private val previousMusic = playerRepository.previousMusic
+
+    init {
+        _scope.launch(Dispatchers.Main) {
+            playlistRepository.preRemovePlaylistEvent.collect { id ->
+                if (_playlist.value?.abstr?.meta?.id == id) {
+                    stop()
+                }
+            }
+        }
+        _scope.launch(Dispatchers.Main) {
+            playlistRepository.preRemoveMusicEvent.collect { arg ->
+                if (_playlist.value?.abstr?.meta?.id == arg.playlistId && _music.value?.meta?.id == arg.musicId) {
+                    stop()
+                }
+            }
+        }
+        _scope.launch(Dispatchers.Main) {
+            storageRepository.preRemoveStorageEvent.collect { id ->
+                if (_music.value?.loc?.storageId == id) {
+                    stop()
+                }
+            }
+        }
+    }
 
     fun setupMediaController(mediaController: MediaController) {
         _mediaController = mediaController
@@ -78,6 +105,8 @@ class PlayerControllerRepository @Inject constructor(
         }
 
         _scope.launch(Dispatchers.Main) {
+            stop()
+
             val music = bridge.run { ctGetMusic(it, id) }
             val playlist = bridge.run { ctGetPlaylist(it, playlistId) }
             val inPlaylist = music != null && playlist != null && playlist.musics.find { music -> music.meta.id == id }.let { it -> it != null }

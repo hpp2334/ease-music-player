@@ -12,6 +12,7 @@ import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.core.syncMetadataUtil
 import com.kutedev.easemusicplayer.singleton.ImportRepository
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
+import com.kutedev.easemusicplayer.singleton.StorageRepository
 import com.kutedev.easemusicplayer.utils.formatDuration
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.collections.immutable.persistentListOf
@@ -65,6 +66,7 @@ private fun defaultPlaylistAbstract(): PlaylistAbstract {
 class PlaylistVM @Inject constructor(
     private val bridge: Bridge,
     private val playlistRepository: PlaylistRepository,
+    private val storageRepository: StorageRepository,
     private val importRepository: ImportRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -88,6 +90,11 @@ class PlaylistVM @Inject constructor(
                 reload()
             }
         }
+        viewModelScope.launch {
+            storageRepository.onRemoveStorageEvent.collect {
+                reload()
+            }
+        }
     }
 
     fun remove() {
@@ -96,11 +103,7 @@ class PlaylistVM @Inject constructor(
 
     fun removeMusic(id: MusicId) {
         viewModelScope.launch {
-            bridge.run { backend -> ctRemoveMusicFromPlaylist(backend, ArgRemoveMusicFromPlaylist(
-                playlistId = _id,
-                musicId = id
-            ))}
-            playlistRepository.reload()
+            playlistRepository.removeMusic(_id, id)
         }
     }
 
