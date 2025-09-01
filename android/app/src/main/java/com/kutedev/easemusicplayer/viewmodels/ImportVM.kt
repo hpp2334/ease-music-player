@@ -148,8 +148,9 @@ class ImportVM @Inject constructor(
 
     fun selectStorage(storageId: StorageId) {
         _selectedStorageId.value = storageId
+        _undoStack.value = persistentListOf()
 
-        reload()
+        navigateDirImpl("/")
     }
 
     fun toggleAll() {

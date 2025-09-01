@@ -39,6 +39,8 @@ mod onedrive_types {
     pub struct ListItemResponse {
         #[serde_as(deserialize_as = "Vec<DefaultOnError>")]
         pub value: Vec<Option<ListItem>>,
+        #[serde(rename = "@odata.nextLink")]
+        pub next_link: Option<String>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -192,14 +194,8 @@ impl OneDriveBackend {
         Ok(())
     }
 
-    async fn list_core(&self, dir: &str) -> StorageBackendResult<reqwest::Response> {
-        let subdir = if dir == "/" {
-            "/root/children".to_string()
-        } else {
-            ("/root:".to_string() + dir + ":/children").to_string()
-        };
-        let _url = ONEDRIVE_ROOT_API.to_string() + subdir.as_str();
-        let url = reqwest::Url::parse(_url.as_str())
+    async fn list_core_by_url(&self, url: &str) -> StorageBackendResult<reqwest::Response> {
+        let url = reqwest::Url::parse(url)
             .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
         let base_headers = self.build_base_header_map().await;
 
@@ -220,35 +216,57 @@ impl OneDriveBackend {
         Ok(resp)
     }
 
+    fn compute_list_url(&self, dir: &str) -> String {
+        let subdir = if dir == "/" {
+            "/root/children".to_string()
+        } else {
+            ("/root:".to_string() + dir + ":/children").to_string()
+        };
+        let _url = ONEDRIVE_ROOT_API.to_string() + subdir.as_str();
+        _url
+    }
+
     async fn list_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
-        let resp = self.list_core(dir).await?.error_for_status()?;
-        let text: String = resp.text().await?;
-        let obj: onedrive_types::ListItemResponse = serde_json::from_str(&text).map_err(|e| {
-            tracing::warn!("onedrive list resp: {text}");
-            e
-        })?;
+        let mut url = self.compute_list_url(dir);
 
         let mut ret: Vec<Entry> = Default::default();
-        for item in obj.value.into_iter().flatten() {
-            let name = item.name;
-            let path = dir.to_string() + "/" + name.as_str();
-            match item.kind {
-                onedrive_types::ListItemKind::File { size, .. } => {
-                    ret.push(Entry {
-                        name,
-                        path,
-                        size: Some(size as usize),
-                        is_dir: false,
-                    });
+        loop {
+            let resp = self.list_core_by_url(&url).await?.error_for_status()?;
+            let text: String = resp.text().await?;
+            let obj: onedrive_types::ListItemResponse =
+                serde_json::from_str(&text).map_err(|e| {
+                    tracing::warn!("onedrive list resp: {text}");
+                    e
+                })?;
+
+            for item in obj.value.into_iter().flatten() {
+                let name = item.name;
+                let path = dir.to_string() + "/" + name.as_str();
+                match item.kind {
+                    onedrive_types::ListItemKind::File { size, .. } => {
+                        ret.push(Entry {
+                            name,
+                            path,
+                            size: Some(size as usize),
+                            is_dir: false,
+                        });
+                    }
+                    onedrive_types::ListItemKind::Folder { .. } => {
+                        ret.push(Entry {
+                            name,
+                            path,
+                            size: None,
+                            is_dir: true,
+                        });
+                    }
                 }
-                onedrive_types::ListItemKind::Folder { .. } => {
-                    ret.push(Entry {
-                        name,
-                        path,
-                        size: None,
-                        is_dir: true,
-                    });
-                }
+            }
+            tracing::info!("load {} items", ret.len());
+
+            if let Some(next_link) = obj.next_link {
+                url = next_link;
+            } else {
+                break;
             }
         }
 
