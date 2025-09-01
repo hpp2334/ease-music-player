@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.time.debounce
@@ -52,9 +51,11 @@ class PlaylistRepository @Inject constructor(
     private val _playlists = MutableStateFlow(persistentListOf<PlaylistAbstract>())
     private val _syncedTotalDuration = MutableSharedFlow<MusicId>()
     private val _debouncedReloadEvent = MutableSharedFlow<Unit>()
+    private val _preRemovePlaylistEvent = MutableSharedFlow<PlaylistId>()
 
     val playlists = _playlists.asStateFlow()
     val syncedTotalDuration = _syncedTotalDuration.asSharedFlow()
+    val preRemovePlaylistEvent = _preRemovePlaylistEvent.asSharedFlow()
 
     init {
         _scope.launch {
@@ -83,6 +84,7 @@ class PlaylistRepository @Inject constructor(
 
     fun removePlaylist(id: PlaylistId) {
         _scope.launch {
+            _preRemovePlaylistEvent.emit(id)
             bridge.run { ctRemovePlaylist(it, id) }
             reload()
         }

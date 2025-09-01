@@ -59,7 +59,7 @@ class PlayerVM @Inject constructor(
     }
 
     fun resume() {
-        playerRepository.remove()
+        playerControllerRepository.resume()
     }
 
     fun pause() {
