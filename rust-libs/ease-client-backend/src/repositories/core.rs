@@ -2,15 +2,13 @@ use std::sync::{Arc, RwLock};
 
 use redb::{ReadableTable, WriteTransaction};
 
-use crate::{error::BResult, models::key::DbKeyAlloc};
+use crate::error::BResult;
 
-use super::{
-    blob::BlobManager,
-    defs::{
-        TABLE_ID_ALLOC, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST,
-        TABLE_PLAYLIST_MUSIC, TABLE_PREFERENCE, TABLE_SCHEMA_VERSION, TABLE_STORAGE,
-        TABLE_STORAGE_MUSIC,
-    },
+use super::blob::BlobManager;
+use ease_client_schema::{
+    DbKeyAlloc, TABLE_ID_ALLOC, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST,
+    TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_PREFERENCE, TABLE_SCHEMA_VERSION, TABLE_STORAGE,
+    TABLE_STORAGE_MUSIC,
 };
 
 #[derive(Default)]
@@ -45,6 +43,13 @@ impl DatabaseServer {
         }
 
         self.init_database().unwrap();
+    }
+
+    pub fn destroy(&self) {
+        {
+            let mut w = self._db.write().unwrap();
+            *w = None;
+        }
     }
 
     fn init_database(&self) -> BResult<()> {

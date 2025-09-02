@@ -1,12 +1,13 @@
 use std::{cmp::Ordering, time::Duration};
 
-
+use ease_client_tokio::tokio_runtime;
 use futures_util::future::BoxFuture;
 use reqwest::header::HeaderValue;
 use reqwest::StatusCode;
 
 use crate::{
-    env::EASEM_ONEDRIVE_ID, Entry, StorageBackend, StorageBackendError, StorageBackendResult, StreamFile,
+    env::EASEM_ONEDRIVE_ID, Entry, StorageBackend, StorageBackendError, StorageBackendResult,
+    StreamFile,
 };
 
 pub struct BuildOneDriveArg {
@@ -20,44 +21,49 @@ struct Auth {
 
 pub struct OneDriveBackend {
     refresh_token: String,
-    auth: tokio::sync::RwLock<Option<Auth>>
+    auth: tokio::sync::RwLock<Option<Auth>>,
 }
-
 
 mod onedrive_types {
     use serde::Deserialize;
+    use serde_with::{serde_as, DefaultOnError};
 
     #[derive(Deserialize, Debug)]
     pub struct RedeemCodeResp {
         pub access_token: String,
         pub refresh_token: String,
     }
+
+    #[serde_as]
     #[derive(Debug, Deserialize)]
     pub struct ListItemResponse {
-        pub value: Vec<ListItem>,
+        #[serde_as(deserialize_as = "Vec<DefaultOnError>")]
+        pub value: Vec<Option<ListItem>>,
+        #[serde(rename = "@odata.nextLink")]
+        pub next_link: Option<String>,
     }
-    
+
     #[derive(Debug, Deserialize)]
     pub struct ListItem {
         pub name: String,
         #[serde(flatten)]
         pub kind: ListItemKind,
     }
-    
+
     #[derive(Debug, Deserialize)]
     #[serde(untagged)]
     pub enum ListItemKind {
         File {
             size: u64,
             #[serde(rename = "file")]
-            _file: ListFileMetadata
+            _file: ListFileMetadata,
         },
         Folder {
             #[serde(rename = "folder")]
             _folder: ListFolderMetadata,
         },
     }
-    
+
     #[derive(Debug, Deserialize)]
     pub struct ListFolderMetadata {
         #[serde(rename = "childCount")]
@@ -67,15 +73,13 @@ mod onedrive_types {
     #[derive(Debug, Deserialize)]
     pub struct ListFileMetadata {
         #[serde(rename = "mimeType")]
-        pub _mime_type: String
+        pub _mime_type: String,
     }
 }
 
-
 const ONEDRIVE_ROOT_API: &str = "https://graph.microsoft.com/v1.0/me/drive";
 const ONEDRIVE_API_BASE: &str = "https://login.microsoftonline.com/common/oauth2/v2.0";
-const ONEDRIVE_REDIRECT_URI: &str = "easem://oauth2redirect/";  
-
+const ONEDRIVE_REDIRECT_URI: &str = "easem://oauth2redirect/";
 
 fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
     if let Err(e) = r {
@@ -85,7 +89,7 @@ fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
             }
         }
     }
-    return false;
+    false
 }
 
 fn build_client() -> StorageBackendResult<reqwest::Client> {
@@ -96,17 +100,22 @@ fn build_client() -> StorageBackendResult<reqwest::Client> {
     Ok(client)
 }
 
-async fn refresh_token_by_code_impl(code: String) -> StorageBackendResult<Auth> {      
+async fn refresh_token_by_code_impl(code: String) -> StorageBackendResult<Auth> {
     let client_id = EASEM_ONEDRIVE_ID;
-    let body = 
+    let body =
         format!("client_id={client_id}&redirect_uri={ONEDRIVE_REDIRECT_URI}&code={code}&grant_type=authorization_code");
 
-    let resp = build_client()?
-        .request(reqwest::Method::POST, format!("{ONEDRIVE_API_BASE}/token"))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body)
-        .send()
-        .await?;
+    let resp = tokio_runtime()
+        .spawn(async move {
+            let ret = build_client()?
+                .request(reqwest::Method::POST, format!("{ONEDRIVE_API_BASE}/token"))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body)
+                .send()
+                .await?;
+            Ok::<_, StorageBackendError>(ret)
+        })
+        .await??;
     let resp_text = resp.text().await?;
     let value = serde_json::from_str::<onedrive_types::RedeemCodeResp>(&resp_text)?;
     Ok(Auth {
@@ -117,7 +126,10 @@ async fn refresh_token_by_code_impl(code: String) -> StorageBackendResult<Auth> 
 
 impl OneDriveBackend {
     pub fn new(arg: BuildOneDriveArg) -> Self {
-        Self { refresh_token: arg.code, auth: Default::default() }
+        Self {
+            refresh_token: arg.code,
+            auth: Default::default(),
+        }
     }
 
     async fn build_base_header_map(&self) -> reqwest::header::HeaderMap {
@@ -127,34 +139,45 @@ impl OneDriveBackend {
             if let Some(auth) = r.as_ref() {
                 header_map.append(
                     reqwest::header::AUTHORIZATION,
-                    HeaderValue::from_str(format!("bearer {}", auth.access_token).as_str()).unwrap(),
+                    HeaderValue::from_str(format!("bearer {}", auth.access_token).as_str())
+                        .unwrap(),
                 );
             }
         }
-        return header_map;
+        header_map
     }
 
     async fn try_ensure_refresh_token_by_refresh_token(&self) -> StorageBackendResult<()> {
-        let mut w= self.auth.write().await;
+        let mut w = self.auth.write().await;
         if w.is_none() {
             self.refresh_token_by_refresh_token_impl(&mut w).await?;
         }
         Ok(())
     }
 
-    async fn refresh_token_by_refresh_token_impl(&self, w: &mut Option<Auth>) -> StorageBackendResult<()> {
+    async fn refresh_token_by_refresh_token_impl(
+        &self,
+        w: &mut Option<Auth>,
+    ) -> StorageBackendResult<()> {
         let client_id = EASEM_ONEDRIVE_ID;
         let refresh_token = self.refresh_token.clone();
-        let body = 
+        let body =
             format!("client_id={client_id}&redirect_uri={ONEDRIVE_REDIRECT_URI}&refresh_token={refresh_token}&grant_type=refresh_token");
 
-        let resp = self
-            .build_client()?
-            .request(reqwest::Method::POST, format!("{ONEDRIVE_API_BASE}/token"))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
-            .await?;
+        let resp = {
+            let client = self.build_client()?;
+
+            tokio_runtime()
+                .spawn(async move {
+                    client
+                        .request(reqwest::Method::POST, format!("{ONEDRIVE_API_BASE}/token"))
+                        .header("Content-Type", "application/x-www-form-urlencoded")
+                        .body(body)
+                        .send()
+                        .await
+                })
+                .await??
+        };
         let resp_text = resp.text().await?;
         let value = serde_json::from_str::<onedrive_types::RedeemCodeResp>(&resp_text)?;
 
@@ -166,58 +189,84 @@ impl OneDriveBackend {
     }
 
     async fn refresh_token_by_refresh_token(&self) -> StorageBackendResult<()> {
-        let mut w= self.auth.write().await;
+        let mut w = self.auth.write().await;
         self.refresh_token_by_refresh_token_impl(&mut w).await?;
         Ok(())
     }
 
-    async fn list_core(&self, dir: &str) -> StorageBackendResult<reqwest::Response> {
+    async fn list_core_by_url(&self, url: &str) -> StorageBackendResult<reqwest::Response> {
+        let url = reqwest::Url::parse(url)
+            .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
+        let base_headers = self.build_base_header_map().await;
+
+        let resp = {
+            let client = self.build_client()?;
+
+            tokio_runtime()
+                .spawn(async move {
+                    client
+                        .request(reqwest::Method::GET, url.clone())
+                        .headers(base_headers)
+                        .send()
+                        .await
+                })
+                .await??
+        };
+
+        Ok(resp)
+    }
+
+    fn compute_list_url(&self, dir: &str) -> String {
         let subdir = if dir == "/" {
             "/root/children".to_string()
         } else {
             ("/root:".to_string() + dir + ":/children").to_string()
         };
         let _url = ONEDRIVE_ROOT_API.to_string() + subdir.as_str();
-        let url = reqwest::Url::parse(_url.as_str())
-            .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
-        let base_headers = self.build_base_header_map().await;
-        
-        let resp = self
-            .build_client()?
-            .request(reqwest::Method::GET, url.clone())
-            .headers(base_headers)
-            .send()
-            .await?;
-
-        Ok(resp)
+        _url
     }
 
     async fn list_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
-        let resp = self.list_core(dir).await?.error_for_status()?;
-        let text: String = resp.text().await?;
-        let obj: onedrive_types::ListItemResponse = serde_json::from_str(&text)?;
+        let mut url = self.compute_list_url(dir);
 
         let mut ret: Vec<Entry> = Default::default();
-        for item in obj.value {
-            let name = item.name;
-            let path = dir.to_string() + "/" + name.as_str();
-            match item.kind {
-                onedrive_types::ListItemKind::File { size, .. } => {
-                    ret.push(Entry {
-                        name,
-                        path,
-                        size: Some(size as usize),
-                        is_dir: false,
-                    });
+        loop {
+            let resp = self.list_core_by_url(&url).await?.error_for_status()?;
+            let text: String = resp.text().await?;
+            let obj: onedrive_types::ListItemResponse =
+                serde_json::from_str(&text).map_err(|e| {
+                    tracing::warn!("onedrive list resp: {text}");
+                    e
+                })?;
+
+            for item in obj.value.into_iter().flatten() {
+                let name = item.name;
+                let path = dir.to_string() + "/" + name.as_str();
+                match item.kind {
+                    onedrive_types::ListItemKind::File { size, .. } => {
+                        ret.push(Entry {
+                            name,
+                            path,
+                            size: Some(size as usize),
+                            is_dir: false,
+                        });
+                    }
+                    onedrive_types::ListItemKind::Folder { .. } => {
+                        ret.push(Entry {
+                            name,
+                            path,
+                            size: None,
+                            is_dir: true,
+                        });
+                    }
                 }
-                onedrive_types::ListItemKind::Folder { .. } => {
-                    ret.push(Entry {
-                        name,
-                        path,
-                        size: None,
-                        is_dir: true,
-                    });
-                }
+            }
+            tracing::info!("load {} items", ret.len());
+
+            if let Some(next_link) = obj.next_link {
+                url = next_link;
+            } else {
+                break;
             }
         }
 
@@ -257,25 +306,32 @@ impl OneDriveBackend {
         let mut headers = self.build_base_header_map().await;
         headers.insert(
             reqwest::header::RANGE,
-            HeaderValue::from_str(format!("bytes={}-", byte_offset).as_str()).unwrap(),
+            HeaderValue::from_str(format!("bytes={byte_offset}-").as_str()).unwrap(),
         );
 
-        let resp = self
-            .build_client()?
-            .get(url.clone())
-            .headers(headers)
-            .send()
-            .await?;
+        let resp = {
+            let client = self.build_client()?;
+
+            tokio_runtime()
+                .spawn(async move { client.get(url.clone()).headers(headers).send().await })
+                .await??
+        };
         let byte_offset = if resp.headers().get(reqwest::header::CONTENT_RANGE).is_some() {
             0
         } else {
             byte_offset
         };
-        let res = resp.error_for_status().map(|resp| StreamFile::new(resp, byte_offset))?;
+        let res = resp
+            .error_for_status()
+            .map(|resp| StreamFile::new(resp, byte_offset))?;
         Ok(res)
     }
 
-    async fn get_with_retry_impl(&self, p: String, byte_offset: u64) -> StorageBackendResult<StreamFile> {
+    async fn get_with_retry_impl(
+        &self,
+        p: String,
+        byte_offset: u64,
+    ) -> StorageBackendResult<StreamFile> {
         self.try_ensure_refresh_token_by_refresh_token().await?;
         let r = self.get_impl(p.as_str(), byte_offset).await;
         if !is_auth_error(&r) {

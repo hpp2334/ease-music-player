@@ -1,13 +1,20 @@
 use std::io::SeekFrom;
 
+use ease_client_tokio::tokio_runtime;
 use futures_util::future::BoxFuture;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-use crate::{Entry, StorageBackend, StorageBackendResult, StreamFile};
+use crate::{Entry, StorageBackend, StorageBackendError, StorageBackendResult, StreamFile};
 
 pub struct LocalBackend;
 
 static ANDROID_PREFIX_PATH: &str = "/storage/emulated/0";
+
+impl Default for LocalBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl LocalBackend {
     pub fn new() -> Self {
@@ -23,30 +30,37 @@ impl LocalBackend {
             dir.to_string()
         };
 
-        let path = tokio::fs::canonicalize(dir).await?;
-        let mut dir = tokio::fs::read_dir(path).await?;
+        let mut ret = tokio_runtime()
+            .spawn(async move {
+                let path = tokio::fs::canonicalize(dir).await?;
+                let mut dir = tokio::fs::read_dir(path).await?;
 
-        let mut ret: Vec<Entry> = Default::default();
-        while let Some(entry) = dir.next_entry().await? {
-            let metadata = entry.metadata().await?;
-            let mut path = entry
-                .path()
-                .to_string_lossy()
-                .to_string()
-                .replace("\\\\?\\", "");
-            if std::env::consts::OS == "android" {
-                if let Some(strip_path) = path.strip_prefix(ANDROID_PREFIX_PATH) {
-                    path = strip_path.to_string();
+                let mut ret: Vec<Entry> = Default::default();
+                while let Some(entry) = dir.next_entry().await? {
+                    let metadata = entry.metadata().await?;
+                    let mut path = entry
+                        .path()
+                        .to_string_lossy()
+                        .to_string()
+                        .replace("\\\\?\\", "");
+                    if std::env::consts::OS == "android" {
+                        if let Some(strip_path) = path.strip_prefix(ANDROID_PREFIX_PATH) {
+                            path = strip_path.to_string();
+                        }
+                    }
+
+                    ret.push(Entry {
+                        name: entry.file_name().to_string_lossy().to_string(),
+                        path: path.replace('\\', "/"),
+                        size: Some(metadata.len() as usize),
+                        is_dir: metadata.is_dir(),
+                    });
                 }
-            }
 
-            ret.push(Entry {
-                name: entry.file_name().to_string_lossy().to_string(),
-                path: path.replace('\\', "/"),
-                size: Some(metadata.len() as usize),
-                is_dir: metadata.is_dir(),
-            });
-        }
+                Ok::<_, StorageBackendError>(ret)
+            })
+            .await??;
+
         ret.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(ret)
     }
@@ -59,12 +73,23 @@ impl LocalBackend {
         } else {
             p.to_string()
         };
-        let path = tokio::fs::canonicalize(&p).await?;
-        let mut file = tokio::fs::File::open(path).await?;
 
-        let mut buf: Vec<u8> = Default::default();
-        file.seek(SeekFrom::Start(byte_offset as u64)).await?;
-        file.read_to_end(&mut buf).await?;
+        let buf = {
+            let p = p.clone();
+            tokio_runtime()
+                .spawn(async move {
+                    let mut buf: Vec<u8> = Default::default();
+                    let path = tokio::fs::canonicalize(&p).await?;
+                    let mut file = tokio::fs::File::open(path).await?;
+
+                    file.seek(SeekFrom::Start(byte_offset)).await?;
+                    file.read_to_end(&mut buf).await?;
+
+                    Ok::<_, StorageBackendError>(buf)
+                })
+                .await??
+        };
+
         Ok(StreamFile::new_from_bytes(buf.as_slice(), &p, 0))
     }
 }
@@ -137,10 +162,9 @@ mod test {
         let cwd = cwd.to_string_lossy().to_string();
         let file = backend.get(cwd, 3).await.unwrap();
 
-        let stream = file.into_stream();
-        pin_mut!(stream);
-        let chunk = stream.next().await;
-        assert_eq!(chunk.is_some(), true);
+        let stream = file.into_rx();
+        let chunk = stream.recv().await;
+        assert!(chunk.is_ok());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(chunk.as_ref()), "og.txt");
     }

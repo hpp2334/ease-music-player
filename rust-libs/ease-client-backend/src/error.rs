@@ -1,15 +1,19 @@
-use ease_client_shared::backends::generated::Code;
+use ease_client_schema::{MusicId, PlaylistId};
+use ease_order_key::OrderKeyError;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum BError {
     #[error("remote storage error: {0:?}")]
     RemoteStorageError(#[from] ease_remote_storage::StorageBackendError),
-    #[error("no such message error: code = {0:?}")]
-    NoSuchMessage(Code),
     #[error("failed to load asset: {0:?}")]
     AssetLoadFail(String),
     #[error("asset not found")]
     AssetNotFound,
+    #[error("playlist not found")]
+    PlaylistNotFound(PlaylistId),
+    #[error("music not found")]
+    MusicNotFound(MusicId),
     #[error("redb error: {0:?}")]
     RedbError(#[from] redb::Error),
     #[error("redb transaction error: {0:?}")]
@@ -22,6 +26,12 @@ pub enum BError {
     RedbCommitError(#[from] redb::CommitError),
     #[error("io error: {0:?}")]
     IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    OrderKeyError(#[from] OrderKeyError),
+    #[error("custom: {message}")]
+    CustomError { message: String },
+    #[error(transparent)]
+    AnyHowError(#[from] anyhow::Error),
 }
 
 pub type BResult<T> = Result<T, BError>;

@@ -1,19 +1,13 @@
 use std::sync::Arc;
 
-use ease_client_shared::backends::{music::MusicId, storage::{ArgUpsertStorage, BlobId, StorageId}};
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
-use crate::{
-    error::BResult,
-    models::{key::DbKeyAlloc, storage::StorageModel},
-};
+use crate::{error::BResult, objects::ArgUpsertStorage};
 
-use super::{
-    core::DatabaseServer,
-    defs::{
-        TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE,
-        TABLE_STORAGE_MUSIC,
-    },
+use super::core::DatabaseServer;
+use ease_client_schema::{
+    BlobId, DbKeyAlloc, MusicId, StorageId, StorageModel, TABLE_MUSIC, TABLE_MUSIC_BY_LOC,
+    TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE, TABLE_STORAGE_MUSIC,
 };
 
 impl DatabaseServer {
@@ -44,11 +38,10 @@ impl DatabaseServer {
         let table = db.open_table(TABLE_STORAGE)?;
         let len = table.len()? as usize;
 
-        let mut ret: Vec<StorageModel> = Default::default();
-        ret.reserve(len);
+        let mut ret: Vec<StorageModel> = Vec::with_capacity(len);
 
-        let mut iter = table.iter()?;
-        while let Some(v) = iter.next() {
+        let iter = table.iter()?;
+        for v in iter {
             let v = v?.1.value();
             ret.push(v);
         }
@@ -66,7 +59,8 @@ impl DatabaseServer {
                 v
             } else {
                 let id = self.alloc_id(&db, DbKeyAlloc::Storage)?;
-                let v = StorageModel {
+
+                StorageModel {
                     id: StorageId::wrap(id),
                     addr: Default::default(),
                     alias: Default::default(),
@@ -74,8 +68,7 @@ impl DatabaseServer {
                     password: Default::default(),
                     is_anonymous: Default::default(),
                     typ: Default::default(),
-                };
-                v
+                }
             };
             let id = model.id;
 
@@ -109,11 +102,11 @@ impl DatabaseServer {
 
             let mut music_iter = table_storage_musics.get(id)?;
 
-            while let Some(v) = music_iter.next() {
+            for v in music_iter.by_ref() {
                 let id = v?.value();
 
                 let mut iter = table_music_playlists.get(id)?;
-                while let Some(v) = iter.next() {
+                for v in iter.by_ref() {
                     let playlist_id = v?.value();
                     table_playlist_musics.remove(playlist_id, id)?;
                 }
@@ -141,40 +134,6 @@ impl DatabaseServer {
         for id in to_remove_blobs {
             self.blob().remove(id)?;
         }
-
-        Ok(())
-    }
-
-    pub fn cleanup_invalid_storage_music_entries(self: &Arc<Self>) -> BResult<()> {
-        let db = self.db().begin_write()?;
-        let rdb = self.db().begin_read()?;
-
-        {
-            let mut table_storage_musics = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
-
-            let mut to_remove: Vec<(StorageId, MusicId)> = Default::default();
-
-            for music_iter in table_storage_musics.iter()? {
-                let (storage_id, mut music_iter) = music_iter?;
-                let storage_id = storage_id.value();
-                while let Some(v) = music_iter.next() {
-                    let id = v?.value();
-                    {
-                        let m = self.load_music_impl(&rdb, id)?;
-                        if m.is_none() {
-                            to_remove.push((storage_id, id));
-                        }
-                    }
-                }
-                drop(music_iter);
-            }
-            
-            for (storage_id, music_id) in to_remove {
-                table_storage_musics.remove(storage_id, music_id)?;
-            }
-        }
-
-        db.commit()?;
 
         Ok(())
     }

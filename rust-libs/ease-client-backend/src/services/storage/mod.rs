@@ -4,13 +4,16 @@ use std::{
     time::Duration,
 };
 
-use crate::{ctx::BackendContext, error::BResult, models::storage::StorageModel};
-use ease_client_shared::backends::{
-    connector::ConnectorAction,
-    storage::{ArgUpsertStorage, Storage, StorageEntryLoc, StorageId, StorageType},
+use crate::{
+    ctx::BackendContext,
+    error::BResult,
+    objects::{ArgUpsertStorage, Storage},
+    services::{get_music, get_music_abstract, get_music_cover_bytes},
 };
+use ease_client_schema::{DataSourceKey, StorageEntryLoc, StorageId, StorageModel, StorageType};
 use ease_remote_storage::{
-    BuildOneDriveArg, BuildWebdavArg, LocalBackend, OneDriveBackend, StorageBackend, Webdav,
+    BuildOneDriveArg, BuildWebdavArg, LocalBackend, OneDriveBackend, StorageBackend, StreamFile,
+    Webdav,
 };
 use tracing::instrument;
 
@@ -27,21 +30,17 @@ pub(crate) async fn load_storage_entry_data(
     let loc = loc.clone();
     let backend = get_storage_backend(cx, loc.storage_id)?;
     if let Some(backend) = backend {
-        cx.async_runtime()
-            .spawn(async move {
-                tracing::trace!("start load");
-                let ret = match backend.get(loc.path, 0).await {
-                    Ok(data) => {
-                        let data = data.bytes().await.unwrap();
-                        let data = data.to_vec();
-                        Ok(Some(data))
-                    }
-                    Err(_) => Ok(None),
-                };
-                tracing::trace!("end load");
-                ret
-            })
-            .await
+        tracing::trace!("start load");
+        let ret = match backend.get(loc.path, 0).await {
+            Ok(data) => {
+                let data = data.bytes().await.unwrap();
+                let data = data.to_vec();
+                Ok(Some(data))
+            }
+            Err(_) => Ok(None),
+        };
+        tracing::trace!("end load");
+        ret
     } else {
         Ok(None)
     }
@@ -112,7 +111,7 @@ pub fn get_storage_backend(
     let storage = model.unwrap();
     let storage = build_storage(storage, music_count);
     let backend = build_storage_backend_by_arg(
-        &cx,
+        cx,
         ArgUpsertStorage {
             id: None,
             addr: storage.addr,
@@ -155,8 +154,47 @@ pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
     Ok(storages)
 }
 
-pub async fn notify_storages(cx: &BackendContext) -> BResult<()> {
-    let storages = list_storage(cx).await?;
-    cx.notify(ConnectorAction::Storages(storages));
-    Ok(())
+async fn get_asset_file_by_loc(
+    cx: &BackendContext,
+    entry: StorageEntryLoc,
+    byte_offset: u64,
+) -> BResult<Option<StreamFile>> {
+    let storage_backend = get_storage_backend(cx, entry.storage_id)?;
+    let Some(storage_backend) = storage_backend else {
+        return Ok(None);
+    };
+
+    let file = storage_backend.get(entry.path, byte_offset).await;
+    if let Err(e) = &file {
+        if e.is_not_found() {
+            return Ok(None);
+        }
+    }
+    let file = file?;
+    Ok(Some(file))
+}
+
+pub(crate) async fn get_asset_file(
+    cx: &BackendContext,
+    key: DataSourceKey,
+    byte_offset: u64,
+) -> BResult<Option<StreamFile>> {
+    match key {
+        DataSourceKey::Music { id } => {
+            let m = get_music(cx, id).await?;
+            let Some(m) = m else {
+                return Ok(None);
+            };
+            get_asset_file_by_loc(cx, m.loc, byte_offset).await
+        }
+        DataSourceKey::Cover { id } => {
+            let buf = get_music_cover_bytes(cx, id)?;
+            if buf.is_empty() {
+                return Ok(None);
+            }
+            let file = StreamFile::new_from_bytes(buf.as_slice(), "Default", byte_offset);
+            Ok(Some(file))
+        }
+        DataSourceKey::AnyEntry { entry } => get_asset_file_by_loc(cx, entry, byte_offset).await,
+    }
 }

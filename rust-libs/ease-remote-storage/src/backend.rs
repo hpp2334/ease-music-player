@@ -1,9 +1,10 @@
-use std::io::ErrorKind;
+use std::{io::ErrorKind, process::Output};
 
-use async_stream::stream;
 use bytes::Bytes;
+use ease_client_tokio::tokio_runtime;
 use futures_util::future::BoxFuture;
 use reqwest::StatusCode;
+use tokio::sync::oneshot::error;
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -34,10 +35,22 @@ pub enum StorageBackendError {
     ParseXMLFail,
     #[error(transparent)]
     TokioIO(#[from] tokio::io::Error),
+    #[error(transparent)]
+    TokioJoinError(#[from] tokio::task::JoinError),
     #[error("Url Parse Error")]
     UrlParseError(String),
     #[error("Serde Json Error: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
+    #[error("QuickXML De Error: {0}")]
+    QuickXMLDeError(#[from] quick_xml::DeError),
+}
+
+#[derive(thiserror::Error, Debug)]
+enum SendChunkError {
+    #[error(transparent)]
+    RequestFail(#[from] reqwest::Error),
+    #[error("mpsc send error: {0}")]
+    MpscSendError(#[from] async_channel::SendError<StorageBackendResult<Bytes>>),
 }
 
 pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
@@ -47,14 +60,14 @@ impl StorageBackendError {
         if let StorageBackendError::RequestFail(e) = self {
             return e.is_timeout();
         }
-        return false;
+        false
     }
 
     pub fn is_unauthorized(&self) -> bool {
         if let StorageBackendError::RequestFail(e) = self {
             return e.status() == Some(StatusCode::UNAUTHORIZED);
         }
-        return false;
+        false
     }
 
     pub fn is_not_found(&self) -> bool {
@@ -74,7 +87,7 @@ pub trait StorageBackend {
 impl StreamFile {
     pub fn new(resp: reqwest::Response, byte_offset: u64) -> Self {
         let url = resp.url().to_string();
-        let name = url.split('/').last().unwrap();
+        let name = url.split('/').next_back().unwrap();
         let header_map = resp.headers();
         let content_length = header_map.get(reqwest::header::CONTENT_LENGTH).map(|v| {
             let v = v.to_str().unwrap();
@@ -92,7 +105,7 @@ impl StreamFile {
         }
     }
     pub fn new_from_bytes(buf: &[u8], name: &str, byte_offset: u64) -> Self {
-        let total: usize = buf.len() as usize;
+        let total: usize = buf.len();
         let buf = bytes::Bytes::copy_from_slice(buf);
         Self {
             inner: StreamFileInner::Total(buf),
@@ -103,47 +116,64 @@ impl StreamFile {
         }
     }
     pub fn size(&self) -> Option<usize> {
-        if let Some(total) = self.total {
-            Some(total - self.byte_offset as usize)
-        } else {
-            None
-        }
+        self.total.map(|total| total - self.byte_offset as usize)
     }
     pub fn content_type(&self) -> Option<&str> {
-        self.content_type.as_ref().map(|v| v.as_str())
+        self.content_type.as_deref()
     }
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
 
-    pub fn into_stream(self) -> impl futures_util::Stream<Item = StorageBackendResult<Bytes>> {
-        stream! {
-            match self.inner {
-                StreamFileInner::Response(mut response) => {
-                    let mut remaining = self.byte_offset as usize;
-                    while let Some(chunk) = response.chunk().await? {
-                        if chunk.len() <= remaining {
-                            remaining -= chunk.len();
-                        } else if remaining > 0 {
-                            let chunk = Bytes::copy_from_slice(&chunk[remaining..]);
-                            remaining = 0;
-                            yield(Ok(chunk))
-                        } else {
-                            yield(Ok(chunk))
+    pub fn into_rx(self) -> async_channel::Receiver<StorageBackendResult<Bytes>> {
+        let (mut tx, rx) = async_channel::bounded::<StorageBackendResult<Bytes>>(10);
+
+        let _ = tokio_runtime().spawn(async move {
+            let f = || async {
+                match self.inner {
+                    StreamFileInner::Response(mut response) => {
+                        let mut remaining = self.byte_offset as usize;
+
+                        while let Some(chunk) = response.chunk().await? {
+                            if chunk.len() <= remaining {
+                                remaining -= chunk.len();
+                            } else if remaining > 0 {
+                                let chunk = Bytes::copy_from_slice(&chunk[remaining..]);
+                                remaining = 0;
+                                tx.send(Ok(chunk)).await?;
+                            } else {
+                                tx.send(Ok(chunk)).await?;
+                            }
                         }
                     }
-                },
-                StreamFileInner::Total(buf) => {
-                    let offset = self.byte_offset as usize;
-                    if offset == 0 {
-                        yield(Ok(buf));
-                    } else {
-                        let buf = Bytes::copy_from_slice(&buf[offset..]);
-                        yield(Ok(buf))
+                    StreamFileInner::Total(buf) => {
+                        let offset = self.byte_offset as usize;
+                        if offset == 0 {
+                            tx.send(Ok(buf)).await?;
+                        } else {
+                            let buf = Bytes::copy_from_slice(&buf[offset..]);
+                            tx.send(Ok(buf)).await?;
+                        }
                     }
-                },
+                }
+
+                Ok(())
+            };
+
+            let res: Result<(), SendChunkError> = f().await;
+            if let Err(e) = res {
+                let e: Option<StorageBackendError> = match e {
+                    SendChunkError::RequestFail(e) => Some(e.into()),
+                    _ => None,
+                };
+                if let Some(e) = e {
+                    let _ = tx.send(Err(e)).await;
+                }
             }
-        }
+            let _ = tx.close();
+        });
+
+        rx
     }
 
     pub async fn bytes(self) -> StorageBackendResult<Bytes> {

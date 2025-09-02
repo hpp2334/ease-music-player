@@ -1,40 +1,46 @@
+use std::sync::Arc;
 
-use ease_client_shared::backends::music::{ArgUpdateMusicLyric, Music, MusicId};
-use futures::try_join;
+use ease_client_schema::MusicId;
 
 use crate::{
-    ctx::BackendContext,
     error::BResult,
-    services::music::{disable_time_to_pause, enable_time_to_pause, get_music, notify_music},
+    objects::Music,
+    services::{
+        get_music, get_music_abstract, update_music_cover, update_music_duration,
+        ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric,
+    },
+    Backend, MusicAbstract,
 };
 
-pub(crate) async fn cr_get_music(cx: &BackendContext, id: MusicId) -> BResult<Option<Music>> {
-    get_music(&cx, id).await
+#[uniffi::export]
+pub async fn ct_get_music(cx: Arc<Backend>, id: MusicId) -> BResult<Option<Music>> {
+    let cx = cx.get_context();
+    get_music(cx, id).await
 }
 
-pub(crate) async fn cu_update_music_lyric(
-    cx: &BackendContext,
-    arg: ArgUpdateMusicLyric,
-) -> BResult<()> {
+#[uniffi::export]
+pub fn cts_get_music_abstract(cx: Arc<Backend>, id: MusicId) -> BResult<Option<MusicAbstract>> {
+    let cx = cx.get_context();
+    get_music_abstract(cx, id)
+}
+
+#[uniffi::export]
+pub async fn ct_update_music_lyric(cx: Arc<Backend>, arg: ArgUpdateMusicLyric) -> BResult<()> {
+    let cx = cx.get_context();
     cx.database_server()
         .update_music_lyric(arg.id, arg.lyric_loc)?;
 
-    try_join! {
-        notify_music(cx, arg.id)
-    }?;
-
     Ok(())
 }
 
-pub(crate) async fn cu_enable_time_to_pause(
-    cx: &BackendContext,
-    arg: std::time::Duration,
-) -> BResult<()> {
-    enable_time_to_pause(cx, arg);
-    Ok(())
+#[uniffi::export]
+pub fn cts_update_music_duration(cx: Arc<Backend>, arg: ArgUpdateMusicDuration) -> BResult<()> {
+    let cx = cx.get_context();
+    update_music_duration(cx, arg)
 }
 
-pub(crate) async fn cu_disable_time_to_pause(cx: &BackendContext, _arg: ()) -> BResult<()> {
-    disable_time_to_pause(cx);
-    Ok(())
+#[uniffi::export]
+pub fn cts_update_music_cover(cx: Arc<Backend>, arg: ArgUpdateMusicCover) -> BResult<()> {
+    let cx = cx.get_context();
+    update_music_cover(cx, arg)
 }

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -21,27 +20,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.ImportCover
 import com.kutedev.easemusicplayer.components.SimpleFormText
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import uniffi.ease_client.PlaylistCreateWidget
-import uniffi.ease_client.PlaylistEditWidget
-import uniffi.ease_client_shared.CreatePlaylistMode
+import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistVM
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteImport
+import com.kutedev.easemusicplayer.singleton.RouteImportType
+import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
+import uniffi.ease_client_backend.CreatePlaylistMode
+import uniffi.ease_client_schema.DataSourceKey
 
 @Composable
 private fun Tab(
@@ -92,18 +96,24 @@ private fun FullImportHeader(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FullImportBlock(
-    evm: EaseViewModel
+    createPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val state = evm.createPlaylistState.collectAsState().value
+    val navController = LocalNavController.current
 
-    if (!state.fullImported) {
+    val musicCount by createPlaylistVM.musicCount.collectAsState()
+    val name by createPlaylistVM.name.collectAsState()
+    val recommendPlaylistNames by createPlaylistVM.recommendPlaylistNames.collectAsState()
+    val cover by createPlaylistVM.cover.collectAsState()
+    val fullImported by createPlaylistVM.fullImported.collectAsState()
+
+    if (!fullImported) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .clickable {
-                    bridge.dispatchClick(PlaylistCreateWidget.Import)
+                    createPlaylistVM.prepareImportCreate()
+                    navController.navigate(RouteImport(RouteImportType.EditPlaylist))
                 }
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(0.dp, 32.dp),
@@ -123,7 +133,6 @@ private fun FullImportBlock(
             )
         }
     } else {
-        val musicCount = state.musicCount
         val musicCountSuffix = stringResource(R.string.music_count_unit)
 
         Column(
@@ -142,16 +151,16 @@ private fun FullImportBlock(
             )
             SimpleFormText(
                 label = null,
-                value = state.name,
+                value = name,
                 onChange = { value ->
-                    bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
+                    createPlaylistVM.updateName(value)
                 }
             )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(0.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                for (name in state.recommendPlaylistNames) {
+                for (name in recommendPlaylistNames) {
                     EaseTextButton(
                         modifier = Modifier.widthIn(max = 120.dp),
                         text = name,
@@ -159,7 +168,7 @@ private fun FullImportBlock(
                         size = EaseTextButtonSize.Small,
                         disabled = false,
                         onClick = {
-                            bridge.dispatchChangeText(PlaylistCreateWidget.Name, name)
+                            createPlaylistVM.updateName(name)
                         },
                     )
                 }
@@ -169,12 +178,12 @@ private fun FullImportBlock(
                 text = stringResource(R.string.playlists_dialog_cover),
             )
             ImportCover(
-                dataSourceKey = state.picture,
+                dataSourceKey = cover.let { cover -> if (cover != null) DataSourceKey.AnyEntry(cover) else null },
                 onAdd = {
-                    bridge.dispatchClick(PlaylistCreateWidget.Cover);
+                    navController.navigate(RouteImport(RouteImportType.EditPlaylistCover))
                 },
                 onRemove = {
-                    bridge.dispatchClick(PlaylistCreateWidget.ClearCover);
+                    createPlaylistVM.clearCover()
                 }
             )
         }
@@ -183,15 +192,17 @@ private fun FullImportBlock(
 
 @Composable
 fun CreatePlaylistsDialog(
-    evm: EaseViewModel
+    createPlaylistVM: CreatePlaylistVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val state = evm.createPlaylistState.collectAsState().value
-    val isOpen = state.modalOpen
-    val mode = state.mode
+    val context = LocalContext.current
+    val isOpen by createPlaylistVM.modalOpen.collectAsState()
+    val mode by createPlaylistVM.mode.collectAsState()
+    val name by createPlaylistVM.name.collectAsState()
+    val fullImported by createPlaylistVM.fullImported.collectAsState()
+    val canSubmit by createPlaylistVM.canSubmit.collectAsState()
 
     val onDismissRequest = {
-        bridge.dispatchClick(PlaylistCreateWidget.CloseModal)
+        createPlaylistVM.closeModal()
     }
     if (!isOpen) {
         return
@@ -211,28 +222,26 @@ fun CreatePlaylistsDialog(
                     stringId = R.string.playlists_dialog_tab_full,
                     isActive = mode == CreatePlaylistMode.FULL,
                     onClick = {
-                        bridge.dispatchClick(PlaylistCreateWidget.Tab(CreatePlaylistMode.FULL));
+                        createPlaylistVM.updateMode(CreatePlaylistMode.FULL)
                     }
                 )
                 Tab(
                     stringId = R.string.playlists_dialog_tab_empty,
                     isActive = mode == CreatePlaylistMode.EMPTY,
                     onClick = {
-                        bridge.dispatchClick(PlaylistCreateWidget.Tab(CreatePlaylistMode.EMPTY));
+                        createPlaylistVM.updateMode(CreatePlaylistMode.EMPTY)
                     }
                 )
             }
             Box(modifier = Modifier.height(8.dp))
-            if (state.mode == CreatePlaylistMode.FULL) {
-                FullImportBlock(
-                    evm = evm,
-                )
+            if (mode == CreatePlaylistMode.FULL) {
+                FullImportBlock()
             } else {
                 SimpleFormText(
                     label = stringResource(R.string.playlists_dialog_playlist_name),
-                    value = state.name,
+                    value = name,
                     onChange = { value ->
-                        bridge.dispatchChangeText(PlaylistCreateWidget.Name, value)
+                        createPlaylistVM.updateName(value)
                     }
                 )
             }
@@ -242,13 +251,13 @@ fun CreatePlaylistsDialog(
                     .fillMaxWidth()
             ) {
                 Row {
-                    if (state.fullImported && state.mode == CreatePlaylistMode.FULL) {
+                    if (fullImported && mode == CreatePlaylistMode.FULL) {
                         EaseTextButton(
                             text = stringResource(id = R.string.playlists_dialog_button_reset),
                             type = EaseTextButtonType.Primary,
                             size = EaseTextButtonSize.Medium,
                             onClick = {
-                                bridge.dispatchClick(PlaylistCreateWidget.Reset);
+                                createPlaylistVM.reset()
                             }
                         )
                     }
@@ -264,9 +273,9 @@ fun CreatePlaylistsDialog(
                         text = stringResource(id = R.string.playlists_dialog_button_ok),
                         type = EaseTextButtonType.Primary,
                         size = EaseTextButtonSize.Medium,
-                        disabled = !state.canSubmit,
+                        disabled = !canSubmit,
                         onClick = {
-                            bridge.dispatchClick(PlaylistCreateWidget.FinishCreate);
+                            createPlaylistVM.finish(context)
                             onDismissRequest()
                         }
                     )
@@ -279,14 +288,17 @@ fun CreatePlaylistsDialog(
 
 @Composable
 fun EditPlaylistsDialog(
-    evm: EaseViewModel
+    editPlaylistVM: EditPlaylistVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val state = evm.editPlaylistState.collectAsState().value
-    val isOpen = state.modalOpen
+    val navController = LocalNavController.current
+
+    val isOpen by editPlaylistVM.modalOpen.collectAsState()
+    val name by editPlaylistVM.name.collectAsState()
+    val cover by editPlaylistVM.cover.collectAsState()
+    val canSubmit by editPlaylistVM.canSubmit.collectAsState()
 
     val onDismissRequest = {
-        bridge.dispatchClick(PlaylistEditWidget.CloseModal)
+        editPlaylistVM.closeModal()
     }
     if (!isOpen) {
         return
@@ -307,9 +319,9 @@ fun EditPlaylistsDialog(
             )
             SimpleFormText(
                 label = null,
-                value = state.name,
+                value = name,
                 onChange = { value ->
-                    bridge.dispatchChangeText(PlaylistEditWidget.Name, value)
+                    editPlaylistVM.updateName(value)
                 }
             )
             Box(modifier = Modifier.height(12.dp))
@@ -317,12 +329,13 @@ fun EditPlaylistsDialog(
                 text = stringResource(R.string.playlists_dialog_cover),
             )
             ImportCover(
-                dataSourceKey = state.picture,
+                dataSourceKey = cover.let { cover -> if (cover != null) DataSourceKey.AnyEntry(cover) else null },
                 onAdd = {
-                    bridge.dispatchClick(PlaylistEditWidget.Cover);
+                    editPlaylistVM.prepareImportCover()
+                    navController.navigate(RouteImport(RouteImportType.EditPlaylistCover))
                 },
                 onRemove = {
-                    bridge.dispatchClick(PlaylistEditWidget.ClearCover);
+                    editPlaylistVM.clearCover()
                 }
             )
             Row(
@@ -340,8 +353,9 @@ fun EditPlaylistsDialog(
                     text = stringResource(id = R.string.playlists_dialog_button_ok),
                     type = EaseTextButtonType.Primary,
                     size = EaseTextButtonSize.Medium,
+                    disabled = !canSubmit,
                     onClick = {
-                        bridge.dispatchClick(PlaylistEditWidget.FinishEdit);
+                        editPlaylistVM.finish()
                     }
                 )
             }

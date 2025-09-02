@@ -16,7 +16,7 @@ private val DarkColorScheme = darkColorScheme(
     primary = Color(0xFF2E89B0),
     secondary = Color(0xFFC9EBFA),
     tertiary = Pink80,
-    surfaceVariant = Color(0xFFE3E3E3)
+    surfaceVariant = Color(0xFF303030)
 )
 
 private val LightColorScheme = lightColorScheme(

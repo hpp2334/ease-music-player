@@ -1,22 +1,14 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use ease_client_shared::backends::{
-    music::MusicId,
-    music_duration::MusicDuration,
-    playlist::PlaylistId,
-    storage::{BlobId, StorageEntryLoc},
-};
+use ease_order_key::OrderKey;
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, WriteTransaction};
 
-use crate::{
-    error::BResult,
-    models::{key::DbKeyAlloc, music::MusicModel},
-};
+use crate::error::BResult;
 
-use super::{
-    bin::BinSerde,
-    core::DatabaseServer,
-    defs::{TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC},
+use super::core::DatabaseServer;
+use ease_client_schema::{
+    BinSerde, BlobId, DbKeyAlloc, MusicId, MusicModel, PlaylistId, StorageEntryLoc, TABLE_MUSIC,
+    TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC,
 };
 
 #[derive(Debug)]
@@ -33,16 +25,18 @@ impl DatabaseServer {
         let db = self.db().begin_read()?;
         let table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
         let table_music = db.open_table(TABLE_MUSIC)?;
-        let mut iter = table_playlist_musics.get(playlist_id)?;
-        let mut ret: Vec<MusicModel> = Vec::new();
-        ret.reserve(iter.len() as usize);
+        let iter = table_playlist_musics.get(playlist_id)?;
+        let mut ret: Vec<MusicModel> = Vec::with_capacity(iter.len() as usize);
 
-        while let Some(item) = iter.next() {
+        for item in iter {
             let id = item?.value();
 
             let music = table_music.get(id)?.unwrap().value();
             ret.push(music);
         }
+
+        ret.sort_by(|lhs, rhs| lhs.order.cmp(&rhs.order));
+
         Ok(ret)
     }
 
@@ -84,6 +78,7 @@ impl DatabaseServer {
         db: &WriteTransaction,
         rdb: &ReadTransaction,
         arg: ArgDBAddMusic,
+        order: OrderKey,
     ) -> BResult<(MusicId, bool)> {
         let music = self.load_music_by_key_impl(rdb, arg.loc.clone())?;
         if let Some(music) = music {
@@ -105,18 +100,19 @@ impl DatabaseServer {
                 cover: None,
                 lyric: None,
                 lyric_default: true,
+                order: order.into_raw(),
             },
         )?;
         table_storage_music.insert(arg.loc.storage_id, id)?;
         table_music_by_loc.insert(arg.loc, id)?;
 
-        return Ok((id, false));
+        Ok((id, false))
     }
 
     pub fn update_music_total_duration(
         self: &Arc<Self>,
         id: MusicId,
-        duration: MusicDuration,
+        duration: Duration,
     ) -> BResult<()> {
         let db = self.db().begin_write()?;
         {
@@ -176,6 +172,22 @@ impl DatabaseServer {
         Ok(())
     }
 
+    pub fn set_music_order(self: &Arc<Self>, id: MusicId, order: OrderKey) -> BResult<()> {
+        let db = self.db().begin_write()?;
+
+        {
+            let mut table_music = db.open_table(TABLE_MUSIC)?;
+            let m = table_music.get(id)?.map(|v| v.value());
+
+            if let Some(mut m) = m {
+                m.order = order.into_raw();
+                table_music.insert(id, m)?;
+            }
+        };
+        db.commit()?;
+        Ok(())
+    }
+
     pub fn compact_music_impl(
         self: &Arc<Self>,
         db: &WriteTransaction,
@@ -187,7 +199,7 @@ impl DatabaseServer {
         let ref_playlists = table_mp.get(id)?.len();
 
         if ref_playlists == 0 {
-            let m = self.load_music_impl(&rdb, id)?.unwrap();
+            let m = self.load_music_impl(rdb, id)?.unwrap();
 
             let mut table_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
             let mut table_storage = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;

@@ -31,7 +31,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kutedev.easemusicplayer.R
-import uniffi.ease_client_shared.DataSourceKey
+import uniffi.ease_client_schema.DataSourceKey
 
 @Composable
 fun ImportCover(
@@ -72,7 +72,7 @@ fun ImportCover(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White)
+                        .background(MaterialTheme.colorScheme.surface)
                         .width(8.dp)
                         .height(2.dp)
                 )

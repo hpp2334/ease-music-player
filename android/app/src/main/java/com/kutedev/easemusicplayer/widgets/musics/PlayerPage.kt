@@ -50,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
@@ -64,26 +65,33 @@ import com.kutedev.easemusicplayer.components.MusicCover
 import com.kutedev.easemusicplayer.components.customAnchoredDraggable
 import com.kutedev.easemusicplayer.components.dropShadow
 import com.kutedev.easemusicplayer.components.rememberCustomAnchoredDraggableState
-import com.kutedev.easemusicplayer.core.UIBridgeController
 import com.kutedev.easemusicplayer.utils.nextTickOnMain
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import uniffi.ease_client.MusicControlAction
-import uniffi.ease_client.MusicControlWidget
-import uniffi.ease_client.MusicDetailWidget
-import uniffi.ease_client.MusicLyricWidget
-import uniffi.ease_client.VLyricLine
-import uniffi.ease_client.ViewAction
-import uniffi.ease_client_shared.DataSourceKey
-import uniffi.ease_client_shared.LyricLoadState
-import uniffi.ease_client_shared.PlayMode
+import com.kutedev.easemusicplayer.viewmodels.PlayerVM
+import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteImport
+import com.kutedev.easemusicplayer.singleton.RouteImportType
+import com.kutedev.easemusicplayer.utils.formatDuration
+import com.kutedev.easemusicplayer.utils.toMusicDurationMs
+import uniffi.ease_client_schema.DataSourceKey
+import uniffi.ease_client_backend.LyricLine
+import uniffi.ease_client_backend.LyricLoadState
+import uniffi.ease_client_backend.Lyrics
+import uniffi.ease_client_schema.PlayMode
+import java.time.Duration
+import kotlin.collections.emptyList
 import kotlin.math.absoluteValue
 import kotlin.math.sign
 
 @Composable
 private fun MusicPlayerHeader(
     hasLyric: Boolean,
+    playerVM: PlayerVM = hiltViewModel(),
 ) {
-    val bridge = UIBridgeController.current
+    val navController = LocalNavController.current
+    val currentPlaying by playerVM.music.collectAsState()
+
+
     var moreMenuExpanded by remember {
         mutableStateOf(false)
     }
@@ -99,7 +107,7 @@ private fun MusicPlayerHeader(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_back),
             onClick = {
-                bridge.popRoute()
+                navController.popBackStack()
             }
         )
         Box {
@@ -122,14 +130,18 @@ private fun MusicPlayerHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.music_lyric_remove,
                                 onClick = {
-                                    bridge.dispatchClick(MusicLyricWidget.REMOVE)
+                                    playerVM.removeLyric()
                                 }
                             )
                         } else {
                             EaseContextMenuItem(
                                 stringId = R.string.music_lyric_add,
                                 onClick = {
-                                    bridge.dispatchClick(MusicLyricWidget.ADD)
+                                    if (currentPlaying?.meta?.id != null) {
+                                        navController.navigate(
+                                            RouteImport(RouteImportType.Lyric)
+                                        )
+                                    }
                                 }
                             )
                         },
@@ -137,7 +149,7 @@ private fun MusicPlayerHeader(
                             stringId = R.string.music_player_context_menu_remove,
                             isError = true,
                             onClick = {
-                                bridge.dispatchClick(MusicDetailWidget.REMOVE)
+                                playerVM.remove()
                             }
                         ),
                     )
@@ -168,8 +180,16 @@ private fun MusicSlider(
         _currentDurationMS
     }
 
-    val durationRate = if (totalDurationMS == 0UL) { 0f } else { (currentDurationMS.toDouble() / totalDurationMS.toDouble()).toFloat() };
-    val bufferRate = if (totalDurationMS == 0UL) { 0f } else { (bufferDurationMS.toDouble() / totalDurationMS.toDouble()).toFloat() };
+    val durationRate = if (totalDurationMS == 0UL) {
+        0f
+    } else {
+        (currentDurationMS.toDouble() / totalDurationMS.toDouble()).toFloat()
+    };
+    val bufferRate = if (totalDurationMS == 0UL) {
+        0f
+    } else {
+        (bufferDurationMS.toDouble() / totalDurationMS.toDouble()).toFloat()
+    };
     var sliderWidth by remember { mutableIntStateOf(0) }
     val sliderWidthDp = with(LocalDensity.current) {
         sliderWidth.toDp()
@@ -198,7 +218,8 @@ private fun MusicSlider(
                 }
                 .pointerInput(totalDurationMS, sliderWidth) {
                     detectTapGestures { offset ->
-                        var nextMS = (offset.x.toDouble() / sliderWidth.toDouble() * totalDurationMS.toDouble()).toLong()
+                        var nextMS =
+                            (offset.x.toDouble() / sliderWidth.toDouble() * totalDurationMS.toDouble()).toLong()
                         nextMS = nextMS.coerceIn(0L, totalDurationMS.toLong())
                         onChangeMusicPosition(nextMS.toULong())
                     }
@@ -216,32 +237,36 @@ private fun MusicSlider(
                     }
                 )
         ) {
-            Box(modifier = Modifier
-                .fillMaxWidth()
-                .height(sliderHeight)
-                .offset(0.dp, (sliderContainerHeight - sliderHeight) / 2)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(sliderHeight)
+                    .offset(0.dp, (sliderContainerHeight - sliderHeight) / 2)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Box(modifier = Modifier
-                    .fillMaxWidth(bufferRate)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.secondary)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(bufferRate)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.secondary)
                 )
-                Box(modifier = Modifier
-                    .fillMaxWidth(durationRate)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.primary)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(durationRate)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary)
                 )
             }
-            Box(modifier = Modifier
-                .offset(
-                    -handleSize / 2 + (sliderWidthDp * durationRate),
-                    (sliderContainerHeight - handleSize) / 2
-                )
-                .size(handleSize)
-                .clip(RoundedCornerShape(999.dp))
-                .background(MaterialTheme.colorScheme.primary)
+            Box(
+                modifier = Modifier
+                    .offset(
+                        -handleSize / 2 + (sliderWidthDp * durationRate),
+                        (sliderContainerHeight - handleSize) / 2
+                    )
+                    .size(handleSize)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MaterialTheme.colorScheme.primary)
             )
         }
         Row(
@@ -286,7 +311,7 @@ private fun CoverImage(dataSourceKey: DataSourceKey?) {
 
 @Composable
 private fun MusicLyric(
-    lyrics: List<VLyricLine>,
+    lyrics: List<LyricLine>,
     lyricIndex: Int,
     lyricLoadedState: LyricLoadState,
     onClickAdd: () -> Unit,
@@ -368,7 +393,8 @@ private fun MusicLyric(
                 }
                 itemsIndexed(lyrics) { index, lyric ->
                     val isCurrent = index == lyricIndex
-                    val textColor = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    val textColor =
+                        if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
 
                     Box(
                         modifier = Modifier
@@ -398,7 +424,7 @@ private fun MusicPlayerBody(
     canPrev: Boolean,
     canNext: Boolean,
     lyricIndex: Int,
-    lyrics: List<VLyricLine>,
+    lyrics: List<LyricLine>,
     lyricLoadedState: LyricLoadState,
     onClickAddLyric: () -> Unit,
 ) {
@@ -424,15 +450,19 @@ private fun MusicPlayerBody(
     var showLyric by remember { mutableStateOf(false) }
 
     fun updateAnchored() {
-        val anchors =listOfNotNull(
+        val anchors = listOfNotNull(
             0f to "DEFAULT",
-            if (canPrev) { widgetWidth.toFloat() to "PREV" } else null,
-            if (canNext) { -widgetWidth.toFloat() to "NEXT" } else null,
+            if (canPrev) {
+                widgetWidth.toFloat() to "PREV"
+            } else null,
+            if (canNext) {
+                -widgetWidth.toFloat() to "NEXT"
+            } else null,
         ).toMap()
 
         anchoredDraggableState.updateAnchors(
             anchors,
-            {value ->
+            { value ->
                 if (value == widgetWidth.toFloat()) {
                     nextTickOnMain {
                         onPrev()
@@ -476,7 +506,7 @@ private fun MusicPlayerBody(
                 onDragStarted = {
                     dragStartX = anchoredDraggableState.value
                 },
-                onLimitDragEnded = {nextValue ->
+                onLimitDragEnded = { nextValue ->
                     val dis = (nextValue - dragStartX).absoluteValue.coerceIn(0f, widgetWidth.toFloat());
                     val sign = (nextValue - dragStartX).sign;
                     val next = dragStartX + dis * sign
@@ -527,13 +557,18 @@ private fun MusicPlayerBody(
 
 @Composable
 private fun MusicPanel(
-    evm: EaseViewModel,
+    playerVM: PlayerVM = hiltViewModel(),
+    sleepModeVM: SleepModeVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val state by evm.currentMusicState.collectAsState()
-    val timeToPauseState by evm.timeToPauseState.collectAsState()
+    val playMode by playerVM.playMode.collectAsState()
+    val timeToPauseState by sleepModeVM.state.collectAsState()
+    val previousMusic by playerVM.previousMusic.collectAsState()
+    val nextMusic by playerVM.nextMusic.collectAsState()
+    val playing by playerVM.playing.collectAsState()
+    val loading by playerVM.loading.collectAsState()
+
     val isTimeToPauseOpen = timeToPauseState.enabled
-    val modeDrawable = when (state.playMode) {
+    val modeDrawable = when (playMode) {
         PlayMode.SINGLE -> R.drawable.icon_mode_one
         PlayMode.SINGLE_LOOP -> R.drawable.icon_mode_repeatone
         PlayMode.LIST -> R.drawable.icon_mode_list
@@ -546,7 +581,11 @@ private fun MusicPanel(
     ) {
         EaseIconButton(
             sizeType = EaseIconButtonSize.Medium,
-            buttonType = if (isTimeToPauseOpen) { EaseIconButtonType.Primary } else { EaseIconButtonType.Default },
+            buttonType = if (isTimeToPauseOpen) {
+                EaseIconButtonType.Primary
+            } else {
+                EaseIconButtonType.Default
+            },
             overrideColors = EaseIconButtonColors(
                 iconTint = if (isTimeToPauseOpen) {
                     MaterialTheme.colorScheme.primary
@@ -557,41 +596,43 @@ private fun MusicPanel(
             ),
             painter = painterResource(id = R.drawable.icon_timelapse),
             onClick = {
-                bridge.dispatchClick(MusicControlWidget.TIME_TO_PAUSE)
+                sleepModeVM.openModal()
             }
         )
         EaseIconButton(
             sizeType = EaseIconButtonSize.Medium,
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_play_previous),
-            disabled = !state.canPlayPrevious,
+            disabled = previousMusic == null,
             onClick = {
-                bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
+                playerVM.playPrevious()
             }
         )
-        if (!state.playing) {
+        if (!playing) {
             EaseIconButton(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
-                disabled = state.loading,
-                overrideColors = if (state.loading) {
+                disabled = loading,
+                overrideColors = if (loading) {
                     EaseIconButtonColors(
                         buttonDisabledBg = MaterialTheme.colorScheme.secondary,
                     )
-                } else { null },
+                } else {
+                    null
+                },
                 onClick = {
-                    bridge.dispatchClick(MusicControlWidget.PLAY)
+                    playerVM.resume()
                 }
             )
         }
-        if (state.playing) {
+        if (playing) {
             EaseIconButton(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_pause),
                 onClick = {
-                    bridge.dispatchClick(MusicControlWidget.PAUSE)
+                    playerVM.pause()
                 }
             )
         }
@@ -599,9 +640,9 @@ private fun MusicPanel(
             sizeType = EaseIconButtonSize.Medium,
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = R.drawable.icon_play_next),
-            disabled = !state.canPlayNext,
+            disabled = nextMusic == null,
             onClick = {
-                bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
+                playerVM.playNext()
             }
         )
         EaseIconButton(
@@ -609,7 +650,7 @@ private fun MusicPanel(
             buttonType = EaseIconButtonType.Default,
             painter = painterResource(id = modeDrawable),
             onClick = {
-                bridge.dispatchClick(MusicControlWidget.PLAYMODE)
+                playerVM.changePlayModeToNext()
             }
         )
     }
@@ -617,18 +658,24 @@ private fun MusicPanel(
 
 @Composable
 fun MusicPlayerPage(
-    evm: EaseViewModel,
+    playerVM: PlayerVM = hiltViewModel(),
 ) {
-    val bridge = UIBridgeController.current
-    val currentMusicState by evm.currentMusicState.collectAsState()
-    val currentLyricState by evm.currentMusicLyricState.collectAsState()
+    val navController = LocalNavController.current
+    val currentMusic by playerVM.music.collectAsState()
+    val currentDuration by playerVM.currentDuration.collectAsState()
+    val previousMusic by playerVM.previousMusic.collectAsState()
+    val nextMusic by playerVM.nextMusic.collectAsState()
+    val bufferDuration by playerVM.bufferDuration.collectAsState()
+    val currentLyricIndex by playerVM.lyricIndex.collectAsState()
+    val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.LOADING
+    val lyrics = currentMusic?.lyric?.data?.lines ?: emptyList()
 
-    val hasLyric = currentLyricState.loadState != LyricLoadState.MISSING
+    val hasLyric = lyricLoadedState != LyricLoadState.MISSING
 
     Box(
         modifier = Modifier
             .clipToBounds()
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .fillMaxSize()
     ) {
         Column {
@@ -641,21 +688,23 @@ fun MusicPlayerPage(
             ) {
                 MusicPlayerBody(
                     onPrev = {
-                        bridge.dispatchClick(MusicControlWidget.PLAY_PREVIOUS)
+                        playerVM.playPrevious()
                     },
                     onNext = {
-                        bridge.dispatchClick(MusicControlWidget.PLAY_NEXT)
+                        playerVM.playNext()
                     },
-                    cover = currentMusicState.cover,
-                    prevCover = currentMusicState.previousCover,
-                    nextCover = currentMusicState.nextCover,
-                    canPrev = currentMusicState.canPlayPrevious,
-                    canNext = currentMusicState.canPlayNext,
-                    lyricIndex = currentMusicState.lyricIndex,
-                    lyricLoadedState = currentLyricState.loadState,
-                    lyrics = currentLyricState.lyricLines,
+                    cover = currentMusic?.cover,
+                    prevCover = previousMusic?.cover,
+                    nextCover = nextMusic?.cover,
+                    canPrev = previousMusic != null,
+                    canNext = nextMusic != null,
+                    lyricIndex = currentLyricIndex,
+                    lyricLoadedState = lyricLoadedState,
+                    lyrics = lyrics,
                     onClickAddLyric = {
-                        bridge.dispatchClick(MusicLyricWidget.ADD)
+                        if (currentMusic != null) {
+                            navController.navigate(RouteImport(RouteImportType.Lyric))
+                        }
                     }
                 )
             }
@@ -663,20 +712,20 @@ fun MusicPlayerPage(
                 modifier = Modifier.padding(36.dp, 10.dp)
             ) {
                 Text(
-                    text = currentMusicState.title,
+                    text = currentMusic?.meta?.title ?: "",
                     maxLines = 3,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 20.sp,
                     modifier = Modifier.padding(0.dp, 10.dp)
                 )
                 MusicSlider(
-                    currentDuration = currentMusicState.currentDuration,
-                    _currentDurationMS = currentMusicState.currentDurationMs,
-                    bufferDurationMS = currentMusicState.bufferDurationMs,
-                    totalDuration = currentMusicState.totalDuration,
-                    totalDurationMS = currentMusicState.totalDurationMs,
+                    currentDuration = formatDuration(currentDuration),
+                    _currentDurationMS = toMusicDurationMs(currentDuration),
+                    bufferDurationMS = bufferDuration.toMillis().toULong(),
+                    totalDuration = formatDuration(currentMusic),
+                    totalDurationMS = toMusicDurationMs(currentMusic),
                     onChangeMusicPosition = { nextMS ->
-                        bridge.dispatchAction(ViewAction.MusicControl(MusicControlAction.Seek(nextMS)))
+                        playerVM.seek(nextMS)
                     }
                 )
             }
@@ -685,9 +734,7 @@ fun MusicPlayerPage(
                     .align(Alignment.CenterHorizontally)
                     .padding(0.dp, 48.dp)
             ) {
-                MusicPanel(
-                    evm = evm,
-                )
+                MusicPanel()
             }
         }
     }
@@ -730,7 +777,7 @@ private fun MusicSliderPreview() {
             bufferDurationMS = bufferMS,
             totalDuration = formatMS(totalMS),
             totalDurationMS = totalMS,
-            onChangeMusicPosition = {nextMS ->
+            onChangeMusicPosition = { nextMS ->
                 currentMS = nextMS
             }
         )
@@ -756,21 +803,22 @@ private fun MusicPlayerBodyPreview() {
                 Text(text = "canPrev")
                 Switch(
                     checked = canPrev,
-                    onCheckedChange = {value -> canPrev = value}
+                    onCheckedChange = { value -> canPrev = value }
                 )
             }
             Column {
                 Text(text = "canNext")
                 Switch(
                     checked = canNext,
-                    onCheckedChange = {value -> canNext = value}
+                    onCheckedChange = { value -> canNext = value }
                 )
             }
         }
-        Box(modifier = Modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .background(Color.Blue)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .background(Color.Blue)
         )
         Box(
             contentAlignment = Alignment.Center,
@@ -792,10 +840,12 @@ private fun MusicPlayerBodyPreview() {
                 onClickAddLyric = {},
             )
         }
-        Box(modifier = Modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .background(Color.Blue))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .background(Color.Blue)
+        )
     }
 }
 
@@ -807,16 +857,22 @@ private fun MusicLyricPreview() {
     var lyricIndex by remember { mutableIntStateOf(0) }
     val lyricLines = remember {
         listOf(
-            VLyricLine(1000u, "> Task :app:preBuild UP-TO-DATE"),
-            VLyricLine(3000u, "> Task :app:preDebugBuild UP-TO-DATE"),
-            VLyricLine(4000u, "> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE"),
-            VLyricLine(4500u, "> Task :app:checkDebugAarMetadata UP-TO-DATE"),
-            VLyricLine(5000u, "> Task :app:generateDebugResValues UP-TO-DATE"),
-            VLyricLine(5500u, "For more on this, please refer to https://docs.gradle.org/8.9/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation."),
-            VLyricLine(6000u, "> Task :app:generateDebugResValues UP-TO-DATE"),
-            VLyricLine(7000u, "You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins."),
-            VLyricLine(8000u, "> Task :app:createDebugApkListingFileRedirect UP-TO-DATE"),
-            VLyricLine(9000u, "> Task :app:assembleDebug"),
+            LyricLine(Duration.ofMillis(1000), "> Task :app:preBuild UP-TO-DATE"),
+            LyricLine(Duration.ofMillis(3000), "> Task :app:preDebugBuild UP-TO-DATE"),
+            LyricLine(Duration.ofMillis(4000), "> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE"),
+            LyricLine(Duration.ofMillis(4500), "> Task :app:checkDebugAarMetadata UP-TO-DATE"),
+            LyricLine(Duration.ofMillis(5000), "> Task :app:generateDebugResValues UP-TO-DATE"),
+            LyricLine(
+                Duration.ofMillis(5500),
+                "For more on this, please refer to https://docs.gradle.org/8.9/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation."
+            ),
+            LyricLine(Duration.ofMillis(6000), "> Task :app:generateDebugResValues UP-TO-DATE"),
+            LyricLine(
+                Duration.ofMillis(7000),
+                "You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins."
+            ),
+            LyricLine(Duration.ofMillis(8000), "> Task :app:createDebugApkListingFileRedirect UP-TO-DATE"),
+            LyricLine(Duration.ofMillis(9000), "> Task :app:assembleDebug"),
         )
     }
     var widgetHeight by remember { mutableIntStateOf(0) }
@@ -852,7 +908,8 @@ private fun MusicLyricPreview() {
             Button(onClick = { lyricLoadedState = LyricLoadState.LOADED }) { Text("LOADED") }
             Button(onClick = { lyricLoadedState = LyricLoadState.FAILED }) { Text("FAILED") }
         }
-        Box(modifier = Modifier
+        Box(
+            modifier = Modifier
             .onSizeChanged { size ->
                 if (size.height != widgetHeight) {
                     widgetHeight = size.height

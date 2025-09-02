@@ -71,4 +71,16 @@
     <string name="storage_edit_onedrive_disconnect">断开账户连接</string>
     <string name="storage_edit_onedrive_should_auth">需要连接你的账户</string>
     <string name="storage_edit_onedrive_alias_not_empty">名字不能为空</string>
+    <string name="setting_debug">DEBUG</string>
+    <string name="setting_log">日志</string>
+    <string name="setting_more">更多...</string>
+    <string name="debug_trigger_rs_err">Trigger Rust Error</string>
+    <string name="debug_trigger_rs_async_err">Trigger Rust Async Error</string>
+    <string name="debug_trigger_kt_exception">Trigger Kotlin Exception</string>
+    <string name="debug_trigger_kt_async_exception">Trigger Kotlin Async Exception</string>
+    <string name="log_title">日志</string>
+    <plurals name="log_desc">
+        <item quantity="other">找到 %d 个日志文件</item>
+    </plurals>
+    <string name="debug_trigger_rs_panic">Trigger Rust panic!</string>
 </resources>

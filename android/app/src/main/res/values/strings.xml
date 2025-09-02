@@ -71,4 +71,17 @@
     <string name="storage_edit_onedrive_disconnect">Disconnect</string>
     <string name="storage_edit_onedrive_should_auth">Should connect your account</string>
     <string name="storage_edit_onedrive_alias_not_empty">Alias should not be empty</string>
+    <string name="setting_debug">DEBUG</string>
+    <string name="setting_log">Logs</string>
+    <string name="setting_more">More...</string>
+    <string name="debug_trigger_rs_err">Trigger Rust Error</string>
+    <string name="debug_trigger_rs_async_err">Trigger Rust Async Error</string>
+    <string name="debug_trigger_kt_exception">Trigger Kotlin Exception</string>
+    <string name="debug_trigger_kt_async_exception">Trigger Kotlin Async Exception</string>
+    <string name="log_title">Log</string>
+    <plurals name="log_desc">
+        <item quantity="one">%d log file found</item>
+        <item quantity="other">%d log files found</item>
+    </plurals>
+    <string name="debug_trigger_rs_panic">Trigger Rust panic!</string>
 </resources>

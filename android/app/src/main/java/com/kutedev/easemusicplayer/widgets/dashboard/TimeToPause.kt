@@ -40,17 +40,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.graphics.ColorUtils
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
+import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import uniffi.ease_client.TimeToPauseAction
-import uniffi.ease_client.TimeToPauseWidget
-import uniffi.ease_client.ViewAction
 import kotlin.math.absoluteValue
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -273,27 +271,27 @@ private fun TimeToPauseModalCore(
 }
 
 @Composable
-fun TimeToPauseModal(
-    evm: EaseViewModel,
-) {
-    val bridge = UIBridgeController.current
-    val state by evm.timeToPauseState.collectAsState()
+fun TimeToPauseModal(sleepModeVM: SleepModeVM = hiltViewModel()) {
+    val state by sleepModeVM.state.collectAsState()
+    val modalOpen by sleepModeVM.modalOpen.collectAsState()
+    val editLeftTime by sleepModeVM.editLeftTime.collectAsState()
+
     val onClose = {
-        bridge.dispatchAction(ViewAction.TimeToPause(TimeToPauseAction.CloseModal));
+        sleepModeVM.closeModal()
     }
 
     TimeToPauseModalCore(
-        isOpen = state.modalOpen,
-        initHours = state.leftHour.toInt(),
-        initMinutes = state.leftMinute.toInt(),
+        isOpen = modalOpen,
+        initHours = editLeftTime.hour,
+        initMinutes = editLeftTime.minute,
         deleteEnabled = state.enabled,
         onCancel = onClose,
         onConfirm = { hour, minute ->
-            bridge.dispatchAction(ViewAction.TimeToPause(TimeToPauseAction.Finish(hour.toUByte(), minute.toUByte(), 0u)))
+            sleepModeVM.set(hour, minute)
             onClose()
         },
         onDelete = {
-            bridge.dispatchClick(TimeToPauseWidget.DELETE)
+            sleepModeVM.remove()
             onClose()
         }
     )

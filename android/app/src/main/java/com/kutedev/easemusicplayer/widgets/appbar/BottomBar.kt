@@ -1,6 +1,5 @@
 package com.kutedev.easemusicplayer.widgets.appbar
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -18,24 +17,27 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.dropShadow
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
+import com.kutedev.easemusicplayer.viewmodels.PlayerVM
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteHome
+import com.kutedev.easemusicplayer.core.RoutePlaylist
+import com.kutedev.easemusicplayer.core.isRouteHome
+import com.kutedev.easemusicplayer.core.isRoutePlaylist
 import com.kutedev.easemusicplayer.widgets.musics.MiniPlayer
 import kotlinx.coroutines.launch
-import uniffi.ease_client.RoutesKey
-import kotlin.math.tan
 
 private interface IBottomItem {
     val painterId: Int;
@@ -84,11 +86,15 @@ fun BottomBarSpacer(
 
 @Composable
 fun BoxScope.BottomBar(
-    currentRoute: RoutesKey,
     bottomBarPageState: PagerState?,
-    evm: EaseViewModel,
     scaffoldPadding: PaddingValues,
+    playerVM: PlayerVM = hiltViewModel()
 ) {
+    val navController = LocalNavController.current
+    val _currentRoute by navController.currentBackStackEntryAsState()
+    val currentRoute = if (_currentRoute?.destination?.route != null) _currentRoute!!.destination.route!! else ""
+
+    val current by playerVM.music.collectAsState()
     val items = listOf(
         BPlaylist,
         BDashboard,
@@ -96,10 +102,10 @@ fun BoxScope.BottomBar(
     )
     val animationScope = rememberCoroutineScope()
 
-    val hasCurrentMusic = evm.currentMusicState.collectAsState().value.id != null
+    val hasCurrentMusic = current?.meta?.id != null
 
-    val showBottomBar = currentRoute == RoutesKey.HOME
-    val showMiniPlayer = hasCurrentMusic && (currentRoute == RoutesKey.HOME || currentRoute == RoutesKey.PLAYLIST)
+    val showBottomBar = isRouteHome(currentRoute)
+    val showMiniPlayer = hasCurrentMusic && (isRouteHome(currentRoute) || isRoutePlaylist(currentRoute))
 
     if (!showBottomBar && !showMiniPlayer) {
         Box(modifier = Modifier
@@ -119,13 +125,11 @@ fun BoxScope.BottomBar(
                 8.dp,
             )
             .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp))
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .fillMaxWidth()
     ) {
         if (showMiniPlayer) {
-            MiniPlayer(
-                evm = evm
-            )
+            MiniPlayer()
         }
         if (showBottomBar && bottomBarPageState != null) {
             Row(

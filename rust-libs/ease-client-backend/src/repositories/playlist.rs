@@ -1,22 +1,21 @@
 use std::sync::Arc;
 
-use ease_client_shared::backends::{
-    music::MusicId,
-    playlist::PlaylistId,
-    storage::{BlobId, StorageEntryLoc},
-};
+use ease_order_key::OrderKey;
 use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
 
-use crate::{
-    error::BResult,
-    models::{key::DbKeyAlloc, playlist::PlaylistModel},
+use crate::{error::BResult, services::get_playlist};
+
+use super::{core::DatabaseServer, music::ArgDBAddMusic};
+use ease_client_schema::{
+    BlobId, DbKeyAlloc, MusicId, PlaylistId, PlaylistModel, StorageEntryLoc, TABLE_MUSIC_PLAYLIST,
+    TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC,
 };
 
-use super::{
-    core::DatabaseServer,
-    defs::{TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST, TABLE_PLAYLIST_MUSIC},
-    music::ArgDBAddMusic,
-};
+#[derive(Debug, uniffi::Record)]
+pub struct AddedMusic {
+    pub id: MusicId,
+    pub existed: bool,
+}
 
 impl DatabaseServer {
     pub fn load_playlist(self: &Arc<Self>, id: PlaylistId) -> BResult<Option<PlaylistModel>> {
@@ -42,32 +41,15 @@ impl DatabaseServer {
         let mut ret: Vec<PlaylistModel> = Default::default();
         ret.reserve(len);
 
-        let mut iter = table.iter()?;
-        while let Some(v) = iter.next() {
+        let iter = table.iter()?;
+        for v in iter {
             let v = v?.1.value();
             ret.push(v);
         }
 
+        ret.sort_by_key(|v| OrderKey::wrap(v.order.clone()));
+
         Ok(ret)
-    }
-
-    pub fn load_playlist_first_cover_id(
-        self: &Arc<Self>,
-        id: PlaylistId,
-    ) -> BResult<Option<MusicId>> {
-        let db = self.db().begin_read()?;
-        let table = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
-        let mut iter = table.get(id)?;
-
-        while let Some(id) = iter.next() {
-            let id = id?.value();
-            let m = self.load_music_impl(&db, id)?.unwrap();
-
-            if m.cover.is_some() {
-                return Ok(Some(m.id));
-            }
-        }
-        Ok(None)
     }
 
     pub fn create_playlist(
@@ -76,18 +58,18 @@ impl DatabaseServer {
         picture: Option<StorageEntryLoc>,
         musics: Vec<ArgDBAddMusic>,
         current_time_ms: i64,
-    ) -> BResult<(PlaylistId, Vec<(MusicId, bool)>)> {
+        order: OrderKey,
+    ) -> BResult<(PlaylistId, Vec<AddedMusic>)> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
-        let mut ret: Vec<(MusicId, bool)> = Default::default();
-        ret.reserve(musics.len());
+        let mut ret: Vec<AddedMusic> = Vec::with_capacity(musics.len());
 
         let playlist_id = {
             let id = {
                 let id = self.alloc_id(&db, DbKeyAlloc::Playlist)?;
-                let id = PlaylistId::wrap(id);
-                id
+
+                PlaylistId::wrap(id)
             };
 
             let mut playlist = PlaylistModel {
@@ -95,6 +77,7 @@ impl DatabaseServer {
                 title: Default::default(),
                 created_time: Default::default(),
                 picture: Default::default(),
+                order: order.into_raw(),
             };
 
             playlist.title = title;
@@ -106,15 +89,18 @@ impl DatabaseServer {
 
             id
         };
+
+        let mut order = OrderKey::default();
         for m in musics {
-            let (id, existed) = self.add_music_impl(&db, &rdb, m)?;
+            let (id, existed) = self.add_music_impl(&db, &rdb, m, order.clone())?;
+            order = OrderKey::greater(&order);
 
             let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
             let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
             table_pm.insert(playlist_id, id)?;
             table_mp.insert(id, playlist_id)?;
 
-            ret.push((id, existed));
+            ret.push(AddedMusic { id, existed });
         }
 
         db.commit()?;
@@ -131,16 +117,36 @@ impl DatabaseServer {
         let rdb = self.db().begin_read()?;
 
         {
-            let mut playlist = self.load_playlist_impl(&rdb, id)?.unwrap();
+            let playlist = self.load_playlist_impl(&rdb, id)?;
 
-            playlist.title = title;
-            playlist.picture = picture;
+            if let Some(mut playlist) = playlist {
+                playlist.title = title;
+                playlist.picture = picture;
 
-            let mut table = db.open_table(TABLE_PLAYLIST)?;
-            table.insert(id, playlist)?;
+                let mut table = db.open_table(TABLE_PLAYLIST)?;
+                table.insert(id, playlist)?;
+            }
         };
         db.commit()?;
         Ok(id)
+    }
+
+    pub fn set_playlist_order(self: &Arc<Self>, id: PlaylistId, order: OrderKey) -> BResult<()> {
+        let db = self.db().begin_write()?;
+        let rdb = self.db().begin_read()?;
+
+        {
+            let playlist = self.load_playlist_impl(&rdb, id)?;
+
+            if let Some(mut playlist) = playlist {
+                playlist.order = order.into_raw();
+
+                let mut table = db.open_table(TABLE_PLAYLIST)?;
+                table.insert(id, playlist)?;
+            }
+        };
+        db.commit()?;
+        Ok(())
     }
 
     pub fn remove_playlist(self: &Arc<Self>, playlist_id: PlaylistId) -> BResult<()> {
@@ -205,22 +211,24 @@ impl DatabaseServer {
         self: &Arc<Self>,
         playlist_id: PlaylistId,
         musics: Vec<ArgDBAddMusic>,
-    ) -> BResult<Vec<(MusicId, bool)>> {
+        last_order: OrderKey,
+    ) -> BResult<Vec<AddedMusic>> {
         let db = self.db().begin_write()?;
         let rdb = self.db().begin_read()?;
 
-        let mut ret: Vec<(MusicId, bool)> = Default::default();
-        ret.reserve(musics.len());
+        let mut ret: Vec<AddedMusic> = Vec::with_capacity(musics.len());
 
+        let mut order = OrderKey::greater(&last_order);
         for m in musics {
-            let (id, existed) = self.add_music_impl(&db, &rdb, m)?;
+            let (id, existed) = self.add_music_impl(&db, &rdb, m, order.clone())?;
+            order = OrderKey::greater(&order);
 
             let mut table_pm = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
             let mut table_mp = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
             table_pm.insert(playlist_id, id)?;
             table_mp.insert(id, playlist_id)?;
 
-            ret.push((id, existed));
+            ret.push(AddedMusic { id, existed });
         }
         db.commit()?;
         Ok(ret)

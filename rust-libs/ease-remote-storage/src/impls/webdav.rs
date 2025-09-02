@@ -1,7 +1,7 @@
 use crate::backend::{Entry, StorageBackend, StorageBackendResult, StreamFile};
 use crate::StorageBackendError;
 
-
+use ease_client_tokio::tokio_runtime;
 use futures_util::future::BoxFuture;
 use reqwest::header::HeaderValue;
 use reqwest::{StatusCode, Url};
@@ -78,7 +78,7 @@ fn build_authorization_header_value(
     uri: &str,
     method: &str,
 ) -> Option<String> {
-    if www_authenticate == "" {
+    if www_authenticate.is_empty() {
         return None;
     }
     let mut pw_client = http_auth::PasswordClient::try_from(www_authenticate).unwrap();
@@ -91,7 +91,7 @@ fn build_authorization_header_value(
             body: Some(&[]),
         })
         .unwrap();
-    return Some(ret);
+    Some(ret)
 }
 
 fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
@@ -102,7 +102,7 @@ fn is_auth_error<T>(r: &StorageBackendResult<T>) -> bool {
             }
         }
     }
-    return false;
+    false
 }
 
 impl Webdav {
@@ -163,14 +163,14 @@ impl Webdav {
                 }
             }
         }
-        return header_map;
+        header_map
     }
 
     fn get_url(&self, dir: &str) -> StorageBackendResult<Url> {
         let mut url = reqwest::Url::parse(&self.addr)
             .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
         let base = url.path();
-        url.set_path(&(base.trim_end_matches('/').to_string() + "/" + dir.trim_start_matches('/')));    
+        url.set_path(&(base.trim_end_matches('/').to_string() + "/" + dir.trim_start_matches('/')));
         Ok(url)
     }
 
@@ -185,19 +185,27 @@ impl Webdav {
         let url = self.get_url(dir)?;
 
         let method = reqwest::Method::from_bytes(b"PROPFIND").unwrap();
-        let resp = self
-            .build_client()?
-            .request(method.clone(), url.clone())
-            .headers(self.build_base_header_map(method.clone(), &url))
-            .header("Depth", 1)
-            .body(
-                r#"<?xml version="1.0" ?>
-            <D:propfind xmlns:D="DAV:">
-            <D:allprop/>
-            </D:propfind>"#,
-            )
-            .send()
-            .await?;
+        let resp = {
+            let client = self.build_client()?;
+            let headers = self.build_base_header_map(method.clone(), &url);
+
+            tokio_runtime()
+                .spawn(async move {
+                    client
+                        .request(method.clone(), url.clone())
+                        .headers(headers)
+                        .header("Depth", 1)
+                        .body(
+                            r#"<?xml version="1.0" ?>
+                <D:propfind xmlns:D="DAV:">
+                <D:allprop/>
+                </D:propfind>"#,
+                        )
+                        .send()
+                        .await
+                })
+                .await??
+        };
         self.post_handle_response(&resp);
 
         Ok(resp)
@@ -206,7 +214,10 @@ impl Webdav {
     async fn list_impl(&self, dir: &str) -> StorageBackendResult<Vec<Entry>> {
         let resp = self.list_core(dir).await?.error_for_status()?;
         let text: String = resp.text().await?;
-        let obj: webdav_list_types::Root = quick_xml::de::from_str(&text).unwrap();
+        let obj: webdav_list_types::Root = quick_xml::de::from_str(&text).map_err(|e| {
+            tracing::error!("webdav list resp: {text}");
+            e
+        })?;
 
         let mut ret: Vec<Entry> = Default::default();
         for item in obj.response {
@@ -272,15 +283,15 @@ impl Webdav {
         let mut headers = self.build_base_header_map(reqwest::Method::GET, &url);
         headers.insert(
             reqwest::header::RANGE,
-            HeaderValue::from_str(format!("bytes={}-", byte_offset).as_str()).unwrap(),
+            HeaderValue::from_str(format!("bytes={byte_offset}-").as_str()).unwrap(),
         );
 
-        let resp = self
-            .build_client()?
-            .get(url.clone())
-            .headers(headers)
-            .send()
-            .await?;
+        let resp = {
+            let client = self.build_client()?;
+            tokio_runtime()
+                .spawn(async move { client.get(url.clone()).headers(headers).send().await })
+                .await??
+        };
         let byte_offset = if resp.headers().get(reqwest::header::CONTENT_RANGE).is_some() {
             0
         } else {
@@ -330,7 +341,6 @@ mod test {
     use std::{convert::Infallible, net::SocketAddr, time::Duration};
 
     use dav_server::{fakels::FakeLs, localfs::LocalFs, DavHandler};
-    use futures_util::{pin_mut, StreamExt};
     use tokio::task::JoinHandle;
 
     use crate::backend::StorageBackend;
@@ -380,7 +390,7 @@ mod test {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         SetupServerRes {
-            addr: format!("http://127.0.0.1:{}", port),
+            addr: format!("http://127.0.0.1:{port}"),
             handle,
         }
     }
@@ -423,10 +433,9 @@ mod test {
         let file = backend.get(item.path, 0).await.unwrap();
         assert_eq!(file.size(), Some(3));
 
-        let stream = file.into_stream();
-        pin_mut!(stream);
-        let chunk = stream.next().await;
-        assert_eq!(chunk.is_some(), true);
+        let stream = file.into_rx();
+        let chunk = stream.recv().await;
+        assert!(chunk.is_ok());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [49, 50, 51]);
     }
@@ -460,10 +469,9 @@ mod test {
         let file = backend.get(item.path.to_string(), 0).await.unwrap();
         assert_eq!(file.size(), Some(3));
 
-        let stream = file.into_stream();
-        pin_mut!(stream);
-        let chunk = stream.next().await;
-        assert_eq!(chunk.is_some(), true);
+        let stream = file.into_rx();
+        let chunk = stream.recv().await;
+        assert!(chunk.is_ok());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [49, 50, 51]);
     }
@@ -482,10 +490,9 @@ mod test {
         let file = backend.get("/a.bin".to_string(), 2).await.unwrap();
         assert_eq!(file.size(), Some(1));
 
-        let stream = file.into_stream();
-        pin_mut!(stream);
-        let chunk = stream.next().await;
-        assert_eq!(chunk.is_some(), true);
+        let stream = file.into_rx();
+        let chunk = stream.recv().await;
+        assert!(chunk.is_ok());
         let chunk = chunk.unwrap().unwrap();
         assert_eq!(chunk.as_ref(), [51]);
     }

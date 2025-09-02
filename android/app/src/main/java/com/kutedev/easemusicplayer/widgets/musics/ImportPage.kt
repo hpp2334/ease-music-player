@@ -23,7 +23,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,21 +41,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseCheckbox
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import uniffi.ease_client.StorageImportAction
-import uniffi.ease_client.StorageImportWidget
-import uniffi.ease_client.VCurrentStorageEntriesStateStorageItem
-import uniffi.ease_client.VCurrentStorageEntry
-import uniffi.ease_client.VSplitPathItem
-import uniffi.ease_client.ViewAction
-import uniffi.ease_client_shared.CurrentStorageStateType
-import uniffi.ease_client_shared.StorageEntryType
+import com.kutedev.easemusicplayer.viewmodels.ImportVM
+import com.kutedev.easemusicplayer.viewmodels.StoragesVM
+import com.kutedev.easemusicplayer.viewmodels.VImportStorageEntry
+import com.kutedev.easemusicplayer.viewmodels.entryTyp
+import com.kutedev.easemusicplayer.core.LocalNavController
+import uniffi.ease_client_backend.CurrentStorageStateType
+import uniffi.ease_client_backend.StorageEntry
+import uniffi.ease_client_backend.StorageEntryType
 
 @Composable
 private fun ImportEntriesSkeleton() {
@@ -127,17 +126,21 @@ private fun ImportEntriesSkeleton() {
 
 @Composable
 private fun ImportEntry(
-    entry: VCurrentStorageEntry,
-    onLocateEntry: (path: String) -> Unit
+    entry: StorageEntry,
+    checked: Boolean,
+    allowTypes: List<StorageEntryType>,
+    onClickEntry: (entry: StorageEntry) -> Unit
 ) {
-    val painter = when (entry.entryTyp) {
+    val entryTyp = entry.entryTyp()
+    val canCheck = allowTypes.any({t -> t == entryTyp })
+    val painter = when (entryTyp) {
         StorageEntryType.FOLDER -> painterResource(id = R.drawable.icon_folder)
         StorageEntryType.IMAGE -> painterResource(id = R.drawable.icon_image)
         StorageEntryType.MUSIC -> painterResource(id = R.drawable.icon_music_note)
         else -> painterResource(id = R.drawable.icon_file)
     }
     val onClick = {
-        onLocateEntry(entry.path);
+        onClickEntry(entry);
     }
 
     Row(
@@ -155,7 +158,7 @@ private fun ImportEntry(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1.0F)
         ) {
-            Image(
+            Icon(
                 painter = painter,
                 contentDescription = null,
                 modifier = Modifier
@@ -173,9 +176,9 @@ private fun ImportEntry(
             modifier = Modifier
                 .size(16.dp)
         ) {
-            if (entry.canCheck) {
+            if (canCheck) {
                 EaseCheckbox(
-                    value = entry.checked,
+                    value = checked,
                     onChange = {
                         onClick()
                     }
@@ -187,11 +190,14 @@ private fun ImportEntry(
 
 @Composable
 private fun ImportEntries(
-    selectedCount: Int,
-    splitPaths: List<VSplitPathItem>,
-    entries: List<VCurrentStorageEntry>,
+    importVM: ImportVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
+    val navController = LocalNavController.current
+    val splitPaths by importVM.splitPaths.collectAsState()
+    val entries by importVM.entries.collectAsState()
+    val selectedCount by importVM.selectedCount.collectAsState()
+    val allowTypes by importVM.allowTypes.collectAsState()
+    val selected by importVM.selected.collectAsState()
 
     @Composable
     fun PathTab(
@@ -214,7 +220,7 @@ private fun ImportEntries(
                 .clickable(
                     enabled = !disabled,
                     onClick = {
-                        bridge.dispatchClick(StorageImportWidget.FolderNav(path))
+                        importVM.navigateDir(path)
                     }
                 )
                 .clip(RoundedCornerShape(2.dp))
@@ -222,6 +228,7 @@ private fun ImportEntries(
                 .padding(4.dp, 2.dp)
         )
     }
+
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
@@ -258,7 +265,11 @@ private fun ImportEntries(
                 items(entries) {
                     ImportEntry(
                         entry = it,
-                        onLocateEntry = { path -> bridge.dispatchClick(StorageImportWidget.StorageEntry(path)) },
+                        checked = selected.contains(it.path),
+                        allowTypes = allowTypes,
+                        onClickEntry = { entry ->
+                            importVM.clickEntry(entry)
+                        },
                     )
                 }
                 item {
@@ -271,7 +282,8 @@ private fun ImportEntries(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.surface,
                 onClick = {
-                    bridge.dispatchClick(StorageImportWidget.Import);
+                    navController.popBackStack()
+                    importVM.finish()
                 },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -288,32 +300,39 @@ private fun ImportEntries(
 
 @Composable
 private fun ImportStorages(
-    storageItems: List<VCurrentStorageEntriesStateStorageItem>
+    storagesVM: StoragesVM = hiltViewModel(),
+    importVM: ImportVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
+    val storageItems by storagesVM.storages.collectAsState()
+    val selectedStorageId by importVM.selectedStorageId.collectAsState()
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier
             .padding(28.dp, 0.dp)
             .horizontalScroll(rememberScrollState())
     ) {
-        for (item in storageItems) {
-            val bgColor = if (item.selected) {
+        for (_item in storageItems) {
+            val item = VImportStorageEntry(_item)
+
+            val selected = selectedStorageId == item.id
+
+            val bgColor = if (selected) {
                 MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.surfaceVariant
             }
-            val textColor = if (item.selected) {
-                MaterialTheme.colorScheme.surface
+            val textColor = if (selected) {
+                Color.White
             } else {
-                Color.Unspecified
+                MaterialTheme.colorScheme.onSurface
             }
 
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .clickable {
-                        bridge.dispatchClick(StorageImportWidget.StorageItem(item.id))
+                        importVM.selectStorage(item.id)
                     }
                     .background(bgColor)
                     .width(142.dp)
@@ -407,9 +426,10 @@ private fun ImportMusicsWarningImpl(
 
 @Composable
 private fun ImportMusicsError(
-    type: CurrentStorageStateType,
+    importVM: ImportVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
+    val type by importVM.loadState.collectAsState()
+
     val title = when (type) {
         CurrentStorageStateType.AUTHENTICATION_FAILED -> stringResource(id = R.string.import_musics_error_authentication_title)
         CurrentStorageStateType.TIMEOUT -> stringResource(id = R.string.import_musics_error_timeout_title)
@@ -435,33 +455,45 @@ private fun ImportMusicsError(
         color = MaterialTheme.colorScheme.error,
         iconPainter = painterResource(id = R.drawable.icon_warning),
         onClick = {
-            bridge.dispatchClick(StorageImportWidget.Error)
+            if (type == CurrentStorageStateType.NEED_PERMISSION) {
+                importVM.requestPermission()
+            } else {
+                importVM.reload()
+            }
         }
     )
 }
 
 @Composable
 fun ImportMusicsPage(
-    evm: EaseViewModel
+    importVM: ImportVM = hiltViewModel(),
+    storagesVM: StoragesVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val state by evm.currentStorageEntriesState.collectAsState()
-    val storageItems = state.storageItems
-    val titleText = when (state.selectedCount) {
+    val navController = LocalNavController.current
+    val selectedCount by importVM.selectedCount.collectAsState()
+    val canUndo by importVM.canUndo.collectAsState()
+    val disabledToggleAll by importVM.disabledToggleAll.collectAsState()
+    val loadState by importVM.loadState.collectAsState()
+
+    val titleText = when (selectedCount) {
         0 -> stringResource(id = R.string.import_musics_title_default)
-        1 -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_single_suffix)}"
-        else -> "${state.selectedCount} ${stringResource(id = R.string.import_musics_title_multi_suffix)}"
+        1 -> "${selectedCount} ${stringResource(id = R.string.import_musics_title_single_suffix)}"
+        else -> "${selectedCount} ${stringResource(id = R.string.import_musics_title_multi_suffix)}"
     }
     fun doUndo() {
-        bridge.dispatchAction(ViewAction.StorageImport(StorageImportAction.UNDO));
+        if (canUndo) {
+            importVM.undo()
+        } else {
+            navController.popBackStack()
+        }
     }
 
-    BackHandler(enabled = state.canUndo) {
+    BackHandler(enabled = canUndo) {
         doUndo()
     }
     Column(
         modifier = Modifier
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .fillMaxSize()
     ) {
         Row(
@@ -491,30 +523,22 @@ fun ImportMusicsPage(
                     sizeType = EaseIconButtonSize.Medium,
                     buttonType = EaseIconButtonType.Default,
                     painter = painterResource(id = R.drawable.icon_toggle_all),
-                    disabled = state.disabledToggleAll,
+                    disabled = disabledToggleAll,
                     onClick = {
-                        bridge.dispatchClick(StorageImportWidget.ToggleAll)
+                        importVM.toggleAll()
                     }
                 )
             }
         }
-        ImportStorages(
-            storageItems = storageItems
-        )
-        when (state.stateType) {
+        ImportStorages()
+        when (loadState) {
             CurrentStorageStateType.LOADING -> ImportEntriesSkeleton()
             CurrentStorageStateType.TIMEOUT,
             CurrentStorageStateType.AUTHENTICATION_FAILED,
             CurrentStorageStateType.UNKNOWN_ERROR,
-            CurrentStorageStateType.NEED_PERMISSION -> ImportMusicsError(
-                type = state.stateType,
-            )
+            CurrentStorageStateType.NEED_PERMISSION -> ImportMusicsError()
             else -> {
-                ImportEntries(
-                    selectedCount = state.selectedCount,
-                    splitPaths = state.splitPaths,
-                    entries = state.entries,
-                )
+                ImportEntries()
             }
         }
     }

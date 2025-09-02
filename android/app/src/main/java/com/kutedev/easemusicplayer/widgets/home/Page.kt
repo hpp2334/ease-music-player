@@ -12,25 +12,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.getBottomBarSpace
 import com.kutedev.easemusicplayer.widgets.dashboard.DashboardSubpage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsSubpage
 import com.kutedev.easemusicplayer.widgets.settings.SettingSubpage
-import uniffi.ease_client.RoutesKey
 
 @Composable
 fun HomePage(
-    ctx: android.content.Context,
-    evm: EaseViewModel,
+    playerVM: PlayerVM = hiltViewModel(),
     scaffoldPadding: PaddingValues,
 ) {
     val pagerState = rememberPagerState(pageCount = {
         3
     })
-    val state by evm.currentMusicState.collectAsState()
-    val isPlaying = state.playing
+    val isPlaying by playerVM.playing.collectAsState()
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -42,21 +41,17 @@ fun HomePage(
             state = pagerState
         ) { page ->
             if (page == 0) {
-                PlaylistsSubpage(
-                    evm = evm,
-                )
+                PlaylistsSubpage()
             }
             if (page == 1) {
-                DashboardSubpage(evm = evm)
+                DashboardSubpage()
             }
             if (page == 2) {
-                SettingSubpage(ctx = ctx)
+                SettingSubpage()
             }
         }
         BottomBar(
-            currentRoute = RoutesKey.HOME,
             bottomBarPageState = pagerState,
-            evm = evm,
             scaffoldPadding = scaffoldPadding,
         )
     }

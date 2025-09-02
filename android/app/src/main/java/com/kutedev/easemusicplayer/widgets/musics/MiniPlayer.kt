@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,16 +28,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.MusicCover
-import com.kutedev.easemusicplayer.core.UIBridgeController
-import com.kutedev.easemusicplayer.viewmodels.EaseViewModel
-import uniffi.ease_client.MainBodyWidget
-import uniffi.ease_client.MusicControlWidget
-import uniffi.ease_client_shared.DataSourceKey
+import com.kutedev.easemusicplayer.viewmodels.PlayerVM
+import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.RouteMusicPlayer
+import com.kutedev.easemusicplayer.utils.formatDuration
+import com.kutedev.easemusicplayer.utils.toMusicDurationMs
+import uniffi.ease_client_schema.DataSourceKey
 
 @Composable
 private fun MiniPlayerCore(
@@ -146,25 +150,29 @@ private fun MiniPlayerCore(
 
 @Composable
 fun MiniPlayer(
-    evm: EaseViewModel
+    playerVM: PlayerVM = hiltViewModel()
 ) {
-    val bridge = UIBridgeController.current
-    val state = evm.currentMusicState.collectAsState().value
+    val navController = LocalNavController.current
+    val isPlaying by playerVM.playing.collectAsState()
+    val music by playerVM.music.collectAsState()
+    val loading by playerVM.loading.collectAsState()
+    val nextMusic by playerVM.nextMusic.collectAsState()
+    val currentDuration by playerVM.currentDuration.collectAsState()
 
     MiniPlayerCore(
-        isPlaying = state.playing,
-        title = state.title,
-        cover = state.cover,
-        currentDurationMS = state.currentDurationMs,
-        totalDuration = state.totalDuration,
-        totalDurationMS = state.totalDurationMs,
-        canNext = state.canPlayNext,
-        loading = state.loading,
-        onClick = { bridge.dispatchClick(MainBodyWidget.MiniPlayer) },
-        onPlay = { bridge.dispatchClick(MusicControlWidget.PLAY) },
-        onPause = { bridge.dispatchClick(MusicControlWidget.PAUSE) },
-        onStop = { bridge.dispatchClick(MusicControlWidget.STOP) },
-        onNext = { bridge.dispatchClick(MusicControlWidget.PLAY_NEXT) },
+        isPlaying = isPlaying,
+        title = music?.meta?.title ?: "",
+        cover = music?.cover,
+        currentDurationMS = toMusicDurationMs(currentDuration),
+        totalDuration = formatDuration(music),
+        totalDurationMS = toMusicDurationMs(music),
+        canNext = nextMusic != null,
+        loading = loading,
+        onClick = { navController.navigate(RouteMusicPlayer()) },
+        onPlay = { playerVM.resume() },
+        onPause = { playerVM.pause() },
+        onStop = { playerVM.stop() },
+        onNext = { playerVM.playNext() },
     )
 }
 
