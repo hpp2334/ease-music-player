@@ -39,7 +39,6 @@ class PlayerRepository @Inject constructor(
     private val bridge: Bridge,
     private val _scope: CoroutineScope
 ) {
-    private val _sleep = MutableStateFlow(SleepModeState())
     private val _music = MutableStateFlow(null as Music?)
     private val _playlist = MutableStateFlow(null as Playlist?)
     private val _playing = MutableStateFlow(false)
@@ -51,14 +50,10 @@ class PlayerRepository @Inject constructor(
             playlist.musics.indexOfFirst { m -> m.meta.id == music.meta.id }
         }
     }
-
-    private var _sleepJob: Job? = null
     private val _loading = MutableStateFlow(false)
     private val _durationChanged = MutableSharedFlow<Unit>()
     private val _playMode = MutableStateFlow(PlayMode.SINGLE)
     val playMode = _playMode.asStateFlow()
-
-    val sleepState = _sleep.asStateFlow()
     val durationChanged = _durationChanged.asSharedFlow()
     val music = _music.asStateFlow()
     val playlist = _playlist.asStateFlow()
@@ -140,26 +135,6 @@ class PlayerRepository @Inject constructor(
                 }
             }
         }
-    }
-
-
-    fun scheduleSleep(newExpiredMs: Long) {
-        _sleepJob?.cancel()
-
-        val delayMs = max(newExpiredMs - System.currentTimeMillis(), 0)
-        _sleepJob = _scope.launch {
-            _sleep.update { state -> state.copy(enabled = true, expiredMs = newExpiredMs) }
-            easeLog("schedule sleep")
-            delay(delayMs)
-            easeLog("sleep scheduled")
-            _sleep.update { state -> state.copy(enabled = false, expiredMs = 0) }
-        }
-    }
-
-    fun cancelSleep() {
-        _sleepJob?.cancel()
-        _sleepJob = null
-        _sleep.update { state -> state.copy(enabled = false, expiredMs = 0) }
     }
 
     fun changePlayModeToNext() {

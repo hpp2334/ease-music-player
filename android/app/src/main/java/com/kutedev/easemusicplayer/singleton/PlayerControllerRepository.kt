@@ -11,9 +11,14 @@ import com.kutedev.easemusicplayer.core.BuildMediaContext
 import com.kutedev.easemusicplayer.core.playUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.ctGetMusic
@@ -26,6 +31,7 @@ import uniffi.ease_client_schema.PlaylistId
 import java.time.Duration
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.max
 
 @Singleton
 class PlayerControllerRepository @Inject constructor(
@@ -39,8 +45,13 @@ class PlayerControllerRepository @Inject constructor(
     private var _mediaController: MediaController? = null
     private val _playlist = playerRepository.playlist
     private val _music = playerRepository.music
+    private val _sleep = MutableStateFlow(SleepModeState())
+
+    private var _sleepJob: Job? = null
     private val nextMusic = playerRepository.nextMusic
     private val previousMusic = playerRepository.previousMusic
+
+    val sleepState = _sleep.asStateFlow()
 
     init {
         _scope.launch(Dispatchers.Main) {
@@ -172,13 +183,33 @@ class PlayerControllerRepository @Inject constructor(
     fun seek(ms: ULong) {
         val mediaController = _mediaController ?: return
 
-        val duration = Duration.ofMillis(ms.toLong())
-
         if (mediaController.isCommandAvailable(COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
             mediaController.seekTo(ms.toLong())
         } else {
             easeError("media controller seek failed, command COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM is unavailable")
         }
+    }
+
+    fun scheduleSleep(newExpiredMs: Long) {
+        _sleepJob?.cancel()
+
+        val delayMs = max(newExpiredMs - System.currentTimeMillis(), 0)
+        _sleepJob = _scope.launch {
+            _sleep.update { state -> state.copy(enabled = true, expiredMs = newExpiredMs) }
+            easeLog("schedule sleep")
+            delay(delayMs)
+            easeLog("sleep scheduled")
+            _scope.launch(Dispatchers.Main) {
+                pause()
+            }
+            _sleep.update { state -> state.copy(enabled = false, expiredMs = 0) }
+        }
+    }
+
+    fun cancelSleep() {
+        _sleepJob?.cancel()
+        _sleepJob = null
+        _sleep.update { state -> state.copy(enabled = false, expiredMs = 0) }
     }
 
     fun remove() {

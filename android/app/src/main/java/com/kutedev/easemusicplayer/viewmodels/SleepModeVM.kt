@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
+import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,12 +18,12 @@ class SleepModeLeftTime(ms: Long) {
 
 @HiltViewModel
 class SleepModeVM @Inject constructor(
-    val playerRepository: PlayerRepository
+    val playerControllerRepository: PlayerControllerRepository
 ) : ViewModel() {
     private val _modalOpen = MutableStateFlow(false)
     private val _editLeftTime = MutableStateFlow(SleepModeLeftTime(0))
 
-    val state = playerRepository.sleepState
+    val state = playerControllerRepository.sleepState
 
     val modalOpen = _modalOpen.asStateFlow()
     val editLeftTime = _editLeftTime.asStateFlow()
@@ -41,12 +42,12 @@ class SleepModeVM @Inject constructor(
     }
 
     fun remove() {
-        playerRepository.cancelSleep()
+        playerControllerRepository.cancelSleep()
     }
 
     fun set(hour: Int, minute: Int) {
         val newExpiredMs = System.currentTimeMillis() + hour.toLong() * 3600_000 + minute.toLong() * 60_000
 
-        playerRepository.scheduleSleep(newExpiredMs)
+        playerControllerRepository.scheduleSleep(newExpiredMs)
     }
 }
