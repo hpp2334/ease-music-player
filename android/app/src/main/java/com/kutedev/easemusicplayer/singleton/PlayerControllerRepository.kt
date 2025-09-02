@@ -199,9 +199,7 @@ class PlayerControllerRepository @Inject constructor(
             easeLog("schedule sleep")
             delay(delayMs)
             easeLog("sleep scheduled")
-            _scope.launch(Dispatchers.Main) {
-                pause()
-            }
+            playerRepository.emitPauseRequest()
             _sleep.update { state -> state.copy(enabled = false, expiredMs = 0) }
         }
     }

@@ -1,16 +1,14 @@
 package com.kutedev.easemusicplayer.core
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
 import androidx.annotation.OptIn
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.C.WAKE_MODE_NETWORK
 import androidx.media3.common.Player
+import androidx.media3.common.Player.COMMAND_PLAY_PAUSE
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -35,6 +33,7 @@ import javax.inject.Inject
 import com.kutedev.easemusicplayer.singleton.Bridge
 import dagger.hilt.android.AndroidEntryPoint
 import uniffi.ease_client_backend.MusicAbstract
+import uniffi.ease_client_backend.easeError
 import uniffi.ease_client_backend.easeLog
 
 
@@ -165,6 +164,18 @@ class PlaybackService : MediaSessionService() {
             }
         })
         easeLog("Playback service created")
+
+        serviceScope.launch(Dispatchers.Main) {
+            playerRepository.pauseRequest.collect {
+                val player = _mediaSession?.player ?: return@collect
+
+                if (player.isCommandAvailable(COMMAND_PLAY_PAUSE)) {
+                    player.pause()
+                } else {
+                    easeError("media player pause failed, command COMMAND_PLAY_PAUSE is unavailable")
+                }
+            }
+        }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
