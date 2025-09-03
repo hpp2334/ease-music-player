@@ -48,6 +48,7 @@ import javax.inject.Singleton
 @Singleton
 class PlaylistRepository @Inject constructor(
     private val bridge: Bridge,
+    private val storageRepository: StorageRepository,
     private val _scope: CoroutineScope
 ) {
     private val _requestSemaphore = Semaphore(4)
@@ -65,6 +66,11 @@ class PlaylistRepository @Inject constructor(
     init {
         _scope.launch {
             _debouncedReloadEvent.debounce(Duration.ofMillis(500)).collect {
+                reload()
+            }
+        }
+        _scope.launch {
+            storageRepository.onRemoveStorageEvent.collect {
                 reload()
             }
         }

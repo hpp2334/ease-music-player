@@ -30,7 +30,7 @@ class StorageRepository @Inject constructor(
     val oauthRefreshToken = _oauthRefreshToken.asStateFlow()
     val storages = _storages.asStateFlow()
     val preRemoveStorageEvent = _preRemoveStorageEvent.asSharedFlow()
-    val onRemoveStorageEvent = _preRemoveStorageEvent.asSharedFlow()
+    val onRemoveStorageEvent = _onRemoveStorageEvent.asSharedFlow()
 
     suspend fun updateRefreshToken(code: String) {
         val token = bridge.run { ctGetRefreshToken(it, code) } ?: return
