@@ -90,6 +90,9 @@ class PlayerControllerRepository @Inject constructor(
                 }
             }
         })
+        _scope.launch {
+            playerRepository.reload()
+        }
         easeLog("media controller setup")
     }
 
