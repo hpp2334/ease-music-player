@@ -188,10 +188,10 @@ class EditStorageVM @Inject constructor(
     private fun validate(): Boolean {
         val f = form.value
         _validated.value = Validated(
-            addrEmpty = if (f.typ == StorageType.LOCAL) {  f.addr.isBlank() } else { false },
-            aliasEmpty = if (f.typ == StorageType.LOCAL) { false } else { f.alias.isBlank() },
-            usernameEmpty = if (f.typ == StorageType.LOCAL) { !f.isAnonymous && f.username.isBlank() } else { false },
-            passwordEmpty = if (f.typ == StorageType.LOCAL) { !f.isAnonymous && f.password.isBlank() } else { f.password.isBlank() },
+            addrEmpty = if (f.typ == StorageType.WEBDAV) {  f.addr.isBlank() } else { false },
+            aliasEmpty = if (f.typ == StorageType.WEBDAV) { false } else { f.alias.isBlank() },
+            usernameEmpty = if (f.typ == StorageType.WEBDAV) { !f.isAnonymous && f.username.isBlank() } else { false },
+            passwordEmpty = if (f.typ == StorageType.WEBDAV) { !f.isAnonymous && f.password.isBlank() } else { f.password.isBlank() },
         )
         return _validated.value.valid()
     }

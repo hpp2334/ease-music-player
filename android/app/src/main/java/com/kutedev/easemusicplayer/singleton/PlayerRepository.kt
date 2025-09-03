@@ -67,7 +67,7 @@ class PlayerRepository @Inject constructor(
                 val i = (musicIndex + playlist.musics.size - 1) % playlist.musics.size
                 playlist.musics[i]
             }
-    }.stateIn(_scope, SharingStarted.Lazily, null)
+    }.stateIn(_scope, SharingStarted.Eagerly, null)
 
     val nextMusic = combine(playMode, _musicIndex, _playlist) {
             playMode, musicIndex, playlist ->
@@ -79,7 +79,7 @@ class PlayerRepository @Inject constructor(
             val i = (musicIndex + 1) % playlist.musics.size
             playlist.musics[i]
         }
-    }.stateIn(_scope, SharingStarted.Lazily, null)
+    }.stateIn(_scope, SharingStarted.Eagerly, null)
 
     val onCompleteMusic = combine(playMode, _musicIndex, _playlist) {
             playMode, musicIndex, playlist ->

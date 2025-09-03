@@ -148,6 +148,7 @@ class PlaylistVM @Inject constructor(
                 b = b?.meta?.id
             )) }
             playlistRepository.scheduleReload()
+            reload()
         }
     }
 
