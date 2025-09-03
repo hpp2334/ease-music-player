@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
+import uniffi.ease_client_backend.Playlist
 import uniffi.ease_client_backend.ctGetMusic
 import uniffi.ease_client_backend.ctGetPlaylist
 import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
@@ -202,6 +203,10 @@ class PlayerControllerRepository @Inject constructor(
             playerRepository.emitPauseRequest()
             _sleep.update { state -> state.copy(enabled = false, expiredMs = 0) }
         }
+    }
+
+    fun refreshPlaylistIfMatch(playlist: Playlist) {
+        playerRepository.refreshPlaylistIfMatch(playlist)
     }
 
     fun cancelSleep() {

@@ -171,6 +171,12 @@ class PlayerRepository @Inject constructor(
         reload()
     }
 
+    fun refreshPlaylistIfMatch(playlist: Playlist) {
+        if (_playlist.value?.abstr?.meta?.id == playlist.abstr.meta.id) {
+            _playlist.value = playlist
+        }
+    }
+
     fun emitPauseRequest() {
         _scope.launch {
             _pauseRequest.emit(Unit)

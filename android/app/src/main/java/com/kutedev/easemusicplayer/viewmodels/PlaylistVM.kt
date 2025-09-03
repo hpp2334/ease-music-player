@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.core.syncMetadataUtil
 import com.kutedev.easemusicplayer.singleton.ImportRepository
+import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import com.kutedev.easemusicplayer.utils.formatDuration
@@ -68,6 +69,7 @@ class PlaylistVM @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val storageRepository: StorageRepository,
     private val importRepository: ImportRepository,
+    private val playerControllerRepository: PlayerControllerRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val _id: PlaylistId = PlaylistId(savedStateHandle["id"]!!)
@@ -162,6 +164,7 @@ class PlaylistVM @Inject constructor(
         if (playlist != null) {
             _playlistAbstr.value = playlist.abstr
             _playlistMusics.value = playlist.musics.toPersistentList()
+            playerControllerRepository.refreshPlaylistIfMatch(playlist)
         } else {
             _playlistAbstr.value = defaultPlaylistAbstract()
             _playlistMusics.value = persistentListOf()
