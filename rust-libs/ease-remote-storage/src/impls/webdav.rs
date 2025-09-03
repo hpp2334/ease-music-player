@@ -166,11 +166,17 @@ impl Webdav {
         header_map
     }
 
-    fn get_url(&self, dir: &str) -> StorageBackendResult<Url> {
+    fn get_url<const IS_DIR: bool>(&self, p: &str) -> StorageBackendResult<Url> {
         let mut url = reqwest::Url::parse(&self.addr)
             .map_err(|e| StorageBackendError::UrlParseError(e.to_string()))?;
         let base = url.path();
-        url.set_path(&(base.trim_end_matches('/').to_string() + "/" + dir.trim_start_matches('/')));
+        let mut p = base.trim_end_matches('/').to_string() + "/" + p.trim_start_matches('/');
+        if IS_DIR {
+            if !p.ends_with('/') {
+                p += "/";
+            }
+        }
+        url.set_path(&p);
         Ok(url)
     }
 
@@ -182,7 +188,7 @@ impl Webdav {
     }
 
     async fn list_core(&self, dir: &str) -> StorageBackendResult<reqwest::Response> {
-        let url = self.get_url(dir)?;
+        let url = self.get_url::<true>(dir)?;
 
         let method = reqwest::Method::from_bytes(b"PROPFIND").unwrap();
         let resp = {
@@ -242,6 +248,9 @@ impl Webdav {
                     name = splited.last().unwrap().to_string();
                 }
             }
+            name = urlencoding::decode(name.as_str())
+                .map(|v| v.to_string())
+                .unwrap_or(name);
 
             ret.push(Entry {
                 name,
@@ -278,7 +287,7 @@ impl Webdav {
     }
 
     async fn get_impl(&self, p: &str, byte_offset: u64) -> StorageBackendResult<StreamFile> {
-        let url = self.get_url(p)?;
+        let url = self.get_url::<false>(p)?;
 
         let mut headers = self.build_base_header_map(reqwest::Method::GET, &url);
         headers.insert(
