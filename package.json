@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build:jni": "bun run ./scripts/build-jni-libs.ts",
-    "build:apk": "EBUILD=1 bun run build:jni && bun run ./scripts/build-apk.ts",
+    "build:jni": "npx tsx ./scripts/build-jni-libs.ts",
+    "build:apk": "EBUILD=1 pnpm run build:jni && npx tsx ./scripts/build-apk.ts",
     "test": "cd ./rust-libs && cargo nextest run"
   },
   "keywords": [],
