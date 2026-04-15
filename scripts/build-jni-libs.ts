@@ -12,7 +12,7 @@ execSync(`cargo build -p ease-client-backend`, {
 for (const buildTarget of TARGETS) {
   console.log(`Generate kotlin file of ${buildTarget}`);
   execSync(
-    `cargo run -p ease-client-android-ffi-builder generate --library ${path.resolve(RUST_LIBS_ROOTS, "./target/debug/libease_client_backend.so")} --language kotlin --out-dir ${path.resolve(ROOT, "android/app/src/main/java/")}`,
+    `cargo run -p ease-client-android-ffi-builder generate --library ${path.resolve(RUST_LIBS_ROOTS, "./target/debug/libease_client_backend.so")} --language kotlin --out-dir ${path.resolve(ROOT, "shared/src/androidMain/kotlin/")}`,
     {
       stdio: "inherit",
       cwd: RUST_LIBS_ROOTS,
@@ -26,7 +26,7 @@ for (const buildTarget of TARGETS) {
 
   console.log(`Generate jniLibs of ${buildTarget}`);
   execSync(
-    `cargo ndk --no-strip --target ${buildTarget} -o ${path.resolve(ROOT, "android/app/src/main/jniLibs")} build --release --lib`,
+    `cargo ndk --no-strip --target ${buildTarget} -o ${path.resolve(ROOT, "androidApp/src/main/jniLibs")} build --release --lib`,
     {
       stdio: "inherit",
       cwd: RUST_LIBS_ROOTS,
@@ -38,3 +38,22 @@ for (const buildTarget of TARGETS) {
     },
   );
 }
+
+console.log("Generate kotlin bindings for desktop");
+execSync(
+  `cargo run -p ease-client-android-ffi-builder generate --library ${path.resolve(RUST_LIBS_ROOTS, "./target/debug/libease_client_backend.so")} --language kotlin --out-dir ${path.resolve(ROOT, "shared/src/desktopMain/kotlin/")}`,
+  {
+    stdio: "inherit",
+    cwd: RUST_LIBS_ROOTS,
+    env: {
+      ...process.env,
+      RUST_BACKTRACE: "1",
+    },
+  },
+);
+
+console.log("Build desktop native library");
+execSync(`cargo build --release --lib`, {
+  stdio: "inherit",
+  cwd: RUST_LIBS_ROOTS,
+});

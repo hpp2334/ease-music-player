@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <path d="M0,0h108v108h-108z" fill="#3DDC84"/>
+  <path d="M9,0L9,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M19,0L19,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M29,0L29,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M39,0L39,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M49,0L49,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M59,0L59,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M69,0L69,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M79,0L79,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M89,0L89,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M99,0L99,108" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,9L108,9" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,19L108,19" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,29L108,29" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,39L108,39" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,49L108,49" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,59L108,59" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,69L108,69" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,79L108,79" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,89L108,89" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M0,99L108,99" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M19,29L89,29" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M19,39L89,39" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M19,49L89,49" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M19,59L89,59" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M19,69L89,69" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M19,79L89,79" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M29,19L29,89" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M39,19L39,89" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M49,19L49,89" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M59,19L59,89" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M69,19L69,89" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+  <path d="M79,19L79,89" fill="#00000000" stroke="#33FFFFFF" stroke-width="0.8"/>
+</svg>

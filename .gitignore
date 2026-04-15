@@ -32,9 +32,17 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Gradle build
+.gradle/
+.kotlin/
+build/
+*/build/
+
 # Sign
 /android/root.jks
 /android/key.properties
+/androidApp/root.jks
+/androidApp/key.properties
 
 # Scripts
 /node_modules

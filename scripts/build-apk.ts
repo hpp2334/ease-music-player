@@ -34,16 +34,14 @@ const version = (() => {
 })();
 console.log(`App version: ${version}`);
 
-const androidDir = path.resolve(ROOT, "./android");
-const jksPath = path.resolve(androidDir, "root.jks");
-const keyPropertiesPath = path.resolve(androidDir, "key.properties");
-const srcDir = path.resolve(androidDir, "./app/build/outputs/apk/release");
-const dstDir = path.resolve(ROOT, "./artifacts/apk");
+const rootDir = ROOT;
+const jksPath = path.resolve(rootDir, "androidApp/root.jks");
+const keyPropertiesPath = path.resolve(rootDir, "androidApp/key.properties");
+const srcDir = path.resolve(rootDir, "./androidApp/build/outputs/apk/release");
+const dstDir = path.resolve(rootDir, "./artifacts/apk");
 
-// Generate jks from environment
 decodeAndDecompress(ANDROID_SIGN_JKS!, jksPath);
 
-// Signing
 writeFileSync(
   keyPropertiesPath,
   `storePassword=${ANDROID_SIGN_PASSWORD}
@@ -53,9 +51,9 @@ writeFileSync(
 );
 console.log(`${keyPropertiesPath} written`);
 
-execSync("./gradlew assembleRelease --info", {
+execSync("./gradlew :androidApp:assembleRelease --info", {
   stdio: "inherit",
-  cwd: androidDir,
+  cwd: rootDir,
 });
 
 rmSync(dstDir, { recursive: true, force: true });
@@ -63,10 +61,9 @@ mkdirSync(srcDir, { recursive: true });
 console.log(srcDir);
 cpSync(srcDir, dstDir, { recursive: true });
 
-// rename
 for (const target of TARGETS) {
   renameSync(
-    path.join(dstDir, `app-${target}-release.apk`),
+    path.join(dstDir, `androidApp-${target}-release.apk`),
     path.join(dstDir, `ease-client-music-${target}-${version}.apk`),
   );
 }
