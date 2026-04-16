@@ -45,9 +45,9 @@ decodeAndDecompress(ANDROID_SIGN_JKS!, jksPath);
 writeFileSync(
   keyPropertiesPath,
   `storePassword=${ANDROID_SIGN_PASSWORD}
-    keyPassword=${ANDROID_SIGN_PASSWORD}
-    keyAlias=key0
-    storeFile=androidApp/root.jks`,
+keyPassword=${ANDROID_SIGN_PASSWORD}
+keyAlias=key0
+storeFile=androidApp/root.jks`,
 );
 console.log(`${keyPropertiesPath} written`);
 
