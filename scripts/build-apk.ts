@@ -47,7 +47,7 @@ writeFileSync(
   `storePassword=${ANDROID_SIGN_PASSWORD}
     keyPassword=${ANDROID_SIGN_PASSWORD}
     keyAlias=key0
-    storeFile=root.jks`,
+    storeFile=androidApp/root.jks`,
 );
 console.log(`${keyPropertiesPath} written`);
 
