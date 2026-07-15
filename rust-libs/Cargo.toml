@@ -5,6 +5,7 @@ resolver = "2"
 members = [
     "ease-client-backend",
     "ease-client-android-ffi-builder",
+    "ease-client-migration",
     "ease-client-schema",
     "ease-client-tokio",
     "ease-order-key",
@@ -22,6 +23,11 @@ redb = "2.2.0"
 uniffi = "=0.28.3"
 bitcode = "0.6.3"
 postcard = { version = "1.1.3", features = ["alloc"] }
+sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros"] }
+sea-orm-migration = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+# Force libsqlite3-sys to build its own bundled SQLite so we don't need a
+# system libsqlite3 on cross-compile targets like aarch64-linux-android.
+libsqlite3-sys = { version = ">=0.28", features = ["bundled"] }
 futures = "0.3.30"
 async-channel = "2.5.0"
 thiserror = "1.0.57"
@@ -29,5 +35,6 @@ chrono = "0.4.41"
 anyhow = "1.0"
 tracing = "0.1"
 ease-client-schema = { path = "./ease-client-schema" }
+ease-client-migration = { path = "./ease-client-migration" }
 ease-client-tokio = { path = "./ease-client-tokio" }
 ease-order-key = { path = "./ease-order-key" }

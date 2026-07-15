@@ -1,6 +1,11 @@
-use ease_client_schema::{upgrade_v1_to_v2, upgrade_v2_to_v3, StorageType};
+use ease_client_schema::StorageType;
 
-use crate::{ctx::BackendContext, error::BResult, objects::ArgUpsertStorage};
+use crate::{
+    ctx::BackendContext,
+    error::BResult,
+    objects::ArgUpsertStorage,
+    repositories::app::SCHEMA_VERSION,
+};
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ArgInitializeApp {
@@ -9,43 +14,37 @@ pub struct ArgInitializeApp {
     pub storage_path: String,
 }
 
-pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
+pub async fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
     tracing::info!("app bootstrap: {:?}", arg);
     cx.set_storage_path(&arg.storage_path);
-    // Init
-    init_database(cx, &arg)?;
+    init_database(cx, &arg).await?;
     Ok(())
 }
 
-pub fn app_destroy(cx: &BackendContext) -> BResult<()> {
+pub async fn app_destroy(cx: &BackendContext) -> BResult<()> {
     cx.database_server().destroy();
     tracing::info!("app destroyed");
     Ok(())
 }
 
-fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
-    static SCHEMA_VERSION: u32 = 3;
+async fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
+    // `DatabaseServer::init` runs ease_client_migration::migrate, which:
+    //   1. Opens/creates data.db.
+    //   2. Runs sea-orm-migration to the latest schema (v4).
+    //   3. If a legacy data.redb exists at <doc_dir>/data.redb, imports all
+    //      rows into SQLite and deletes data.redb.
+    cx.database_server().init(arg.app_document_dir.clone()).await?;
 
-    cx.database_server().init(arg.app_document_dir.clone());
-    let old_schema_version = cx.database_server().get_schema_version()?;
-
-    if old_schema_version < SCHEMA_VERSION {
-        if old_schema_version < 1 {
-            init_local_storage(cx)?;
-            cx.database_server().save_schema_version(SCHEMA_VERSION)?;
-        } else {
-            if old_schema_version < 2 {
-                upgrade_v1_to_v2(&cx.database_server().db())?;
-            }
-            if old_schema_version < 3 {
-                upgrade_v2_to_v3(&cx.database_server().db())?;
-            }
-        }
+    let old_schema_version = cx.database_server().get_schema_version().await?;
+    if old_schema_version == 0 {
+        // Fresh install with no legacy redb — seed local storage.
+        init_local_storage(cx).await?;
+        cx.database_server().save_schema_version(SCHEMA_VERSION).await?;
     }
 
-    let schema_version = cx.database_server().get_schema_version()?;
+    let schema_version = cx.database_server().get_schema_version().await?;
     tracing::info!(
-        "old schema version is {}, now is {}",
+        "old schema version was {}, now is {}",
         old_schema_version,
         schema_version
     );
@@ -53,15 +52,17 @@ fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
     Ok(())
 }
 
-fn init_local_storage(cx: &BackendContext) -> BResult<()> {
-    cx.database_server().upsert_storage(ArgUpsertStorage {
-        id: None,
-        addr: Default::default(),
-        alias: "Local".to_string(),
-        username: Default::default(),
-        password: Default::default(),
-        is_anonymous: Default::default(),
-        typ: StorageType::Local,
-    })?;
+async fn init_local_storage(cx: &BackendContext) -> BResult<()> {
+    cx.database_server()
+        .upsert_storage(ArgUpsertStorage {
+            id: None,
+            addr: Default::default(),
+            alias: "Local".to_string(),
+            username: Default::default(),
+            password: Default::default(),
+            is_anonymous: Default::default(),
+            typ: StorageType::Local,
+        })
+        .await?;
     Ok(())
 }

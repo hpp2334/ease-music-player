@@ -1,26 +1,52 @@
 use std::sync::Arc;
 
-use ease_client_schema::{PreferenceModel, TABLE_PREFERENCE};
+use ease_client_migration::converter;
+use ease_client_migration::entities::preference;
+use ease_client_schema::{PlayMode, PreferenceModel};
+use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
 
 use crate::error::BResult;
 
 use super::core::DatabaseServer;
 
+fn playmode_to_i32(p: PlayMode) -> i32 {
+    match p {
+        PlayMode::Single => 0,
+        PlayMode::SingleLoop => 1,
+        PlayMode::List => 2,
+        PlayMode::ListLoop => 3,
+    }
+}
+
 impl DatabaseServer {
-    pub fn load_preference(self: &Arc<Self>) -> BResult<PreferenceModel> {
-        let db = self.db().begin_read()?;
-        let table = db.open_table(TABLE_PREFERENCE)?;
-        let v = table.get(())?.map(|v| v.value()).unwrap_or_default();
+    pub async fn load_preference(self: &Arc<Self>) -> BResult<PreferenceModel> {
+        let db = self.db();
+        let v = preference::Entity::find_by_id(0)
+            .one(&db)
+            .await?
+            .map(converter::preference_to_model)
+            .unwrap_or_default();
         Ok(v)
     }
 
-    pub fn save_preference(self: &Arc<Self>, model: PreferenceModel) -> BResult<()> {
-        let db = self.db().begin_write()?;
-        {
-            let mut table = db.open_table(TABLE_PREFERENCE)?;
-            table.insert((), model)?;
+    pub async fn save_preference(self: &Arc<Self>, model: PreferenceModel) -> BResult<()> {
+        let db = self.db();
+        let existing = preference::Entity::find_by_id(0).one(&db).await?;
+        let pm = playmode_to_i32(model.playmode);
+        match existing {
+            Some(row) => {
+                let mut am: preference::ActiveModel = row.into();
+                am.playmode = ActiveValue::Set(pm);
+                am.update(&db).await?;
+            }
+            None => {
+                let am = preference::ActiveModel {
+                    id: ActiveValue::Set(0),
+                    playmode: ActiveValue::Set(pm),
+                };
+                am.insert(&db).await?;
+            }
         }
-        db.commit()?;
         Ok(())
     }
 }

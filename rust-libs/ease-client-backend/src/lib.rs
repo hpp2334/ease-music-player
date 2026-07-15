@@ -38,12 +38,14 @@ impl Drop for Backend {
 #[uniffi::export]
 impl Backend {
     pub fn init(&self) -> BResult<()> {
-        app_bootstrap(&self.cx, self.arg.clone())?;
-        Ok(())
+        ease_client_tokio::tokio_runtime().block_on(async {
+            app_bootstrap(&self.cx, self.arg.clone()).await
+        })
     }
     pub fn deinit(&self) -> BResult<()> {
-        app_destroy(&self.cx)?;
-        Ok(())
+        ease_client_tokio::tokio_runtime().block_on(async {
+            app_destroy(&self.cx).await
+        })
     }
 }
 

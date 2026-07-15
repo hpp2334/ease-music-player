@@ -128,11 +128,11 @@ pub(crate) fn build_music_abstract(_cx: &BackendContext, model: MusicModel) -> M
     }
 }
 
-pub fn get_music_storage_entry_loc(
+pub async fn get_music_storage_entry_loc(
     cx: &BackendContext,
     id: MusicId,
 ) -> BResult<Option<StorageEntryLoc>> {
-    let m = cx.database_server().load_music(id)?;
+    let m = cx.database_server().load_music(id).await?;
     if m.is_none() {
         return Ok(None);
     }
@@ -141,8 +141,8 @@ pub fn get_music_storage_entry_loc(
     Ok(Some(m))
 }
 
-pub fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<Vec<u8>> {
-    let m = cx.database_server().load_music(id)?.unwrap();
+pub async fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<Vec<u8>> {
+    let m = cx.database_server().load_music(id).await?.unwrap();
     if let Some(id) = m.cover {
         cx.database_server().blob().read(id)
     } else {
@@ -155,12 +155,13 @@ pub struct ArgUpdateMusicDuration {
     pub id: MusicId,
     pub duration: Duration,
 }
-pub(crate) fn update_music_duration(
+pub(crate) async fn update_music_duration(
     cx: &BackendContext,
     arg: ArgUpdateMusicDuration,
 ) -> BResult<()> {
     cx.database_server()
-        .update_music_total_duration(arg.id, arg.duration)?;
+        .update_music_total_duration(arg.id, arg.duration)
+        .await?;
     Ok(())
 }
 
@@ -169,14 +170,15 @@ pub struct ArgUpdateMusicCover {
     pub id: MusicId,
     pub cover: Vec<u8>,
 }
-pub(crate) fn update_music_cover(cx: &BackendContext, arg: ArgUpdateMusicCover) -> BResult<()> {
+pub(crate) async fn update_music_cover(cx: &BackendContext, arg: ArgUpdateMusicCover) -> BResult<()> {
     cx.database_server()
-        .update_music_cover(arg.id, arg.cover.clone())?;
+        .update_music_cover(arg.id, arg.cover.clone())
+        .await?;
     Ok(())
 }
 
 pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Option<Music>> {
-    let model = cx.database_server().load_music(id)?;
+    let model = cx.database_server().load_music(id).await?;
     if model.is_none() {
         return Ok(None);
     }
@@ -217,11 +219,11 @@ pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Optio
     Ok(Some(music))
 }
 
-pub(crate) fn get_music_abstract(
+pub(crate) async fn get_music_abstract(
     cx: &BackendContext,
     id: MusicId,
 ) -> BResult<Option<MusicAbstract>> {
-    let model = cx.database_server().load_music(id)?;
+    let model = cx.database_server().load_music(id).await?;
     if model.is_none() {
         return Ok(None);
     }

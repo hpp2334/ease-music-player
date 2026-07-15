@@ -14,18 +14,12 @@ pub enum BError {
     PlaylistNotFound(PlaylistId),
     #[error("music not found")]
     MusicNotFound(MusicId),
-    #[error("redb error: {0:?}")]
-    RedbError(#[from] redb::Error),
-    #[error("redb transaction error: {0:?}")]
-    RedbTransactionError(#[from] redb::TransactionError),
-    #[error("redb table error: {0:?}")]
-    RedbTableError(#[from] redb::TableError),
-    #[error("redb storage error: {0:?}")]
-    RedbStorageError(#[from] redb::StorageError),
-    #[error("redb commit error: {0:?}")]
-    RedbCommitError(#[from] redb::CommitError),
+    #[error("database error: {0:?}")]
+    DbError(#[from] sea_orm::DbErr),
     #[error("io error: {0:?}")]
     IoError(#[from] std::io::Error),
+    #[error("json error: {0:?}")]
+    JsonError(#[from] serde_json::Error),
     #[error(transparent)]
     OrderKeyError(#[from] OrderKeyError),
     #[error("custom: {message}")]
