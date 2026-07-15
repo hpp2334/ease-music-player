@@ -48,12 +48,15 @@ pub(crate) fn build_playlist_meta(
     }
 }
 
-pub(crate) fn build_playlist_abstract(
+pub(crate) async fn build_playlist_abstract(
     cx: &BackendContext,
     model: PlaylistModel,
 ) -> BResult<(PlaylistAbstract, Vec<MusicAbstract>)> {
     let id = model.id;
-    let musics = cx.database_server().load_musics_by_playlist_id(id)?;
+    let musics = cx
+        .database_server()
+        .load_musics_by_playlist_id(id)
+        .await?;
     let first_cover_music_id = musics.iter().find(|m| m.cover.is_some()).map(|v| v.id);
     let meta = build_playlist_meta(cx, model, first_cover_music_id);
 
@@ -72,24 +75,26 @@ pub(crate) fn build_playlist_abstract(
     Ok((abstr, musics))
 }
 
-pub fn get_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
-    let model = cx.database_server().load_playlist(arg)?;
+pub async fn get_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
+    let model = cx.database_server().load_playlist(arg).await?;
 
     if model.is_none() {
         return Ok(None);
     }
     let model = model.unwrap();
-    let (abstr, musics) = build_playlist_abstract(cx, model)?;
+    let (abstr, musics) = build_playlist_abstract(cx, model).await?;
 
     Ok(Some(Playlist { abstr, musics }))
 }
 
-pub(crate) fn get_all_playlist_abstracts(cx: &BackendContext) -> BResult<Vec<PlaylistAbstract>> {
-    let models = cx.database_server().load_playlists()?;
+pub(crate) async fn get_all_playlist_abstracts(
+    cx: &BackendContext,
+) -> BResult<Vec<PlaylistAbstract>> {
+    let models = cx.database_server().load_playlists().await?;
 
     let mut ret: Vec<PlaylistAbstract> = Default::default();
     for model in models {
-        let (abstr, _) = build_playlist_abstract(cx, model)?;
+        let (abstr, _) = build_playlist_abstract(cx, model).await?;
         ret.push(abstr)
     }
 

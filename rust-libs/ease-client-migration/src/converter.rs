@@ -1,0 +1,183 @@
+#![allow(dead_code)]
+
+use ease_client_schema::v3::{self, MusicModel, PlaylistModel, PreferenceModel, StorageModel};
+use ease_client_schema::v2::{PlayMode, StorageType};
+
+use crate::entities::{blob, id_alloc, music, playlist, playlist_music, preference, storage};
+
+const FALSE_I32: i32 = 0;
+const TRUE_I32: i32 = 1;
+
+fn db_key_alloc_index(k: &v3::DbKeyAlloc) -> i32 {
+    match k {
+        v3::DbKeyAlloc::Playlist => 0,
+        v3::DbKeyAlloc::Music => 1,
+        v3::DbKeyAlloc::Storage => 2,
+    }
+}
+
+fn storage_type_index(t: StorageType) -> i32 {
+    match t {
+        StorageType::Local => 0,
+        StorageType::Webdav => 1,
+        StorageType::OneDrive => 2,
+    }
+}
+
+fn storage_type_from_index(i: i32) -> StorageType {
+    match i {
+        0 => StorageType::Local,
+        1 => StorageType::Webdav,
+        2 => StorageType::OneDrive,
+        _ => StorageType::default(),
+    }
+}
+
+fn play_mode_index(p: PlayMode) -> i32 {
+    match p {
+        PlayMode::Single => 0,
+        PlayMode::SingleLoop => 1,
+        PlayMode::List => 2,
+        PlayMode::ListLoop => 3,
+    }
+}
+
+fn play_mode_from_index(i: i32) -> PlayMode {
+    match i {
+        0 => PlayMode::Single,
+        1 => PlayMode::SingleLoop,
+        2 => PlayMode::List,
+        3 => PlayMode::ListLoop,
+        _ => PlayMode::default(),
+    }
+}
+
+fn encode_order(order: &[u32]) -> String {
+    serde_json::to_string(order).unwrap_or_else(|_| "[]".to_string())
+}
+
+pub fn decode_order(s: &str) -> Vec<u32> {
+    serde_json::from_str(s).unwrap_or_default()
+}
+
+pub fn id_alloc_from(kind: v3::DbKeyAlloc, next_id: i64) -> id_alloc::ActiveModel {
+    id_alloc::ActiveModel {
+        kind: sea_orm::ActiveValue::Set(db_key_alloc_index(&kind)),
+        next_id: sea_orm::ActiveValue::Set(next_id),
+    }
+}
+
+pub fn playlist_from(m: PlaylistModel) -> playlist::ActiveModel {
+    playlist::ActiveModel {
+        id: sea_orm::ActiveValue::Set(*m.id.as_ref()),
+        title: sea_orm::ActiveValue::Set(m.title),
+        created_time: sea_orm::ActiveValue::Set(m.created_time),
+        picture_storage_id: sea_orm::ActiveValue::Set(m.picture.as_ref().map(|p| *p.storage_id.as_ref())),
+        picture_path: sea_orm::ActiveValue::Set(m.picture.map(|p| p.path)),
+        order: sea_orm::ActiveValue::Set(encode_order(&m.order)),
+    }
+}
+
+pub fn playlist_to_model(row: playlist::Model) -> PlaylistModel {
+    PlaylistModel {
+        id: v3::PlaylistId::wrap(row.id),
+        title: row.title,
+        created_time: row.created_time,
+        picture: match (row.picture_storage_id, row.picture_path) {
+            (Some(sid), Some(path)) => Some(v3::StorageEntryLoc {
+                storage_id: v3::StorageId::wrap(sid),
+                path,
+            }),
+            _ => None,
+        },
+        order: decode_order(&row.order),
+    }
+}
+
+pub fn music_from(m: MusicModel) -> music::ActiveModel {
+    music::ActiveModel {
+        id: sea_orm::ActiveValue::Set(*m.id.as_ref()),
+        loc_storage_id: sea_orm::ActiveValue::Set(*m.loc.storage_id.as_ref()),
+        loc_path: sea_orm::ActiveValue::Set(m.loc.path),
+        title: sea_orm::ActiveValue::Set(m.title),
+        duration_ms: sea_orm::ActiveValue::Set(m.duration.map(|d| d.as_millis() as i64)),
+        cover_blob_id: sea_orm::ActiveValue::Set(m.cover.map(|c| *c.as_ref())),
+        lyric_storage_id: sea_orm::ActiveValue::Set(m.lyric.as_ref().map(|l| *l.storage_id.as_ref())),
+        lyric_path: sea_orm::ActiveValue::Set(m.lyric.map(|l| l.path)),
+        lyric_default: sea_orm::ActiveValue::Set(if m.lyric_default { TRUE_I32 } else { FALSE_I32 }),
+        order: sea_orm::ActiveValue::Set(encode_order(&m.order)),
+    }
+}
+
+pub fn music_to_model(row: music::Model) -> MusicModel {
+    MusicModel {
+        id: v3::MusicId::wrap(row.id),
+        loc: v3::StorageEntryLoc {
+            storage_id: v3::StorageId::wrap(row.loc_storage_id),
+            path: row.loc_path,
+        },
+        title: row.title,
+        duration: row.duration_ms.map(|ms| std::time::Duration::from_millis(ms as u64)),
+        cover: row.cover_blob_id.map(v3::BlobId::wrap),
+        lyric: match (row.lyric_storage_id, row.lyric_path) {
+            (Some(sid), Some(path)) => Some(v3::StorageEntryLoc {
+                storage_id: v3::StorageId::wrap(sid),
+                path,
+            }),
+            _ => None,
+        },
+        lyric_default: row.lyric_default != FALSE_I32,
+        order: decode_order(&row.order),
+    }
+}
+
+pub fn playlist_music_from(playlist_id: v3::PlaylistId, music_id: v3::MusicId) -> playlist_music::ActiveModel {
+    playlist_music::ActiveModel {
+        playlist_id: sea_orm::ActiveValue::Set(*playlist_id.as_ref()),
+        music_id: sea_orm::ActiveValue::Set(*music_id.as_ref()),
+    }
+}
+
+pub fn storage_from(m: StorageModel) -> storage::ActiveModel {
+    storage::ActiveModel {
+        id: sea_orm::ActiveValue::Set(*m.id.as_ref()),
+        addr: sea_orm::ActiveValue::Set(m.addr),
+        alias: sea_orm::ActiveValue::Set(m.alias),
+        username: sea_orm::ActiveValue::Set(m.username),
+        password: sea_orm::ActiveValue::Set(m.password),
+        is_anonymous: sea_orm::ActiveValue::Set(if m.is_anonymous { TRUE_I32 } else { FALSE_I32 }),
+        typ: sea_orm::ActiveValue::Set(storage_type_index(m.typ)),
+    }
+}
+
+pub fn storage_to_model(row: storage::Model) -> StorageModel {
+    StorageModel {
+        id: v3::StorageId::wrap(row.id),
+        addr: row.addr,
+        alias: row.alias,
+        username: row.username,
+        password: row.password,
+        is_anonymous: row.is_anonymous != FALSE_I32,
+        typ: storage_type_from_index(row.typ),
+    }
+}
+
+pub fn preference_from(m: PreferenceModel) -> preference::ActiveModel {
+    preference::ActiveModel {
+        id: sea_orm::ActiveValue::Set(0),
+        playmode: sea_orm::ActiveValue::Set(play_mode_index(m.playmode)),
+    }
+}
+
+pub fn preference_to_model(row: preference::Model) -> PreferenceModel {
+    PreferenceModel {
+        playmode: play_mode_from_index(row.playmode),
+    }
+}
+
+pub fn blob_alloc_from(next_id: i64) -> blob::ActiveModel {
+    blob::ActiveModel {
+        id: sea_orm::ActiveValue::Set(blob::Model::ROW_ID),
+        next_id: sea_orm::ActiveValue::Set(next_id),
+    }
+}

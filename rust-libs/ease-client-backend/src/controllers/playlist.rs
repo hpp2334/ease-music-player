@@ -18,14 +18,15 @@ use crate::{
 #[uniffi::export]
 pub async fn ct_get_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<Option<Playlist>> {
     let cx = cx.get_context();
-    get_playlist(cx, arg)
+    get_playlist(cx, arg).await
 }
 
 #[uniffi::export]
 pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BResult<()> {
     let cx = cx.get_context();
     cx.database_server()
-        .update_playlist(arg.id, arg.title, arg.cover)?;
+        .update_playlist(arg.id, arg.title, arg.cover)
+        .await?;
 
     Ok(())
 }
@@ -33,7 +34,7 @@ pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BRe
 #[uniffi::export]
 pub async fn ct_list_playlist(cx: Arc<Backend>) -> BResult<Vec<PlaylistAbstract>> {
     let cx = cx.get_context();
-    return get_all_playlist_abstracts(cx);
+    get_all_playlist_abstracts(cx).await
 }
 
 #[derive(uniffi::Record)]
@@ -67,18 +68,22 @@ pub async fn ct_create_playlist(
         })
         .collect();
 
-    let last_order = get_all_playlist_abstracts(cx)?
+    let last_order = get_all_playlist_abstracts(cx)
+        .await?
         .last()
         .map(|v| OrderKey::wrap(v.meta.order.clone()))
         .unwrap_or_default();
 
-    let (playlist_id, music_ids) = cx.database_server().create_playlist(
-        arg.title,
-        arg.cover.clone(),
-        musics,
-        current_time_ms,
-        OrderKey::greater(&last_order),
-    )?;
+    let (playlist_id, music_ids) = cx
+        .database_server()
+        .create_playlist(
+            arg.title,
+            arg.cover.clone(),
+            musics,
+            current_time_ms,
+            OrderKey::greater(&last_order),
+        )
+        .await?;
 
     Ok(RetCreatePlaylist {
         id: playlist_id,
@@ -109,7 +114,7 @@ pub async fn ct_add_musics_to_playlist(
         })
         .collect();
 
-    let Some(playlist) = get_playlist(cx, arg.id)? else {
+    let Some(playlist) = get_playlist(cx, arg.id).await? else {
         return Err(BError::PlaylistNotFound(arg.id));
     };
     let last_order = playlist
@@ -120,7 +125,8 @@ pub async fn ct_add_musics_to_playlist(
 
     let ret = cx
         .database_server()
-        .add_musics_to_playlist(arg.id, musics, last_order)?;
+        .add_musics_to_playlist(arg.id, musics, last_order)
+        .await?;
 
     Ok(ret)
 }
@@ -132,7 +138,8 @@ pub async fn ct_remove_music_from_playlist(
 ) -> BResult<()> {
     let cx = cx.get_context();
     cx.database_server()
-        .remove_music_from_playlist(arg.playlist_id, arg.music_id)?;
+        .remove_music_from_playlist(arg.playlist_id, arg.music_id)
+        .await?;
 
     Ok(())
 }
@@ -145,13 +152,17 @@ pub struct ArgReorderPlaylist {
 }
 
 #[uniffi::export]
-pub fn cts_reorder_playlist(cx: Arc<Backend>, arg: ArgReorderPlaylist) -> BResult<()> {
+pub async fn cts_reorder_playlist(cx: Arc<Backend>, arg: ArgReorderPlaylist) -> BResult<()> {
     let cx = cx.get_context();
+    reorder_playlist_inner(cx, arg).await
+}
+
+async fn reorder_playlist_inner(cx: &BackendContext, arg: ArgReorderPlaylist) -> BResult<()> {
     if arg.a == arg.b {
         return Ok(());
     }
 
-    let playlists = get_all_playlist_abstracts(cx)?;
+    let playlists = get_all_playlist_abstracts(cx).await?;
 
     let from = playlists
         .iter()
@@ -193,14 +204,15 @@ pub fn cts_reorder_playlist(cx: Arc<Backend>, arg: ArgReorderPlaylist) -> BResul
     };
 
     cx.database_server()
-        .set_playlist_order(from.meta.id, order)?;
+        .set_playlist_order(from.meta.id, order)
+        .await?;
     Ok(())
 }
 
 #[uniffi::export]
 pub async fn ct_remove_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<()> {
     let cx = cx.get_context();
-    cx.database_server().remove_playlist(arg)?;
+    cx.database_server().remove_playlist(arg).await?;
 
     Ok(())
 }
@@ -214,12 +226,16 @@ pub struct ArgReorderMusic {
 }
 
 #[uniffi::export]
-pub fn cts_reorder_music_in_playlist(cx: Arc<Backend>, arg: ArgReorderMusic) -> BResult<()> {
+pub async fn cts_reorder_music_in_playlist(cx: Arc<Backend>, arg: ArgReorderMusic) -> BResult<()> {
     let cx = cx.get_context();
+    reorder_music_in_playlist_inner(cx, arg).await
+}
+
+async fn reorder_music_in_playlist_inner(cx: &BackendContext, arg: ArgReorderMusic) -> BResult<()> {
     if arg.a == arg.b {
         return Ok(());
     }
-    let Some(playlist) = get_playlist(cx, arg.playlist_id)? else {
+    let Some(playlist) = get_playlist(cx, arg.playlist_id).await? else {
         return Err(BError::PlaylistNotFound(arg.playlist_id));
     };
 
@@ -265,6 +281,8 @@ pub fn cts_reorder_music_in_playlist(cx: Arc<Backend>, arg: ArgReorderMusic) -> 
         }
     };
 
-    cx.database_server().set_music_order(from.meta.id, order)?;
+    cx.database_server()
+        .set_music_order(from.meta.id, order)
+        .await?;
     Ok(())
 }

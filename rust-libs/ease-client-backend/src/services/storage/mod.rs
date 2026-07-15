@@ -8,7 +8,7 @@ use crate::{
     ctx::BackendContext,
     error::BResult,
     objects::{ArgUpsertStorage, Storage},
-    services::{get_music, get_music_abstract, get_music_cover_bytes},
+    services::{get_music, get_music_cover_bytes},
 };
 use ease_client_schema::{DataSourceKey, StorageEntryLoc, StorageId, StorageModel, StorageType};
 use ease_remote_storage::{
@@ -102,40 +102,42 @@ pub fn get_storage_backend(
         }
     }
 
-    let model = cx.database_server().load_storage(storage_id)?;
-    let music_count = cx.database_server().load_storage_music_count(storage_id)?;
+    ease_client_tokio::tokio_runtime().block_on(async {
+        let model = cx.database_server().load_storage(storage_id).await?;
+        let music_count = cx.database_server().load_storage_music_count(storage_id).await?;
 
-    if model.is_none() {
-        return Ok(None);
-    }
-    let storage = model.unwrap();
-    let storage = build_storage(storage, music_count);
-    let backend = build_storage_backend_by_arg(
-        cx,
-        ArgUpsertStorage {
-            id: None,
-            addr: storage.addr,
-            alias: storage.alias,
-            username: storage.username,
-            password: storage.password,
-            is_anonymous: storage.is_anonymous,
-            typ: storage.typ,
-        },
-    )?;
+        if model.is_none() {
+            return Ok::<_, crate::error::BError>(None);
+        }
+        let storage = model.unwrap();
+        let storage = build_storage(storage, music_count);
+        let backend = build_storage_backend_by_arg(
+            cx,
+            ArgUpsertStorage {
+                id: None,
+                addr: storage.addr,
+                alias: storage.alias,
+                username: storage.username,
+                password: storage.password,
+                is_anonymous: storage.is_anonymous,
+                typ: storage.typ,
+            },
+        )?;
 
-    {
-        let mut state = cx.storage_state().cache.write().unwrap();
-        state.insert(storage_id, backend.clone());
-    }
-    Ok(Some(backend))
+        {
+            let mut state = cx.storage_state().cache.write().unwrap();
+            state.insert(storage_id, backend.clone());
+        }
+        Ok(Some(backend))
+    })
 }
 
 pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
-    let models = cx.database_server().load_storages()?;
+    let models = cx.database_server().load_storages().await?;
 
     let mut storages: Vec<Storage> = Default::default();
     for m in models.into_iter() {
-        let music_count = cx.database_server().load_storage_music_count(m.id)?;
+        let music_count = cx.database_server().load_storage_music_count(m.id).await?;
 
         storages.push(build_storage(m, music_count));
     }
@@ -188,7 +190,7 @@ pub(crate) async fn get_asset_file(
             get_asset_file_by_loc(cx, m.loc, byte_offset).await
         }
         DataSourceKey::Cover { id } => {
-            let buf = get_music_cover_bytes(cx, id)?;
+            let buf = get_music_cover_bytes(cx, id).await?;
             if buf.is_empty() {
                 return Ok(None);
             }

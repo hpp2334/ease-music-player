@@ -35,7 +35,7 @@ pub async fn ct_upsert_storage(cx: Arc<Backend>, arg: ArgUpsertStorage) -> BResu
     let arg = normalize_arg_upsert_storage(arg);
 
     let cx = cx.get_context();
-    let id = cx.database_server().upsert_storage(arg)?;
+    let id = cx.database_server().upsert_storage(arg).await?;
     evict_storage_backend_cache(cx, id);
 
     Ok(())
@@ -51,7 +51,7 @@ pub async fn ct_get_refresh_token(cx: Arc<Backend>, code: String) -> BResult<Str
 #[uniffi::export]
 pub async fn ct_remove_storage(cx: Arc<Backend>, id: StorageId) -> BResult<()> {
     let cx = cx.get_context();
-    cx.database_server().remove_storage(id)?;
+    cx.database_server().remove_storage(id).await?;
     evict_storage_backend_cache(cx, id);
 
     Ok(())
