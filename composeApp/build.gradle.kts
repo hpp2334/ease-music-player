@@ -11,6 +11,17 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+val appVersion = "0.3.0"
+
+val osName = System.getProperty("os.name").lowercase()
+val osArch = System.getProperty("os.arch").lowercase()
+val javafxClassifier = when {
+    osName.contains("mac") && osArch == "aarch64" -> "mac-aarch64"
+    osName.contains("mac") -> "mac"
+    osName.contains("win") -> "win"
+    else -> "linux"
+}
+
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
@@ -69,6 +80,10 @@ kotlin {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.kotlinx.coroutines.swing)
+                val jfx = libs.versions.javafx.get()
+                implementation("org.openjfx:javafx-media:$jfx:$javafxClassifier")
+                implementation("org.openjfx:javafx-graphics:$jfx:$javafxClassifier")
+                implementation("org.openjfx:javafx-base:$jfx:$javafxClassifier")
             }
         }
     }
@@ -87,7 +102,7 @@ android {
         minSdk = 29
         targetSdk = 34
         versionCode = 1
-        versionName = "0.3.0"
+        versionName = appVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -160,7 +175,11 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Msi)
             packageName = "ease-music-player"
-            packageVersion = "1.0.0"
+            packageVersion = appVersion
+            macOS {
+                dmgPackageVersion = "1.0.0"
+                packageBuildVersion = "1.0.0"
+            }
         }
     }
 }

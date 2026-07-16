@@ -8,7 +8,7 @@ import {
   renameSync,
 } from "fs";
 import path from "path";
-import { BUILD_GRADLE_KTS, ROOT, TARGETS } from "./base";
+import { BUILD_GRADLE_KTS, COMPOSE_APP, ROOT, TARGETS } from "./base";
 import fs from "node:fs";
 import zlib from "node:zlib";
 
@@ -34,28 +34,28 @@ const version = (() => {
 })();
 console.log(`App version: ${version}`);
 
-const androidDir = path.resolve(ROOT, "./android");
-const jksPath = path.resolve(androidDir, "root.jks");
-const keyPropertiesPath = path.resolve(androidDir, "key.properties");
-const srcDir = path.resolve(androidDir, "./app/build/outputs/apk/release");
+const jksPath = path.resolve(ROOT, "root.jks");
+const keyPropertiesPath = path.resolve(ROOT, "key.properties");
+const srcDir = path.resolve(
+  COMPOSE_APP,
+  "./build/outputs/apk/release",
+);
 const dstDir = path.resolve(ROOT, "./artifacts/apk");
 
-// Generate jks from environment
 decodeAndDecompress(ANDROID_SIGN_JKS!, jksPath);
 
-// Signing
 writeFileSync(
   keyPropertiesPath,
   `storePassword=${ANDROID_SIGN_PASSWORD}
-    keyPassword=${ANDROID_SIGN_PASSWORD}
-    keyAlias=key0
-    storeFile=root.jks`,
+keyPassword=${ANDROID_SIGN_PASSWORD}
+keyAlias=key0
+storeFile=root.jks`,
 );
 console.log(`${keyPropertiesPath} written`);
 
-execSync("./gradlew assembleRelease --info", {
+execSync("./gradlew :composeApp:assembleRelease --info", {
   stdio: "inherit",
-  cwd: androidDir,
+  cwd: ROOT,
 });
 
 rmSync(dstDir, { recursive: true, force: true });
@@ -63,10 +63,9 @@ mkdirSync(srcDir, { recursive: true });
 console.log(srcDir);
 cpSync(srcDir, dstDir, { recursive: true });
 
-// rename
 for (const target of TARGETS) {
   renameSync(
-    path.join(dstDir, `app-${target}-release.apk`),
+    path.join(dstDir, `composeApp-${target}-release.apk`),
     path.join(dstDir, `ease-client-music-${target}-${version}.apk`),
   );
 }
