@@ -19,9 +19,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Prepare cargo cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         continue-on-error: false
         with:
           path: |
@@ -37,7 +37,7 @@ jobs:
       - uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r28-beta2
+          ndk-version: r27c
           add-to-path: false
       - name: Set Up JDK
         uses: actions/setup-java@v4
@@ -58,7 +58,7 @@ jobs:
       - name: Run tests
         run: pnpm run test
       - name: Build APK
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }} || ${{ startsWith(github.ref, 'refs/tags/pre-v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/pre-v') }}
         run: |
           mkdir -p ~/.gradle
           echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> ~/.gradle/gradle.properties
@@ -82,3 +82,54 @@ jobs:
           tag: ${{ github.ref }}
           overwrite: true
           file_glob: true
+
+  build-desktop:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            format: deb
+            artifact: ease-music-player_*.deb
+          - os: macos-latest
+            format: dmg
+            artifact: ease-music-player-*.dmg
+          - os: windows-latest
+            format: msi
+            artifact: ease-music-player-*.msi
+    runs-on: ${{ matrix.os }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/pre-v') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set Up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "21"
+          cache: "gradle"
+      - name: Build native libs
+        run: |
+          cd rust-libs
+          cargo build -p ease-client-backend
+      - name: Generate UniFFI bindings
+        shell: bash
+        run: |
+          cd rust-libs
+          cargo run -p ease-client-android-ffi-builder generate \
+            --library ./target/debug/libease_client_backend.${{ matrix.os == 'macos-latest' && 'dylib' || matrix.os == 'windows-latest' && 'dll' || 'so' }} \
+            --language kotlin \
+            --out-dir ../composeApp/src/jvmShared/kotlin/
+      - name: Copy host native library
+        shell: bash
+        run: |
+          mkdir -p composeApp/src/desktopMain/resources/natives
+          EXT="so"
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then EXT="dylib"; fi
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then EXT="dll"; fi
+          cp rust-libs/target/debug/libease_client_backend.$EXT composeApp/src/desktopMain/resources/natives/
+      - name: Build Desktop distribution
+        run: ./gradlew :composeApp:packageDistributionForCurrentOS
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: composeApp/build/compose/binaries/${{ matrix.format }}/${{ matrix.artifact }}

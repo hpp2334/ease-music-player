@@ -14,6 +14,8 @@ val desktopModule = module {
             cacheDir = System.getProperty("java.io.tmpdir") + "/ease-music-player/",
         )
     }
-    single<PlayerController> { DesktopPlayerController() }
+    single<PlayerController> {
+        DesktopPlayerController(get(), get(), get(), get(), get(), get())
+    }
     single<PermissionManager> { DesktopPermissionManager() }
 }

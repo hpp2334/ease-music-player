@@ -56,6 +56,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import easemusicplayer.composeapp.generated.resources.Res
 import easemusicplayer.composeapp.generated.resources.*
+import com.kutedev.easemusicplayer.platform.BackHandler
 
 @Composable
 private fun ImportEntriesSkeleton() {
@@ -488,9 +489,9 @@ fun ImportMusicsPage(
         }
     }
 
-    // BackHandler(enabled = canUndo) {
-    //     doUndo()
-    // }
+    BackHandler(enabled = canUndo) {
+        doUndo()
+    }
     Column(
         modifier = Modifier
             .background(MaterialTheme.colorScheme.surface)

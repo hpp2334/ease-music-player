@@ -22,8 +22,19 @@
 
 -keep class uniffi.** { *; }
 -keep class com.sun.jna.** { *; }
+-keep class org.koin.** { *; }
+-keepclassmembers @kotlinx.serialization.Serializable class ** {
+    *** Companion;
+    *** serializer();
+}
+-keepclassmembers @kotlinx.serialization.Serializable class ** {
+    <fields>;
+}
+-keep class com.kutedev.easemusicplayer.** { *; }
 -dontwarn java.awt.Component
 -dontwarn java.awt.GraphicsEnvironment
 -dontwarn java.awt.HeadlessException
 -dontwarn java.awt.Window
+-dontwarn org.koin.**
+-dontwarn org.jetbrains.compose.**
 -keepattributes LineNumberTable,SourceFile
