@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ease_client_migration::converter;
-use ease_client_migration::entities::{music, playlist_music, storage};
+use ease_client_schema::entities::{music, playlist_music, storage};
 use ease_client_schema::{BlobId, StorageId, StorageModel};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 

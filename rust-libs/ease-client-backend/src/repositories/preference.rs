@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ease_client_migration::converter;
-use ease_client_migration::entities::preference;
+use ease_client_schema::entities::preference;
 use ease_client_schema::{PlayMode, PreferenceModel};
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
 

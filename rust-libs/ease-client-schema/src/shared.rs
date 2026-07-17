@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use serde::{Deserialize, Serialize};
 
 macro_rules! define_id {
@@ -13,13 +11,14 @@ macro_rules! define_id {
             PartialOrd,
             Ord,
             Copy,
-            bitcode::Encode,
-            bitcode::Decode,
             uniffi::Record,
+            Serialize,
+            Deserialize,
         )]
         pub struct $s {
             value: i64,
         }
+
         impl $s {
             pub fn wrap(value: i64) -> Self {
                 Self { value }
@@ -29,24 +28,6 @@ macro_rules! define_id {
         impl AsRef<i64> for $s {
             fn as_ref(&self) -> &i64 {
                 &self.value
-            }
-        }
-
-        impl serde::Serialize for $s {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                self.value.serialize(serializer)
-            }
-        }
-
-        impl<'de> serde::Deserialize<'de> for $s {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                i64::deserialize(deserializer).map(|p| Self { value: p })
             }
         }
     };
@@ -65,8 +46,6 @@ define_id!(PlaylistId);
     Hash,
     PartialEq,
     Eq,
-    bitcode::Encode,
-    bitcode::Decode,
     uniffi::Record,
     PartialOrd,
     Ord,
@@ -87,8 +66,6 @@ pub struct StorageEntryLoc {
     Serialize,
     Deserialize,
     uniffi::Enum,
-    bitcode::Decode,
-    bitcode::Encode,
 )]
 pub enum StorageType {
     Local,
@@ -107,8 +84,6 @@ pub enum StorageType {
     Serialize,
     Deserialize,
     uniffi::Enum,
-    bitcode::Decode,
-    bitcode::Encode,
 )]
 pub enum PlayMode {
     #[default]
@@ -117,6 +92,3 @@ pub enum PlayMode {
     List,
     ListLoop,
 }
-
-#[derive(Debug, Clone, Copy, bitcode::Encode, bitcode::Decode)]
-pub struct MusicDuration(pub Duration);

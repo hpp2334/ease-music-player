@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use ease_client_migration::{import_from_redb, open_database, entities::{music, playlist, storage, playlist_music, schema_version}};
+use ease_client_migration::{import_from_redb, open_database};
+use ease_client_schema::entities::{music, playlist, playlist_music, schema_version, storage};
 use sea_orm::{EntityTrait, PaginatorTrait};
 use sea_orm_migration::MigratorTrait;
 
@@ -9,7 +10,9 @@ async fn import_redb_fixture_to_sqlite() {
     let dir = tempfile::tempdir().unwrap();
 
     // Open the SQLite target first and run the schema migrations.
-    let db = open_database(dir.path().to_str().unwrap()).await.unwrap();
+    let db = open_database(dir.path().to_str().unwrap())
+        .await
+        .unwrap();
     ease_client_migration::Migrator::up(&db, None).await.unwrap();
 
     // Sanity: tables are present and empty before import.
@@ -25,7 +28,7 @@ async fn import_redb_fixture_to_sqlite() {
 
     import_from_redb(&tmp, &db).await.unwrap();
 
-    // After import, the SQLite schema_version should be 4.
+    // After import, the SQLite schema_version should be SCHEMA_VERSION.
     let row = schema_version::Entity::find_by_id(schema_version::Model::ROW_ID)
         .one(&db)
         .await

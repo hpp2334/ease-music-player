@@ -1,18 +1,20 @@
 #![allow(dead_code)]
 
-use ease_client_schema::v3::{self, MusicModel, PlaylistModel, PreferenceModel, StorageModel};
-use ease_client_schema::v2::{PlayMode, StorageType};
+use ease_client_schema::{
+    BlobId, DbKeyAlloc, MusicId, MusicModel, PlayMode, PlaylistId, PlaylistModel, PreferenceModel,
+    StorageEntryLoc, StorageId, StorageModel, StorageType,
+};
 
-use crate::entities::{blob, id_alloc, music, playlist, playlist_music, preference, storage};
+use ease_client_schema::entities::{blob, id_alloc, music, playlist, playlist_music, preference, storage};
 
 const FALSE_I32: i32 = 0;
 const TRUE_I32: i32 = 1;
 
-fn db_key_alloc_index(k: &v3::DbKeyAlloc) -> i32 {
+fn db_key_alloc_index(k: &DbKeyAlloc) -> i32 {
     match k {
-        v3::DbKeyAlloc::Playlist => 0,
-        v3::DbKeyAlloc::Music => 1,
-        v3::DbKeyAlloc::Storage => 2,
+        DbKeyAlloc::Playlist => 0,
+        DbKeyAlloc::Music => 1,
+        DbKeyAlloc::Storage => 2,
     }
 }
 
@@ -60,7 +62,7 @@ pub fn decode_order(s: &str) -> Vec<u32> {
     serde_json::from_str(s).unwrap_or_default()
 }
 
-pub fn id_alloc_from(kind: v3::DbKeyAlloc, next_id: i64) -> id_alloc::ActiveModel {
+pub fn id_alloc_from(kind: DbKeyAlloc, next_id: i64) -> id_alloc::ActiveModel {
     id_alloc::ActiveModel {
         kind: sea_orm::ActiveValue::Set(db_key_alloc_index(&kind)),
         next_id: sea_orm::ActiveValue::Set(next_id),
@@ -80,12 +82,12 @@ pub fn playlist_from(m: PlaylistModel) -> playlist::ActiveModel {
 
 pub fn playlist_to_model(row: playlist::Model) -> PlaylistModel {
     PlaylistModel {
-        id: v3::PlaylistId::wrap(row.id),
+        id: PlaylistId::wrap(row.id),
         title: row.title,
         created_time: row.created_time,
         picture: match (row.picture_storage_id, row.picture_path) {
-            (Some(sid), Some(path)) => Some(v3::StorageEntryLoc {
-                storage_id: v3::StorageId::wrap(sid),
+            (Some(sid), Some(path)) => Some(StorageEntryLoc {
+                storage_id: StorageId::wrap(sid),
                 path,
             }),
             _ => None,
@@ -111,17 +113,17 @@ pub fn music_from(m: MusicModel) -> music::ActiveModel {
 
 pub fn music_to_model(row: music::Model) -> MusicModel {
     MusicModel {
-        id: v3::MusicId::wrap(row.id),
-        loc: v3::StorageEntryLoc {
-            storage_id: v3::StorageId::wrap(row.loc_storage_id),
+        id: MusicId::wrap(row.id),
+        loc: StorageEntryLoc {
+            storage_id: StorageId::wrap(row.loc_storage_id),
             path: row.loc_path,
         },
         title: row.title,
         duration: row.duration_ms.map(|ms| std::time::Duration::from_millis(ms as u64)),
-        cover: row.cover_blob_id.map(v3::BlobId::wrap),
+        cover: row.cover_blob_id.map(BlobId::wrap),
         lyric: match (row.lyric_storage_id, row.lyric_path) {
-            (Some(sid), Some(path)) => Some(v3::StorageEntryLoc {
-                storage_id: v3::StorageId::wrap(sid),
+            (Some(sid), Some(path)) => Some(StorageEntryLoc {
+                storage_id: StorageId::wrap(sid),
                 path,
             }),
             _ => None,
@@ -131,7 +133,7 @@ pub fn music_to_model(row: music::Model) -> MusicModel {
     }
 }
 
-pub fn playlist_music_from(playlist_id: v3::PlaylistId, music_id: v3::MusicId) -> playlist_music::ActiveModel {
+pub fn playlist_music_from(playlist_id: PlaylistId, music_id: MusicId) -> playlist_music::ActiveModel {
     playlist_music::ActiveModel {
         playlist_id: sea_orm::ActiveValue::Set(*playlist_id.as_ref()),
         music_id: sea_orm::ActiveValue::Set(*music_id.as_ref()),
@@ -152,7 +154,7 @@ pub fn storage_from(m: StorageModel) -> storage::ActiveModel {
 
 pub fn storage_to_model(row: storage::Model) -> StorageModel {
     StorageModel {
-        id: v3::StorageId::wrap(row.id),
+        id: StorageId::wrap(row.id),
         addr: row.addr,
         alias: row.alias,
         username: row.username,

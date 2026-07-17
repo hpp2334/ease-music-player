@@ -1,26 +1,25 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ease_client_schema::v3;
+use crate::legacy::schema_v3 as v3;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Set, TransactionTrait};
 use sea_orm_migration::MigratorTrait;
 
 pub mod converter;
-pub mod entities;
-pub mod legacy;
+pub(crate) mod legacy;
 pub mod migrations;
 
 pub use sea_orm::DatabaseConnection as DbConn;
 
-use crate::entities::{blob, id_alloc, music, playlist, playlist_music, preference, schema_version, storage};
-use crate::legacy::v3::TABLE_BLOB as V3_TABLE_BLOB;
-use crate::legacy::v3::TABLE_ID_ALLOC as V3_TABLE_ID_ALLOC;
-use crate::legacy::v3::TABLE_MUSIC as V3_TABLE_MUSIC;
-use crate::legacy::v3::TABLE_MUSIC_PLAYLIST as V3_TABLE_MUSIC_PLAYLIST;
-use crate::legacy::v3::TABLE_PLAYLIST as V3_TABLE_PLAYLIST;
-use crate::legacy::v3::TABLE_PREFERENCE as V3_TABLE_PREFERENCE;
-use crate::legacy::v3::TABLE_STORAGE as V3_TABLE_STORAGE;
-use crate::legacy::v3::TABLE_SCHEMA_VERSION as V3_TABLE_SCHEMA_VERSION;
+use ease_client_schema::entities::{blob, id_alloc, music, playlist, playlist_music, preference, schema_version, storage};
+use crate::legacy::redb_v3::TABLE_BLOB as V3_TABLE_BLOB;
+use crate::legacy::redb_v3::TABLE_ID_ALLOC as V3_TABLE_ID_ALLOC;
+use crate::legacy::redb_v3::TABLE_MUSIC as V3_TABLE_MUSIC;
+use crate::legacy::redb_v3::TABLE_MUSIC_PLAYLIST as V3_TABLE_MUSIC_PLAYLIST;
+use crate::legacy::redb_v3::TABLE_PLAYLIST as V3_TABLE_PLAYLIST;
+use crate::legacy::redb_v3::TABLE_PREFERENCE as V3_TABLE_PREFERENCE;
+use crate::legacy::redb_v3::TABLE_STORAGE as V3_TABLE_STORAGE;
+use crate::legacy::redb_v3::TABLE_SCHEMA_VERSION as V3_TABLE_SCHEMA_VERSION;
 use crate::legacy::{upgrade_v1_to_v2, upgrade_v2_to_v3};
 use redb::{ReadableMultimapTable, ReadableTable};
 
@@ -82,30 +81,30 @@ pub async fn import_from_redb(
 
     let playlist_rows = read_all_playlists(&redb_db)?;
     for m in playlist_rows {
-        converter::playlist_from(m).insert(&txn).await?;
+        converter::playlist_from(m.into()).insert(&txn).await?;
     }
 
     let music_rows = read_all_music(&redb_db)?;
     for m in music_rows {
-        converter::music_from(m).insert(&txn).await?;
+        converter::music_from(m.into()).insert(&txn).await?;
     }
 
     let storage_rows = read_all_storage(&redb_db)?;
     for m in storage_rows {
-        converter::storage_from(m).insert(&txn).await?;
+        converter::storage_from(m.into()).insert(&txn).await?;
     }
 
     let playlist_music_rows = read_all_playlist_music(&redb_db)?;
     for (pid, mid) in playlist_music_rows {
-        converter::playlist_music_from(pid, mid).insert(&txn).await?;
+        converter::playlist_music_from(pid.into(), mid.into()).insert(&txn).await?;
     }
 
     if let Some(pref) = read_preference(&redb_db)? {
-        converter::preference_from(pref).insert(&txn).await?;
+        converter::preference_from(pref.into()).insert(&txn).await?;
     }
 
     for (kind, next_id) in read_id_alloc(&redb_db)? {
-        converter::id_alloc_from(kind, next_id).insert(&txn).await?;
+        converter::id_alloc_from(kind.into(), next_id).insert(&txn).await?;
     }
 
     if let Some(next_blob_id) = read_blob_next_id(&redb_db)? {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ease_client_migration::entities::schema_version;
+use ease_client_schema::entities::schema_version;
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
 
 use crate::error::BResult;
