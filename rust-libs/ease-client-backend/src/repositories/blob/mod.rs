@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use ease_client_migration::DbConn;
-use ease_client_migration::entities::blob;
+use ease_client_schema::entities::blob;
 use ease_client_schema::BlobId;
 use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait};
 

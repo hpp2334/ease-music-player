@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use ease_client_schema::v2::{
+use super::schema_v2::{
     BlobId, DbKeyAlloc, MusicId, PlaylistId, StorageEntryLoc, StorageId, MusicModel,
     PlaylistModel, PreferenceModel, StorageModel,
 };

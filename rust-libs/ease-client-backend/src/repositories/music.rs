@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use ease_client_migration::converter;
-use ease_client_migration::entities::{music, playlist_music};
+use ease_client_schema::entities::{music, playlist_music};
 use ease_client_schema::{BlobId, MusicId, MusicModel, PlaylistId, StorageEntryLoc};
 use ease_order_key::OrderKey;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};

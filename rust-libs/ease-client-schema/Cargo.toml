@@ -7,7 +7,4 @@ license = "GPL-3.0"
 [dependencies]
 serde = { workspace = true }
 uniffi = { workspace = true }
-bitcode = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
+sea-orm = { workspace = true }

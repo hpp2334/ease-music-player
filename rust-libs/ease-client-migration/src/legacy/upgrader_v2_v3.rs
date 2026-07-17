@@ -5,9 +5,9 @@ use redb::{
     WriteTransaction,
 };
 
-use super::v2 as legacy_v2;
-use super::v3 as legacy_v3;
-use ease_client_schema::v3;
+use super::redb_v2 as legacy_v2;
+use super::redb_v3 as legacy_v3;
+use super::schema_v3 as v3;
 
 use legacy_v3::{
     TABLE_BLOB, TABLE_ID_ALLOC, TABLE_MUSIC, TABLE_MUSIC_BY_LOC, TABLE_MUSIC_PLAYLIST,

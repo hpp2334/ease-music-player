@@ -1,10 +1,10 @@
 use redb::{ReadTransaction, ReadableMultimapTable};
 
-use ease_client_schema::v2::*;
+use super::schema_v2::*;
 
 use std::sync::Arc;
 
-use super::v2::{TABLE_MUSIC, TABLE_SCHEMA_VERSION, TABLE_STORAGE_MUSIC};
+use super::redb_v2::{TABLE_MUSIC, TABLE_SCHEMA_VERSION, TABLE_STORAGE_MUSIC};
 
 fn load_music_impl(db: &ReadTransaction, id: MusicId) -> anyhow::Result<Option<MusicModel>> {
     let table_music = db.open_table(TABLE_MUSIC)?;

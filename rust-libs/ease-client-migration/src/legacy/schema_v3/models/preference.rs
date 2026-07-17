@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::v2::PlayMode;
+use super::super::objects::PlayMode;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PreferenceModel {

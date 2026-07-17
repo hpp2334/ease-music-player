@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use ease_client_migration::DbConn;
-use ease_client_migration::entities::{blob, id_alloc};
+use ease_client_schema::entities::{blob, id_alloc};
 use ease_client_schema::DbKeyAlloc;
 use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait};
 

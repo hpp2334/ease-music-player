@@ -1,4 +1,4 @@
-use crate::{v2, v3};
+use crate::legacy::{schema_v2 as v2, schema_v3 as v3};
 
 impl From<v2::DbKeyAlloc> for v3::DbKeyAlloc {
     fn from(v2: v2::DbKeyAlloc) -> Self {
