@@ -51,3 +51,9 @@ rust-libs/ease-remote-storage/src/generated.rs
 **/node_modules
 
 .fuse*
+
+# Build cache & local state
+.gradle/
+/build/
+.metadata
+.vscode/
