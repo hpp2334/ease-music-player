@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use ease_client_tokio::tokio_runtime;
 
 use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc};
 use ease_order_key::{OrderKey, OrderKeyRef};
@@ -17,24 +18,29 @@ use crate::{
 
 #[uniffi::export]
 pub async fn ct_get_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<Option<Playlist>> {
-    let cx = cx.get_context();
-    get_playlist(cx, arg).await
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        get_playlist(cx, arg).await
+    }).await.unwrap()
 }
 
 #[uniffi::export]
 pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BResult<()> {
-    let cx = cx.get_context();
-    cx.database_server()
-        .update_playlist(arg.id, arg.title, arg.cover)
-        .await?;
-
-    Ok(())
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        cx.database_server()
+            .update_playlist(arg.id, arg.title, arg.cover)
+            .await?;
+        Ok(())
+    }).await.unwrap()
 }
 
 #[uniffi::export]
 pub async fn ct_list_playlist(cx: Arc<Backend>) -> BResult<Vec<PlaylistAbstract>> {
-    let cx = cx.get_context();
-    get_all_playlist_abstracts(cx).await
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        get_all_playlist_abstracts(cx).await
+    }).await.unwrap()
 }
 
 #[derive(uniffi::Record)]
@@ -48,47 +54,49 @@ pub async fn ct_create_playlist(
     cx: Arc<Backend>,
     arg: ArgCreatePlaylist,
 ) -> BResult<RetCreatePlaylist> {
-    let cx = cx.get_context();
-    let current_time_ms = cx.current_time().as_millis() as i64;
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        let current_time_ms = cx.current_time().as_millis() as i64;
 
-    let musics = arg
-        .entries
-        .clone()
-        .into_iter()
-        .map(|arg| {
-            let entry = arg.entry;
-            let name = arg.name;
-            ArgDBAddMusic {
-                loc: StorageEntryLoc {
-                    storage_id: entry.storage_id,
-                    path: entry.path,
-                },
-                title: name,
-            }
+        let musics = arg
+            .entries
+            .clone()
+            .into_iter()
+            .map(|arg| {
+                let entry = arg.entry;
+                let name = arg.name;
+                ArgDBAddMusic {
+                    loc: StorageEntryLoc {
+                        storage_id: entry.storage_id,
+                        path: entry.path,
+                    },
+                    title: name,
+                }
+            })
+            .collect();
+
+        let last_order = get_all_playlist_abstracts(cx)
+            .await?
+            .last()
+            .map(|v| OrderKey::wrap(v.meta.order.clone()))
+            .unwrap_or_default();
+
+        let (playlist_id, music_ids) = cx
+            .database_server()
+            .create_playlist(
+                arg.title,
+                arg.cover.clone(),
+                musics,
+                current_time_ms,
+                OrderKey::greater(&last_order),
+            )
+            .await?;
+
+        Ok(RetCreatePlaylist {
+            id: playlist_id,
+            music_ids,
         })
-        .collect();
-
-    let last_order = get_all_playlist_abstracts(cx)
-        .await?
-        .last()
-        .map(|v| OrderKey::wrap(v.meta.order.clone()))
-        .unwrap_or_default();
-
-    let (playlist_id, music_ids) = cx
-        .database_server()
-        .create_playlist(
-            arg.title,
-            arg.cover.clone(),
-            musics,
-            current_time_ms,
-            OrderKey::greater(&last_order),
-        )
-        .await?;
-
-    Ok(RetCreatePlaylist {
-        id: playlist_id,
-        music_ids,
-    })
+    }).await.unwrap()
 }
 
 #[uniffi::export]
@@ -96,39 +104,41 @@ pub async fn ct_add_musics_to_playlist(
     cx: Arc<Backend>,
     arg: ArgAddMusicsToPlaylist,
 ) -> BResult<Vec<AddedMusic>> {
-    let cx = cx.get_context();
-    let musics = arg
-        .entries
-        .clone()
-        .into_iter()
-        .map(|arg| {
-            let entry = arg.entry;
-            let name = arg.name;
-            ArgDBAddMusic {
-                loc: StorageEntryLoc {
-                    storage_id: entry.storage_id,
-                    path: entry.path,
-                },
-                title: name,
-            }
-        })
-        .collect();
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        let musics = arg
+            .entries
+            .clone()
+            .into_iter()
+            .map(|arg| {
+                let entry = arg.entry;
+                let name = arg.name;
+                ArgDBAddMusic {
+                    loc: StorageEntryLoc {
+                        storage_id: entry.storage_id,
+                        path: entry.path,
+                    },
+                    title: name,
+                }
+            })
+            .collect();
 
-    let Some(playlist) = get_playlist(cx, arg.id).await? else {
-        return Err(BError::PlaylistNotFound(arg.id));
-    };
-    let last_order = playlist
-        .musics
-        .last()
-        .map(|v| OrderKey::wrap(v.meta.order.clone()))
-        .unwrap_or(OrderKey::default());
+        let Some(playlist) = get_playlist(cx, arg.id).await? else {
+            return Err(BError::PlaylistNotFound(arg.id));
+        };
+        let last_order = playlist
+            .musics
+            .last()
+            .map(|v| OrderKey::wrap(v.meta.order.clone()))
+            .unwrap_or(OrderKey::default());
 
-    let ret = cx
-        .database_server()
-        .add_musics_to_playlist(arg.id, musics, last_order)
-        .await?;
+        let ret = cx
+            .database_server()
+            .add_musics_to_playlist(arg.id, musics, last_order)
+            .await?;
 
-    Ok(ret)
+        Ok(ret)
+    }).await.unwrap()
 }
 
 #[uniffi::export]
@@ -136,12 +146,13 @@ pub async fn ct_remove_music_from_playlist(
     cx: Arc<Backend>,
     arg: ArgRemoveMusicFromPlaylist,
 ) -> BResult<()> {
-    let cx = cx.get_context();
-    cx.database_server()
-        .remove_music_from_playlist(arg.playlist_id, arg.music_id)
-        .await?;
-
-    Ok(())
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        cx.database_server()
+            .remove_music_from_playlist(arg.playlist_id, arg.music_id)
+            .await?;
+        Ok(())
+    }).await.unwrap()
 }
 
 #[derive(uniffi::Record)]
@@ -153,8 +164,10 @@ pub struct ArgReorderPlaylist {
 
 #[uniffi::export]
 pub async fn cts_reorder_playlist(cx: Arc<Backend>, arg: ArgReorderPlaylist) -> BResult<()> {
-    let cx = cx.get_context();
-    reorder_playlist_inner(cx, arg).await
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        reorder_playlist_inner(cx, arg).await
+    }).await.unwrap()
 }
 
 async fn reorder_playlist_inner(cx: &BackendContext, arg: ArgReorderPlaylist) -> BResult<()> {
@@ -211,10 +224,11 @@ async fn reorder_playlist_inner(cx: &BackendContext, arg: ArgReorderPlaylist) ->
 
 #[uniffi::export]
 pub async fn ct_remove_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<()> {
-    let cx = cx.get_context();
-    cx.database_server().remove_playlist(arg).await?;
-
-    Ok(())
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        cx.database_server().remove_playlist(arg).await?;
+        Ok(())
+    }).await.unwrap()
 }
 
 #[derive(uniffi::Record)]
@@ -227,8 +241,10 @@ pub struct ArgReorderMusic {
 
 #[uniffi::export]
 pub async fn cts_reorder_music_in_playlist(cx: Arc<Backend>, arg: ArgReorderMusic) -> BResult<()> {
-    let cx = cx.get_context();
-    reorder_music_in_playlist_inner(cx, arg).await
+    tokio_runtime().handle().spawn(async move {
+        let cx = cx.get_context();
+        reorder_music_in_playlist_inner(cx, arg).await
+    }).await.unwrap()
 }
 
 async fn reorder_music_in_playlist_inner(cx: &BackendContext, arg: ArgReorderMusic) -> BResult<()> {

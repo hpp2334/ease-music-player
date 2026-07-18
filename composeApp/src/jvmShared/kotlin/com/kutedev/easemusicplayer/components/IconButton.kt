@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -57,6 +58,7 @@ fun EaseIconButton(
     onClick: () -> Unit,
     overrideColors: EaseIconButtonColors? = null,
     disabled: Boolean = false,
+    testTag: String? = null,
 ) {
     val buttonSize = easeIconButtonSizeToDp(sizeType)
     val isVariant = buttonType == EaseIconButtonType.Primary || buttonType == EaseIconButtonType.ErrorVariant
@@ -107,6 +109,7 @@ fun EaseIconButton(
     Box(
         modifier = Modifier
             .size(buttonSize)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
             .clip(RoundedCornerShape(999.dp))
             .background(buttonBg)
             .clickable(

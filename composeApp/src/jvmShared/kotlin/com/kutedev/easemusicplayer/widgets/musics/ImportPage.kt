@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.components.EaseCheckbox
 import com.kutedev.easemusicplayer.components.EaseIconButton
@@ -289,6 +290,7 @@ private fun ImportEntries(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .offset((-40).dp, (-40).dp)
+                    .testTag("btn_import_confirm")
             ) {
                 Icon(
                     painter = painterResource(Res.drawable.icon_yes),
