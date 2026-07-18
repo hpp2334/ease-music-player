@@ -86,7 +86,20 @@ kotlin {
                 implementation("org.openjfx:javafx-base:$jfx:$javafxClassifier")
             }
         }
+        @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+        val desktopTest by getting {
+            dependencies {
+                implementation(compose.uiTest)
+                implementation(compose.uiTestJUnit4)
+                implementation(libs.junit)
+            }
+        }
     }
+}
+
+tasks.withType<Test>().configureEach {
+    systemProperty("jna.library.path", layout.projectDirectory.dir("../rust-libs/target/debug").asFile.absolutePath)
+    jvmArgs("-Xmx2g")
 }
 
 android {

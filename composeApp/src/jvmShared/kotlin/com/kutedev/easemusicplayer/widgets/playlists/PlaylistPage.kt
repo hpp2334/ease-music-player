@@ -176,7 +176,8 @@ private fun PlaylistHeader(
                     buttonType = EaseIconButtonType.Surface,
                     overrideColors = EaseIconButtonColors().copy(iconTint = Color.White),
                     painter = painterResource(Res.drawable.icon_vertialcal_more),
-                    onClick = { moreMenuExpanded = true; }
+                    onClick = { moreMenuExpanded = true; },
+                    testTag = "btn_playlist_more"
                 )
                 Box(
                     contentAlignment = Alignment.TopEnd,

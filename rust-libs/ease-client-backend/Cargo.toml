@@ -34,7 +34,7 @@ tracing-subscriber = "0.3.0"
 serde = { workspace = true }
 sea-orm = { workspace = true }
 libsqlite3-sys = { workspace = true }
-uniffi = { workspace = true }
+uniffi = { workspace = true, features = ["tokio"] }
 ease-client-schema = { workspace = true }
 ease-client-migration = { workspace = true }
 ease-client-tokio = { workspace = true }

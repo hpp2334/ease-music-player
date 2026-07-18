@@ -28,7 +28,7 @@ pub(crate) async fn load_storage_entry_data(
     loc: &StorageEntryLoc,
 ) -> BResult<Option<Vec<u8>>> {
     let loc = loc.clone();
-    let backend = get_storage_backend(cx, loc.storage_id)?;
+    let backend = get_storage_backend(cx, loc.storage_id).await?;
     if let Some(backend) = backend {
         tracing::trace!("start load");
         let ret = match backend.get(loc.path, 0).await {
@@ -90,7 +90,7 @@ pub(crate) fn evict_storage_backend_cache(cx: &BackendContext, storage_id: Stora
     w.remove(&storage_id);
 }
 
-pub fn get_storage_backend(
+pub async fn get_storage_backend(
     cx: &BackendContext,
     storage_id: StorageId,
 ) -> BResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
@@ -102,34 +102,32 @@ pub fn get_storage_backend(
         }
     }
 
-    ease_client_tokio::tokio_runtime().block_on(async {
-        let model = cx.database_server().load_storage(storage_id).await?;
-        let music_count = cx.database_server().load_storage_music_count(storage_id).await?;
+    let model = cx.database_server().load_storage(storage_id).await?;
+    let music_count = cx.database_server().load_storage_music_count(storage_id).await?;
 
-        if model.is_none() {
-            return Ok::<_, crate::error::BError>(None);
-        }
-        let storage = model.unwrap();
-        let storage = build_storage(storage, music_count);
-        let backend = build_storage_backend_by_arg(
-            cx,
-            ArgUpsertStorage {
-                id: None,
-                addr: storage.addr,
-                alias: storage.alias,
-                username: storage.username,
-                password: storage.password,
-                is_anonymous: storage.is_anonymous,
-                typ: storage.typ,
-            },
-        )?;
+    if model.is_none() {
+        return Ok(None);
+    }
+    let storage = model.unwrap();
+    let storage = build_storage(storage, music_count);
+    let backend = build_storage_backend_by_arg(
+        cx,
+        ArgUpsertStorage {
+            id: None,
+            addr: storage.addr,
+            alias: storage.alias,
+            username: storage.username,
+            password: storage.password,
+            is_anonymous: storage.is_anonymous,
+            typ: storage.typ,
+        },
+    )?;
 
-        {
-            let mut state = cx.storage_state().cache.write().unwrap();
-            state.insert(storage_id, backend.clone());
-        }
-        Ok(Some(backend))
-    })
+    {
+        let mut state = cx.storage_state().cache.write().unwrap();
+        state.insert(storage_id, backend.clone());
+    }
+    Ok(Some(backend))
 }
 
 pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
@@ -161,7 +159,7 @@ async fn get_asset_file_by_loc(
     entry: StorageEntryLoc,
     byte_offset: u64,
 ) -> BResult<Option<StreamFile>> {
-    let storage_backend = get_storage_backend(cx, entry.storage_id)?;
+    let storage_backend = get_storage_backend(cx, entry.storage_id).await?;
     let Some(storage_backend) = storage_backend else {
         return Ok(None);
     };

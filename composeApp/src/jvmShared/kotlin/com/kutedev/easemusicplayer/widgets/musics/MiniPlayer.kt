@@ -99,6 +99,7 @@ private fun MiniPlayerCore(
                             disabled = loading,
                             painter = painterResource(Res.drawable.icon_play),
                             onClick = onPlay,
+                            testTag = "btn_play",
                         )
                     } else {
                         EaseIconButton(
@@ -106,6 +107,7 @@ private fun MiniPlayerCore(
                             buttonType = EaseIconButtonType.Default,
                             painter = painterResource(Res.drawable.icon_pause),
                             onClick = onPause,
+                            testTag = "btn_pause",
                         )
                     }
                     EaseIconButton(
@@ -114,12 +116,14 @@ private fun MiniPlayerCore(
                         painter = painterResource(Res.drawable.icon_play_next),
                         disabled = !canNext,
                         onClick = onNext,
+                        testTag = "btn_next",
                     )
                     EaseIconButton(
                         sizeType = EaseIconButtonSize.Medium,
                         buttonType = EaseIconButtonType.Default,
                         painter = painterResource(Res.drawable.icon_stop),
                         onClick = onStop,
+                        testTag = "btn_stop",
                     )
                 }
             }
