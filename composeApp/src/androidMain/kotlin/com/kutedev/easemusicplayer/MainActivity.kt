@@ -16,13 +16,12 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import com.kutedev.easemusicplayer.core.KeepBackendService
 import com.kutedev.easemusicplayer.core.PlaybackService
+import com.kutedev.easemusicplayer.lifecycle.AppLifecycle
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.PermissionManager
 import com.kutedev.easemusicplayer.singleton.PermissionRepository
 import com.kutedev.easemusicplayer.singleton.PlayerController
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
-import com.kutedev.easemusicplayer.singleton.PlayerRepository
-import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
@@ -33,10 +32,9 @@ import kotlin.system.exitProcess
 class MainActivity : ComponentActivity(), KoinComponent {
     private val bridge: Bridge by inject()
     private val storageRepository: StorageRepository by inject()
-    private val playlistRepository: PlaylistRepository by inject()
     private val playerController: PlayerController by inject()
-    private val playerRepository: PlayerRepository by inject()
     private val permissionManager: PermissionManager by inject()
+    private val appLifecycle: AppLifecycle by inject()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,10 +58,8 @@ class MainActivity : ComponentActivity(), KoinComponent {
         super.onStart()
         ensurePostNotificationsPermission()
 
+        appLifecycle.onStartup()
         lifecycleScope.launch {
-            playerRepository.reload()
-            storageRepository.reload()
-            playlistRepository.reload()
             setupMediaController()
         }
     }

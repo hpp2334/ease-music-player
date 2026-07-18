@@ -2,6 +2,7 @@ package com.kutedev.easemusicplayer
 
 import com.kutedev.easemusicplayer.di.appModule
 import com.kutedev.easemusicplayer.di.desktopModule
+import com.kutedev.easemusicplayer.lifecycle.AppLifecycle
 import com.kutedev.easemusicplayer.platform.TrayController
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.DesktopPlayerController
@@ -12,6 +13,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -20,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.koin.core.context.startKoin
+import javax.imageio.ImageIO
 
 fun main() {
     val nativeLibDir = "../rust-libs/target/debug"
@@ -31,6 +36,10 @@ fun main() {
 
     val bridge = koin.get<Bridge>()
     bridge.initialize()
+
+    koin.get<AppLifecycle>().onStartup()
+
+    val appIcon = loadAppIcon()
 
     val playerController = koin.get<PlayerController>() as DesktopPlayerController
     val playerRepository = koin.get<PlayerRepository>()
@@ -87,9 +96,17 @@ fun main() {
             },
             visible = windowVisible,
             state = windowState,
-            title = "Ease Music Player"
+            title = "Ease Music Player",
+            icon = appIcon?.let { BitmapPainter(it) },
         ) {
             Root()
         }
     }
 }
+
+private fun loadAppIcon(): ImageBitmap? = runCatching {
+    Thread.currentThread().contextClassLoader
+        ?.getResourceAsStream("ic_launcher.png")
+        ?.use { ImageIO.read(it) }
+        ?.toComposeImageBitmap()
+}.getOrNull()

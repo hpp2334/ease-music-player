@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.di
 
+import com.kutedev.easemusicplayer.lifecycle.AppLifecycle
 import com.kutedev.easemusicplayer.singleton.AssetRepository
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.ImportRepository
@@ -36,6 +37,7 @@ val appModule = module {
     singleOf(::PlayerRepository)
     singleOf(::StorageRepository)
     singleOf(::PlaylistRepository)
+    singleOf(::AppLifecycle)
 
     viewModelOf(::PlaylistsVM)
     viewModelOf(::SleepModeVM)
