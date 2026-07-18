@@ -91,6 +91,7 @@ fn setup_panic_hook() {
 
         tracing::error!("panic info: {}", info);
         tracing::error!("panic stacktrace: {}", stacktrace);
+        eprintln!("rust panic: {}\n{}", info, stacktrace);
 
         std::process::abort()
     }));
