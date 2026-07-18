@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { COMPOSE_APP, ENVS, ROOT, RUST_LIBS_ROOTS, TARGETS } from "./base";
+import { ROOT, RUST_LIBS_ROOTS, TARGETS } from "./base";
 import path from "node:path";
 
 console.log("Build ease-client in debug mode");
@@ -8,10 +8,22 @@ execSync(`cargo build -p ease-client-backend`, {
   cwd: RUST_LIBS_ROOTS,
 });
 
+// Host cdylib filename varies by platform:
+//   windows: ease_client_backend.dll
+//   mac:     libease_client_backend.dylib
+//   linux:   libease_client_backend.so
+const hostLibName =
+  process.platform === "win32"
+    ? "ease_client_backend.dll"
+    : process.platform === "darwin"
+      ? "libease_client_backend.dylib"
+      : "libease_client_backend.so";
+const hostLib = path.resolve(RUST_LIBS_ROOTS, "target/debug", hostLibName);
+
 for (const buildTarget of TARGETS) {
-  console.log(`Generate kotlin bindings`);
+  console.log(`Generate kotlin bindings of ${buildTarget}`);
   execSync(
-    `cargo run -p ease-client-android-ffi-builder generate --library ${path.resolve(RUST_LIBS_ROOTS, "./target/debug/libease_client_backend.so")} --language kotlin --out-dir ${path.resolve(COMPOSE_APP, "src/jvmShared/kotlin/")}`,
+    `cargo run -p ease-client-android-ffi-builder generate --library ${hostLib} --language kotlin --out-dir ${path.resolve(ROOT, "android/app/src/main/java/")}`,
     {
       stdio: "inherit",
       cwd: RUST_LIBS_ROOTS,
@@ -23,19 +35,9 @@ for (const buildTarget of TARGETS) {
     },
   );
 
-  if (!ENVS.Build) {
-    console.log(`Copy host native library for desktop`);
-    const libExt = process.platform === "darwin" ? "dylib" : "so";
-    const hostLib = path.resolve(RUST_LIBS_ROOTS, `./target/debug/libease_client_backend.${libExt}`);
-    const desktopNatives = path.resolve(COMPOSE_APP, "src/desktopMain/resources/natives");
-    execSync(`mkdir -p ${desktopNatives} && cp ${hostLib} ${desktopNatives}/`, {
-      stdio: "inherit",
-    });
-  }
-
-  console.log(`Generate jniLibs for ${buildTarget}`);
+  console.log(`Generate jniLibs of ${buildTarget}`);
   execSync(
-    `cargo ndk --no-strip --target ${buildTarget} -o ${path.resolve(COMPOSE_APP, "src/androidMain/jniLibs")} build --release --lib`,
+    `cargo ndk --no-strip --target ${buildTarget} -o ${path.resolve(ROOT, "android/app/src/main/jniLibs")} build --release --lib`,
     {
       stdio: "inherit",
       cwd: RUST_LIBS_ROOTS,
