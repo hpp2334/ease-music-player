@@ -1,6 +1,5 @@
 package com.kutedev.easemusicplayer.singleton
 
-import com.kutedev.easemusicplayer.audio.StreamingHttpServer
 import javafx.application.Platform
 import javafx.scene.media.Media
 import javafx.scene.media.MediaPlayer
@@ -36,7 +35,6 @@ class DesktopPlayerController(
     private val scope: CoroutineScope
 ) : PlayerController {
 
-    private val httpServer = StreamingHttpServer(bridge, scope)
     private var _mediaPlayer: MediaPlayer? = null
 
     private val _sleep = MutableStateFlow(SleepModeState())
@@ -46,8 +44,7 @@ class DesktopPlayerController(
     override val sleepState = _sleep.asStateFlow()
 
     init {
-        httpServer.start()
-        easeLog("desktop http server started on port ${httpServer.port}")
+        easeLog("desktop player initialized (rust streaming server)")
 
         scope.launch {
             playlistRepository.preRemovePlaylistEvent.collect { id ->
@@ -165,7 +162,12 @@ class DesktopPlayerController(
                 playerRepository.setCurrent(music!!, playlist!!)
                 playerRepository.setIsLoading(true)
 
-                val url = "${httpServer.baseUrl}/music/${id.value}"
+                val baseUrl = bridge.runSyncRaw { it.streamingBaseUrl() }
+                    ?: run {
+                        easeError("streaming base URL is null; init() not called?")
+                        return@launch
+                    }
+                val url = "$baseUrl/music/${id.value}"
                 easeLog("desktop player playing: $url")
                 createMediaPlayer(url, id)
             } else {
@@ -264,7 +266,6 @@ class DesktopPlayerController(
             _mediaPlayer?.dispose()
             _mediaPlayer = null
         }
-        httpServer.stop()
         easeLog("desktop player destroyed")
     }
 }
