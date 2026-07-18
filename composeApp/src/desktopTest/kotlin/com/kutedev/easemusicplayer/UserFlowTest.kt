@@ -105,7 +105,7 @@ class UserFlowTest {
         stopKoin()
     }
 
-    private fun saveScreenshot(path: String) {
+    private fun saveScreenshot(name: String) {
         val bitmap = composeRule.onNodeWithTag("screen_root").captureToImage()
         val pixelMap = bitmap.toPixelMap()
         val w = bitmap.width
@@ -120,7 +120,9 @@ class UserFlowTest {
                 image.setRGB(x, y, rgb)
             }
         }
-        val f = File(path)
+        val dir = File(System.getProperty("java.io.tmpdir"), "ease-user-flow")
+        dir.mkdirs()
+        val f = File(dir, name)
         ImageIO.write(image, "PNG", f)
         println("Saved: ${f.absolutePath} (${f.length()} bytes)")
     }
@@ -159,28 +161,28 @@ class UserFlowTest {
     @Test
     fun fullUserFlow() {
         startApp()
-        saveScreenshot("/tmp/uf-01-initial.png")
+        saveScreenshot("uf-01-initial.png")
 
         // === STEP 1: Create playlist via UI ===
         println("=== STEP 1: Create playlist ===")
         composeRule.onNodeWithText("Empty Playlists. Tap to add one.").performClick()
         composeRule.waitForIdle(); Thread.sleep(500)
-        saveScreenshot("/tmp/uf-02-dialog.png")
+        saveScreenshot("uf-02-dialog.png")
 
         composeRule.onNodeWithText("EMPTY").performClick()
         composeRule.waitForIdle(); Thread.sleep(500)
-        saveScreenshot("/tmp/uf-03-empty-tab.png")
+        saveScreenshot("uf-03-empty-tab.png")
 
         composeRule.onNode(hasSetTextAction()).performTextInput("My Test Playlist")
         composeRule.waitForIdle(); Thread.sleep(500)
-        saveScreenshot("/tmp/uf-04-name-entered.png")
+        saveScreenshot("uf-04-name-entered.png")
 
         composeRule.mainClock.autoAdvance = false
         composeRule.onAllNodesWithText("OK")[0].performClick()
         Thread.sleep(3000)
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
-        saveScreenshot("/tmp/uf-05-playlist-created.png")
+        saveScreenshot("uf-05-playlist-created.png")
 
         // === STEP 2: Import music via backend (simulating WebDAV import) ===
         println("=== STEP 2: Import music from WebDAV ===")
@@ -191,7 +193,7 @@ class UserFlowTest {
 
             bridge.run {
                 ctUpsertStorage(it, ArgUpsertStorage(
-                    id = null, addr = "http://localhost:5000",
+                    id = null, addr = "http://local.hpp2334.com:5000",
                     alias = "Test WebDAV", username = "world", password = "a123456",
                     isAnonymous = false, typ = StorageType.WEBDAV,
                 ))
@@ -219,7 +221,7 @@ class UserFlowTest {
         }
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle(); Thread.sleep(2000); composeRule.waitForIdle()
-        saveScreenshot("/tmp/uf-06-music-imported.png")
+        saveScreenshot("uf-06-music-imported.png")
 
         // === STEP 3: Test playback ===
         println("=== STEP 3: Test playback ===")
@@ -238,14 +240,14 @@ class UserFlowTest {
         }
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle(); Thread.sleep(1000); composeRule.waitForIdle()
-        saveScreenshot("/tmp/uf-07-playing.png")
+        saveScreenshot("uf-07-playing.png")
         println("Play calls: ${testController.playCallCount}, isPlaying: ${testController.isPlaying}")
 
         // === STEP 4: Pause ===
         println("=== STEP 4: Pause ===")
         testController.pause()
         composeRule.waitForIdle(); Thread.sleep(500); composeRule.waitForIdle()
-        saveScreenshot("/tmp/uf-08-paused.png")
+        saveScreenshot("uf-08-paused.png")
         println("Pause calls: ${testController.pauseCallCount}, isPlaying: ${testController.isPlaying}")
 
         // === STEP 5: Stop + Remove playlist ===
@@ -262,7 +264,7 @@ class UserFlowTest {
         }
         composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle(); Thread.sleep(2000); composeRule.waitForIdle()
-        saveScreenshot("/tmp/uf-09-removed.png")
+        saveScreenshot("uf-09-removed.png")
 
         println("=== ALL STEPS COMPLETE ===")
         println("Play calls: ${testController.playCallCount}")

@@ -523,4 +523,61 @@ mod test {
         let chunk = file.bytes().await.unwrap();
         assert_eq!(chunk.as_ref(), [51]);
     }
+
+    /// Reproduces the production crash against a live WebDAV server.
+    /// Run with: cargo test -p ease-remote-storage -- --ignored --nocapture live_webdav_get
+    #[tokio::test]
+    #[ignore]
+    async fn live_webdav_get() {
+        let backend = Webdav::new(BuildWebdavArg {
+            addr: "http://local.hpp2334.com:5000".to_string(),
+            username: "world".to_string(),
+            password: "a123456".to_string(),
+            is_anonymous: false,
+            connect_timeout: Duration::from_secs(10),
+        });
+
+        println!("=== LIST /data/musics ===");
+        let list = backend.list("/data/musics".to_string()).await.unwrap();
+        for e in &list {
+            println!(
+                "  entry: name={:?} path={:?} size={:?} is_dir={}",
+                e.name, e.path, e.size, e.is_dir
+            );
+        }
+        let wav = list
+            .iter()
+            .find(|e| e.name == "melt memory.wav")
+            .expect("melt memory.wav not found");
+        let path = wav.path.clone();
+        println!("=== GET path={:?} ===", path);
+
+        let file = backend.get(path, 0).await;
+        match &file {
+            Ok(f) => println!("OK size={:?}", f.size()),
+            Err(e) => println!("ERR {:?}: {}", e, e),
+        }
+        let file = file.unwrap();
+
+        println!("=== drain stream ===");
+        let rx = file.into_rx();
+        let mut total: usize = 0;
+        let mut chunks = 0usize;
+        while let Ok(msg) = rx.recv().await {
+            match msg {
+                Ok(b) => {
+                    chunks += 1;
+                    total += b.len();
+                    if chunks <= 3 || chunks % 50 == 0 {
+                        println!("  chunk #{}: {} bytes (total={})", chunks, b.len(), total);
+                    }
+                }
+                Err(e) => {
+                    println!("  stream Err: {:?}", e);
+                    break;
+                }
+            }
+        }
+        println!("=== DONE chunks={} total={} ===", chunks, total);
+    }
 }

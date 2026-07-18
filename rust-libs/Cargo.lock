@@ -890,6 +890,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "thiserror 1.0.63",
+ "tokio",
  "tracing",
  "tracing-android",
  "tracing-subscriber",

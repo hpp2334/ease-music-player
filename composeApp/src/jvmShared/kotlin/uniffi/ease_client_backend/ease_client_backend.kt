@@ -816,6 +816,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -851,6 +853,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_ease_client_backend_fn_method_backend_init(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_ease_client_backend_fn_method_backend_streaming_base_url(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_ease_client_backend_fn_func_create_backend(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
     fun uniffi_ease_client_backend_fn_func_ct_add_musics_to_playlist(`cx`: Pointer,`arg`: RustBuffer.ByValue,
@@ -1099,6 +1103,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_ease_client_backend_checksum_method_backend_init(
     ): Short
+    fun uniffi_ease_client_backend_checksum_method_backend_streaming_base_url(
+    ): Short
     fun ffi_ease_client_backend_uniffi_contract_version(
     ): Int
     
@@ -1222,6 +1228,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_ease_client_backend_checksum_method_backend_init() != 52850.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_ease_client_backend_checksum_method_backend_streaming_base_url() != 51490.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1923,6 +1932,13 @@ public interface BackendInterface {
     
     fun `init`()
     
+    /**
+     * Returns the streaming HTTP server's base URL (e.g.
+     * `http://127.0.0.1:54321`), or `None` if `init()` has not been
+     * called yet. JavaFX MediaPlayer points at `<base_url>/music/:id`.
+     */
+    fun `streamingBaseUrl`(): kotlin.String?
+    
     companion object
 }
 
@@ -2029,6 +2045,23 @@ open class Backend: Disposable, AutoCloseable, BackendInterface {
 }
     }
     
+    
+
+    
+    /**
+     * Returns the streaming HTTP server's base URL (e.g.
+     * `http://127.0.0.1:54321`), or `None` if `init()` has not been
+     * called yet. JavaFX MediaPlayer points at `<base_url>/music/:id`.
+     */override fun `streamingBaseUrl`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_ease_client_backend_fn_method_backend_streaming_base_url(
+        it, _status)
+}
+    }
+    )
+    }
     
 
     
@@ -3620,6 +3653,38 @@ public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
         } else {
             buf.put(1)
             FfiConverterULong.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
+    override fun read(buf: ByteBuffer): kotlin.String? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterString.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.String?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.String?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterString.write(value, buf)
         }
     }
 }

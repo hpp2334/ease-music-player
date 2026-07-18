@@ -118,6 +118,11 @@ impl StreamFile {
     pub fn size(&self) -> Option<usize> {
         self.total.map(|total| total - self.byte_offset as usize)
     }
+
+    /// The full size of the underlying resource, ignoring `byte_offset`.
+    pub fn total_size(&self) -> Option<usize> {
+        self.total
+    }
     pub fn content_type(&self) -> Option<&str> {
         self.content_type.as_deref()
     }
