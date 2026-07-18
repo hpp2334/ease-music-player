@@ -1,8 +1,0 @@
-/build
-/src/jvmMain/kotlin/uniffi
-/src/androidMain/jniLibs
-/src/androidMain/java/uniffi
-/.gradle
-/local.properties
-/.idea
-.DS_Store

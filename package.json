@@ -6,7 +6,6 @@
   "scripts": {
     "build:jni": "npx tsx ./scripts/build-jni-libs.ts",
     "build:apk": "EBUILD=1 pnpm run build:jni && npx tsx ./scripts/build-apk.ts",
-    "run:desktop": "npx tsx ./scripts/run-desktop.ts",
     "test": "cd ./rust-libs && cargo nextest run"
   },
   "keywords": [],
