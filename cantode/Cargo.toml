@@ -1,0 +1,38 @@
+[package]
+name = "cantode"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "A cross-platform audio engine: decode, output, and metadata probing behind a pluggable trait-based API."
+repository = "https://github.com/hpp2334/ease-music-player"
+keywords = ["audio", "player", "decoder", "symphonia", "cpal"]
+categories = ["multimedia::audio"]
+publish = false
+
+[features]
+default = ["sink-cpal"]
+# `sink-cpal` is the only feature flag. Disabling it yields a headless
+# build that can still decode and probe metadata but cannot drive audio
+# hardware (`Player::load` returns a `Sink` error).
+sink-cpal = ["dep:cpal", "dep:ringbuf"]
+
+[dependencies]
+thiserror = "1.0.57"
+tracing = "0.1"
+# symphonia is the sole built-in decoder and is unconditional. To
+# substitute a different decoder, implement the `Decoder` / `DecoderFactory`
+# traits and pass your factory to `PlayerContextConfig::decoder_factory`;
+# you don't need a feature flag to bypass symphonia.
+symphonia = { version = "0.5", features = [
+    "mp3",
+    "flac",
+    "vorbis",
+    "ogg",
+    "wav",
+    "aac",
+    "isomp4",
+] }
+cpal = { version = "0.17", optional = true }
+ringbuf = { version = "0.4", optional = true }
+
+[dev-dependencies]
