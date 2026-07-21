@@ -40,8 +40,8 @@
 //! # use std::time::Duration;
 //! # fn make_source() -> Box<dyn AudioSource> { unimplemented!() }
 //!
-//! let mut cx = PlayerContext::new()?;
-//! let player = Player::new(&mut cx)?;
+//! let cx = PlayerContext::new()?;
+//! let player = Player::new(&cx)?;
 //!
 //! let metadata = player.load(make_source())?;
 //! println!("duration: {:?}", metadata.duration);
@@ -73,7 +73,7 @@ pub use context::{PlayerContext, PlayerContextConfig};
 pub use decoder::{AudioFormat, Decoder, DecoderFactory, DecodedFrame};
 pub use error::{CantodeError, Result};
 pub use events::{ChannelEventSink, EventSink, NullEventSink, PlayerEvent};
-pub use metadata::{probe_metadata, CoverArt, Metadata};
+pub use metadata::{probe_metadata, CoverArt, Metadata, Tag};
 pub use player::{Player, PlayerConfig};
 pub use source::{AudioSource, MemoryAudioSource};
 pub use state::PlayerState;

@@ -8,11 +8,12 @@
 //! - an optional global [`EventSink`] that sees every player's events,
 //! - a registry of live players for diagnostics and bulk shutdown.
 //!
-//! `Player::new(&mut cx)` registers a player with the context (hence the
-//! `&mut`); `probe_metadata(&cx, ...)` only reads the factory (hence the
-//! `&`). [`Player`] does **not** borrow the context — it is `'static` and
-//! can outlive it. `PlayerContext::Drop` best-effort-shuts-down any players
-//! that are still registered (their own `Drop` is the primary path).
+//! `Player::new(&cx)` registers a player with the context (registration
+//! uses interior mutability, so a shared borrow is enough);
+//! `probe_metadata(&cx, ...)` also takes `&`. [`Player`] does **not**
+//! borrow the context — it is `'static` and can outlive it.
+//! `PlayerContext::Drop` best-effort-shuts-down any players that are
+//! still registered (their own `Drop` is the primary path).
 
 use std::sync::{Arc, Mutex, Weak};
 
@@ -42,8 +43,8 @@ pub struct PlayerContextConfig {
 ///
 /// Create one context per application (or per audio session) and hand out
 /// players from it. The context is cheap to clone — but typical usage is a
-/// single owned context on the audio thread, with `&mut PlayerContext`
-/// borrowed only for `Player::new`.
+/// single owned context on the audio thread, with `&PlayerContext`
+/// borrowed for `Player::new`.
 pub struct PlayerContext {
     #[cfg(feature = "sink-cpal")]
     host: Host,

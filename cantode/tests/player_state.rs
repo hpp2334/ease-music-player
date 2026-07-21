@@ -15,8 +15,8 @@ mod common;
 /// the device, so no `require_audio_device` needed.
 #[test]
 fn player_starts_idle() {
-    let mut cx = PlayerContext::new().unwrap();
-    let player = Player::new(&mut cx).unwrap();
+    let cx = PlayerContext::new().unwrap();
+    let player = Player::new(&cx).unwrap();
     assert_eq!(player.state(), PlayerState::Idle);
     assert_eq!(cx.active_player_count(), 1);
     player.stop().unwrap();
@@ -28,8 +28,8 @@ fn player_starts_idle() {
 fn load_transitions_to_paused() {
     common::require_audio_device();
 
-    let mut cx = PlayerContext::new().unwrap();
-    let player = Player::new(&mut cx).unwrap();
+    let cx = PlayerContext::new().unwrap();
+    let player = Player::new(&cx).unwrap();
     player.set_volume(0.0).unwrap();
 
     let src = MemoryAudioSource::new(common::make_sine_wav(common::WavSpec {
@@ -48,8 +48,8 @@ fn load_transitions_to_paused() {
 fn play_pause_cycle() {
     common::require_audio_device();
 
-    let mut cx = PlayerContext::new().unwrap();
-    let player = Player::new(&mut cx).unwrap();
+    let cx = PlayerContext::new().unwrap();
+    let player = Player::new(&cx).unwrap();
     player.set_volume(0.0).unwrap();
 
     let src = MemoryAudioSource::new(common::make_sine_wav(common::WavSpec {
@@ -74,8 +74,8 @@ fn play_pause_cycle() {
 fn short_source_ends() {
     common::require_audio_device();
 
-    let mut cx = PlayerContext::new().unwrap();
-    let player = Player::new(&mut cx).unwrap();
+    let cx = PlayerContext::new().unwrap();
+    let player = Player::new(&cx).unwrap();
     player.set_volume(0.0).unwrap();
 
     let src = MemoryAudioSource::new(common::make_sine_wav(common::WavSpec {

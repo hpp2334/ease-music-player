@@ -295,7 +295,7 @@ fn build_metadata(
     codec_params: &CodecParameters,
     format: &AudioFormat,
 ) -> Metadata {
-    let tags: Vec<(String, String)> = metadata_rev
+    let tags: Vec<crate::Tag> = metadata_rev
         .map(|r| r.tags().iter().map(tag_to_pair).collect())
         .unwrap_or_default();
 
@@ -327,12 +327,15 @@ fn build_metadata(
     }
 }
 
-fn tag_to_pair(t: &Tag) -> (String, String) {
+fn tag_to_pair(t: &Tag) -> crate::Tag {
     let key = t
         .std_key
         .map(std_key_name)
         .unwrap_or_else(|| t.key.clone());
-    (key, t.value.to_string())
+    crate::Tag {
+        key,
+        value: t.value.to_string(),
+    }
 }
 
 fn std_key_name(k: StandardTagKey) -> String {

@@ -2,7 +2,6 @@ package com.kutedev.easemusicplayer
 
 import android.Manifest.permission.POST_NOTIFICATIONS
 import android.app.Application
-import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,11 +12,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
-import com.google.common.util.concurrent.MoreExecutors
+import com.kutedev.easemusicplayer.core.CantodePlayer
 import com.kutedev.easemusicplayer.core.KeepBackendService
-import com.kutedev.easemusicplayer.core.PlaybackService
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.PermissionRepository
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
@@ -26,6 +22,7 @@ import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import uniffi.ease_client_backend.easeLog
 import javax.inject.Inject
@@ -66,29 +63,25 @@ class MainActivity : ComponentActivity() {
             playerRepository.reload()
             storageRepository.reload()
             playlistRepository.reload()
-            setupMediaController()
+            setupCantodePlayer()
         }
     }
 
-    private fun setupMediaController() {
-        val factory = MediaController.Builder(
-            this,
-            SessionToken(this, ComponentName(this, PlaybackService::class.java))
-        ).buildAsync()
-        factory.addListener(
-            {
-                factory.let {
-                    if (it.isDone) {
-                        val controller = it.get()
-                        playerControllerRepository.setupMediaController(controller)
-                        controller
-                    } else {
-                        null
-                    }
-                }
-            },
-            MoreExecutors.directExecutor()
-        )
+    /**
+     * Build the cantode PlayerContextHandle + PlayerHandle + CantodePlayer
+     * via [PlayerControllerRepository]. The CantodePlayer gets its own
+     * CoroutineScope for the 10Hz state poll loop.
+     */
+    private fun setupCantodePlayer() {
+        playerControllerRepository.setupCantodePlayer { handle ->
+            CantodePlayer(
+                playerRepository = playerRepository,
+                handle = handle,
+                scope = kotlinx.coroutines.CoroutineScope(
+                    kotlinx.coroutines.Dispatchers.Default + SupervisorJob(),
+                ),
+            )
+        }
     }
 
     private fun setupExceptionHandler() {
@@ -103,7 +96,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        playerControllerRepository.destroyMediaController()
+        // No teardown needed: the cantode player / context live in
+        // PlayerControllerRepository (singleton-scoped), not tied to this
+        // activity's lifetime. PlaybackService still owns the MediaSession.
     }
 
     override fun onDestroy() {
@@ -140,4 +135,22 @@ class MainActivity : ComponentActivity() {
 }
 
 @HiltAndroidApp
-class EaseMusicPlayerApplication : Application() {  }
+class EaseMusicPlayerApplication : Application() {
+    companion object {
+        init {
+            System.loadLibrary("ease_client_backend")
+        }
+    }
+
+    /**
+     * JNI hook for cpal's AAudio backend: register the JavaVM + app Context
+     * into ndk-context. MUST be called before any cpal interaction.
+     * Idempotent on the Rust side (OnceLock guarded).
+     */
+    private external fun nativeInitAndroidContext(context: android.content.Context)
+
+    override fun onCreate() {
+        super.onCreate()
+        nativeInitAndroidContext(this)
+    }
+}

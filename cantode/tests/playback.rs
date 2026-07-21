@@ -23,7 +23,7 @@ mod common;
 /// is constructed internally by `Player` — no override is possible or
 /// needed.
 fn player_with_events(
-    cx: &mut PlayerContext,
+    cx: &PlayerContext,
     event_sink: Arc<dyn cantode::EventSink>,
 ) -> Player {
     let cfg = PlayerConfig {
@@ -36,10 +36,10 @@ fn player_with_events(
 fn load_play_end_lifecycle() {
     common::require_audio_device();
 
-    let mut cx = PlayerContext::new().unwrap();
+    let cx = PlayerContext::new().unwrap();
     let event_sink = Arc::new(ChannelEventSink::new(1024));
     let rx = event_sink.subscribe();
-    let player = player_with_events(&mut cx, event_sink);
+    let player = player_with_events(&cx, event_sink);
 
     let src: Box<dyn AudioSource> = Box::new(MemoryAudioSource::new(common::make_sine_wav(
         common::WavSpec {
@@ -83,8 +83,8 @@ fn load_play_end_lifecycle() {
 fn seek_works_after_load() {
     common::require_audio_device();
 
-    let mut cx = PlayerContext::new().unwrap();
-    let player = Player::new(&mut cx).unwrap();
+    let cx = PlayerContext::new().unwrap();
+    let player = Player::new(&cx).unwrap();
     player.set_volume(0.0).unwrap();
 
     let src: Box<dyn AudioSource> = Box::new(MemoryAudioSource::new(common::make_sine_wav(
@@ -107,13 +107,13 @@ fn seek_works_after_load() {
 #[test]
 fn registry_count_tracks_player_lifetime() {
     // Doesn't touch the device, so no `require_audio_device` needed.
-    let mut cx = PlayerContext::new().unwrap();
+    let cx = PlayerContext::new().unwrap();
     assert_eq!(cx.active_player_count(), 0);
 
-    let p1 = Player::new(&mut cx).unwrap();
+    let p1 = Player::new(&cx).unwrap();
     assert_eq!(cx.active_player_count(), 1);
 
-    let p2 = Player::new(&mut cx).unwrap();
+    let p2 = Player::new(&cx).unwrap();
     assert_eq!(cx.active_player_count(), 2);
 
     drop(p1);
@@ -127,8 +127,8 @@ fn registry_count_tracks_player_lifetime() {
 fn stop_returns_to_idle() {
     common::require_audio_device();
 
-    let mut cx = PlayerContext::new().unwrap();
-    let player = Player::new(&mut cx).unwrap();
+    let cx = PlayerContext::new().unwrap();
+    let player = Player::new(&cx).unwrap();
     player.set_volume(0.0).unwrap();
 
     let src: Box<dyn AudioSource> = Box::new(MemoryAudioSource::new(common::make_sine_wav(
@@ -158,8 +158,8 @@ fn play_actually_drives_position_forward() {
     // sufficient given require_audio_device already proved device open.
     common::require_audio_device();
 
-    let mut cx = PlayerContext::new().unwrap();
-    let player = Player::new(&mut cx).unwrap();
+    let cx = PlayerContext::new().unwrap();
+    let player = Player::new(&cx).unwrap();
     player.set_volume(0.0).unwrap();
 
     let src: Box<dyn AudioSource> = Box::new(MemoryAudioSource::new(common::make_sine_wav(

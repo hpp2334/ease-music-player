@@ -37,14 +37,13 @@ for (const buildTarget of TARGETS) {
 
   console.log(`Generate jniLibs of ${buildTarget}`);
   execSync(
-    `cargo ndk --no-strip --target ${buildTarget} -o ${path.resolve(ROOT, "android/app/src/main/jniLibs")} build --release --lib`,
+    `cargo ndk --no-strip --platform 30 --target ${buildTarget} -o ${path.resolve(ROOT, "android/app/src/main/jniLibs")} build -p ease-client-backend --release --lib`,
     {
       stdio: "inherit",
       cwd: RUST_LIBS_ROOTS,
       env: {
         ...process.env,
         RUST_BACKTRACE: "1",
-        CARGO_NDK_ANDROID_PLATFORM: "34",
       },
     },
   );

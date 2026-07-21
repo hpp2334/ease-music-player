@@ -22,11 +22,9 @@ pub async fn ct_get_music(cx: Arc<Backend>, id: MusicId) -> BResult<Option<Music
 }
 
 #[uniffi::export]
-pub async fn cts_get_music_abstract(cx: Arc<Backend>, id: MusicId) -> BResult<Option<MusicAbstract>> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        get_music_abstract(cx, id).await
-    }).await.unwrap()
+pub fn cts_get_music_abstract(cx: Arc<Backend>, id: MusicId) -> BResult<Option<MusicAbstract>> {
+    let cx = cx.get_context().clone();
+    tokio_runtime().block_on(async move { get_music_abstract(&cx, id).await })
 }
 
 #[uniffi::export]
@@ -42,17 +40,13 @@ pub async fn ct_update_music_lyric(cx: Arc<Backend>, arg: ArgUpdateMusicLyric) -
 }
 
 #[uniffi::export]
-pub async fn cts_update_music_duration(cx: Arc<Backend>, arg: ArgUpdateMusicDuration) -> BResult<()> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        update_music_duration(cx, arg).await
-    }).await.unwrap()
+pub fn cts_update_music_duration(cx: Arc<Backend>, arg: ArgUpdateMusicDuration) -> BResult<()> {
+    let cx = cx.get_context().clone();
+    tokio_runtime().block_on(async move { update_music_duration(&cx, arg).await })
 }
 
 #[uniffi::export]
-pub async fn cts_update_music_cover(cx: Arc<Backend>, arg: ArgUpdateMusicCover) -> BResult<()> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        update_music_cover(cx, arg).await
-    }).await.unwrap()
+pub fn cts_update_music_cover(cx: Arc<Backend>, arg: ArgUpdateMusicCover) -> BResult<()> {
+    let cx = cx.get_context().clone();
+    tokio_runtime().block_on(async move { update_music_cover(&cx, arg).await })
 }

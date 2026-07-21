@@ -163,11 +163,9 @@ pub struct ArgReorderPlaylist {
 }
 
 #[uniffi::export]
-pub async fn cts_reorder_playlist(cx: Arc<Backend>, arg: ArgReorderPlaylist) -> BResult<()> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        reorder_playlist_inner(cx, arg).await
-    }).await.unwrap()
+pub fn cts_reorder_playlist(cx: Arc<Backend>, arg: ArgReorderPlaylist) -> BResult<()> {
+    let cx = cx.get_context().clone();
+    tokio_runtime().block_on(async move { reorder_playlist_inner(&cx, arg).await })
 }
 
 async fn reorder_playlist_inner(cx: &BackendContext, arg: ArgReorderPlaylist) -> BResult<()> {
@@ -240,11 +238,9 @@ pub struct ArgReorderMusic {
 }
 
 #[uniffi::export]
-pub async fn cts_reorder_music_in_playlist(cx: Arc<Backend>, arg: ArgReorderMusic) -> BResult<()> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        reorder_music_in_playlist_inner(cx, arg).await
-    }).await.unwrap()
+pub fn cts_reorder_music_in_playlist(cx: Arc<Backend>, arg: ArgReorderMusic) -> BResult<()> {
+    let cx = cx.get_context().clone();
+    tokio_runtime().block_on(async move { reorder_music_in_playlist_inner(&cx, arg).await })
 }
 
 async fn reorder_music_in_playlist_inner(cx: &BackendContext, arg: ArgReorderMusic) -> BResult<()> {
