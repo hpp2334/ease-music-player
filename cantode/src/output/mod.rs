@@ -75,3 +75,119 @@ pub(crate) trait AudioSink: Send {
     #[allow(dead_code)]
     fn latency(&self) -> Duration;
 }
+
+/// Convert interleaved f32 PCM from `src_channels` to `dst_channels`,
+/// writing into `out`.
+///
+/// Used by the player worker when the negotiated device channel count
+/// differs from the decoder's channel count — e.g. a stereo source playing
+/// through a genuinely mono-only device, or vice versa. The mix is simple
+/// but correct enough for music playback:
+///
+/// - **Down-mix to mono**: every output sample is the average of the source
+///   frame's channels. (Standard ITU down-mix would attenuate by 1/√2; we
+///   use 1/N to avoid clipping on already-hot masters. Close enough for a
+///   fallback path that should rarely fire.)
+/// - **Up-mix from mono**: the single source sample is replicated onto
+///   every output channel.
+/// - **Equal channel count**: `out` is filled with a straight copy.
+///
+/// `out` must be sized for exactly `src.len() / src_channels * dst_channels`
+/// samples. Returns the number of samples written.
+pub(crate) fn remux_channels(
+    src: &[f32],
+    src_channels: u16,
+    dst: &mut [f32],
+    dst_channels: u16,
+) -> usize {
+    let src_ch = src_channels as usize;
+    let dst_ch = dst_channels as usize;
+    if src_ch == 0 || dst_ch == 0 {
+        return 0;
+    }
+    let n_frames = src.len() / src_ch;
+    let out_needed = n_frames * dst_ch;
+    if dst.len() < out_needed {
+        return 0;
+    }
+    if src_ch == dst_ch {
+        dst[..out_needed].copy_from_slice(&src[..out_needed]);
+        return out_needed;
+    }
+    if dst_ch == 1 {
+        // Down-mix to mono: average channels per frame.
+        for f in 0..n_frames {
+            let mut sum = 0.0f32;
+            for c in 0..src_ch {
+                sum += src[f * src_ch + c];
+            }
+            dst[f] = sum / src_ch as f32;
+        }
+    } else if src_ch == 1 {
+        // Up-mix mono → multi-channel: replicate.
+        for f in 0..n_frames {
+            let s = src[f];
+            for c in 0..dst_ch {
+                dst[f * dst_ch + c] = s;
+            }
+        }
+    } else {
+        // General mismatch (e.g. 6 → 2). Replicate-or-truncate channel by
+        // channel. This branch is not high-fidelity but it never panics and
+        // produces a listenable result for the rare device that requires it.
+        for f in 0..n_frames {
+            for c in 0..dst_ch {
+                let s = if c < src_ch {
+                    src[f * src_ch + c]
+                } else {
+                    src[f * src_ch]
+                };
+                dst[f * dst_ch + c] = s;
+            }
+        }
+    }
+    out_needed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remux_channels;
+
+    #[test]
+    fn remux_same_channel_count_is_identity() {
+        let src = [0.1, 0.2, 0.3, 0.4]; // 2 frames × 2 channels
+        let mut out = [0.0f32; 4];
+        let n = remux_channels(&src, 2, &mut out, 2);
+        assert_eq!(n, 4);
+        assert_eq!(out, src);
+    }
+
+    #[test]
+    fn remux_stereo_to_mono_averages_channels() {
+        // Frame 0: (0.2, 0.6) → 0.4
+        // Frame 1: (1.0, -1.0) → 0.0
+        let src = [0.2, 0.6, 1.0, -1.0];
+        let mut out = [0.0f32; 2];
+        let n = remux_channels(&src, 2, &mut out, 1);
+        assert_eq!(n, 2);
+        assert!((out[0] - 0.4).abs() < 1e-6);
+        assert!(out[1].abs() < 1e-6);
+    }
+
+    #[test]
+    fn remux_mono_to_stereo_replicates() {
+        let src = [0.25, -0.5];
+        let mut out = [0.0f32; 4];
+        let n = remux_channels(&src, 1, &mut out, 2);
+        assert_eq!(n, 4);
+        assert_eq!(out, [0.25, 0.25, -0.5, -0.5]);
+    }
+
+    #[test]
+    fn remux_insufficient_output_returns_zero() {
+        let src = [0.1, 0.2, 0.3, 0.4]; // 2 frames stereo → needs 4 mono out
+        let mut out = [0.0f32; 1]; // too small
+        let n = remux_channels(&src, 2, &mut out, 1);
+        assert_eq!(n, 0);
+    }
+}

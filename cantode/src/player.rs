@@ -156,6 +156,9 @@ impl Player {
                     },
                     last_position_emit: Instant::now(),
                     ended_for_this_load: false,
+                    src_channels: 0,
+                    device_channels: 0,
+                    remix_buf: Vec::new(),
                 };
                 worker.run();
             })
@@ -294,6 +297,18 @@ struct Worker {
     sinks: EventSinks,
     last_position_emit: Instant,
     ended_for_this_load: bool,
+    /// Channel count of the currently-loaded source, captured in `do_load`.
+    /// Zero means "no source loaded" / "no conversion needed yet".
+    src_channels: u16,
+    /// Channel count the device stream actually opened with, captured in
+    /// `do_load` from the format returned by `sink.start`. When this differs
+    /// from `src_channels`, `pump_once` runs each decoded frame through
+    /// `remux_channels` before writing it to the sink. The mismatch is rare
+    /// but real — see `CpalSink::start` / `pick_supported_config`.
+    device_channels: u16,
+    /// Reusable scratch buffer for the channel-conversion path. Empty when
+    /// `src_channels == device_channels`.
+    remix_buf: Vec<f32>,
 }
 
 struct EventSinks {
@@ -409,7 +424,21 @@ impl Worker {
                     let mut sink: Box<dyn crate::output::AudioSink> =
                         Box::new(crate::output::CpalSink::new());
                     match sink.start(fmt) {
-                        Ok(_) => {
+                        Ok(actual_fmt) => {
+                            // Capture the channel counts so `pump_once` can
+                            // convert when the device insisted on a channel
+                            // count other than the source's.
+                            self.src_channels = fmt.channels;
+                            self.device_channels = actual_fmt.channels;
+                            if self.src_channels != self.device_channels {
+                                tracing::info!(
+                                    src = self.src_channels,
+                                    device = self.device_channels,
+                                    "device channel count differs from source; \
+                                     enabling channel conversion in worker"
+                                );
+                                self.remix_buf = Vec::new();
+                            }
                             self.sink = Some(sink);
                             self.sinks.emit(PlayerEvent::MetadataReady(meta.clone()));
                             self.apply_worker_event(WorkerEvent::LoadCompleted);
@@ -436,6 +465,9 @@ impl Worker {
         self.shared_position.store(Duration::ZERO);
         *self.shared_duration.lock().unwrap() = None;
         self.ended_for_this_load = false;
+        self.src_channels = 0;
+        self.device_channels = 0;
+        self.remix_buf.clear();
     }
 
     fn do_unload(&mut self) -> crate::Result<()> {
@@ -465,7 +497,28 @@ impl Worker {
             Ok(Some(frame)) => {
                 self.shared_position.store(frame.timestamp);
                 if let Some(s) = self.sink.as_mut() {
-                    let _ = s.write(&frame.data);
+                    // If the device channel count differs from the source,
+                    // remap the interleaved PCM before writing. The common
+                    // case (`src == device`) skips the allocation entirely.
+                    if self.src_channels != 0
+                        && self.device_channels != 0
+                        && self.src_channels != self.device_channels
+                    {
+                        let n_frames = frame.data.len() / self.src_channels as usize;
+                        let out_samples = n_frames * self.device_channels as usize;
+                        if self.remix_buf.len() < out_samples {
+                            self.remix_buf.resize(out_samples, 0.0);
+                        }
+                        let written = crate::output::remux_channels(
+                            &frame.data,
+                            self.src_channels,
+                            &mut self.remix_buf[..out_samples],
+                            self.device_channels,
+                        );
+                        let _ = s.write(&self.remix_buf[..written]);
+                    } else {
+                        let _ = s.write(&frame.data);
+                    }
                 }
                 self.maybe_emit_position();
             }
