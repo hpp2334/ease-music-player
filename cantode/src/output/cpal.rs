@@ -93,7 +93,8 @@ impl AudioSink for CpalSink {
             .ok_or(CantodeError::NoOutputDevice)?;
 
         let desired_rate = fmt.sample_rate; // cpal::SampleRate is `u32`.
-        let supported = pick_supported_config(&device, desired_rate)?;
+        let desired_channels = fmt.channels;
+        let supported = pick_supported_config(&device, desired_rate, desired_channels)?;
         let stream_config = supported.config();
         let actual = AudioFormat::new(
             stream_config.channels as u16,
@@ -212,13 +213,38 @@ impl Drop for CpalSink {
 
 // ----- helpers -----
 
-/// Pick the closest supported stream config for the desired sample rate,
-/// falling back to the device default if no exact match exists. `rate` is
-/// the raw `cpal::SampleRate` (which is `u32`).
+/// Pick the closest supported stream config for the desired sample rate
+/// and channel count.
+///
+/// Preference order:
+/// 1. A config whose sample-rate range contains `desired_rate` **and** whose
+///    channel count equals `desired_channels`. (Exact match on both axes.)
+/// 2. A config whose sample-rate range contains `desired_rate` (any
+///    channels) — the caller will down/up-mix.
+/// 3. The device's default output config.
+///
+/// Why channel count matters: on Android (AAudio via oboe/ndk-sys), the
+/// device's *default* config reported by cpal is frequently **mono** even
+/// when the device can actually sink stereo. If we accept that default for a
+/// stereo source, the worker pushes 2-sample frames into the ring buffer
+/// while the callback drains them as 1-sample frames — playback runs at 2×
+/// speed and glitches. Requesting the source's channel count up front (with
+/// a down/up-mix fallback for genuinely mono-only devices) is the fix.
 fn pick_supported_config(
     device: &cpal::Device,
     desired_rate: u32,
+    desired_channels: u16,
 ) -> crate::Result<SupportedStreamConfig> {
+    if let Ok(mut configs) = device.supported_output_configs() {
+        // (1) Exact match on rate + channels.
+        if let Some(c) = configs.find(|c| {
+            c.channels() == desired_channels
+                && c.min_sample_rate() <= desired_rate
+                && desired_rate <= c.max_sample_rate()
+        }) {
+            return Ok(c.with_sample_rate(desired_rate));
+        }
+    }
     if let Ok(mut configs) = device.supported_output_configs()
         && let Some(c) = configs.find(|c| {
             c.min_sample_rate() <= desired_rate && desired_rate <= c.max_sample_rate()

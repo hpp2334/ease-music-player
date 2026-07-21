@@ -31,7 +31,10 @@ use ease_remote_storage::{StorageBackendResult, StreamFile};
 use crate::{
     error::BError,
     objects::music::{MetadataRecord, PlayerStateRecord},
-    services::{get_asset_file, get_music, update_music_cover, ArgUpdateMusicCover},
+    services::{
+        get_asset_file, get_music, update_music_cover, update_music_duration, ArgUpdateMusicCover,
+        ArgUpdateMusicDuration,
+    },
     Backend, BackendContext,
 };
 
@@ -350,26 +353,53 @@ pub async fn ct_player_load_music(
     let metadata = join_result
         .map_err(|e| BError::CustomError { message: format!("join: {e}") })??;
 
-    // Cover-art writeback: if the probe found embedded cover AND the
-    // DB's Music.cover is None, fire-and-forget a tokio task to write
-    // it. Best-effort — failures are logged, not surfaced.
-    if metadata.cover_art.is_some() {
+    // Metadata writeback: if the probe found embedded cover AND/OR a
+    // duration that the DB doesn't yet have, fire-and-forget a tokio task
+    // to fill them in. The UI reads duration from `music.meta.duration`
+    // (the DB column), so without this writeback newly-imported tracks
+    // show "--:--:--" until they're played for the first time. Cover
+    // writeback also goes through here. Best-effort — failures are
+    // logged, not surfaced.
+    let has_cover = metadata.cover_art.is_some();
+    let probed_duration = metadata.duration;
+    if has_cover || probed_duration.is_some() {
         let backend_weak = backend.get_context().weak();
         let mid = music_id;
-        let cover = metadata.cover_art.clone().unwrap();
+        let cover_bytes = metadata.cover_art.as_ref().map(|c| c.data.clone());
         tokio_runtime().handle().spawn(async move {
-            if let Some(cx) = backend_weak.upgrade() {
-                if let Ok(Some(m)) = get_music(&cx, mid).await {
-                    if m.cover.is_none() {
-                        let _ = update_music_cover(
-                            &cx,
-                            ArgUpdateMusicCover {
-                                id: mid,
-                                cover: cover.data.clone(),
-                            },
-                        )
-                        .await;
-                    }
+            let Some(cx) = backend_weak.upgrade() else {
+                return;
+            };
+            let Ok(Some(m)) = get_music(&cx, mid).await else {
+                return;
+            };
+            // Duration: only write if the DB column is currently null and
+            // the probe produced a non-zero duration. Overwriting an
+            // existing value would be surprising for users who manually
+            // fixed it.
+            if let Some(dur) = probed_duration {
+                if !dur.is_zero() && m.meta.duration.is_none() {
+                    let _ = update_music_duration(
+                        &cx,
+                        ArgUpdateMusicDuration {
+                            id: mid,
+                            duration: dur,
+                        },
+                    )
+                    .await;
+                }
+            }
+            // Cover: only write if the DB has no cover blob yet.
+            if let Some(bytes) = cover_bytes {
+                if m.cover.is_none() {
+                    let _ = update_music_cover(
+                        &cx,
+                        ArgUpdateMusicCover {
+                            id: mid,
+                            cover: bytes,
+                        },
+                    )
+                    .await;
                 }
             }
         });
