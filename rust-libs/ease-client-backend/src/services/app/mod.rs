@@ -1,11 +1,4 @@
-use ease_client_schema::StorageType;
-
-use crate::{
-    ctx::BackendContext,
-    error::BResult,
-    objects::ArgUpsertStorage,
-    repositories::app::SCHEMA_VERSION,
-};
+use crate::{ctx::BackendContext, error::BResult};
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ArgInitializeApp {
@@ -33,36 +26,12 @@ async fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<(
     //   2. Runs sea-orm-migration to the latest schema (v4).
     //   3. If a legacy data.redb exists at <doc_dir>/data.redb, imports all
     //      rows into SQLite and deletes data.redb.
+    //
+    // Local storage is NOT seeded here. The biz layer synthesizes it on every
+    // `list_storage` call (see services::storage::list_storage), so it is
+    // always present regardless of DB / migration state.
     cx.database_server().init(arg.app_document_dir.clone()).await?;
-
-    let old_schema_version = cx.database_server().get_schema_version().await?;
-    if old_schema_version == 0 {
-        // Fresh install with no legacy redb — seed local storage.
-        init_local_storage(cx).await?;
-        cx.database_server().save_schema_version(SCHEMA_VERSION).await?;
-    }
-
     let schema_version = cx.database_server().get_schema_version().await?;
-    tracing::info!(
-        "old schema version was {}, now is {}",
-        old_schema_version,
-        schema_version
-    );
-
-    Ok(())
-}
-
-async fn init_local_storage(cx: &BackendContext) -> BResult<()> {
-    cx.database_server()
-        .upsert_storage(ArgUpsertStorage {
-            id: None,
-            addr: Default::default(),
-            alias: "Local".to_string(),
-            username: Default::default(),
-            password: Default::default(),
-            is_anonymous: Default::default(),
-            typ: StorageType::Local,
-        })
-        .await?;
+    tracing::info!("database initialized; schema version = {}", schema_version);
     Ok(())
 }
