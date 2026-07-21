@@ -118,12 +118,12 @@ impl Player {
     ///
     /// Spawns a dedicated worker thread named `cantode-player-N` and
     /// registers the player in `cx`'s live-player registry.
-    pub fn new(cx: &mut PlayerContext) -> Result<Self, CantodeError> {
+    pub fn new(cx: &PlayerContext) -> Result<Self, CantodeError> {
         Self::with_config(cx, PlayerConfig::default())
     }
 
     /// Like [`Player::new`] but with per-player overrides.
-    pub fn with_config(cx: &mut PlayerContext, config: PlayerConfig) -> Result<Self, CantodeError> {
+    pub fn with_config(cx: &PlayerContext, config: PlayerConfig) -> Result<Self, CantodeError> {
         let (cmd_tx, cmd_rx) = mpsc::sync_channel(COMMAND_CHANNEL_CAP);
         let state = Arc::new(AtomicState::new(PlayerState::Idle));
         let position = Arc::new(AtomicPosition::new());

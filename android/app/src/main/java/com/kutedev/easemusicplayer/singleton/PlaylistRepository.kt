@@ -1,28 +1,14 @@
 package com.kutedev.easemusicplayer.singleton
 
 import android.content.Context
-import androidx.annotation.OptIn
-import androidx.lifecycle.viewModelScope
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import com.kutedev.easemusicplayer.core.BuildMediaContext
-import com.kutedev.easemusicplayer.core.MusicPlayerDataSource
-import com.kutedev.easemusicplayer.core.buildMediaItem
-import com.kutedev.easemusicplayer.core.syncMetadataUtil
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.time.debounce
 import uniffi.ease_client_backend.AddedMusic
 import uniffi.ease_client_backend.ArgCreatePlaylist
@@ -51,7 +37,6 @@ class PlaylistRepository @Inject constructor(
     private val storageRepository: StorageRepository,
     private val _scope: CoroutineScope
 ) {
-    private val _requestSemaphore = Semaphore(4)
     private val _playlists = MutableStateFlow(persistentListOf<PlaylistAbstract>())
     private val _syncedTotalDuration = MutableSharedFlow<MusicId>()
     private val _debouncedReloadEvent = MutableSharedFlow<Unit>()
@@ -141,56 +126,19 @@ class PlaylistRepository @Inject constructor(
         reload()
     }
 
-    @OptIn(UnstableApi::class)
+    /**
+     * Proactively probe + persist the duration of [id] without playing it.
+     *
+     * TODO(v0.5): wire this to `ctPlayerProbeDurationMs` via a shared
+     * `PlayerContextHandle`. For v0.4 we leave this as a no-op — music
+     * durations are lazily filled in on first play via the backend's
+     * `ctPlayerLoadMusic` writeback hook. The user-visible effect is
+     * that newly-imported tracks show no duration in the playlist UI
+     * until they're played once.
+     */
+    @Suppress("UNUSED_PARAMETER")
     private fun requestTotalDuration(context: Context, id: MusicId) {
-        val musicAbstract = bridge.runSync { ctsGetMusicAbstract(it, id) } ?: return
-        if (musicAbstract.meta.duration != null) {
-            return
-        }
-
-        _scope.launch(Dispatchers.Main) {
-            _requestSemaphore.acquire()
-
-            try {
-                val player = ExoPlayer.Builder(context)
-                    .setMediaSourceFactory(ProgressiveMediaSource.Factory(DataSource.Factory { MusicPlayerDataSource(bridge, _scope) }) )
-                    .build()
-                player.addListener(object : Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_READY) {
-                            syncMetadataUtil(
-                                scope = _scope,
-                                bridge = bridge,
-                                player = player
-                            ) {
-                                _scope.launch {
-                                    _syncedTotalDuration.emit(id)
-                                    reload()
-                                }
-                            }
-                            player.release()
-                            _requestSemaphore.release()
-
-                        }
-                    }
-
-                    override fun onPlayerError(error: PlaybackException) {
-                        player.release()
-                        _requestSemaphore.release()
-                        easeError("request total duration failed: $error")
-                    }
-                })
-
-                val mediaItem = buildMediaItem(BuildMediaContext(
-                    bridge = bridge,
-                    scope = _scope,
-                ), musicAbstract)
-                player.setMediaItem(mediaItem)
-                player.prepare()
-            } catch (error: Exception) {
-                easeError("request total duration failed: $error")
-            }
-        }
+        // No-op — see KDoc.
     }
 
     fun scheduleReload() {

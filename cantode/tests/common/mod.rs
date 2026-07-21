@@ -84,14 +84,14 @@ pub fn require_audio_device() {
     // If `load` fails with `NoOutputDevice`, the environment is missing
     // audio — fail loud.
     use cantode::{AudioSource, CantodeError, MemoryAudioSource, PlayerContext};
-    let mut cx = match PlayerContext::new() {
+    let cx = match PlayerContext::new() {
         Ok(cx) => cx,
         Err(e) => panic!(
             "PlayerContext::new() failed: {e:?}. \
              Tests require a working cpal host."
         ),
     };
-    let player = cantode::Player::new(&mut cx).expect("Player::new failed");
+    let player = cantode::Player::new(&cx).expect("Player::new failed");
     // 1 sample of silence at 8 kHz mono — opens the device, doesn't play
     // anything audible.
     let mut bytes = make_sine_wav(WavSpec {

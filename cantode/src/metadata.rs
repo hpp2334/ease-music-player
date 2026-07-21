@@ -23,9 +23,22 @@ pub struct Metadata {
     /// Free-form tag pairs (key, value). Keys are typically
     /// symphonia-standard tag names (`TrackTitle`, `Artist`, `Album`,
     /// `AlbumArtist`, ...).
-    pub tags: Vec<(String, String)>,
+    pub tags: Vec<Tag>,
     /// Embedded cover art, if any.
     pub cover_art: Option<CoverArt>,
+}
+
+/// A single free-form metadata tag (key/value pair).
+///
+/// Stored as a small struct rather than a tuple so the type crosses
+/// foreign-binding boundaries (e.g. UniFFI) cleanly.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Tag {
+    /// Tag key — typically a symphonia-standard name (`TrackTitle`,
+    /// `Artist`, ...).
+    pub key: String,
+    /// Tag value.
+    pub value: String,
 }
 
 /// Embedded picture metadata (typically ID3 APIC or FLAC

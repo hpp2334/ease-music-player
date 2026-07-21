@@ -9,19 +9,22 @@ use crate::{
     Backend,
 };
 
+/// Synchronously save the play-mode preference (the `cts_` prefix marks
+/// this as a sync controller per AGENTS.md). The underlying service fn is
+/// async, so we drive it on the shared tokio runtime via `block_on`.
 #[uniffi::export]
-pub async fn cts_save_preference_playmode(cx: Arc<Backend>, arg: PlayMode) -> BResult<()> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        save_preference_playmode(cx, arg).await?;
+pub fn cts_save_preference_playmode(cx: Arc<Backend>, arg: PlayMode) -> BResult<()> {
+    let cx = cx.get_context().clone();
+    tokio_runtime().block_on(async move {
+        save_preference_playmode(&cx, arg).await?;
         Ok(())
-    }).await.unwrap()
+    })
 }
 
+/// Synchronously read the play-mode preference. See
+/// [`cts_save_preference_playmode`] for the sync/async reasoning.
 #[uniffi::export]
-pub async fn cts_get_preference_playmode(cx: Arc<Backend>) -> BResult<PlayMode> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        get_preference_playmode(cx).await
-    }).await.unwrap()
+pub fn cts_get_preference_playmode(cx: Arc<Backend>) -> BResult<PlayMode> {
+    let cx = cx.get_context().clone();
+    tokio_runtime().block_on(async move { get_preference_playmode(&cx).await })
 }

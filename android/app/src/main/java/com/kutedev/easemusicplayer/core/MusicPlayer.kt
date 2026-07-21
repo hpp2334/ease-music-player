@@ -4,15 +4,8 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
 import androidx.annotation.OptIn
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
-import androidx.media3.common.C.WAKE_MODE_NETWORK
 import androidx.media3.common.Player
-import androidx.media3.common.Player.COMMAND_PLAY_PAUSE
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -21,65 +14,107 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
 import com.kutedev.easemusicplayer.MainActivity
+import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import uniffi.ease_client_backend.MusicAbstract
 import uniffi.ease_client_backend.Playlist
 import uniffi.ease_client_backend.ctGetMusic
-import javax.inject.Inject
-import com.kutedev.easemusicplayer.singleton.Bridge
-import dagger.hilt.android.AndroidEntryPoint
-import uniffi.ease_client_backend.MusicAbstract
-import uniffi.ease_client_backend.easeError
 import uniffi.ease_client_backend.easeLog
+import javax.inject.Inject
 
 
-const val PLAYER_TO_PREV_COMMAND = "PLAYER_TO_PREV_COMMAND";
-const val PLAYER_TO_NEXT_COMMAND = "PLAYER_TO_NEXT_COMMAND";
+const val PLAYER_TO_PREV_COMMAND = "PLAYER_TO_PREV_COMMAND"
+const val PLAYER_TO_NEXT_COMMAND = "PLAYER_TO_NEXT_COMMAND"
 
 
-
+/**
+ * Background [MediaSessionService] that owns the [MediaSession] exposed
+ * to system controllers (notification / lock-screen / Bluetooth / Auto).
+ *
+ * The session is backed by a [CantodePlayer] (a [SimpleBasePlayer]
+ * wrapping a cantode `PlayerHandle`) instead of ExoPlayer. Audio decode
+ * and output happen entirely in Rust.
+ *
+ * Because [CantodePlayer] is constructed lazily in [PlayerControllerRepository.setupCantodePlayer]
+ * (after the backend initializes), this service collects
+ * [PlayerControllerRepository.cantodePlayerState] and builds the session
+ * the first time it observes a non-null value.
+ */
 @AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
     @Inject lateinit var playerRepository: PlayerRepository
     @Inject lateinit var bridge: Bridge
+    @Inject lateinit var playerControllerRepository: PlayerControllerRepository
+
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private var _mediaSession: MediaSession? = null
+    private var attachedPlayer: CantodePlayer? = null
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         easeLog("Playback service creating...")
-        val context = this
+
+        // Sleep timer: pause requests come from PlayerRepository.
+        serviceScope.launch(Dispatchers.Main) {
+            playerRepository.pauseRequest.collect {
+                attachedPlayer?.pause()
+            }
+        }
+
+        // Build the MediaSession as soon as the CantodePlayer is published.
+        serviceScope.launch {
+            playerControllerRepository.cantodePlayerState.collectLatest { player ->
+                if (player != null && attachedPlayer !== player) {
+                    attachPlayer(player)
+                }
+            }
+        }
+
+        // Auto-advance on ENDED.
+        serviceScope.launch {
+            playerControllerRepository.endedEvent.collect {
+                playOnComplete()
+            }
+        }
+
+        easeLog("Playback service created")
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun attachPlayer(player: CantodePlayer) {
+        val oldSession = _mediaSession
+        attachedPlayer = player
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
-        val player = ExoPlayer.Builder(context)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build(),
-                true
-            )
-            .setHandleAudioBecomingNoisy(true)
-            .setWakeMode(WAKE_MODE_NETWORK)
-            .setMediaSourceFactory(ProgressiveMediaSource.Factory(DataSource.Factory { MusicPlayerDataSource(bridge, serviceScope) }) )
-            .build()
-        _mediaSession = MediaSession.Builder(this, player)
+        _mediaSession = buildSession(player, pendingIntent)
+        oldSession?.release()
+        easeLog("PlaybackService attached CantodePlayer + built MediaSession")
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun buildSession(player: CantodePlayer, pendingIntent: PendingIntent): MediaSession {
+        return MediaSession.Builder(this, player)
             .setSessionActivity(pendingIntent)
             .setCallback(object : MediaSession.Callback {
-                @OptIn(UnstableApi::class)
                 override fun onConnect(
                     session: MediaSession,
-                    controller: MediaSession.ControllerInfo
+                    controller: MediaSession.ControllerInfo,
                 ): MediaSession.ConnectionResult {
                     if (session.isMediaNotificationController(controller)) {
                         val customPrevCommand = SessionCommand(PLAYER_TO_PREV_COMMAND, Bundle.EMPTY)
@@ -100,21 +135,28 @@ class PlaybackService : MediaSessionService() {
                                 .remove(Player.COMMAND_SEEK_FORWARD)
                                 .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
                                 .build()
-                        // Custom layout and available commands to configure the legacy/framework session.
                         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                             .setCustomLayout(
                                 ImmutableList.of(
                                     CommandButton.Builder()
                                         .setSessionCommand(customPrevCommand)
-                                        .setIconResId(CommandButton.getIconResIdForIconConstant(CommandButton.ICON_PREVIOUS))
+                                        .setIconResId(
+                                            CommandButton.getIconResIdForIconConstant(
+                                                CommandButton.ICON_PREVIOUS,
+                                            ),
+                                        )
                                         .setDisplayName("Previous")
                                         .build(),
                                     CommandButton.Builder()
                                         .setSessionCommand(customNextCommand)
-                                        .setIconResId(CommandButton.getIconResIdForIconConstant(CommandButton.ICON_NEXT))
+                                        .setIconResId(
+                                            CommandButton.getIconResIdForIconConstant(
+                                                CommandButton.ICON_NEXT,
+                                            ),
+                                        )
                                         .setDisplayName("Next")
                                         .build(),
-                                )
+                                ),
                             )
                             .setAvailablePlayerCommands(playerCommands)
                             .setAvailableSessionCommands(sessionCommands)
@@ -127,7 +169,7 @@ class PlaybackService : MediaSessionService() {
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
                     customCommand: SessionCommand,
-                    args: Bundle
+                    args: Bundle,
                 ): ListenableFuture<SessionResult> {
                     if (customCommand.customAction == PLAYER_TO_PREV_COMMAND) {
                         playPrevious()
@@ -138,44 +180,6 @@ class PlaybackService : MediaSessionService() {
                 }
             })
             .build()
-
-        player.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                playerRepository.setIsPlaying(isPlaying)
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
-                    playOnComplete()
-                } else if (playbackState == Player.STATE_READY) {
-                    playerRepository.setIsLoading(false)
-                    syncMetadataUtil(serviceScope, bridge, player)
-                } else if (playbackState == Player.STATE_BUFFERING) {
-                    playerRepository.setIsLoading(true)
-                }
-            }
-
-            override fun onPositionDiscontinuity(
-                oldPosition: Player.PositionInfo,
-                newPosition: Player.PositionInfo,
-                reason: Int
-            ) {
-                playerRepository.notifyDurationChanged()
-            }
-        })
-        easeLog("Playback service created")
-
-        serviceScope.launch(Dispatchers.Main) {
-            playerRepository.pauseRequest.collect {
-                val player = _mediaSession?.player ?: return@collect
-
-                if (player.isCommandAvailable(COMMAND_PLAY_PAUSE)) {
-                    player.pause()
-                } else {
-                    easeError("media player pause failed, command COMMAND_PLAY_PAUSE is unavailable")
-                }
-            }
-        }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -188,21 +192,17 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        _mediaSession?.player?.stop()
-        _mediaSession?.player?.release()
         _mediaSession?.release()
         _mediaSession = null
+        attachedPlayer = null
         serviceScope.cancel()
     }
 
-
     fun play(musicAbstract: MusicAbstract, playlist: Playlist) {
-        val player = _mediaSession?.player ?: return
-
         serviceScope.launch {
             val music = bridge.run { ctGetMusic(it, musicAbstract.meta.id) } ?: return@launch
             playerRepository.setCurrent(music, playlist)
-            playUtil(BuildMediaContext(bridge = bridge, scope = serviceScope), musicAbstract, player as ExoPlayer)
+            playerControllerRepository.play(musicAbstract.meta.id, playlist.abstr.meta.id)
         }
     }
 

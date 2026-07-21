@@ -23,6 +23,7 @@ impl Drop for BackendContextInternal {
     }
 }
 
+#[derive(Clone)]
 pub struct BackendContext {
     internal: Arc<BackendContextInternal>,
 }

@@ -134,11 +134,11 @@ fn exercise_file(case: Case) {
     // `require_audio_device` will panic loudly so CI failures are obvious.
     common::require_audio_device();
 
-    let mut cx2 = PlayerContext::new().expect("context construction failed");
+    let cx2 = PlayerContext::new().expect("context construction failed");
     let event_sink = Arc::new(cantode::ChannelEventSink::new(1024));
     let rx = event_sink.subscribe();
     let player = Player::with_config(
-        &mut cx2,
+        &cx2,
         PlayerConfig {
             event_sink: Some(event_sink),
         },
