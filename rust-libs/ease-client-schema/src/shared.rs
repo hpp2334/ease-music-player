@@ -38,6 +38,39 @@ define_id!(BlobId);
 define_id!(MusicId);
 define_id!(PlaylistId);
 
+impl StorageId {
+    /// Sentinel id for the synthetic, always-present Local storage.
+    ///
+    /// Negative so it can never collide with a real auto-incremented row in
+    /// the `storage` table. The Local storage is not persisted — it is
+    /// injected by the biz layer on every `list_storage` call, so callers can
+    /// always resolve it regardless of DB / migration state.
+    pub fn local() -> Self {
+        Self::wrap(-1)
+    }
+
+    /// True if this id refers to the synthetic Local storage.
+    pub fn is_local(self) -> bool {
+        self == Self::local()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_storage_id_is_negative_sentinel() {
+        let local = StorageId::local();
+        assert!(local.is_local());
+        assert_eq!(*local.as_ref(), -1);
+        // Must never collide with a real auto-increment id (always >= 1).
+        assert_ne!(StorageId::wrap(0), local);
+        assert_ne!(StorageId::wrap(1), local);
+        assert_ne!(StorageId::wrap(i64::MAX), local);
+    }
+}
+
 #[derive(
     Debug,
     Serialize,

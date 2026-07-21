@@ -102,6 +102,26 @@ pub async fn get_storage_backend(
         }
     }
 
+    // The synthetic Local storage is not persisted in the DB — build a
+    // LocalBackend directly so browse and playback always succeed.
+    if storage_id.is_local() {
+        let backend = build_storage_backend_by_arg(
+            cx,
+            ArgUpsertStorage {
+                id: None,
+                addr: String::new(),
+                alias: "Local".to_string(),
+                username: String::new(),
+                password: String::new(),
+                is_anonymous: false,
+                typ: StorageType::Local,
+            },
+        )?;
+        let mut state = cx.storage_state().cache.write().unwrap();
+        state.insert(storage_id, backend.clone());
+        return Ok(Some(backend));
+    }
+
     let model = cx.database_server().load_storage(storage_id).await?;
     let music_count = cx.database_server().load_storage_music_count(storage_id).await?;
 
@@ -133,12 +153,32 @@ pub async fn get_storage_backend(
 pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
     let models = cx.database_server().load_storages().await?;
 
-    let mut storages: Vec<Storage> = Default::default();
+    let mut storages: Vec<Storage> = Vec::with_capacity(models.len() + 1);
     for m in models.into_iter() {
+        // Local is always the synthetic sentinel-id entry injected below;
+        // skip any DB-persisted Local row (e.g. carried over from a legacy
+        // redb migration) so it is not shown twice.
+        if m.typ == StorageType::Local {
+            continue;
+        }
         let music_count = cx.database_server().load_storage_music_count(m.id).await?;
-
         storages.push(build_storage(m, music_count));
     }
+
+    // Always inject the synthetic Local storage so the biz layer can hit it
+    // regardless of DB / migration state. See `StorageId::local`.
+    let local_id = StorageId::local();
+    let local_count = cx.database_server().load_storage_music_count(local_id).await?;
+    storages.push(Storage {
+        id: local_id,
+        addr: String::new(),
+        alias: "Local".to_string(),
+        username: String::new(),
+        password: String::new(),
+        is_anonymous: false,
+        typ: StorageType::Local,
+        music_count: local_count,
+    });
 
     storages.sort_by(|lhs, rhs| {
         let l_local = lhs.typ == StorageType::Local;
