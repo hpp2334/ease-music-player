@@ -59,6 +59,19 @@ pub(crate) trait AudioSink: Send {
     /// to decide whether to enter `Buffering`.
     fn write(&mut self, frames: &[f32]) -> crate::Result<()>;
 
+    /// Drop all samples currently buffered in the sink without closing the
+    /// stream. After `flush()` returns, the next `write()`d samples are the
+    /// next ones the device callback will consume.
+    ///
+    /// Used on seek: the decoder jumps to a new position, but the sink may
+    /// still be holding up to `buffer_secs` of pre-seek audio in its ring
+    /// buffer. Without a flush, the listener hears ~2s of stale audio from
+    /// the old position before the new position's samples arrive — and
+    /// because the worker keeps decoding/pushing during that window, the
+    /// stream becomes a discontinuous mix of old tail + new audio. Flushing
+    /// synchronizes the buffer contents with the decoder position.
+    fn flush(&mut self) -> crate::Result<()>;
+
     /// Temporarily halt output without closing the stream. Idempotent.
     fn pause(&mut self) -> crate::Result<()>;
 
