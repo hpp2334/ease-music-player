@@ -480,6 +480,13 @@ impl Worker {
             CantodeError::InvalidState("seek requires a loaded source".into())
         })?;
         let actual = dec.seek(target)?;
+        // Flush the sink's buffered audio: it contains up to `buffer_secs`
+        // of pre-seek samples that would otherwise play out before the new
+        // seek position's audio arrives. Without this flush, the listener
+        // hears ~2s of stale audio mixed with the new position's samples.
+        if let Some(s) = self.sink.as_mut() {
+            let _ = s.flush();
+        }
         self.shared_position.store(actual);
         self.sinks.emit(PlayerEvent::PositionChanged(actual));
         // Seeking clears the "ended" latch for this load.

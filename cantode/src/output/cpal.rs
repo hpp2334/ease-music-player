@@ -59,6 +59,16 @@ pub(crate) struct CpalSink {
     /// Shared with the cpal callback so `set_volume` takes effect
     /// immediately without rebuilding the stream.
     volume: Arc<AtomicU32>,
+    /// Flush generation counter, shared with the cpal callback.
+    ///
+    /// When `flush()` is called, the worker bumps this counter. The callback
+    /// remembers the last-seen value; on entry, if it differs, the callback
+    /// drains-and-discards the entire ring buffer before producing output.
+    /// This is the safe (no `unsafe`) way to make subsequent `write()`s the
+    /// next thing the device plays — required on seek, otherwise the device
+    /// plays up to `buffer_secs` of pre-seek audio before the new position
+    /// arrives, producing a discontinuous mix.
+    flush_gen: Arc<AtomicU32>,
     format: Option<AudioFormat>,
 }
 
@@ -70,6 +80,7 @@ impl CpalSink {
             stream: None,
             producer: None,
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
+            flush_gen: Arc::new(AtomicU32::new(0)),
             format: None,
         }
     }
@@ -98,7 +109,7 @@ impl AudioSink for CpalSink {
         let stream_config = supported.config();
         let actual = AudioFormat::new(
             stream_config.channels as u16,
-            stream_config.sample_rate, // also `u32`
+            stream_config.sample_rate,
         );
 
         // Size the ring buffer for `DEFAULT_BUFFER_SECS` of audio.
@@ -111,17 +122,18 @@ impl AudioSink for CpalSink {
         let (producer, consumer) = rb.split();
 
         let volume = self.volume.clone();
+        let flush_gen = self.flush_gen.clone();
         let stream = match supported.sample_format() {
-            cpal::SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::U16 => build_stream::<u16>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::F64 => build_stream::<f64>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::I32 => build_stream::<i32>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::U32 => build_stream::<u32>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::I8 => build_stream::<i8>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::U8 => build_stream::<u8>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::I64 => build_stream::<i64>(&device, &stream_config, consumer, volume)?,
-            cpal::SampleFormat::U64 => build_stream::<u64>(&device, &stream_config, consumer, volume)?,
+            cpal::SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::U16 => build_stream::<u16>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::F64 => build_stream::<f64>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::I32 => build_stream::<i32>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::U32 => build_stream::<u32>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::I8 => build_stream::<i8>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::U8 => build_stream::<u8>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::I64 => build_stream::<i64>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::U64 => build_stream::<u64>(&device, &stream_config, consumer, volume, flush_gen)?,
             other => {
                 return Err(CantodeError::StreamConfig(format!(
                     "unsupported sample format: {other:?}"
@@ -152,21 +164,65 @@ impl AudioSink for CpalSink {
         let mut to_push = frames;
         let total = frames.len();
         let mut pushed = 0usize;
+
+        // Backpressure: when the ring buffer is full, the consumer (cpal
+        // callback) hasn't drained enough yet. BLOCK here for a bounded
+        // time instead of dropping samples — otherwise the worker would
+        // burn through the source audio (dropping most frames) while the
+        // position counter races ahead and the audio output becomes a
+        // fragmented mix of source positions.
+        //
+        // We poll with a short sleep (no condvar — the cpal callback is RT
+        // and must not be expected to signal a waiter). 2ms is fine-grained
+        // enough to keep the buffer topped up without busy-spinning.
+        const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(2);
+        // If we wait this long without ANY progress, give up on the
+        // remainder (likely a stream stall / device disconnect).
+        const MAX_STALL: std::time::Duration = std::time::Duration::from_secs(2);
+
+        let mut stall_total = std::time::Duration::ZERO;
         while !to_push.is_empty() {
             let n = producer.push_slice(to_push);
             if n == 0 {
-                break;
+                if stall_total >= MAX_STALL {
+                    tracing::warn!(
+                        remaining = to_push.len(),
+                        waited_ms = stall_total.as_millis() as u64,
+                        "sink write stalled beyond MAX_STALL; dropping remainder"
+                    );
+                    break;
+                }
+                std::thread::sleep(POLL_INTERVAL);
+                stall_total += POLL_INTERVAL;
+                continue;
             }
             pushed += n;
             to_push = &to_push[n..];
+            stall_total = std::time::Duration::ZERO;
         }
 
         if pushed < total {
             tracing::debug!(
                 dropped = total - pushed,
-                "cpal sink ring buffer full; dropping samples"
+                "cpal sink dropped samples after MAX_STALL"
             );
         }
+
+        Ok(())
+    }
+
+    fn flush(&mut self) -> crate::Result<()> {
+        // Bump the flush generation. The cpal callback will detect the
+        // change on its next invocation and discard everything currently
+        // in the ring buffer before producing output, so subsequent
+        // `write()`s are the next samples the device plays.
+        //
+        // We DON'T touch the producer side here: any samples pushed before
+        // this call but not yet consumed are discarded by the callback; any
+        // samples the worker pushes after `flush()` returns race with the
+        // callback's discard but will be correctly consumed because the
+        // discard runs at callback entry with a single atomic load.
+        self.flush_gen.fetch_add(1, Ordering::Release);
         Ok(())
     }
 
@@ -213,38 +269,62 @@ impl Drop for CpalSink {
 
 // ----- helpers -----
 
-/// Pick the closest supported stream config for the desired sample rate
-/// and channel count.
+/// Pick the closest supported stream config for the desired sample rate,
+/// channel count, and sample format.
 ///
-/// Preference order:
+/// Preference order (each step tries F32 first, then falls back to other
+/// formats):
 /// 1. A config whose sample-rate range contains `desired_rate` **and** whose
-///    channel count equals `desired_channels`. (Exact match on both axes.)
-/// 2. A config whose sample-rate range contains `desired_rate` (any
-///    channels) — the caller will down/up-mix.
-/// 3. The device's default output config.
+///    channel count equals `desired_channels` **and** whose sample format is
+///    F32. (Exact match on all three axes — what we want.)
+/// 2. Same as (1) but accepting any sample format the device lists.
+/// 3. A config whose sample-rate range contains `desired_rate` and channels
+///    match (any format).
+/// 4. A config whose sample-rate range contains `desired_rate` (any channels,
+///    any format) — the caller will down/up-mix.
+/// 5. The device's default output config.
 ///
-/// Why channel count matters: on Android (AAudio via oboe/ndk-sys), the
-/// device's *default* config reported by cpal is frequently **mono** even
-/// when the device can actually sink stereo. If we accept that default for a
-/// stereo source, the worker pushes 2-sample frames into the ring buffer
-/// while the callback drains them as 1-sample frames — playback runs at 2×
-/// speed and glitches. Requesting the source's channel count up front (with
-/// a down/up-mix fallback for genuinely mono-only devices) is the fix.
+/// Two historical bugs drive the F32 preference:
+///
+/// - **Channel mismatch (2× speed):** on Android (AAudio via oboe/ndk-sys),
+///   the device's *default* config reported by cpal is frequently **mono**
+///   even when the device can actually sink stereo. Accepting that default
+///   for a stereo source pushes 2-sample frames into the ring buffer while
+///   the callback drains them as 1-sample frames.
+///
+/// - **Format mismatch (2× speed + distortion):** cpal's Android backend
+///   sometimes reports `SampleFormat::I16` as supported, but AAudio actually
+///   opens the stream as **PCM_FLOAT** regardless. cpal then drives an i16
+///   stream callback while AAudio reads f32 → 2-byte writes consumed as
+///   4-byte reads → buffer exhaustion rate doubles and sample interpretation
+///   is wrong. Forcing F32 makes cpal and AAudio agree on the wire format.
 fn pick_supported_config(
     device: &cpal::Device,
     desired_rate: u32,
     desired_channels: u16,
 ) -> crate::Result<SupportedStreamConfig> {
-    if let Ok(mut configs) = device.supported_output_configs() {
-        // (1) Exact match on rate + channels.
-        if let Some(c) = configs.find(|c| {
+    // (1) Exact match on rate + channels + F32.
+    if let Ok(mut configs) = device.supported_output_configs()
+        && let Some(c) = configs.find(|c| {
+            c.channels() == desired_channels
+                && c.sample_format() == cpal::SampleFormat::F32
+                && c.min_sample_rate() <= desired_rate
+                && desired_rate <= c.max_sample_rate()
+        })
+    {
+        return Ok(c.with_sample_rate(desired_rate));
+    }
+    // (2)/(3) Rate + channels match, any format.
+    if let Ok(mut configs) = device.supported_output_configs()
+        && let Some(c) = configs.find(|c| {
             c.channels() == desired_channels
                 && c.min_sample_rate() <= desired_rate
                 && desired_rate <= c.max_sample_rate()
-        }) {
-            return Ok(c.with_sample_rate(desired_rate));
-        }
+        })
+    {
+        return Ok(c.with_sample_rate(desired_rate));
     }
+    // (4) Rate match, any channels/format.
     if let Ok(mut configs) = device.supported_output_configs()
         && let Some(c) = configs.find(|c| {
             c.min_sample_rate() <= desired_rate && desired_rate <= c.max_sample_rate()
@@ -252,6 +332,7 @@ fn pick_supported_config(
     {
         return Ok(c.with_sample_rate(desired_rate));
     }
+    // (5) Last resort: device default.
     device
         .default_output_config()
         .map_err(|e| CantodeError::StreamConfig(format!("default output config: {e}")))
@@ -263,11 +344,16 @@ fn pick_supported_config(
 /// current volume (read atomically) and converting f32 → `T` via
 /// [`cpal::Sample::from_sample`]. On underflow it writes silence
 /// (`T::EQUILIBRIUM`) rather than blocking — standard RT-safety discipline.
+///
+/// `flush_gen` is a generation counter shared with [`CpalSink::flush`]. When
+/// the worker bumps it, the callback drains-and-discards the entire ring
+/// buffer on its next invocation before producing output.
 fn build_stream<T>(
     device: &cpal::Device,
     config: &StreamConfig,
     consumer: HeapCons<f32>,
     volume: Arc<AtomicU32>,
+    flush_gen: Arc<AtomicU32>,
 ) -> crate::Result<Stream>
 where
     T: SizedSample + cpal::FromSample<f32> + Send + 'static,
@@ -275,10 +361,36 @@ where
     let mut consumer = consumer;
     let err_fn = |err: cpal::StreamError| tracing::error!("cpal stream error: {err}");
 
+    // Last flush_gen value observed by the callback. When the worker-side
+    // counter changes, the callback discards the entire buffer once. We
+    // initialize to the current value so a flush that raced with stream
+    // creation is still honored.
+    let last_flush = AtomicU32::new(flush_gen.load(Ordering::Relaxed));
+
     let stream = device
         .build_output_stream::<T, _, _>(
             config,
             move |out: &mut [T], _info: &cpal::OutputCallbackInfo| {
+                // Flush check: if the worker bumped the generation, discard
+                // everything currently in the ring buffer (whether produced
+                // before or racing with this callback) before producing
+                // output. We `clear()` then advance our observed counter so
+                // we only discard once per flush().
+                let current_gen = flush_gen.load(Ordering::Acquire);
+                let last_gen = last_flush.load(Ordering::Relaxed);
+                if current_gen != last_gen {
+                    consumer.clear();
+                    last_flush.store(current_gen, Ordering::Relaxed);
+                    // Output silence for this period — the worker's
+                    // post-seek samples haven't arrived yet (or only just
+                    // started arriving after the clear). Filling silence
+                    // avoids a partial-buffer glitch.
+                    for slot in out.iter_mut() {
+                        *slot = T::EQUILIBRIUM;
+                    }
+                    return;
+                }
+
                 let vol = load_vol(&volume);
                 drain_into(&mut consumer, out, vol);
             },
