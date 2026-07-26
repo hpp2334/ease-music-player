@@ -73,6 +73,17 @@ class PlayerControllerRepository @Inject constructor(
     private val _endedEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     val endedEvent = _endedEvent.asSharedFlow()
 
+    /**
+     * Plugin event bus. Collected by [PluginRepository] and dispatched to
+     * each enabled plugin whose `manifest.json` `events` array contains
+     * the event's [PluginEvent.type] string.
+     *
+     * `extraBufferCapacity = 16` so a slow plugin consumer never blocks
+     * the producer (play/pause/stop run on the UI thread).
+     */
+    private val _pluginEvents = MutableSharedFlow<PluginEvent>(extraBufferCapacity = 16)
+    val pluginEvents = _pluginEvents.asSharedFlow()
+
     val sleepState = _sleep.asStateFlow()
 
     // ---- cantode handles ----
@@ -136,11 +147,23 @@ class PlayerControllerRepository @Inject constructor(
                 this@PlayerControllerRepository.handle = handle
 
                 // Route SimpleBasePlayer STATE_ENDED → _endedEvent so
-                // PlaybackService can fire auto-advance.
+                // PlaybackService can fire auto-advance. Also emit a
+                // MusicComplete plugin event for plugins tracking
+                // play-throughs.
                 player.addListener(object : androidx.media3.common.Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
                             _scope.launch { _endedEvent.emit(Unit) }
+                            val m = _music.value
+                            if (m != null) {
+                                _pluginEvents.tryEmit(
+                                    PluginEvent.MusicComplete(
+                                        musicId = m.meta.id,
+                                        title = m.meta.title,
+                                        timestamp = System.currentTimeMillis(),
+                                    )
+                                )
+                            }
                         }
                     }
                 })
@@ -190,6 +213,13 @@ class PlayerControllerRepository @Inject constructor(
                 cantodePlayer.setCurrentMedia(id, music.meta.title)
                 bridge.run { ctPlayerLoadMusic(it, handle, id) }
                 ctPlayerPlay(handle)
+                _pluginEvents.tryEmit(
+                    PluginEvent.MusicPlay(
+                        musicId = id,
+                        title = music.meta.title,
+                        timestamp = System.currentTimeMillis(),
+                    )
+                )
             } else {
                 playerRepository.resetCurrent()
             }
@@ -203,7 +233,16 @@ class PlayerControllerRepository @Inject constructor(
 
     fun pause() {
         val handle = handle ?: return
-        _scope.launch { ctPlayerPause(handle) }
+        _scope.launch {
+            ctPlayerPause(handle)
+            _pluginEvents.tryEmit(
+                PluginEvent.MusicPause(
+                    musicId = _music.value?.meta?.id,
+                    timestamp = System.currentTimeMillis(),
+                    positionMs = getCurrentPosition(),
+                )
+            )
+        }
     }
 
     fun stop() {
@@ -212,6 +251,9 @@ class PlayerControllerRepository @Inject constructor(
             ctPlayerStop(handle)
             playerRepository.resetCurrent()
             _cantodePlayerState.value?.setCurrentMedia(null, null)
+            _pluginEvents.tryEmit(
+                PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
+            )
         }
     }
 

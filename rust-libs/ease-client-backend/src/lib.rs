@@ -5,9 +5,9 @@ pub(crate) mod ctx;
 pub mod error;
 mod infra;
 mod objects;
+pub(crate) mod plugin_runtime;
 pub(crate) mod repositories;
 mod services;
-mod streaming_server;
 pub(crate) mod utils;
 
 pub use objects::*;
@@ -24,11 +24,21 @@ use crate::{
 
 uniffi::setup_scaffolding!();
 
+/// Process-wide handle to the active [`BackendContext`]. Set once by
+/// [`Backend::init`] and read by the tur `EaseMusicPlugin` so its `ease:*`
+/// JS bridge modules can call into the database / KV storage without a
+/// direct dependency on the `Backend` UniFFI object.
+///
+/// This is the in-memory integration seam between the ease backend and
+/// the tur engine — both `.so` symbols live in the same process (tur is
+/// linked as an rlib into `libease_client_backend.so`), so a OnceLock is
+/// all that's needed for cross-module sharing.
+pub(crate) static BACKEND_CONTEXT: std::sync::OnceLock<Arc<BackendContext>> = std::sync::OnceLock::new();
+
 #[derive(uniffi::Object)]
 pub struct Backend {
     arg: ArgInitializeApp,
     cx: Arc<BackendContext>,
-    streaming_server: std::sync::Mutex<Option<streaming_server::StreamingServer>>,
 }
 
 impl Drop for Backend {
@@ -41,33 +51,22 @@ impl Drop for Backend {
 impl Backend {
     pub fn init(&self) -> BResult<()> {
         let cx = self.cx.clone();
+        let cx_for_once = self.cx.clone();
         let arg = self.arg.clone();
         ease_client_tokio::tokio_runtime().block_on(async move {
             app_bootstrap(&cx, arg).await
         })?;
-
-        let server = streaming_server::StreamingServer::start(self.cx.weak());
-        tracing::info!("streaming server started at {}", server.base_url());
-        *self.streaming_server.lock().unwrap() = Some(server);
+        // Publish the backend context for the tur EaseMusicPlugin. Set
+        // before the first tur engine is constructed so ease:* modules
+        // can resolve the context synchronously at register-time.
+        let _ = BACKEND_CONTEXT.set(cx_for_once);
         Ok(())
     }
 
     pub fn deinit(&self) -> BResult<()> {
-        *self.streaming_server.lock().unwrap() = None;
         ease_client_tokio::tokio_runtime().block_on(async {
             app_destroy(&self.cx).await
         })
-    }
-
-    /// Returns the streaming HTTP server's base URL (e.g.
-    /// `http://127.0.0.1:54321`), or `None` if `init()` has not been
-    /// called yet. JavaFX MediaPlayer points at `<base_url>/music/:id`.
-    pub fn streaming_base_url(&self) -> Option<String> {
-        self.streaming_server
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|s| s.base_url().to_string())
     }
 }
 
@@ -88,7 +87,6 @@ pub fn create_backend(arg: ArgInitializeApp) -> Arc<Backend> {
     Arc::new(Backend {
         cx,
         arg,
-        streaming_server: std::sync::Mutex::new(None),
     })
 }
 

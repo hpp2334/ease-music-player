@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var playerControllerRepository: PlayerControllerRepository
     @Inject lateinit var playerRepository: PlayerRepository
     @Inject lateinit var permissionRepository: PermissionRepository
+    @Inject lateinit var pluginRepository: com.kutedev.easemusicplayer.singleton.PluginRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,6 +65,9 @@ class MainActivity : ComponentActivity() {
             storageRepository.reload()
             playlistRepository.reload()
             setupCantodePlayer()
+            // Connect the plugin event bus after the player repo is wired
+            // so plugins begin receiving music:play / pause / stop / complete.
+            pluginRepository.bindPlayerEvents(playerControllerRepository)
         }
     }
 
