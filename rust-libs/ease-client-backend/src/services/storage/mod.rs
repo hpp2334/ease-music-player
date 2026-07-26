@@ -167,18 +167,7 @@ pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
 
     // Always inject the synthetic Local storage so the biz layer can hit it
     // regardless of DB / migration state. See `StorageId::local`.
-    let local_id = StorageId::local();
-    let local_count = cx.database_server().load_storage_music_count(local_id).await?;
-    storages.push(Storage {
-        id: local_id,
-        addr: String::new(),
-        alias: "Local".to_string(),
-        username: String::new(),
-        password: String::new(),
-        is_anonymous: false,
-        typ: StorageType::Local,
-        music_count: local_count,
-    });
+    storages.push(build_local_storage(cx).await?);
 
     storages.sort_by(|lhs, rhs| {
         let l_local = lhs.typ == StorageType::Local;
@@ -192,6 +181,55 @@ pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
     });
 
     Ok(storages)
+}
+
+/// Build the synthetic, always-present Local storage. Reads the live music
+/// count from the DB but is not itself a DB row — `StorageId::local()` is a
+/// negative sentinel that never appears in the `storage` table.
+pub async fn build_local_storage(cx: &BackendContext) -> BResult<Storage> {
+    let local_id = StorageId::local();
+    let local_count = cx.database_server().load_storage_music_count(local_id).await?;
+    Ok(Storage {
+        id: local_id,
+        addr: String::new(),
+        alias: "Local".to_string(),
+        username: String::new(),
+        password: String::new(),
+        is_anonymous: false,
+        typ: StorageType::Local,
+        music_count: local_count,
+    })
+}
+
+/// Create or update a storage row, rejecting attempts to write the synthetic
+/// Local storage. Local is not persisted — it is always synthesized on read
+/// by `list_storage` / `build_local_storage`, so persisting a row with
+/// `typ = Local` would be a no-op from the user's perspective (the row gets
+/// skipped on read) and would shadow the synthetic entry's intent.
+pub async fn upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> BResult<StorageId> {
+    if arg.typ == StorageType::Local {
+        return Err(crate::error::BError::CustomError {
+            message: "cannot create or update the synthetic Local storage".to_string(),
+        });
+    }
+    let id = cx.database_server().upsert_storage(arg).await?;
+    evict_storage_backend_cache(cx, id);
+    Ok(id)
+}
+
+/// Remove a storage row, rejecting attempts to delete the synthetic Local
+/// storage. Deleting Local would cascade-delete every music row whose
+/// `loc_storage_id` matches the Local sentinel and detach them from all
+/// playlists — catastrophic, and never what a caller intends.
+pub async fn remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()> {
+    if id.is_local() {
+        return Err(crate::error::BError::CustomError {
+            message: "cannot remove the synthetic Local storage".to_string(),
+        });
+    }
+    cx.database_server().remove_storage(id).await?;
+    evict_storage_backend_cache(cx, id);
+    Ok(())
 }
 
 async fn get_asset_file_by_loc(

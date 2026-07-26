@@ -9,8 +9,8 @@ use crate::{
     objects::{ListStorageEntryChildrenResp, Storage, StorageConnectionTestResult, StorageEntry},
     onedrive_oauth_url,
     services::{
-        build_storage_backend_by_arg, evict_storage_backend_cache, get_storage_backend,
-        list_storage,
+        build_storage_backend_by_arg, get_storage_backend, list_storage, remove_storage,
+        upsert_storage,
     },
     ArgUpsertStorage, Backend,
 };
@@ -39,8 +39,7 @@ pub async fn ct_upsert_storage(cx: Arc<Backend>, arg: ArgUpsertStorage) -> BResu
         let arg = normalize_arg_upsert_storage(arg);
 
         let cx = cx.get_context();
-        let id = cx.database_server().upsert_storage(arg).await?;
-        evict_storage_backend_cache(cx, id);
+        upsert_storage(cx, arg).await?;
 
         Ok(())
     }).await.unwrap()
@@ -59,8 +58,7 @@ pub async fn ct_get_refresh_token(cx: Arc<Backend>, code: String) -> BResult<Str
 pub async fn ct_remove_storage(cx: Arc<Backend>, id: StorageId) -> BResult<()> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
-        cx.database_server().remove_storage(id).await?;
-        evict_storage_backend_cache(cx, id);
+        remove_storage(cx, id).await?;
 
         Ok(())
     }).await.unwrap()

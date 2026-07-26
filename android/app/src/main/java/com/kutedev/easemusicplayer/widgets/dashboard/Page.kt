@@ -46,7 +46,8 @@ import com.kutedev.easemusicplayer.viewmodels.SleepModeLeftTime
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.core.LocalNavController
-import com.kutedev.easemusicplayer.core.RouteAddDevices
+import com.kutedev.easemusicplayer.core.RouteCreateStorage
+import com.kutedev.easemusicplayer.core.RouteEditStorage
 import uniffi.ease_client_backend.Storage
 import uniffi.ease_client_schema.StorageType
 
@@ -142,7 +143,7 @@ private fun ColumnScope.DevicesBlock(
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable {
-                        navController.navigate(RouteAddDevices((-1).toString()))
+                        navController.navigate(RouteCreateStorage())
                     }
             ) {
                 Row(
@@ -168,7 +169,7 @@ private fun ColumnScope.DevicesBlock(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        navController.navigate(RouteAddDevices(item.id.value.toString()))
+                        navController.navigate(RouteEditStorage(item.id.value.toString()))
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -250,7 +251,7 @@ fun DashboardSubpage(
                     buttonType = EaseIconButtonType.Primary,
                     painter = painterResource(id = R.drawable.icon_plus),
                     onClick = {
-                        navController.navigate(RouteAddDevices((-1).toString()))
+                        navController.navigate(RouteCreateStorage())
                     }
                 )
             }
