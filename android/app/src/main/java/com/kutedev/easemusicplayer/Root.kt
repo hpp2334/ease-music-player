@@ -22,7 +22,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.kutedev.easemusicplayer.ui.theme.EaseMusicPlayerTheme
 import com.kutedev.easemusicplayer.core.LocalNavController
-import com.kutedev.easemusicplayer.core.RouteAddDevices
+import com.kutedev.easemusicplayer.core.RouteCreateStorage
+import com.kutedev.easemusicplayer.core.RouteEditStorage
 import com.kutedev.easemusicplayer.core.RouteDebugMore
 import com.kutedev.easemusicplayer.core.RouteHome
 import com.kutedev.easemusicplayer.core.RouteImport
@@ -107,8 +108,11 @@ fun Root() {
                                 CreatePlaylistsDialog()
                                 TimeToPauseModal()
                             }
+                            composable(RouteCreateStorage()) {
+                                EditStoragesPage()
+                            }
                             composable(
-                                RouteAddDevices("{id}"),
+                                RouteEditStorage("{id}"),
                                 arguments = listOf(navArgument("id") { type = NavType.LongType })
                             ) {
                                 EditStoragesPage()

@@ -96,7 +96,14 @@ class EditStorageVM @Inject constructor(
         _musicCount.value = 0u
 
         val id: Long? = savedStateHandle["id"]
-        val storage = storageRepository.storages.value.find { v -> id != null && v.id == StorageId(id) }
+        // The route determines mode: `RouteCreateStorage` passes no id
+        // (id == null → create new), `RouteEditStorage/{id}` passes a real
+        // storage id (edit existing). No sentinel, no ambiguity.
+        val storage = if (id == null) {
+            null
+        } else {
+            storageRepository.storages.value.find { v -> v.id == StorageId(id) }
+        }
         if (storage != null) {
             _form.value = ArgUpsertStorage(
                 id = storage.id,
@@ -211,7 +218,16 @@ class EditStorageVM @Inject constructor(
             return false
         }
 
-        storageRepository.upsertStorage(_form.value)
+        val form = _form.value
+        val ok = if (form.id == null) {
+            storageRepository.createStorage(form)
+        } else {
+            storageRepository.updateStorage(form)
+        }
+        if (!ok) {
+            toastRepository.emitToastRes(R.string.storage_edit_save_failed)
+            return false
+        }
         return true
     }
 

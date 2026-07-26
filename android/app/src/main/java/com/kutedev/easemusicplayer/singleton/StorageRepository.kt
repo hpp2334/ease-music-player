@@ -37,9 +37,29 @@ class StorageRepository @Inject constructor(
         _oauthRefreshToken.value = token
     }
 
-    suspend fun upsertStorage(arg: ArgUpsertStorage) {
-        bridge.run { ctUpsertStorage(it, arg) }
+    /**
+     * Create a new storage. `arg.id` must be null — the database assigns the id.
+     * Returns true on success, false if the backend call failed (the bridge
+     * swallows the exception; callers expecting the error message should use
+     * `bridge.runRaw` directly).
+     */
+    suspend fun createStorage(arg: ArgUpsertStorage): Boolean {
+        require(arg.id == null) { "createStorage: arg.id must be null" }
+        bridge.run { ctUpsertStorage(it, arg) } ?: return false
         reload()
+        return true
+    }
+
+    /**
+     * Update an existing storage. `arg.id` must be non-null and refer to a
+     * real persisted storage row (i.e. not the synthetic Local sentinel —
+     * the service layer rejects that with an explicit error).
+     */
+    suspend fun updateStorage(arg: ArgUpsertStorage): Boolean {
+        require(arg.id != null) { "updateStorage: arg.id must be non-null" }
+        bridge.run { ctUpsertStorage(it, arg) } ?: return false
+        reload()
+        return true
     }
 
     suspend fun remove(id: StorageId) {

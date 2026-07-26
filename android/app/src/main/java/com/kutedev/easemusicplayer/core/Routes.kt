@@ -14,8 +14,16 @@ fun isRouteHome(route: String): Boolean {
     return route == "Home"
 }
 
-fun RouteAddDevices(id: String): String {
-    return "AddDevices/${id}"
+fun RouteCreateStorage(): String {
+    return "CreateStorage"
+}
+
+fun RouteEditStorage(id: String): String {
+    return "EditStorage/${id}"
+}
+
+fun isRouteEditStorage(route: String): Boolean {
+    return route.startsWith("EditStorage/")
 }
 
 fun RoutePlaylist(id: String): String {
