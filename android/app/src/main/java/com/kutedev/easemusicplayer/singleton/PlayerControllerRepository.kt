@@ -1,7 +1,10 @@
 package com.kutedev.easemusicplayer.singleton
 
-import com.kutedev.easemusicplayer.core.CantodePlayer
+import android.content.Context
+import com.kutedev.easemusicplayer.core.CantodeEngine
+import com.kutedev.easemusicplayer.core.PlaybackService
 import com.kutedev.easemusicplayer.singleton.SleepModeState
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,11 +22,14 @@ import uniffi.ease_client_backend.PlayerContextHandle
 import uniffi.ease_client_backend.ctGetMusic
 import uniffi.ease_client_backend.ctGetPlaylist
 import uniffi.ease_client_backend.ctPlayerContextNew
+import uniffi.ease_client_backend.ctPlayerDurationMs
 import uniffi.ease_client_backend.ctPlayerLoadMusic
 import uniffi.ease_client_backend.ctPlayerNew
 import uniffi.ease_client_backend.ctPlayerPause
 import uniffi.ease_client_backend.ctPlayerPlay
+import uniffi.ease_client_backend.ctPlayerPositionMs
 import uniffi.ease_client_backend.ctPlayerSeek
+import uniffi.ease_client_backend.ctPlayerState
 import uniffi.ease_client_backend.ctPlayerStop
 import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
 import uniffi.ease_client_backend.easeError
@@ -54,6 +60,7 @@ import kotlin.math.max
  */
 @Singleton
 class PlayerControllerRepository @Inject constructor(
+    @ApplicationContext private val cx: Context,
     private val playerRepository: PlayerRepository,
     private val toastRepository: ToastRepository,
     private val playlistRepository: PlaylistRepository,
@@ -88,9 +95,9 @@ class PlayerControllerRepository @Inject constructor(
 
     // ---- cantode handles ----
 
-    private val _cantodePlayerState = MutableStateFlow<CantodePlayer?>(null)
-    /** The [CantodePlayer] once [setupCantodePlayer] completes; null before. */
-    val cantodePlayerState = _cantodePlayerState.asStateFlow()
+    private val _cantodeEngine = MutableStateFlow<CantodeEngine?>(null)
+    /** The [CantodeEngine] once [setupCantodeEngine] completes; null before. */
+    val cantodeEngine = _cantodeEngine.asStateFlow()
 
     @Volatile private var playerContext: PlayerContextHandle? = null
     @Volatile private var handle: PlayerHandle? = null
@@ -120,85 +127,102 @@ class PlayerControllerRepository @Inject constructor(
                 }
             }
         }
+        // Auto-advance on ENDED (replaces the old PlaybackService-side
+        // playOnComplete). _endedEvent is fed by collecting
+        // [CantodeEngine.endedEvent] inside [setupCantodeEngine].
+        _scope.launch(Dispatchers.Main) {
+            _endedEvent.collect {
+                playOnComplete()
+            }
+        }
     }
 
     /**
      * Called from [com.kutedev.easemusicplayer.MainActivity] once the
      * backend is initialized. Constructs the cantode [PlayerContextHandle]
-     * + [PlayerHandle] + [CantodePlayer], then publishes the wrapper via
-     * [cantodePlayerState] so [com.kutedev.easemusicplayer.core.PlaybackService]
-     * can build its [androidx.media3.session.MediaSession] around it.
+     * + [PlayerHandle] + [CantodeEngine], then publishes the engine via
+     * [cantodeEngine].
      *
-     * [playerFactory] is supplied by the caller (which has the Context
-     * needed to construct a SimpleBasePlayer). This keeps the Context
-     * out of this singleton's constructor.
+     * [engineFactory] is supplied by the caller (which has the app
+     * [CoroutineScope] needed to construct a [CantodeEngine]). This
+     * keeps the scope out of this singleton's constructor.
      *
      * Safe to call multiple times — second+ calls are no-ops.
      */
-    fun setupCantodePlayer(playerFactory: (PlayerHandle) -> CantodePlayer) {
+    fun setupCantodeEngine(engineFactory: (PlayerHandle) -> CantodeEngine) {
         if (setupStarted) return
         setupStarted = true
         _scope.launch(Dispatchers.Main) {
             try {
                 val ctx = ctPlayerContextNew()
                 val handle = ctPlayerNew(ctx)
-                val player = playerFactory(handle)
+                val engine = engineFactory(handle)
                 playerContext = ctx
                 this@PlayerControllerRepository.handle = handle
 
-                // Route SimpleBasePlayer STATE_ENDED → _endedEvent so
-                // PlaybackService can fire auto-advance. Also emit a
-                // MusicComplete plugin event for plugins tracking
-                // play-throughs.
-                player.addListener(object : androidx.media3.common.Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
-                            _scope.launch { _endedEvent.emit(Unit) }
-                            val m = _music.value
-                            if (m != null) {
-                                _pluginEvents.tryEmit(
-                                    PluginEvent.MusicComplete(
-                                        musicId = m.meta.id,
-                                        title = m.meta.title,
-                                        timestamp = System.currentTimeMillis(),
-                                    )
-                                )
-                            }
-                        }
+                // Route cantode ENDED → _endedEvent (drives auto-advance
+                // via the init {} collector above) and emit the
+                // MusicComplete plugin event.
+                _scope.launch {
+                    engine.endedEvent.collect { musicId ->
+                        _endedEvent.emit(Unit)
+                        _pluginEvents.tryEmit(
+                            PluginEvent.MusicComplete(
+                                musicId = musicId,
+                                title = _music.value?.meta?.title ?: "",
+                                timestamp = System.currentTimeMillis(),
+                            )
+                        )
                     }
-                })
+                }
 
-                _cantodePlayerState.value = player
+                _cantodeEngine.value = engine
                 playerRepository.reload()
-                easeLog("cantode player setup complete")
+                easeLog("cantode engine setup complete")
             } catch (e: Exception) {
                 setupStarted = false
-                easeError("cantode player setup failed: $e")
+                easeError("cantode engine setup failed: $e")
                 _scope.launch { toastRepository.emitToast("player setup failed: $e") }
             }
         }
     }
 
-    /** Current position in milliseconds (for the PlayerVM poll). */
+    /**
+     * Current position in milliseconds (for the PlayerVM poll).
+     *
+     * Calls cantode FFI directly (sync UniFFI reads are safe from any
+     * thread) instead of going through the [CantodePlayer] media3 wrapper,
+     * which would require a main-thread affinity check and crash when
+     * called from a background coroutine.
+     */
     fun getCurrentPosition(): Long {
-        return _cantodePlayerState.value?.currentPosition ?: 0L
+        val handle = handle ?: return 0L
+        return ctPlayerPositionMs(handle).toLong()
     }
 
-    /** Buffered position in milliseconds. */
-    fun getBufferedPosition(): Long {
-        return _cantodePlayerState.value?.bufferedPosition ?: 0L
-    }
+    /**
+     * Buffered position in milliseconds.
+     *
+     * Cantode has no separate buffered-position FFI; the decoder runs
+     * ahead of the output device but exposes only the rendered position,
+     * so we report [getCurrentPosition] as a best-effort lower bound.
+     */
+    fun getBufferedPosition(): Long = getCurrentPosition()
 
     fun play(id: MusicId, playlistId: PlaylistId) {
         val handle = handle ?: run {
             easeError("play: cantode player not ready"); return
         }
-        val cantodePlayer = _cantodePlayerState.value ?: return
+        val engine = _cantodeEngine.value ?: return
 
         // Same music already current → just resume.
         if (_music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
             resume(); return
         }
+
+        // Ensure the playback service is up so the media notification +
+        // MediaSession exist before we start pushing state.
+        runCatching { PlaybackService.start(cx) }
 
         _scope.launch(Dispatchers.Main) {
             stop()
@@ -210,7 +234,7 @@ class PlayerControllerRepository @Inject constructor(
 
             if (inPlaylist) {
                 playerRepository.setCurrent(music!!, playlist!!)
-                cantodePlayer.setCurrentMedia(id, music.meta.title)
+                engine.setCurrentMedia(id, music.meta.title)
                 bridge.run { ctPlayerLoadMusic(it, handle, id) }
                 ctPlayerPlay(handle)
                 _pluginEvents.tryEmit(
@@ -250,11 +274,21 @@ class PlayerControllerRepository @Inject constructor(
         _scope.launch {
             ctPlayerStop(handle)
             playerRepository.resetCurrent()
-            _cantodePlayerState.value?.setCurrentMedia(null, null)
+            _cantodeEngine.value?.clearMedia()
             _pluginEvents.tryEmit(
                 PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
             )
         }
+    }
+
+    /**
+     * Advance to [PlayerRepository.onCompleteMusic] when the current
+     * track ends. Replaces the old `PlaybackService.playOnComplete`.
+     */
+    private fun playOnComplete() {
+        val m = playerRepository.onCompleteMusic.value ?: return
+        val p = _playlist.value ?: return
+        play(m.meta.id, p.abstr.meta.id)
     }
 
     fun playNext() {

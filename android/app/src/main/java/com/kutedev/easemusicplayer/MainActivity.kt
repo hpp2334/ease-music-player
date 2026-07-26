@@ -12,7 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
-import com.kutedev.easemusicplayer.core.CantodePlayer
+import com.kutedev.easemusicplayer.core.CantodeEngine
 import com.kutedev.easemusicplayer.core.KeepBackendService
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.PermissionRepository
@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
             playerRepository.reload()
             storageRepository.reload()
             playlistRepository.reload()
-            setupCantodePlayer()
+            setupCantodeEngine()
             // Connect the plugin event bus after the player repo is wired
             // so plugins begin receiving music:play / pause / stop / complete.
             pluginRepository.bindPlayerEvents(playerControllerRepository)
@@ -72,13 +72,13 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Build the cantode PlayerContextHandle + PlayerHandle + CantodePlayer
-     * via [PlayerControllerRepository]. The CantodePlayer gets its own
+     * Build the cantode PlayerContextHandle + PlayerHandle + CantodeEngine
+     * via [PlayerControllerRepository]. The CantodeEngine gets its own
      * CoroutineScope for the 10Hz state poll loop.
      */
-    private fun setupCantodePlayer() {
-        playerControllerRepository.setupCantodePlayer { handle ->
-            CantodePlayer(
+    private fun setupCantodeEngine() {
+        playerControllerRepository.setupCantodeEngine { handle ->
+            CantodeEngine(
                 playerRepository = playerRepository,
                 handle = handle,
                 scope = kotlinx.coroutines.CoroutineScope(
@@ -100,7 +100,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // No teardown needed: the cantode player / context live in
+        // No teardown needed: the cantode engine / context live in
         // PlayerControllerRepository (singleton-scoped), not tied to this
         // activity's lifetime. PlaybackService still owns the MediaSession.
     }
