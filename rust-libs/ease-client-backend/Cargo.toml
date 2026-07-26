@@ -28,11 +28,7 @@ nom = "7"
 unicode-segmentation = "1.10.1"
 base64 = "0.22.1"
 lru = "0.12.5"
-axum = { version = "0.6.20", features = ["macros"] }
-tokio = { version = "1", features = ["net", "io-util", "sync"] }
-flume = { version = "0.11.1" }
-async-stream = "0.3.5"
-futures-util = "0.3.28"
+tokio = { version = "1" }
 tracing-android = "0.2.0"
 tracing-subscriber = "0.3.0"
 serde = { workspace = true }
@@ -45,3 +41,15 @@ ease-client-tokio = { workspace = true }
 ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
+
+# tur engine integration (https://github.com/hpp2334/tur @ b34e0d9).
+# All crates live in the same repo; cargo clones once and resolves their
+# internal path deps against the checkout.
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "b34e0d9" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "b34e0d9" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "b34e0d9" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "b34e0d9" }
+# Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
+# our `use boa_engine::*` resolves to the exact same instance the engine
+# compiles against.
+boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "6ef5370c1cff770c51f3e4f8600590f11d66eeaf" }

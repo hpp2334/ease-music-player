@@ -1,0 +1,75 @@
+package com.kutedev.easemusicplayer.turintegration
+
+import android.view.KeyEvent as AndroidKeyEvent
+
+/**
+ * Maps Android [KeyEvent][android.view.KeyEvent] codes to the browser-style
+ * `key` / `code` strings the tur engine expects.
+ */
+object InputMapper {
+    /** @return `(key, code)` for the given Android keyCode, or `null` if unmapped. */
+    fun map(keyCode: Int): Pair<String, String>? = when (keyCode) {
+        AndroidKeyEvent.KEYCODE_A -> "a" to "KeyA"
+        AndroidKeyEvent.KEYCODE_B -> "b" to "KeyB"
+        AndroidKeyEvent.KEYCODE_C -> "c" to "KeyC"
+        AndroidKeyEvent.KEYCODE_D -> "d" to "KeyD"
+        AndroidKeyEvent.KEYCODE_E -> "e" to "KeyE"
+        AndroidKeyEvent.KEYCODE_F -> "f" to "KeyF"
+        AndroidKeyEvent.KEYCODE_G -> "g" to "KeyG"
+        AndroidKeyEvent.KEYCODE_H -> "h" to "KeyH"
+        AndroidKeyEvent.KEYCODE_I -> "i" to "KeyI"
+        AndroidKeyEvent.KEYCODE_J -> "j" to "KeyJ"
+        AndroidKeyEvent.KEYCODE_K -> "k" to "KeyK"
+        AndroidKeyEvent.KEYCODE_L -> "l" to "KeyL"
+        AndroidKeyEvent.KEYCODE_M -> "m" to "KeyM"
+        AndroidKeyEvent.KEYCODE_N -> "n" to "KeyN"
+        AndroidKeyEvent.KEYCODE_O -> "o" to "KeyO"
+        AndroidKeyEvent.KEYCODE_P -> "p" to "KeyP"
+        AndroidKeyEvent.KEYCODE_Q -> "q" to "KeyQ"
+        AndroidKeyEvent.KEYCODE_R -> "r" to "KeyR"
+        AndroidKeyEvent.KEYCODE_S -> "s" to "KeyS"
+        AndroidKeyEvent.KEYCODE_T -> "t" to "KeyT"
+        AndroidKeyEvent.KEYCODE_U -> "u" to "KeyU"
+        AndroidKeyEvent.KEYCODE_V -> "v" to "KeyV"
+        AndroidKeyEvent.KEYCODE_W -> "w" to "KeyW"
+        AndroidKeyEvent.KEYCODE_X -> "x" to "KeyX"
+        AndroidKeyEvent.KEYCODE_Y -> "y" to "KeyY"
+        AndroidKeyEvent.KEYCODE_Z -> "z" to "KeyZ"
+        AndroidKeyEvent.KEYCODE_0 -> "0" to "Digit0"
+        AndroidKeyEvent.KEYCODE_1 -> "1" to "Digit1"
+        AndroidKeyEvent.KEYCODE_2 -> "2" to "Digit2"
+        AndroidKeyEvent.KEYCODE_3 -> "3" to "Digit3"
+        AndroidKeyEvent.KEYCODE_4 -> "4" to "Digit4"
+        AndroidKeyEvent.KEYCODE_5 -> "5" to "Digit5"
+        AndroidKeyEvent.KEYCODE_6 -> "6" to "Digit6"
+        AndroidKeyEvent.KEYCODE_7 -> "7" to "Digit7"
+        AndroidKeyEvent.KEYCODE_8 -> "8" to "Digit8"
+        AndroidKeyEvent.KEYCODE_9 -> "9" to "Digit9"
+        AndroidKeyEvent.KEYCODE_ENTER -> "Enter" to "Enter"
+        AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> "Enter" to "NumpadEnter"
+        AndroidKeyEvent.KEYCODE_SPACE -> " " to "Space"
+        AndroidKeyEvent.KEYCODE_TAB -> "Tab" to "Tab"
+        AndroidKeyEvent.KEYCODE_DEL -> "Backspace" to "Backspace"
+        AndroidKeyEvent.KEYCODE_FORWARD_DEL -> "Delete" to "Delete"
+        AndroidKeyEvent.KEYCODE_INSERT -> "Insert" to "Insert"
+        AndroidKeyEvent.KEYCODE_DPAD_LEFT -> "ArrowLeft" to "ArrowLeft"
+        AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> "ArrowRight" to "ArrowRight"
+        AndroidKeyEvent.KEYCODE_DPAD_UP -> "ArrowUp" to "ArrowUp"
+        AndroidKeyEvent.KEYCODE_DPAD_DOWN -> "ArrowDown" to "ArrowDown"
+        AndroidKeyEvent.KEYCODE_MOVE_HOME -> "Home" to "Home"
+        AndroidKeyEvent.KEYCODE_MOVE_END -> "End" to "End"
+        AndroidKeyEvent.KEYCODE_PAGE_UP -> "PageUp" to "PageUp"
+        AndroidKeyEvent.KEYCODE_PAGE_DOWN -> "PageDown" to "PageDown"
+        AndroidKeyEvent.KEYCODE_SHIFT_LEFT -> "Shift" to "ShiftLeft"
+        AndroidKeyEvent.KEYCODE_SHIFT_RIGHT -> "Shift" to "ShiftRight"
+        AndroidKeyEvent.KEYCODE_CTRL_LEFT -> "Control" to "ControlLeft"
+        AndroidKeyEvent.KEYCODE_CTRL_RIGHT -> "Control" to "ControlRight"
+        AndroidKeyEvent.KEYCODE_ALT_LEFT -> "Alt" to "AltLeft"
+        AndroidKeyEvent.KEYCODE_ALT_RIGHT -> "Alt" to "AltRight"
+        AndroidKeyEvent.KEYCODE_META_LEFT -> "Meta" to "MetaLeft"
+        AndroidKeyEvent.KEYCODE_META_RIGHT -> "Meta" to "MetaRight"
+        AndroidKeyEvent.KEYCODE_ESCAPE -> "Escape" to "Escape"
+        AndroidKeyEvent.KEYCODE_CAPS_LOCK -> "CapsLock" to "CapsLock"
+        else -> null
+    }
+}

@@ -42,6 +42,14 @@ fun RouteDebugMore(): String {
     return "Debug/More"
 }
 
+fun RoutePlugin(pluginId: String, viewId: String): String {
+    return "Plugin/${pluginId}/${viewId}"
+}
+
+fun isRoutePlugin(route: String): Boolean {
+    return route.startsWith("Plugin/")
+}
+
 val LocalNavController = compositionLocalOf<NavHostController> {
     error("No LocalNavController provided")
 }

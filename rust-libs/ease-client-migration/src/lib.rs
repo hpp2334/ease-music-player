@@ -24,13 +24,16 @@ use crate::legacy::{upgrade_v1_to_v2, upgrade_v2_to_v3};
 use redb::{ReadableMultimapTable, ReadableTable};
 
 /// The schema version produced by this crate.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 pub struct Migrator;
 
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-        vec![Box::new(migrations::InitMigration)]
+        vec![
+            Box::new(migrations::InitMigration),
+            Box::new(migrations::PluginKvMigration),
+        ]
     }
 }
 
