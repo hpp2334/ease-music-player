@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import uniffi.ease_client_backend.ctPluginKvMultiAppend
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -125,7 +127,11 @@ class PluginRepository @Inject constructor(
             is PluginEvent.MusicPlay -> {
                 val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                 val key = "plays:$today"
-                val payload = """{"musicId":${event.musicId.value},"ts":${event.timestamp}}"""
+                val payload = buildJsonObject {
+                    put("musicId", event.musicId.value)
+                    put("title", event.title)
+                    put("ts", event.timestamp)
+                }.toString()
                 _scope.launch(Dispatchers.IO) {
                     bridge.run {
                         ctPluginKvMultiAppend(it, PLAYCOUNT_ID, key, payload)
