@@ -8,7 +8,7 @@ Ease Music Player is a lightweight **Android** music player written in **Kotlin 
 
 Features: WebDAV and OneDrive cloud storage, playlist-based playback, music cover art, lyrics.
 
-> **History note (0.3 → 0.4):** version 0.4 briefly migrated the UI to Kotlin Multiplatform / Compose Multiplatform with a Desktop JVM target (JavaFX `MediaPlayer` + Skiko). The desktop build was dropped for 0.4.0-beta.0 — memory overhead (~half a GB at idle, mostly from loading two rendering stacks) and lack of user-facing benefit made the single-target Android app the better shape. The Rust-side improvements from that era are kept (axum streaming server, `ease-client-schema` / `ease-client-migration` crate split, UniFFI tokio routing). See [`docs/motivation.md`](./docs/motivation.md).
+> **History note (0.3 → 0.4):** version 0.4 briefly migrated the UI to Kotlin Multiplatform / Compose Multiplatform with a Desktop JVM target (JavaFX `MediaPlayer` + Skiko). The desktop build was dropped for 0.4.0-beta.0 — memory overhead (~half a GB at idle, mostly from loading two rendering stacks) and lack of user-facing benefit made the single-target Android app the better shape. The Rust-side improvements from that era are kept (`ease-client-schema` / `ease-client-migration` crate split, UniFFI tokio routing). See [`docs/motivation.md`](./docs/motivation.md).
 
 ## Architecture at a glance
 
@@ -17,22 +17,21 @@ Features: WebDAV and OneDrive cloud storage, playlist-based playback, music cove
 │  Kotlin / Jetpack Compose    │ ──────────────────────────▶ │  Rust workspace (rust-libs/) │
 │  android/app/  (Gradle :app) │                            │  ease-client-backend         │
 │                              │ ◀────────────────────────── │  (cdylib: libease_client_*)  │
-│  Hilt DI, media3 ExoPlayer   │   StateFlow / SharedFlow    │  + axum streaming server*    │
-│                              │   via repositories          │  + Sea-ORM / SQLite          │
+│  Hilt DI, MediaSessionCompat │   StateFlow / SharedFlow    │  + Sea-ORM / SQLite          │
+│                              │   via repositories          │  + cantode audio engine      │
 └──────────────────────────────┘                            └──────────────────────────────┘
 ```
-\* The axum server is started by `Backend::init()` but Android does not consume it — Android streams audio via the FFI `ctGetAssetStream` callback through `MusicPlayerDataSource`. The server remains because it's harmless and the same backend drives potential future desktop clients.
 
-- **Rust side** ([`rust-libs/`](./rust-libs/)) exposes a UniFFI `Backend` object as a `cdylib`. It owns the database (SQLite via Sea-ORM), business logic, controllers/services/repositories, and an axum HTTP streaming server bound to an OS-assigned port (`http://127.0.0.1:<port>/music/:id`, range requests supported for seeking).
+- **Rust side** ([`rust-libs/`](./rust-libs/)) exposes a UniFFI `Backend` object as a `cdylib`. It owns the database (SQLite via Sea-ORM), business logic, and controllers/services/repositories. Audio decode + output live in the separate [`cantode/`](./cantode/) repo-root crate (symphonia + cpal/AAudio), linked into the same `.so`.
 - **Kotlin side** ([`android/app/`](./android/app/)) talks to the backend through [`singleton/Bridge.kt`](./android/app/src/main/java/com/kutedev/easemusicplayer/singleton/Bridge.kt), which wraps the generated UniFFI bindings and exposes suspend + sync helpers.
-- **Playback**: media3 `ExoPlayer` via [`PlaybackService`](./android/app/src/main/java/com/kutedev/easemusicplayer/core/MusicPlayer.kt) (a `MediaSessionService`). Audio bytes are pulled from the Rust backend through [`MusicPlayerDataSource`](./android/app/src/main/java/com/kutedev/easemusicplayer/core/MusicPlayerDataSource.kt), which calls the FFI `ctGetAssetStream` and pipes chunks into ExoPlayer's `DataSource`.
+- **Playback**: [`cantode`](./cantode/) (Rust audio engine) decodes (symphonia: mp3/flac/vorbis/ogg/wav/aac/isomp4) and renders via cpal's AAudio backend, exposing a `PlayerHandle` over UniFFI. [`CantodeEngine`](./android/app/src/main/java/com/kutedev/easemusicplayer/core/CantodeEngine.kt) wraps the handle and polls state at ~10 Hz. [`PlaybackService`](./android/app/src/main/java/com/kutedev/easemusicplayer/core/MusicPlayer.kt) is a plain `android.app.Service` (no longer `MediaSessionService`) that owns a `MediaSessionCompat` from `androidx.media:media` for notification / lock-screen / Bluetooth / Auto integration. No media3 / ExoPlayer dependency remains.
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
 | [`android/`](./android/) | **Gradle root** of the Android project: `settings.gradle.kts`, `build.gradle.kts`, `gradle/`, `gradlew*`, `gradle.properties`, `gradle/libs.versions.toml`. |
-| [`android/app/`](./android/app/) | The `:app` Gradle module — the Android application (Kotlin + Compose + Hilt + media3). |
+| [`android/app/`](./android/app/) | The `:app` Gradle module — the Android application (Kotlin + Compose + Hilt + MediaSessionCompat). |
 | [`rust-libs/`](./rust-libs/) | Cargo workspace of Rust crates (backend, schema, migration, FFI builder, etc.). |
 | [`scripts/`](./scripts/) | TypeScript build/test orchestration (run via `pnpm`/`tsx`). |
 | [`docs/`](./docs/) | `motivation.md` + screenshots. |
@@ -43,13 +42,12 @@ Root Java package: `com.kutedev.easemusicplayer`. Namespace / applicationId: `co
 
 ## Kotlin source layout (`android/app/src/main/java/com/kutedev/easemusicplayer/`)
 
-- `MainActivity.kt` — `@AndroidEntryPoint` `ComponentActivity`; also declares the top-level `@HiltAndroidApp class EaseMusicPlayerApplication`. Hosts `setContent { Root() }`, requests permissions, wires the media3 `MediaController`, and runs the startup reload sequence.
+- `MainActivity.kt` — `@AndroidEntryPoint` `ComponentActivity`; also declares the top-level `@HiltAndroidApp class EaseMusicPlayerApplication`. Hosts `setContent { Root() }`, requests permissions (notably `POST_NOTIFICATIONS` for the playback foreground service), and runs the startup reload sequence.
 - `Root.kt` — main `@Composable` (`NavHost`, routes, theme).
 - `core/`
-  - `MusicPlayer.kt` — `PlaybackService` (`MediaSessionService`) + media3 wiring. `@AndroidEntryPoint`.
+  - `MusicPlayer.kt` — `PlaybackService` (plain `android.app.Service` owning a `MediaSessionCompat` for system integration). `@AndroidEntryPoint`.
   - `KeepBackendService.kt` — foreground service that keeps the Rust backend process alive. `@AndroidEntryPoint`.
-  - `MusicPlayerDataSource.kt` — media3 `DataSource` that streams from the Rust backend via `ctGetAssetStream`.
-  - `MusicPlayerUtil.kt` — media3 helpers (cover / duration probing via FFI).
+  - `CantodeEngine.kt` — Kotlin wrapper around a cantode `PlayerHandle` (Rust audio engine over UniFFI). Owns the 10 Hz state-poll loop, surfaces state via `@Volatile` fields + an `endedEvent` `SharedFlow`.
   - `CoroutineScopeModule.kt` — Hilt `@Module` providing the app-wide `CoroutineScope` (`SupervisorJob + Dispatchers.Default`).
 - `singleton/` — `Bridge` + repositories (see [Key patterns](#key-patterns)).
 - `viewmodels/` — `@HiltViewModel` ViewModels (`PlayerVM`, `PlaylistsVM`, `PlaylistVM`, `AssetVM`, `CreatePlaylistVM`, `EditPlaylistVM`, `EditStorageVM`, `ImportVM`, `StoragesVM`, `SleepModeVM`, `LogVM`, `DebugMoreVM`, `ToastVM`).
@@ -61,7 +59,7 @@ Root Java package: `com.kutedev.easemusicplayer`. Namespace / applicationId: `co
 
 ### Android resources & manifest
 [`android/app/src/main/`](./android/app/src/main/)
-- `AndroidManifest.xml` — declares `EaseMusicPlayerApplication`, `MainActivity`, `PlaybackService` (media3 session), `KeepBackendService`, OAuth2 redirect (`easem://oauth2redirect`), `FileProvider`.
+- `AndroidManifest.xml` — declares `EaseMusicPlayerApplication`, `MainActivity`, `PlaybackService` (plain service owning a `MediaSessionCompat`), `KeepBackendService`, OAuth2 redirect (`easem://oauth2redirect`), `FileProvider`.
 - `res/` — Android resources (mipmaps, `values/strings.xml`, `values-zh-rCN/strings.xml`, `xml/backup_rules.xml`, `xml/data_extraction_rules.xml`, `xml/file_paths.xml`).
 - `assets/` — Compose resources (`composeResources/drawable/`, `composeResources/font/noto_sans.ttf`).
 - `jniLibs/arm64-v8a/` — gitignored, generated by `pnpm build:jni`.
@@ -72,13 +70,14 @@ Workspace root: [`rust-libs/Cargo.toml`](./rust-libs/Cargo.toml) (resolver = `"2
 
 | Crate | Purpose |
 |---|---|
-| `ease-client-backend` | Main backend; `crate-type = ["cdylib", "rlib"]`, GPL-3.0. Provides the `Backend` UniFFI object, controllers/services/repositories, the axum streaming server. Source: `controllers/`, `services/`, `repositories/`, `objects/`, `ctx.rs`, `infra.rs`, `streaming_server.rs`. |
+| `ease-client-backend` | Main backend; `crate-type = ["cdylib", "rlib"]`, GPL-3.0. Provides the `Backend` UniFFI object, controllers/services/repositories. Source: `controllers/`, `services/`, `repositories/`, `objects/`, `ctx.rs`, `infra.rs`. |
 | `ease-client-schema` | Sea-ORM entities, models, domain types. Exposes UniFFI-compatible schema types. |
 | `ease-client-migration` | DB migration from legacy `redb` format to SQLite. Versioned upgraders in `src/legacy/` (`redb_v2`, `redb_v3`, `schema_v2`, `schema_v3`, `upgrader_v1_v2`, `upgrader_v2_v3`). Integration tests in `tests/`. |
 | `ease-client-tokio` | Shared tokio multi-thread runtime accessor (`tokio_runtime()`). |
 | `ease-client-android-ffi-builder` | Binary wrapping `uniffi bindgen` to generate the Kotlin bindings used by `build-jni-libs.ts`. |
 | `ease-order-key` | Standalone orderable-key utility. **Dual MIT OR Apache-2.0 license** (different from the rest). |
 | `ease-remote-storage` (path dep, not a workspace member) | WebDAV / OneDrive remote storage client (`reqwest`, `quick-xml`). GPL-3.0. |
+| [`cantode/`](./cantode/) (repo root, **not** in `rust-libs/` workspace) | Standalone cross-platform audio engine: symphonia decode + cpal/AAudio output behind a trait-based API. Exposes `PlayerHandle` over UniFFI to the Android app; linked into the same `.so` as `ease-client-backend`. Edition 2024, **dual MIT OR Apache-2.0 license** (matches `ease-order-key`, different from the GPL-3.0 main app). |
 
 Notable Rust constraints: UniFFI pinned to `=0.28.3` with the `tokio` feature; SQLite is force-bundled (`libsqlite3-sys` `bundled`) for cross-compilation; Sea-ORM 1.1 with sqlx-sqlite + runtime-tokio-rustls.
 
@@ -101,7 +100,7 @@ Repositories call backend functions through `bridge.run { }`. Backend function p
 The Rust backend spawns work on the shared tokio runtime via `ease_client_tokio::tokio_runtime()`; UniFFI async FFI controllers route through it (`tokio_runtime().handle().spawn(...).await`).
 
 ### Startup sequence
-`MainActivity.onStart()` launches a `lifecycleScope` coroutine that calls `reload()` on `playerRepository`, `storageRepository`, `playlistRepository` (in that order), then sets up the media3 `MediaController`. `Bridge.initialize()` is called earlier in `MainActivity.onCreate()` (after starting `KeepBackendService`).
+`MainActivity.onStart()` launches a `lifecycleScope` coroutine that calls `reload()` on `playerRepository`, `storageRepository`, `playlistRepository` (in that order). `PlaybackService` is started lazily on first play via `PlayerControllerRepository` (it owns the `MediaSessionCompat`); `MainActivity` no longer wires a `MediaController`. `Bridge.initialize()` is called earlier in `MainActivity.onCreate()` (after starting `KeepBackendService`).
 
 ### Repository pattern
 All in `singleton/`, constructed with `Bridge` + `CoroutineScope`, expose `StateFlow` / `SharedFlow`:
