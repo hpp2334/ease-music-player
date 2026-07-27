@@ -1,4 +1,4 @@
-import { Axis, Color, Column, Container, CrossAxisAlignment, Each, MainAxisAlignment, MainAxisSize, PointerInteract, Row, ScrollView, SizedBox, Switch, Text, derive, get, mutate, render, set, source, view } from "tur:std";
+import { Axis, Color, Column, Container, CrossAxisAlignment, Each, Expanded, MainAxisAlignment, MainAxisSize, PointerInteract, Row, ScrollView, SizedBox, Switch, Text, derive, get as external_tur_std_get, mutate, render, set, source, view } from "tur:std";
 import { multiGetAllMulti } from "ease:storage";
 var __webpack_exports__ = {};
 
@@ -68,21 +68,22 @@ const selectedRange$ = source(0);
 const entries$ = source([]);
 const loading$ = source(false);
 const status$ = derive(()=>{
-    if (get(loading$)) return "loading";
-    return get(entries$).length === 0 ? "empty" : "ready";
+    if (external_tur_std_get(loading$)) return "loading";
+    return external_tur_std_get(entries$).length === 0 ? "empty" : "ready";
 });
 // ---------------------------------------------------------------------------
-// Date helpers (UTC, so the day-key matches what the Kotlin appender writes)
+// Date helpers (local time, so the day-key matches what the Kotlin appender
+// writes via `LocalDate.now()` — which uses the device default timezone).
 // ---------------------------------------------------------------------------
 function pad2(n) {
     return n < 10 ? "0" + n : String(n);
 }
 function isoDate(d) {
-    return d.getUTCFullYear() + "-" + pad2(d.getUTCMonth() + 1) + "-" + pad2(d.getUTCDate());
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
 }
 function dateKey(offsetDays) {
     const d = new Date();
-    d.setUTCDate(d.getUTCDate() - offsetDays);
+    d.setDate(d.getDate() - offsetDays);
     return "plays:" + isoDate(d);
 }
 function dateKeysForRange(range) {
@@ -96,7 +97,7 @@ function dateKeysForRange(range) {
 function refresh() {
     set(loading$, true);
     try {
-        const range = RANGES[get(selectedRange$)];
+        const range = RANGES[external_tur_std_get(selectedRange$)];
         const keys = dateKeysForRange(range);
         const grouped = multiGetAllMulti(PLUGIN_ID, keys);
         const counts = new Map();
@@ -114,6 +115,12 @@ function refresh() {
                 const prev = counts.get(id);
                 if (prev) {
                     prev.count += 1;
+                    // Older rows (written before the title field existed)
+                    // fall back to "(unknown)"; prefer a real title if any
+                    // row for this music provides one.
+                    if (prev.title === "(unknown)" && title !== "(unknown)") {
+                        prev.title = title;
+                    }
                 } else {
                     counts.set(id, {
                         musicId: id,
@@ -132,52 +139,61 @@ function refresh() {
     }
 }
 function selectRange(i) {
-    if (i === get(selectedRange$)) return;
+    if (i === external_tur_std_get(selectedRange$)) return;
     set(selectedRange$, i);
     refresh();
 }
 // ---------------------------------------------------------------------------
-// Palette
+// Palette — aligned with EaseMusicPlayerTheme (Material 3 light scheme):
+//   primary         = #2E89B0
+//   secondary       = #C9EBFA
+//   surfaceVariant  = #E3E3E3
 // ---------------------------------------------------------------------------
-const COLOR_PRIMARY = Color.rgb(0x12, 0x59, 0x66);
-const COLOR_PRIMARY_LIGHT = Color.rgb(0xee, 0xee, 0xee);
-const COLOR_TEXT = Color.rgb(0x33, 0x33, 0x33);
-const COLOR_TEXT_MUTED = Color.rgb(0x99, 0x99, 0x99);
-const COLOR_WHITE = Color.rgb(0xff, 0xff, 0xff);
+const COLOR_PRIMARY = Color.hex("#2E89B0");
+const COLOR_PRIMARY_SOFT = Color.hex("#C9EBFA");
+const COLOR_PAGE_BG = Color.hex("#F8FAFC");
+const COLOR_CARD = Color.hex("#FFFFFF");
+const COLOR_TEXT = Color.hex("#0F172A");
+const COLOR_TEXT_MUTED = Color.hex("#64748B");
+const COLOR_DIVIDER = Color.hex("#E2E8F0");
+const COLOR_BAR_TRACK = Color.hex("#E2E8F0");
+// ---------------------------------------------------------------------------
+// Layout constants
+// ---------------------------------------------------------------------------
+const PAGE_PADDING = 16;
+const CARD_RADIUS = 12;
+const CHIP_RADIUS = 999;
+const BAR_HEIGHT = 6;
 function RangeChip(props) {
-    const selected = props.index === get(selectedRange$);
     return PointerInteract({
         onPointerDown: mutate(()=>selectRange(props.index)),
         child: Container({
-            color: selected ? COLOR_PRIMARY : COLOR_PRIMARY_LIGHT,
-            padding: 8,
-            borderRadius: 16,
+            color: derive(({ get })=>props.index === get(selectedRange$) ? COLOR_PRIMARY : Color.hex("#FFFFFF")),
+            borderColor: derive(({ get })=>props.index === get(selectedRange$) ? COLOR_PRIMARY : COLOR_DIVIDER),
+            borderWidth: 1,
+            borderRadius: CHIP_RADIUS,
+            padding: 10,
             children: [
                 Text({
                     text: props.label,
-                    fontSize: 13,
-                    color: selected ? COLOR_WHITE : COLOR_TEXT_MUTED
+                    fontSize: 12,
+                    color: derive(({ get })=>props.index === get(selectedRange$) ? Color.hex("#FFFFFF") : COLOR_TEXT_MUTED)
                 })
             ]
         })
     });
 }
 function RangeRow() {
-    // Plain Row — 6 chips × ~70px ≈ 460px, well within the 1440px viewport.
-    // (Previously wrapped in a horizontal `ScrollView`, which leaked an
-    // unbounded cross-axis height up to the parent `Column` and starved
-    // every sibling below it for vertical space.)
-    const children = RANGES.flatMap((r, i)=>[
-            RangeChip({
-                index: i,
-                label: r.label
-            }),
-            SizedBox({
-                width: 8
-            })
-        ]);
-    // Drop the trailing spacer.
-    if (children.length > 0) children.pop();
+    const children = [];
+    RANGES.forEach((r, i)=>{
+        if (i > 0) children.push(SizedBox({
+            width: 8
+        }));
+        children.push(RangeChip({
+            index: i,
+            label: r.label
+        }));
+    });
     return Row({
         mainAlignment: MainAxisAlignment.Start,
         crossAlignment: CrossAxisAlignment.Center,
@@ -185,42 +201,151 @@ function RangeRow() {
         children
     });
 }
-function EntryItem(entry) {
-    return Container({
-        padding: 12,
+function Header() {
+    return Column({
+        crossAlignment: CrossAxisAlignment.Start,
+        mainAxisSize: MainAxisSize.Min,
         children: [
-            Row({
-                mainAlignment: MainAxisAlignment.SpaceBetween,
-                crossAlignment: CrossAxisAlignment.Center,
+            Text({
+                text: "Play Counts",
+                fontSize: 22,
+                color: COLOR_TEXT
+            }),
+            SizedBox({
+                height: 4
+            }),
+            Text({
+                text: derive(()=>{
+                    const range = RANGES[external_tur_std_get(selectedRange$)];
+                    const total = external_tur_std_get(entries$).reduce((n, e)=>n + e.count, 0);
+                    return `${range.label} · ${total} play${total === 1 ? "" : "s"}`;
+                }),
+                fontSize: 13,
+                color: COLOR_TEXT_MUTED
+            })
+        ]
+    });
+}
+function BarEntry(props) {
+    const fillFlex = props.entry.count;
+    const trackFlex = Math.max(0, props.maxCount - props.entry.count);
+    // Bar row — two Expanded segments share the width in proportion to
+    // count / maxCount. When the entry owns the max, trackFlex is 0 and
+    // the fill takes the whole row.
+    const barChildren = [
+        Expanded({
+            flex: fillFlex,
+            child: Container({
+                color: COLOR_PRIMARY,
+                borderRadius: BAR_HEIGHT / 2
+            })
+        })
+    ];
+    if (trackFlex > 0) {
+        barChildren.push(Expanded({
+            flex: trackFlex,
+            child: Container({
+                color: COLOR_BAR_TRACK,
+                borderRadius: BAR_HEIGHT / 2
+            })
+        }));
+    }
+    return Container({
+        color: COLOR_CARD,
+        borderColor: COLOR_DIVIDER,
+        borderWidth: 1,
+        borderRadius: CARD_RADIUS,
+        padding: 14,
+        children: [
+            Column({
+                crossAlignment: CrossAxisAlignment.Stretch,
+                mainAxisSize: MainAxisSize.Min,
                 children: [
                     Row({
-                        mainAlignment: MainAxisAlignment.Start,
+                        mainAlignment: MainAxisAlignment.SpaceBetween,
                         crossAlignment: CrossAxisAlignment.Center,
-                        mainAxisSize: MainAxisSize.Min,
                         children: [
-                            Text({
-                                text: "♪",
-                                fontSize: 16,
-                                color: COLOR_PRIMARY
+                            Row({
+                                mainAlignment: MainAxisAlignment.Start,
+                                crossAlignment: CrossAxisAlignment.Center,
+                                mainAxisSize: MainAxisSize.Min,
+                                children: [
+                                    Text({
+                                        text: "♪",
+                                        fontSize: 14,
+                                        color: COLOR_PRIMARY
+                                    }),
+                                    SizedBox({
+                                        width: 6
+                                    }),
+                                    Text({
+                                        text: props.entry.title,
+                                        fontSize: 14,
+                                        color: COLOR_TEXT
+                                    })
+                                ]
                             }),
-                            SizedBox({
-                                width: 8
-                            }),
-                            Text({
-                                text: entry.title,
-                                fontSize: 15,
-                                color: COLOR_TEXT
+                            Container({
+                                color: COLOR_PRIMARY_SOFT,
+                                borderRadius: 999,
+                                padding: 6,
+                                children: [
+                                    Text({
+                                        text: String(props.entry.count),
+                                        fontSize: 12,
+                                        color: COLOR_PRIMARY
+                                    })
+                                ]
                             })
                         ]
                     }),
-                    Text({
-                        text: String(entry.count),
-                        fontSize: 16,
-                        color: COLOR_PRIMARY
+                    SizedBox({
+                        height: 10
+                    }),
+                    Container({
+                        height: BAR_HEIGHT,
+                        children: [
+                            Row({
+                                children: barChildren
+                            })
+                        ]
                     })
                 ]
             })
         ]
+    });
+}
+function ReadyBody() {
+    return ScrollView({
+        axis: Axis.Vertical,
+        child: Column({
+            crossAlignment: CrossAxisAlignment.Stretch,
+            mainAxisSize: MainAxisSize.Min,
+            children: [
+                Each({
+                    items: entries$,
+                    build: (entry, index)=>{
+                        const maxCount = external_tur_std_get(entries$).reduce((m, e)=>Math.max(m, e.count), 0);
+                        return Column({
+                            crossAlignment: CrossAxisAlignment.Stretch,
+                            mainAxisSize: MainAxisSize.Min,
+                            children: [
+                                index === 0 ? SizedBox({
+                                    width: 0,
+                                    height: 0
+                                }) : SizedBox({
+                                    height: 8
+                                }),
+                                BarEntry({
+                                    entry,
+                                    maxCount
+                                })
+                            ]
+                        });
+                    }
+                })
+            ]
+        })
     });
 }
 function LoadingBody() {
@@ -239,24 +364,26 @@ function EmptyBody() {
     return Container({
         padding: 48,
         children: [
-            Text({
-                text: "No plays in this range.",
-                fontSize: 14,
-                color: COLOR_TEXT_MUTED
+            Column({
+                crossAlignment: CrossAxisAlignment.Center,
+                mainAxisSize: MainAxisSize.Min,
+                children: [
+                    Text({
+                        text: "♪",
+                        fontSize: 32,
+                        color: COLOR_DIVIDER
+                    }),
+                    SizedBox({
+                        height: 12
+                    }),
+                    Text({
+                        text: "No plays in this range.",
+                        fontSize: 14,
+                        color: COLOR_TEXT_MUTED
+                    })
+                ]
             })
         ]
-    });
-}
-function ReadyBody() {
-    // `Each` is itself a flex; lay it out as a stretch column so each
-    // `EntryItem` spans the full width.
-    return ScrollView({
-        axis: Axis.Vertical,
-        child: Each({
-            items: entries$,
-            build: (entry)=>EntryItem(entry),
-            crossAlignment: CrossAxisAlignment.Stretch
-        })
     });
 }
 // ---------------------------------------------------------------------------
@@ -265,12 +392,14 @@ function ReadyBody() {
 const rootView = view(()=>Column({
         crossAlignment: CrossAxisAlignment.Stretch,
         children: [
-            SizedBox({
-                height: 16
-            }),
             Container({
-                padding: 16,
+                color: COLOR_PAGE_BG,
+                padding: PAGE_PADDING,
                 children: [
+                    Header(),
+                    SizedBox({
+                        height: 16
+                    }),
                     RangeRow()
                 ]
             }),
