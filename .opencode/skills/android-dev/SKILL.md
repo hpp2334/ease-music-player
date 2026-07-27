@@ -1,6 +1,6 @@
 ---
 name: android-dev
-description: Use when building, signing, installing, or debugging the Ease Music Player Android app on a physical device or emulator. Covers `cargo ndk` + `gradlew assembleRelease/Debug`, the unsigned-APK debug-sign flow (`apksigner`, `INSTALL_PARSE_FAILED_NO_CERTIFICATES`), readable Rust panic backtraces in logcat (panic hook + `.symtab` preservation + `catch_unwind`), and the macOS Sequoia `adb` local-network block workaround. Triggers: Android device, `adb connect`, `adb pair`, wireless debugging, `device offline`, `No route to host`, SIGABRT, panic stack.
+description: Use when building, signing, installing, or debugging the Ease Music Player Android app on a device or emulator. Covers cargo ndk and gradlew assembleRelease or assembleDebug, signing an unsigned APK with apksigner, reading Rust panic backtraces in logcat, and the macOS Sequoia adb local-network block workaround using a python3 localhost proxy. Trigger on adb connect, adb pair, wireless debugging, device offline, No route to host, SIGABRT, INSTALL_PARSE_FAILED_NO_CERTIFICATES, or panic stack.
 ---
 
 # Ease Music Player Android on-device debug
