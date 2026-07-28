@@ -53,7 +53,7 @@ import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.ScrollMoveMode
 import sh.calvin.reorderable.rememberReorderableLazyGridState
-import uniffi.ease_client_backend.PlaylistAbstract
+import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
 
 @Composable
 fun PlaylistsSubpage(

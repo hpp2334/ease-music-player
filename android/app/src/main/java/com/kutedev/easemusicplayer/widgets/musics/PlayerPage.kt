@@ -73,11 +73,11 @@ import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.utils.formatDuration
 import com.kutedev.easemusicplayer.utils.toMusicDurationMs
-import uniffi.ease_client_schema.DataSourceKey
-import uniffi.ease_client_backend.LyricLine
-import uniffi.ease_client_backend.LyricLoadState
-import uniffi.ease_client_backend.Lyrics
-import uniffi.ease_client_schema.PlayMode
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.LyricLine
+import com.kutedev.easemusicplayer.singleton.types.LyricLoadState
+import com.kutedev.easemusicplayer.singleton.types.Lyrics
+import com.kutedev.easemusicplayer.singleton.types.PlayMode
 import java.time.Duration
 import kotlin.collections.emptyList
 import kotlin.math.absoluteValue
@@ -662,10 +662,10 @@ fun MusicPlayerPage(
 ) {
     val navController = LocalNavController.current
     val currentMusic by playerVM.music.collectAsState()
-    val currentDuration by playerVM.currentDuration.collectAsState()
+    val currentMs by playerVM.currentMs.collectAsState()
     val previousMusic by playerVM.previousMusic.collectAsState()
     val nextMusic by playerVM.nextMusic.collectAsState()
-    val bufferDuration by playerVM.bufferDuration.collectAsState()
+    val bufferMs by playerVM.bufferMs.collectAsState()
     val currentLyricIndex by playerVM.lyricIndex.collectAsState()
     val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.LOADING
     val lyrics = currentMusic?.lyric?.data?.lines ?: emptyList()
@@ -719,9 +719,9 @@ fun MusicPlayerPage(
                     modifier = Modifier.padding(0.dp, 10.dp)
                 )
                 MusicSlider(
-                    currentDuration = formatDuration(currentDuration),
-                    _currentDurationMS = toMusicDurationMs(currentDuration),
-                    bufferDurationMS = bufferDuration.toMillis().toULong(),
+                    currentDuration = formatDuration(currentMs),
+                    _currentDurationMS = currentMs.toULong(),
+                    bufferDurationMS = bufferMs.toULong(),
                     totalDuration = formatDuration(currentMusic),
                     totalDurationMS = toMusicDurationMs(currentMusic),
                     onChangeMusicPosition = { nextMS ->
@@ -857,22 +857,22 @@ private fun MusicLyricPreview() {
     var lyricIndex by remember { mutableIntStateOf(0) }
     val lyricLines = remember {
         listOf(
-            LyricLine(Duration.ofMillis(1000), "> Task :app:preBuild UP-TO-DATE"),
-            LyricLine(Duration.ofMillis(3000), "> Task :app:preDebugBuild UP-TO-DATE"),
-            LyricLine(Duration.ofMillis(4000), "> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE"),
-            LyricLine(Duration.ofMillis(4500), "> Task :app:checkDebugAarMetadata UP-TO-DATE"),
-            LyricLine(Duration.ofMillis(5000), "> Task :app:generateDebugResValues UP-TO-DATE"),
+            LyricLine(1000L, "> Task :app:preBuild UP-TO-DATE"),
+            LyricLine(3000L, "> Task :app:preDebugBuild UP-TO-DATE"),
+            LyricLine(4000L, "> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE"),
+            LyricLine(4500L, "> Task :app:checkDebugAarMetadata UP-TO-DATE"),
+            LyricLine(5000L, "> Task :app:generateDebugResValues UP-TO-DATE"),
             LyricLine(
-                Duration.ofMillis(5500),
+                5500L,
                 "For more on this, please refer to https://docs.gradle.org/8.9/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation."
             ),
-            LyricLine(Duration.ofMillis(6000), "> Task :app:generateDebugResValues UP-TO-DATE"),
+            LyricLine(6000L, "> Task :app:generateDebugResValues UP-TO-DATE"),
             LyricLine(
-                Duration.ofMillis(7000),
+                7000L,
                 "You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins."
             ),
-            LyricLine(Duration.ofMillis(8000), "> Task :app:createDebugApkListingFileRedirect UP-TO-DATE"),
-            LyricLine(Duration.ofMillis(9000), "> Task :app:assembleDebug"),
+            LyricLine(8000L, "> Task :app:createDebugApkListingFileRedirect UP-TO-DATE"),
+            LyricLine(9000L, "> Task :app:assembleDebug"),
         )
     }
     var widgetHeight by remember { mutableIntStateOf(0) }

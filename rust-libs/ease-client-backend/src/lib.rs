@@ -5,6 +5,7 @@ pub(crate) mod ctx;
 pub mod error;
 mod infra;
 mod objects;
+pub(crate) mod bridge;
 pub(crate) mod plugin_runtime;
 pub(crate) mod repositories;
 mod services;
@@ -22,12 +23,10 @@ use crate::{
     services::{app_bootstrap, app_destroy},
 };
 
-uniffi::setup_scaffolding!();
-
 /// Process-wide handle to the active [`BackendContext`]. Set once by
 /// [`Backend::init`] and read by the tur `EaseMusicPlugin` so its `ease:*`
 /// JS bridge modules can call into the database / KV storage without a
-/// direct dependency on the `Backend` UniFFI object.
+/// direct dependency on the `Backend` object.
 ///
 /// This is the in-memory integration seam between the ease backend and
 /// the tur engine — both `.so` symbols live in the same process (tur is
@@ -35,7 +34,6 @@ uniffi::setup_scaffolding!();
 /// all that's needed for cross-module sharing.
 pub(crate) static BACKEND_CONTEXT: std::sync::OnceLock<Arc<BackendContext>> = std::sync::OnceLock::new();
 
-#[derive(uniffi::Object)]
 pub struct Backend {
     arg: ArgInitializeApp,
     cx: Arc<BackendContext>,
@@ -47,15 +45,12 @@ impl Drop for Backend {
     }
 }
 
-#[uniffi::export]
 impl Backend {
-    pub fn init(&self) -> BResult<()> {
+    pub async fn init_async(&self) -> BResult<()> {
         let cx = self.cx.clone();
         let cx_for_once = self.cx.clone();
         let arg = self.arg.clone();
-        ease_client_tokio::tokio_runtime().block_on(async move {
-            app_bootstrap(&cx, arg).await
-        })?;
+        app_bootstrap(&cx, arg).await?;
         // Publish the backend context for the tur EaseMusicPlugin. Set
         // before the first tur engine is constructed so ease:* modules
         // can resolve the context synchronously at register-time.
@@ -63,10 +58,19 @@ impl Backend {
         Ok(())
     }
 
+    /// Legacy sync entrypoint — must NOT be called from inside a tokio
+    /// runtime context. Used by tests; the bridge dispatcher uses
+    /// [`Backend::init_async`] instead.
+    pub fn init(&self) -> BResult<()> {
+        ease_client_tokio::tokio_runtime().block_on(self.init_async())
+    }
+
+    pub async fn deinit_async(&self) -> BResult<()> {
+        app_destroy(&self.cx).await
+    }
+
     pub fn deinit(&self) -> BResult<()> {
-        ease_client_tokio::tokio_runtime().block_on(async {
-            app_destroy(&self.cx).await
-        })
+        ease_client_tokio::tokio_runtime().block_on(self.deinit_async())
     }
 }
 
@@ -80,7 +84,6 @@ impl Backend {
     }
 }
 
-#[uniffi::export]
 pub fn create_backend(arg: ArgInitializeApp) -> Arc<Backend> {
     let cx = Arc::new(BackendContext::new());
     init_infra(&arg.app_document_dir);
@@ -90,12 +93,10 @@ pub fn create_backend(arg: ArgInitializeApp) -> Arc<Backend> {
     })
 }
 
-#[uniffi::export]
 pub fn ease_log(msg: &str) {
     tracing::info!("{}", msg);
 }
 
-#[uniffi::export]
 pub fn ease_error(msg: &str) {
     tracing::error!("{}", msg);
 }
@@ -108,7 +109,7 @@ pub fn ease_error(msg: &str) {
 // AudioManager (for hints like frames-per-buffer). That path goes through
 // `ndk_context::android_context()`, which panics if nobody has registered
 // the JavaVM + app Context. ndk-glue does this for native-activity apps,
-// but we're a UniFFI cdylib loaded by a normal Kotlin app, so we have to
+// but we're a cdylib loaded by a normal Kotlin app, so we have to
 // register the context ourselves at startup.
 //
 // Kotlin calls this once via `external fun` from MainActivity.onCreate:

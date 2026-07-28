@@ -1,7 +1,7 @@
-mod asset;
-mod debug;
-mod music;
-mod playlist;
-mod plugin;
-mod preference;
-mod storage;
+pub(crate) mod asset;
+pub(crate) mod debug;
+pub(crate) mod music;
+pub(crate) mod playlist;
+pub(crate) mod plugin;
+pub(crate) mod preference;
+pub(crate) mod storage;

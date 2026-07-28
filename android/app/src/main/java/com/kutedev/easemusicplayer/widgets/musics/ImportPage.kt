@@ -53,9 +53,9 @@ import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.viewmodels.VImportStorageEntry
 import com.kutedev.easemusicplayer.viewmodels.entryTyp
 import com.kutedev.easemusicplayer.core.LocalNavController
-import uniffi.ease_client_backend.CurrentStorageStateType
-import uniffi.ease_client_backend.StorageEntry
-import uniffi.ease_client_backend.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.CurrentStorageStateType
+import com.kutedev.easemusicplayer.singleton.types.StorageEntry
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
 
 @Composable
 private fun ImportEntriesSkeleton() {

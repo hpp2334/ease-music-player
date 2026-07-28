@@ -229,12 +229,10 @@ impl AudioSource for MusicAudioSource {
 ///
 /// Construct once per app via [`ct_player_context_new`]. Players created
 /// from this context share the cpal Host and the symphonia decoder factory.
-#[derive(uniffi::Object)]
 pub struct PlayerContextHandle {
     inner: cantode::PlayerContext,
 }
 
-#[uniffi::export]
 impl PlayerContextHandle {
     /// Number of live players created from this context.
     pub fn active_player_count(&self) -> u64 {
@@ -268,7 +266,6 @@ impl PlayerContextHandle {
 /// [`ct_player_load_music`]; drive with `ct_player_play` /
 /// `ct_player_pause` / `ct_player_stop` / `ct_player_seek` /
 /// `ct_player_set_volume`.
-#[derive(uniffi::Object)]
 pub struct PlayerHandle {
     inner: Mutex<cantode::Player>,
 }
@@ -299,14 +296,12 @@ use crate::error::BResult;
 /// This is a sync fn — `PlayerContext::new` opens the cpal default host
 /// (AAudio on Android, CoreAudio on macOS, WASAPI on Windows, ALSA on
 /// Linux) and constructs a `SymphoniaDecoderFactory`; both are cheap.
-#[uniffi::export]
 pub fn ct_player_context_new() -> BResult<Arc<PlayerContextHandle>> {
     Ok(Arc::new(PlayerContextHandle::new()?))
 }
 
 /// Construct a new [`PlayerHandle`] attached to `cx`. Each player owns
 /// one dedicated decode/output worker thread.
-#[uniffi::export]
 pub fn ct_player_new(cx: Arc<PlayerContextHandle>) -> BResult<Arc<PlayerHandle>> {
     Ok(Arc::new(PlayerHandle::new(&cx)?))
 }
@@ -318,7 +313,6 @@ pub fn ct_player_new(cx: Arc<PlayerContextHandle>) -> BResult<Arc<PlayerHandle>>
 /// Runs on the shared tokio pool via `spawn_blocking`: `Player::load`
 /// opens the decoder + output device, which can take 10-500ms on slow
 /// networks (the first chunk must arrive before symphonia can probe).
-#[uniffi::export]
 pub async fn ct_player_load_music(
     backend: Arc<Backend>,
     player: Arc<PlayerHandle>,
@@ -409,7 +403,6 @@ pub async fn ct_player_load_music(
 }
 
 /// Begin or resume playback.
-#[uniffi::export]
 pub async fn ct_player_play(player: Arc<PlayerHandle>) -> BResult<()> {
     player.with_player(|p| {
         p.play()
@@ -418,7 +411,6 @@ pub async fn ct_player_play(player: Arc<PlayerHandle>) -> BResult<()> {
 }
 
 /// Pause playback.
-#[uniffi::export]
 pub async fn ct_player_pause(player: Arc<PlayerHandle>) -> BResult<()> {
     player.with_player(|p| {
         p.pause()
@@ -427,7 +419,6 @@ pub async fn ct_player_pause(player: Arc<PlayerHandle>) -> BResult<()> {
 }
 
 /// Stop playback and drop the loaded source (back to Idle).
-#[uniffi::export]
 pub async fn ct_player_stop(player: Arc<PlayerHandle>) -> BResult<()> {
     player.with_player(|p| {
         p.stop()
@@ -437,7 +428,6 @@ pub async fn ct_player_stop(player: Arc<PlayerHandle>) -> BResult<()> {
 
 /// Seek to `pos_ms` milliseconds from source start. Returns the actual
 /// position seeked to (also in ms).
-#[uniffi::export]
 pub async fn ct_player_seek(player: Arc<PlayerHandle>, pos_ms: u64) -> BResult<u64> {
     let target = Duration::from_millis(pos_ms);
     let actual = player.with_player(|p| {
@@ -448,7 +438,6 @@ pub async fn ct_player_seek(player: Arc<PlayerHandle>, pos_ms: u64) -> BResult<u
 }
 
 /// Set linear gain. `1.0` = unity, `0.0` = silent.
-#[uniffi::export]
 pub async fn ct_player_set_volume(player: Arc<PlayerHandle>, volume: f32) -> BResult<()> {
     player.with_player(|p| {
         p.set_volume(volume)
@@ -457,19 +446,16 @@ pub async fn ct_player_set_volume(player: Arc<PlayerHandle>, volume: f32) -> BRe
 }
 
 /// Current externally-observable state.
-#[uniffi::export]
 pub fn ct_player_state(player: Arc<PlayerHandle>) -> PlayerStateRecord {
     player.with_player(|p| PlayerStateRecord::from_cantode(p.state()))
 }
 
 /// Current playback position in milliseconds.
-#[uniffi::export]
 pub fn ct_player_position_ms(player: Arc<PlayerHandle>) -> u64 {
     player.with_player(|p| p.position().as_millis() as u64)
 }
 
 /// Total duration of the loaded source in milliseconds, if known.
-#[uniffi::export]
 pub fn ct_player_duration_ms(player: Arc<PlayerHandle>) -> Option<u64> {
     player.with_player(|p| p.duration().map(|d| d.as_millis() as u64))
 }
@@ -485,7 +471,6 @@ pub fn ct_player_duration_ms(player: Arc<PlayerHandle>) -> Option<u64> {
 ///
 /// Returns `None` if the music's container doesn't advertise a duration
 /// (rare; most MP3/FLAC/M4A files do).
-#[uniffi::export]
 pub async fn ct_player_probe_duration_ms(
     cx: Arc<PlayerContextHandle>,
     backend: Arc<Backend>,

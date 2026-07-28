@@ -1,6 +1,8 @@
 use crate::shared::{MusicId, StorageEntryLoc};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DataSourceKey {
     Music { id: MusicId },
     Cover { id: MusicId },
@@ -24,7 +26,8 @@ pub enum DataSourceKey {
 /// Storage mode for a plugin KV key. Locked at first use per
 /// (plugin_id, key): a key declared as Single cannot later receive
 /// appends (and vice versa).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PluginKvKind {
     /// One value per key. `set` overwrites.
     Single,
@@ -50,7 +53,8 @@ impl PluginKvKind {
 }
 
 /// One (key, value) pair for the single-value API.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginKvEntry {
     pub key: String,
     pub value: String,
@@ -58,23 +62,25 @@ pub struct PluginKvEntry {
 
 /// One (key, values) pair returned by multi-value bulk reads. `values`
 /// is ordered oldest-first.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginKvMultiEntry {
     pub key: String,
     pub values: Vec<String>,
 }
 
 /// One (key, count) pair returned by `count_multi`.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginKvCountEntry {
     pub key: String,
     pub count: u64,
 }
 
 /// Metadata about a registered key, returned by `list_keys`.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginKvKeyInfo {
     pub key: String,
     pub kind: PluginKvKind,
 }
-

@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{ctx::BackendContext, error::BResult};
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgInitializeApp {
     pub app_document_dir: String,
     pub app_cache_dir: String,

@@ -1,6 +1,10 @@
 package com.kutedev.easemusicplayer.core
 
+import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.BridgeMethods
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
+import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.PlayerStateRecord
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -8,33 +12,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.PlayerHandle
-import uniffi.ease_client_backend.PlayerStateRecord
-import uniffi.ease_client_backend.ctPlayerDurationMs
-import uniffi.ease_client_backend.ctPlayerPositionMs
-import uniffi.ease_client_backend.ctPlayerState
-import uniffi.ease_client_backend.ctPlayerStop
-import uniffi.ease_client_schema.MusicId
 
 /**
- * Plain Kotlin wrapper around a cantode [PlayerHandle] (Rust audio engine
- * over UniFFI). Owns the 10 Hz state-poll loop and surfaces cantode state
- * via `@Volatile` fields (safe to read from any thread) plus an
- * [endedEvent] flow.
- *
- * Replaces the old `CantodePlayer extends SimpleBasePlayer` adapter.
- * media3 has been removed entirely; the system media notification and
- * transport callbacks now go through a platform `android.media.session.MediaSession`
- * owned by [PlaybackService], which reads from this class directly.
+ * Plain Kotlin wrapper around the cantode player (Rust audio engine behind
+ * the unified JSON bridge). Owns the 10 Hz state-poll loop and surfaces
+ * cantode state via `@Volatile` fields (safe to read from any thread) plus
+ * an [endedEvent] flow.
  *
  * Position updates: cantode emits `PositionChanged` at ~10 Hz internally;
- * we poll `ctPlayerPositionMs` + `ctPlayerState` at the same rate and
- * mirror the result into [PlayerRepository] so ViewModels keep working
- * unchanged.
+ * we poll `player.pollState` (one batched JSON call returning state +
+ * positionMs + durationMs) at the same rate and mirror the result into
+ * [PlayerRepository] so ViewModels keep working unchanged.
+ *
+ * @param playerHandleId Opaque Long ID returned by the Rust bridge for
+ *   this player; passed as the `handle` field on every `player.*` call.
  */
 class CantodeEngine(
+    private val bridge: Bridge,
     private val playerRepository: PlayerRepository,
-    private val handle: PlayerHandle,
+    private val playerHandleId: Long,
     private val scope: CoroutineScope,
 ) {
     @Volatile var currentMusicId: MusicId? = null
@@ -48,11 +44,6 @@ class CantodeEngine(
     @Volatile var lastDurationMs: ULong? = null
         private set
 
-    /**
-     * Fires once per track when cantode transitions into `ENDED`.
-     * Collected by [com.kutedev.easemusicplayer.singleton.PlayerControllerRepository]
-     * to drive auto-advance and emit the `MusicComplete` plugin event.
-     */
     private val _endedEvent = MutableSharedFlow<MusicId>(extraBufferCapacity = 4)
     val endedEvent = _endedEvent.asSharedFlow()
 
@@ -70,25 +61,25 @@ class CantodeEngine(
         }
     }
 
-    /** Update the music id + title that the next poll cycle will report. */
     fun setCurrentMedia(musicId: MusicId?, title: String?) {
         currentMusicId = musicId
         currentTitle = title
         endedHandledForCurrent = false
     }
 
-    /** Clear the current media marker (used by `stop()`). */
     fun clearMedia() {
         currentMusicId = null
         currentTitle = null
         endedHandledForCurrent = false
     }
 
-    private fun pollOnce() {
-        // Sync (non-suspend) UniFFI reads — safe from any thread.
-        val newState = ctPlayerState(handle)
-        val newPos = ctPlayerPositionMs(handle)
-        val newDuration = ctPlayerDurationMs(handle)
+    private suspend fun pollOnce() {
+        // Single batched call: state + positionMs + durationMs.
+        val poll = bridge.call(BridgeMethods.Player.POLL_STATE).unwrapOrNull()?.payload ?: return
+
+        val newState = poll.state
+        val newPos = poll.positionMs
+        val newDuration = poll.durationMs
 
         // ENDED detection — fire once per track.
         val mid = currentMusicId
@@ -105,7 +96,6 @@ class CantodeEngine(
         lastPositionMs = newPos
         lastDurationMs = newDuration
 
-        // Mirror into PlayerRepository so ViewModels keep working unchanged.
         when (newState) {
             PlayerStateRecord.PLAYING -> {
                 playerRepository.setIsPlaying(true)
@@ -128,7 +118,9 @@ class CantodeEngine(
     fun release() {
         released = true
         pollJob?.cancel()
-        scope.launch { ctPlayerStop(handle) }
+        scope.launch {
+            bridge.call(BridgeMethods.Player.STOP).unwrapOrNull()
+        }
     }
 
     companion object {

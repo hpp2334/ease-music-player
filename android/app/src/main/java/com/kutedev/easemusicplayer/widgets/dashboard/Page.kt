@@ -48,8 +48,8 @@ import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteCreateStorage
 import com.kutedev.easemusicplayer.core.RouteEditStorage
-import uniffi.ease_client_backend.Storage
-import uniffi.ease_client_schema.StorageType
+import com.kutedev.easemusicplayer.singleton.types.Storage
+import com.kutedev.easemusicplayer.singleton.types.StorageType
 
 private val paddingX = 24.dp
 private val paddingY = 12.dp

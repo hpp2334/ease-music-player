@@ -13,7 +13,6 @@ use crate::{
     Backend, MusicAbstract,
 };
 
-#[uniffi::export]
 pub async fn ct_get_music(cx: Arc<Backend>, id: MusicId) -> BResult<Option<Music>> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -21,13 +20,11 @@ pub async fn ct_get_music(cx: Arc<Backend>, id: MusicId) -> BResult<Option<Music
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub fn cts_get_music_abstract(cx: Arc<Backend>, id: MusicId) -> BResult<Option<MusicAbstract>> {
     let cx = cx.get_context().clone();
     tokio_runtime().block_on(async move { get_music_abstract(&cx, id).await })
 }
 
-#[uniffi::export]
 pub async fn ct_update_music_lyric(cx: Arc<Backend>, arg: ArgUpdateMusicLyric) -> BResult<()> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -39,13 +36,11 @@ pub async fn ct_update_music_lyric(cx: Arc<Backend>, arg: ArgUpdateMusicLyric) -
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub fn cts_update_music_duration(cx: Arc<Backend>, arg: ArgUpdateMusicDuration) -> BResult<()> {
     let cx = cx.get_context().clone();
     tokio_runtime().block_on(async move { update_music_duration(&cx, arg).await })
 }
 
-#[uniffi::export]
 pub fn cts_update_music_cover(cx: Arc<Backend>, arg: ArgUpdateMusicCover) -> BResult<()> {
     let cx = cx.get_context().clone();
     tokio_runtime().block_on(async move { update_music_cover(&cx, arg).await })

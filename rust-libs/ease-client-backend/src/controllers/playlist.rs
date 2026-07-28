@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use ease_client_tokio::tokio_runtime;
-
 use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc};
 use ease_order_key::{OrderKey, OrderKeyRef};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ctx::BackendContext,
@@ -16,7 +16,6 @@ use crate::{
     Backend,
 };
 
-#[uniffi::export]
 pub async fn ct_get_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<Option<Playlist>> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -24,7 +23,6 @@ pub async fn ct_get_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<Optio
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BResult<()> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -35,7 +33,6 @@ pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BRe
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_list_playlist(cx: Arc<Backend>) -> BResult<Vec<PlaylistAbstract>> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -43,13 +40,13 @@ pub async fn ct_list_playlist(cx: Arc<Backend>) -> BResult<Vec<PlaylistAbstract>
     }).await.unwrap()
 }
 
-#[derive(uniffi::Record)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RetCreatePlaylist {
-    id: PlaylistId,
-    music_ids: Vec<AddedMusic>,
+    pub id: PlaylistId,
+    pub music_ids: Vec<AddedMusic>,
 }
 
-#[uniffi::export]
 pub async fn ct_create_playlist(
     cx: Arc<Backend>,
     arg: ArgCreatePlaylist,
@@ -99,7 +96,6 @@ pub async fn ct_create_playlist(
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_add_musics_to_playlist(
     cx: Arc<Backend>,
     arg: ArgAddMusicsToPlaylist,
@@ -141,7 +137,6 @@ pub async fn ct_add_musics_to_playlist(
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_remove_music_from_playlist(
     cx: Arc<Backend>,
     arg: ArgRemoveMusicFromPlaylist,
@@ -155,20 +150,20 @@ pub async fn ct_remove_music_from_playlist(
     }).await.unwrap()
 }
 
-#[derive(uniffi::Record)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgReorderPlaylist {
-    id: PlaylistId,
-    a: Option<PlaylistId>,
-    b: Option<PlaylistId>,
+    pub id: PlaylistId,
+    pub a: Option<PlaylistId>,
+    pub b: Option<PlaylistId>,
 }
 
-#[uniffi::export]
 pub fn cts_reorder_playlist(cx: Arc<Backend>, arg: ArgReorderPlaylist) -> BResult<()> {
     let cx = cx.get_context().clone();
     tokio_runtime().block_on(async move { reorder_playlist_inner(&cx, arg).await })
 }
 
-async fn reorder_playlist_inner(cx: &BackendContext, arg: ArgReorderPlaylist) -> BResult<()> {
+pub(crate) async fn reorder_playlist_inner(cx: &BackendContext, arg: ArgReorderPlaylist) -> BResult<()> {
     if arg.a == arg.b {
         return Ok(());
     }
@@ -220,7 +215,6 @@ async fn reorder_playlist_inner(cx: &BackendContext, arg: ArgReorderPlaylist) ->
     Ok(())
 }
 
-#[uniffi::export]
 pub async fn ct_remove_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<()> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -229,21 +223,21 @@ pub async fn ct_remove_playlist(cx: Arc<Backend>, arg: PlaylistId) -> BResult<()
     }).await.unwrap()
 }
 
-#[derive(uniffi::Record)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgReorderMusic {
-    playlist_id: PlaylistId,
-    id: MusicId,
-    a: Option<MusicId>,
-    b: Option<MusicId>,
+    pub playlist_id: PlaylistId,
+    pub id: MusicId,
+    pub a: Option<MusicId>,
+    pub b: Option<MusicId>,
 }
 
-#[uniffi::export]
 pub fn cts_reorder_music_in_playlist(cx: Arc<Backend>, arg: ArgReorderMusic) -> BResult<()> {
     let cx = cx.get_context().clone();
     tokio_runtime().block_on(async move { reorder_music_in_playlist_inner(&cx, arg).await })
 }
 
-async fn reorder_music_in_playlist_inner(cx: &BackendContext, arg: ArgReorderMusic) -> BResult<()> {
+pub(crate) async fn reorder_music_in_playlist_inner(cx: &BackendContext, arg: ArgReorderMusic) -> BResult<()> {
     if arg.a == arg.b {
         return Ok(());
     }

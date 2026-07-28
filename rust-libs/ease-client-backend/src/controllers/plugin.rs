@@ -23,7 +23,6 @@ use crate::{error::BResult, Backend};
 // Single-value (overwrite) operations
 // ---------------------------------------------------------------------------
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_single_set(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -38,7 +37,6 @@ pub async fn ct_plugin_kv_single_set(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_single_set_multi(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -52,7 +50,6 @@ pub async fn ct_plugin_kv_single_set_multi(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_single_get(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -66,7 +63,6 @@ pub async fn ct_plugin_kv_single_get(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_single_get_multi(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -80,7 +76,6 @@ pub async fn ct_plugin_kv_single_get_multi(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_single_delete(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -94,7 +89,6 @@ pub async fn ct_plugin_kv_single_delete(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_single_delete_multi(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -112,7 +106,6 @@ pub async fn ct_plugin_kv_single_delete_multi(
 // Multi-value (append-only) operations
 // ---------------------------------------------------------------------------
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_multi_append(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -127,7 +120,6 @@ pub async fn ct_plugin_kv_multi_append(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_multi_append_multi(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -141,7 +133,6 @@ pub async fn ct_plugin_kv_multi_append_multi(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_multi_get_all(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -155,7 +146,6 @@ pub async fn ct_plugin_kv_multi_get_all(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_multi_get_all_multi(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -169,7 +159,6 @@ pub async fn ct_plugin_kv_multi_get_all_multi(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_multi_count(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -183,7 +172,6 @@ pub async fn ct_plugin_kv_multi_count(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_multi_count_multi(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -197,7 +185,6 @@ pub async fn ct_plugin_kv_multi_count_multi(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_multi_delete(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -211,7 +198,6 @@ pub async fn ct_plugin_kv_multi_delete(
         .unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_multi_delete_multi(
     cx: Arc<Backend>,
     plugin_id: String,
@@ -229,7 +215,6 @@ pub async fn ct_plugin_kv_multi_delete_multi(
 // Key listing (works across both modes)
 // ---------------------------------------------------------------------------
 
-#[uniffi::export]
 pub async fn ct_plugin_kv_list_keys(
     cx: Arc<Backend>,
     plugin_id: String,

@@ -10,22 +10,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.time.debounce
-import uniffi.ease_client_backend.AddedMusic
-import uniffi.ease_client_backend.ArgCreatePlaylist
-import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ArgReorderPlaylist
-import uniffi.ease_client_backend.ArgUpdatePlaylist
-import uniffi.ease_client_backend.PlaylistAbstract
-import uniffi.ease_client_backend.ctCreatePlaylist
-import uniffi.ease_client_backend.ctListPlaylist
-import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ctRemovePlaylist
-import uniffi.ease_client_backend.ctUpdatePlaylist
-import uniffi.ease_client_backend.ctsGetMusicAbstract
-import uniffi.ease_client_backend.ctsReorderPlaylist
-import uniffi.ease_client_backend.easeError
-import uniffi.ease_client_schema.MusicId
-import uniffi.ease_client_schema.PlaylistId
+import com.kutedev.easemusicplayer.singleton.types.AddedMusic
+import com.kutedev.easemusicplayer.singleton.types.ArgCreatePlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
+import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
+import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.PlaylistId
+import com.kutedev.easemusicplayer.singleton.types.RetCreatePlaylist
 import java.time.Duration
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,7 +28,7 @@ import javax.inject.Singleton
 class PlaylistRepository @Inject constructor(
     private val bridge: Bridge,
     private val storageRepository: StorageRepository,
-    private val _scope: CoroutineScope
+    private val _scope: CoroutineScope,
 ) {
     private val _playlists = MutableStateFlow(persistentListOf<PlaylistAbstract>())
     private val _syncedTotalDuration = MutableSharedFlow<MusicId>()
@@ -63,7 +56,8 @@ class PlaylistRepository @Inject constructor(
 
     fun createPlaylist(context: Context, arg: ArgCreatePlaylist) {
         _scope.launch {
-            val created = bridge.run { ctCreatePlaylist(it, arg) }
+            val created = bridge.call(BridgeMethods.Playlist.CREATE, arg)
+                .unwrapOrNull()?.payload
             if ((created?.musicIds?.size ?: 0) > 0) {
                 requestTotalDuration(context, created!!.musicIds)
             }
@@ -73,7 +67,7 @@ class PlaylistRepository @Inject constructor(
 
     fun editPlaylist(arg: ArgUpdatePlaylist) {
         _scope.launch {
-            bridge.run { ctUpdatePlaylist(it, arg) }
+            bridge.call(BridgeMethods.Playlist.UPDATE, arg).unwrapOrNull()
             reload()
         }
     }
@@ -81,7 +75,7 @@ class PlaylistRepository @Inject constructor(
     fun removePlaylist(id: PlaylistId) {
         _scope.launch {
             _preRemovePlaylistEvent.emit(id)
-            bridge.run { ctRemovePlaylist(it, id) }
+            bridge.call(BridgeMethods.Playlist.REMOVE, id).unwrapOrNull()
             reload()
         }
     }
@@ -105,11 +99,12 @@ class PlaylistRepository @Inject constructor(
         val b = _playlists.value.getOrNull(toIndex + 1)
 
         _scope.launch {
-            bridge.runSync { ctsReorderPlaylist(it, ArgReorderPlaylist(
+            val arg = ArgReorderPlaylist(
                 id = from.meta.id,
                 a = a?.meta?.id,
-                b = b?.meta?.id))
-            }
+                b = b?.meta?.id,
+            )
+            bridge.call(BridgeMethods.Playlist.REORDER, arg).unwrapOrNull()
             scheduleReload()
         }
     }
@@ -118,23 +113,20 @@ class PlaylistRepository @Inject constructor(
     suspend fun removeMusic(playlistId: PlaylistId, musicId: MusicId) {
         val arg = ArgRemoveMusicFromPlaylist(
             playlistId = playlistId,
-            musicId = musicId
+            musicId = musicId,
         )
         _preRemoveMusicEvent.emit(arg)
-        bridge.run { backend -> ctRemoveMusicFromPlaylist(backend, arg)}
-
+        bridge.call(BridgeMethods.Playlist.REMOVE_MUSIC, arg).unwrapOrNull()
         reload()
     }
 
     /**
      * Proactively probe + persist the duration of [id] without playing it.
      *
-     * TODO(v0.5): wire this to `ctPlayerProbeDurationMs` via a shared
-     * `PlayerContextHandle`. For v0.4 we leave this as a no-op — music
+     * TODO(v0.5): wire this to `player.probeDurationMs` via a shared
+     * PlayerContext. For v0.4 we leave this as a no-op — music
      * durations are lazily filled in on first play via the backend's
-     * `ctPlayerLoadMusic` writeback hook. The user-visible effect is
-     * that newly-imported tracks show no duration in the playlist UI
-     * until they're played once.
+     * `player.loadMusic` writeback hook.
      */
     @Suppress("UNUSED_PARAMETER")
     private fun requestTotalDuration(context: Context, id: MusicId) {
@@ -148,6 +140,7 @@ class PlaylistRepository @Inject constructor(
     }
 
     suspend fun reload() {
-        _playlists.value = bridge.run { ctListPlaylist(it).toPersistentList() } ?: persistentListOf()
+        val list: List<PlaylistAbstract>? = bridge.call(BridgeMethods.Playlist.LIST).unwrapOrNull()?.payload
+        _playlists.value = list?.toPersistentList() ?: persistentListOf()
     }
 }

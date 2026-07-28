@@ -40,7 +40,7 @@ import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.utils.formatDuration
 import com.kutedev.easemusicplayer.utils.toMusicDurationMs
-import uniffi.ease_client_schema.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
 
 @Composable
 private fun MiniPlayerCore(
@@ -157,13 +157,13 @@ fun MiniPlayer(
     val music by playerVM.music.collectAsState()
     val loading by playerVM.loading.collectAsState()
     val nextMusic by playerVM.nextMusic.collectAsState()
-    val currentDuration by playerVM.currentDuration.collectAsState()
+    val currentMs by playerVM.currentMs.collectAsState()
 
     MiniPlayerCore(
         isPlaying = isPlaying,
         title = music?.meta?.title ?: "",
         cover = music?.cover,
-        currentDurationMS = toMusicDurationMs(currentDuration),
+        currentDurationMS = currentMs.toULong(),
         totalDuration = formatDuration(music),
         totalDurationMS = toMusicDurationMs(music),
         canNext = nextMusic != null,

@@ -5,12 +5,14 @@ use ease_client_schema::entities::{music, playlist, playlist_music};
 use ease_client_schema::{BlobId, MusicId, PlaylistId, PlaylistModel, StorageEntryLoc};
 use ease_order_key::OrderKey;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
+use serde::{Deserialize, Serialize};
 
 use crate::error::BResult;
 
 use super::{core::DatabaseServer, music::ArgDBAddMusic};
 
-#[derive(Debug, uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AddedMusic {
     pub id: MusicId,
     pub existed: bool,

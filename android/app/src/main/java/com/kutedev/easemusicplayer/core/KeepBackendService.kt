@@ -8,7 +8,6 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.kutedev.easemusicplayer.singleton.Bridge
 import dagger.hilt.android.AndroidEntryPoint
-import uniffi.ease_client_backend.easeLog
 import javax.inject.Inject
 
 
@@ -32,7 +31,7 @@ class KeepBackendService : Service() {
         startForeground(1, notification)
 
         bridge.initialize()
-        easeLog("KeepBackendService started")
+        bridge.logRaw("info", "KeepBackendService started")
         return START_NOT_STICKY
     }
 

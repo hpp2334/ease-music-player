@@ -2,40 +2,13 @@ import { execSync } from "node:child_process";
 import { ROOT, RUST_LIBS_ROOTS, TARGETS } from "./base";
 import path from "node:path";
 
-console.log("Build ease-client in debug mode");
-execSync(`cargo build -p ease-client-backend`, {
-  stdio: "inherit",
-  cwd: RUST_LIBS_ROOTS,
-});
-
-// Host cdylib filename varies by platform:
-//   windows: ease_client_backend.dll
-//   mac:     libease_client_backend.dylib
-//   linux:   libease_client_backend.so
-const hostLibName =
-  process.platform === "win32"
-    ? "ease_client_backend.dll"
-    : process.platform === "darwin"
-      ? "libease_client_backend.dylib"
-      : "libease_client_backend.so";
-const hostLib = path.resolve(RUST_LIBS_ROOTS, "target/debug", hostLibName);
+// Unified JSON+buffer bridge — no UniFFI bindgen step required.
+// The Rust cdylib is cross-compiled directly; the single JNI entrypoint
+// `Java_com_kutedev_easemusicplayer_singleton_EaseBridge_call` is
+// hand-written in `rust-libs/ease-client-backend/src/bridge/jni.rs`.
 
 for (const buildTarget of TARGETS) {
-  console.log(`Generate kotlin bindings of ${buildTarget}`);
-  execSync(
-    `cargo run -p ease-client-android-ffi-builder generate --library ${hostLib} --language kotlin --out-dir ${path.resolve(ROOT, "android/app/src/main/java/")}`,
-    {
-      stdio: "inherit",
-      cwd: RUST_LIBS_ROOTS,
-      env: {
-        ...process.env,
-        RUST_BACKTRACE: "1",
-        CARGO_NDK_ANDROID_PLATFORM: "34",
-      },
-    },
-  );
-
-  console.log(`Generate jniLibs of ${buildTarget}`);
+  console.log(`Cross-compiling ease-client-backend for ${buildTarget}`);
   execSync(
     `cargo ndk --platform 30 --target ${buildTarget} -o ${path.resolve(ROOT, "android/app/src/main/jniLibs")} build -p ease-client-backend --release --lib`,
     {

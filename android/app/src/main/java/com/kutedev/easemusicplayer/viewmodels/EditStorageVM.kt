@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.BridgeMethods
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import com.kutedev.easemusicplayer.singleton.ToastRepository
@@ -17,12 +18,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.ArgUpsertStorage
-import uniffi.ease_client_backend.StorageConnectionTestResult
-import uniffi.ease_client_backend.ctRemoveStorage
-import uniffi.ease_client_backend.ctTestStorage
-import uniffi.ease_client_schema.StorageId
-import uniffi.ease_client_schema.StorageType
+import com.kutedev.easemusicplayer.singleton.types.ArgUpsertStorage
+import com.kutedev.easemusicplayer.singleton.types.StorageConnectionTestResult
+import com.kutedev.easemusicplayer.singleton.types.StorageId
+import com.kutedev.easemusicplayer.singleton.types.StorageType
 import javax.inject.Inject
 
 
@@ -127,13 +126,22 @@ class EditStorageVM @Inject constructor(
         _testResult.value = StorageConnectionTestResult.TESTING
 
         _testJob = viewModelScope.launch {
-            _testResult.value = bridge.runRaw { ctTestStorage(it, form.value) }
+            val result: StorageConnectionTestResult = try {
+                bridge.call(BridgeMethods.Storage.TEST, form.value).unwrapOrThrow().payload
+            } catch (e: Throwable) {
+                StorageConnectionTestResult.OTHER_ERROR
+            }
+            _testResult.value = result
             sendTestToast()
 
             delay(5000)
             resetTestResult()
         }
     }
+
+    /** Returns the OneDrive OAuth URL (launch in a browser). */
+    suspend fun onedriveOauthUrl(): String? =
+        bridge.call(BridgeMethods.Storage.ONEDRIVE_OAUTH_URL).unwrapOrNull()?.payload
 
     private fun sendTestToast() {
         val testing = _testResult.value

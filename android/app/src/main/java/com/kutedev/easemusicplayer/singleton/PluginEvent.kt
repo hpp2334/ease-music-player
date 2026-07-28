@@ -1,6 +1,6 @@
 package com.kutedev.easemusicplayer.singleton
 
-import uniffi.ease_client_schema.MusicId
+import com.kutedev.easemusicplayer.singleton.types.MusicId
 
 /**
  * Events emitted by [PlayerControllerRepository] that plugins can subscribe
