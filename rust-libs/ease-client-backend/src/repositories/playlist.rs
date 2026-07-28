@@ -63,14 +63,28 @@ impl DatabaseServer {
             let (mid, existed) = self.add_music_impl(m, order.clone()).await?;
             order = OrderKey::greater(&order);
 
-            playlist_music::ActiveModel {
-                playlist_id: ActiveValue::Set(*playlist_id.as_ref()),
-                music_id: ActiveValue::Set(*mid.as_ref()),
-            }
-            .insert(&db)
-            .await?;
+            // Same duplicate-guard as in add_musics_to_playlist —
+            // handles a user passing the same path twice in one batch.
+            let already_linked = playlist_music::Entity::find()
+                .filter(playlist_music::Column::PlaylistId.eq(*playlist_id.as_ref()))
+                .filter(playlist_music::Column::MusicId.eq(*mid.as_ref()))
+                .one(&db)
+                .await?
+                .is_some();
 
-            ret.push(AddedMusic { id: mid, existed });
+            if !already_linked {
+                playlist_music::ActiveModel {
+                    playlist_id: ActiveValue::Set(*playlist_id.as_ref()),
+                    music_id: ActiveValue::Set(*mid.as_ref()),
+                }
+                .insert(&db)
+                .await?;
+            }
+
+            ret.push(AddedMusic {
+                id: mid,
+                existed: existed || already_linked,
+            });
         }
 
         Ok((playlist_id, ret))
@@ -171,14 +185,33 @@ impl DatabaseServer {
             let (mid, existed) = self.add_music_impl(m, order.clone()).await?;
             order = OrderKey::greater(&order);
 
-            playlist_music::ActiveModel {
-                playlist_id: ActiveValue::Set(*playlist_id.as_ref()),
-                music_id: ActiveValue::Set(*mid.as_ref()),
-            }
-            .insert(&db)
-            .await?;
+            // Skip linking if the music is already in this playlist
+            // (e.g. user re-imported an existing entry). Without this
+            // guard the INSERT below violates the UNIQUE(playlist_id,
+            // music_id) constraint and aborts the entire batch —
+            // partial successes get committed but the call returns an
+            // error envelope, so the Kotlin side can't tell which
+            // rows were actually inserted (and skips duration probes).
+            let already_linked = playlist_music::Entity::find()
+                .filter(playlist_music::Column::PlaylistId.eq(*playlist_id.as_ref()))
+                .filter(playlist_music::Column::MusicId.eq(*mid.as_ref()))
+                .one(&db)
+                .await?
+                .is_some();
 
-            ret.push(AddedMusic { id: mid, existed });
+            if !already_linked {
+                playlist_music::ActiveModel {
+                    playlist_id: ActiveValue::Set(*playlist_id.as_ref()),
+                    music_id: ActiveValue::Set(*mid.as_ref()),
+                }
+                .insert(&db)
+                .await?;
+            }
+
+            ret.push(AddedMusic {
+                id: mid,
+                existed: existed || already_linked,
+            });
         }
         Ok(ret)
     }

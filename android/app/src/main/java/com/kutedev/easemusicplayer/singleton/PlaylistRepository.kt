@@ -1,6 +1,5 @@
 package com.kutedev.easemusicplayer.singleton
 
-import android.content.Context
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.CoroutineScope
@@ -10,10 +9,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.time.debounce
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import com.kutedev.easemusicplayer.singleton.types.AddedMusic
 import com.kutedev.easemusicplayer.singleton.types.ArgCreatePlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicDuration
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
 import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
 import com.kutedev.easemusicplayer.singleton.types.MusicId
@@ -54,12 +58,12 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
-    fun createPlaylist(context: Context, arg: ArgCreatePlaylist) {
+    fun createPlaylist(arg: ArgCreatePlaylist) {
         _scope.launch {
             val created = bridge.call(BridgeMethods.Playlist.CREATE, arg)
                 .unwrapOrNull()?.payload
             if ((created?.musicIds?.size ?: 0) > 0) {
-                requestTotalDuration(context, created!!.musicIds)
+                requestTotalDuration(created!!.musicIds)
             }
             reload()
         }
@@ -80,10 +84,10 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
-    fun requestTotalDuration(context: Context, added: List<AddedMusic>) {
+    fun requestTotalDuration(added: List<AddedMusic>) {
         for (item in added) {
             if (!item.existed) {
-                requestTotalDuration(context, item.id)
+                _scope.launch { probeAndPersistDuration(item.id) }
             }
         }
     }
@@ -121,16 +125,33 @@ class PlaylistRepository @Inject constructor(
     }
 
     /**
-     * Proactively probe + persist the duration of [id] without playing it.
+     * Probes [id]'s duration via `player.probeDurationMs` (no playback,
+     * no output device — uses [cantode::probe_metadata]) and persists
+     * the result via `music.updateDuration`. Emits
+     * [_syncedTotalDuration] so [PlaylistVM] reloads.
      *
-     * TODO(v0.5): wire this to `player.probeDurationMs` via a shared
-     * PlayerContext. For v0.4 we leave this as a no-op — music
-     * durations are lazily filled in on first play via the backend's
-     * `player.loadMusic` writeback hook.
+     * Silently no-ops if the cantode player context isn't set up yet
+     * (early in app startup) or the probe fails — the existing
+     * `player.loadMusic` writeback hook will fill in the duration on
+     * first play as a fallback.
      */
-    @Suppress("UNUSED_PARAMETER")
-    private fun requestTotalDuration(context: Context, id: MusicId) {
-        // No-op — see KDoc.
+    private suspend fun probeAndPersistDuration(id: MusicId) {
+        val contextHandle = bridge.getPlayerContextId()
+        if (contextHandle < 0L) return
+        val args = buildJsonObject {
+            put("contextHandle", contextHandle)
+            put("backendHandle", bridge.getBackendId())
+            put("musicId", id.value)
+        }
+        val payload = bridge.callRaw("player.probeDurationMs", args)
+            .unwrapOrNull()?.rawPayloadJson ?: return
+        if (payload is JsonNull) return
+        val durMs = payload.jsonPrimitive.content.toLong()
+        bridge.call(
+            BridgeMethods.Music.UPDATE_DURATION,
+            ArgUpdateMusicDuration(id = id, duration = durMs),
+        ).unwrapOrNull()
+        _syncedTotalDuration.emit(id)
     }
 
     fun scheduleReload() {

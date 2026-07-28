@@ -1,6 +1,5 @@
 package com.kutedev.easemusicplayer.viewmodels
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.singleton.ImportRepository
@@ -128,10 +127,10 @@ class CreatePlaylistVM @Inject constructor(
         }
     }
 
-    fun finish(context: Context) {
+    fun finish() {
         val entries = _entries.value.map { entry -> ToAddMusicEntry(entry, entry.name) }
 
-        playlistRepository.createPlaylist(context, ArgCreatePlaylist(
+        playlistRepository.createPlaylist(ArgCreatePlaylist(
             title = _name.value,
             cover = _cover.value,
             entries = entries

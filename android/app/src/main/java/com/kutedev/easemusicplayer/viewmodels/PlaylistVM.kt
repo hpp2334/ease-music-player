@@ -1,6 +1,5 @@
 package com.kutedev.easemusicplayer.viewmodels
 
-import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -99,7 +98,7 @@ class PlaylistVM @Inject constructor(
         }
     }
 
-    fun prepareImportMusics(context: Context) {
+    fun prepareImportMusics() {
         importRepository.prepare(listOf(StorageEntryType.MUSIC)) { entries ->
             viewModelScope.launch {
                 val arg = ArgAddMusicsToPlaylist(
@@ -110,7 +109,7 @@ class PlaylistVM @Inject constructor(
                 )
                 val added: List<AddedMusic> = bridge.call(BridgeMethods.Playlist.ADD_MUSICS, arg)
                     .unwrapOrNull()?.payload ?: emptyList()
-                playlistRepository.requestTotalDuration(context, added)
+                playlistRepository.requestTotalDuration(added)
                 playlistRepository.reload()
             }
         }
