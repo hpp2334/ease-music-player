@@ -275,7 +275,7 @@ fun CreatePlaylistsDialog(
                         size = EaseTextButtonSize.Medium,
                         disabled = !canSubmit,
                         onClick = {
-                            createPlaylistVM.finish(context)
+                            createPlaylistVM.finish()
                             onDismissRequest()
                         }
                     )

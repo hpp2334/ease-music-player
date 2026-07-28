@@ -43,6 +43,9 @@ import com.kutedev.easemusicplayer.singleton.types.Storage as TStorage
  *  - `player.contextNew`, `player.new` — return raw `{handle: N}` for
  *    engine setup.
  *  - `player.loadMusic` — cross-handle arg (`backendHandle` + `musicId`).
+ *  - `player.probeDurationMs` — cross-handle arg (`contextHandle` +
+ *    `backendHandle` + `musicId`); used by [PlaylistRepository] to
+ *    pre-fill music duration on import without playback.
  *  - `music.updateCover` — buffer input.
  *  - `debug.triggerError`, `debug.triggerPanic` — diagnostic; caller
  *    wants the error envelope, not success.
