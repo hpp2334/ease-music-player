@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.BridgeMethods
 import com.kutedev.easemusicplayer.singleton.ImportRepository
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
@@ -20,25 +21,19 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.time.debounce
-import uniffi.ease_client_backend.AddedMusic
-import uniffi.ease_client_backend.ArgAddMusicsToPlaylist
-import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ArgReorderMusic
-import uniffi.ease_client_backend.ArgReorderPlaylist
-import uniffi.ease_client_backend.MusicAbstract
-import uniffi.ease_client_schema.MusicId
-import uniffi.ease_client_backend.Playlist
-import uniffi.ease_client_backend.PlaylistAbstract
-import uniffi.ease_client_schema.PlaylistId
-import uniffi.ease_client_backend.PlaylistMeta
-import uniffi.ease_client_backend.StorageEntryType
-import uniffi.ease_client_backend.ToAddMusicEntry
-import uniffi.ease_client_backend.ctAddMusicsToPlaylist
-import uniffi.ease_client_backend.ctGetPlaylist
-import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ctsGetMusicAbstract
-import uniffi.ease_client_backend.ctsReorderMusicInPlaylist
-import uniffi.ease_client_backend.ctsReorderPlaylist
+import com.kutedev.easemusicplayer.singleton.types.AddedMusic
+import com.kutedev.easemusicplayer.singleton.types.ArgAddMusicsToPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgReorderMusic
+import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylist
+import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
+import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.Playlist
+import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
+import com.kutedev.easemusicplayer.singleton.types.PlaylistId
+import com.kutedev.easemusicplayer.singleton.types.PlaylistMeta
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.ToAddMusicEntry
 import java.time.Duration
 import javax.inject.Inject
 import kotlin.time.toKotlinDuration
@@ -50,8 +45,8 @@ private fun defaultPlaylistAbstract(): PlaylistAbstract {
             title = "",
             cover = null,
             showCover = null,
-            createdTime = Duration.ofMillis(0L),
-            order = listOf(0u)
+            createdTime = 0L,
+            order = listOf(0L)
         ),
         musicCount = 0uL,
         duration = null
@@ -105,23 +100,19 @@ class PlaylistVM @Inject constructor(
     }
 
     fun prepareImportMusics(context: Context) {
-        importRepository.prepare(listOf(StorageEntryType.MUSIC)) {
-            entries ->
-                viewModelScope.launch {
-                    val added = bridge.run { backend ->
-                        ctAddMusicsToPlaylist(
-                            backend, ArgAddMusicsToPlaylist(
-                            id = _id,
-                            entries = entries.map { entry ->
-                                ToAddMusicEntry(
-                                    entry = entry,
-                                    name = entry.name
-                                )
-                            }
-                    ))} ?: emptyList()
-                    playlistRepository.requestTotalDuration(context, added)
-                    playlistRepository.reload()
-                }
+        importRepository.prepare(listOf(StorageEntryType.MUSIC)) { entries ->
+            viewModelScope.launch {
+                val arg = ArgAddMusicsToPlaylist(
+                    id = _id,
+                    entries = entries.map { entry ->
+                        ToAddMusicEntry(entry = entry, name = entry.name)
+                    },
+                )
+                val added: List<AddedMusic> = bridge.call(BridgeMethods.Playlist.ADD_MUSICS, arg)
+                    .unwrapOrNull()?.payload ?: emptyList()
+                playlistRepository.requestTotalDuration(context, added)
+                playlistRepository.reload()
+            }
         }
     }
 
@@ -136,12 +127,13 @@ class PlaylistVM @Inject constructor(
         val b = _playlistMusics.value.getOrNull(toIndex + 1)
 
         viewModelScope.launch {
-            bridge.runSync { ctsReorderMusicInPlaylist(it, ArgReorderMusic(
+            val arg = ArgReorderMusic(
                 playlistId = _playlistAbstr.value.meta.id,
                 id = from.meta.id,
                 a = a?.meta?.id,
-                b = b?.meta?.id
-            )) }
+                b = b?.meta?.id,
+            )
+            bridge.call(BridgeMethods.Playlist.REORDER_MUSIC, arg).unwrapOrNull()
             playlistRepository.scheduleReload()
             reload()
         }
@@ -156,7 +148,7 @@ class PlaylistVM @Inject constructor(
     }
 
     private suspend fun reload() {
-        val playlist = bridge.run { backend -> ctGetPlaylist(backend, _id) }
+        val playlist: Playlist? = bridge.call(BridgeMethods.Playlist.GET, _id).unwrapOrNull()?.payload
         if (playlist != null) {
             _playlistAbstr.value = playlist.abstr
             _playlistMusics.value = playlist.musics.toPersistentList()

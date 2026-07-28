@@ -11,10 +11,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import uniffi.ease_client_backend.ArgUpdatePlaylist
-import uniffi.ease_client_backend.StorageEntryType
-import uniffi.ease_client_schema.PlaylistId
-import uniffi.ease_client_schema.StorageEntryLoc
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.PlaylistId
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
 import javax.inject.Inject
 import kotlin.collections.firstOrNull
 import kotlin.collections.map

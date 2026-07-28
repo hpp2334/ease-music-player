@@ -7,7 +7,6 @@ use ease_remote_storage::{StorageBackendError, StorageBackendResult};
 
 use crate::{error::BResult, services::get_asset_file, Backend};
 
-#[uniffi::export]
 pub async fn ct_get_asset(cx: Arc<Backend>, key: DataSourceKey) -> BResult<Option<Vec<u8>>> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -21,13 +20,11 @@ pub async fn ct_get_asset(cx: Arc<Backend>, key: DataSourceKey) -> BResult<Optio
     }).await.unwrap()
 }
 
-#[derive(uniffi::Object)]
 pub struct AssetStream {
     stream: async_channel::Receiver<StorageBackendResult<Bytes>>,
     size: Option<u64>,
 }
 
-#[uniffi::export]
 impl AssetStream {
     pub async fn next(&self) -> BResult<Option<Vec<u8>>> {
         if let Ok(result) = self.stream.recv().await {
@@ -43,7 +40,6 @@ impl AssetStream {
     }
 }
 
-#[uniffi::export]
 pub async fn ct_get_asset_stream(
     cx: Arc<Backend>,
     key: DataSourceKey,

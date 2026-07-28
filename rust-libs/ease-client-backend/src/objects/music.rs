@@ -2,24 +2,30 @@ use std::time::Duration;
 
 use ease_client_schema::{DataSourceKey, MusicId, StorageEntryLoc};
 use ease_order_key::OrderKey;
+use serde::{Deserialize, Serialize};
 
 use super::lyric::Lyrics;
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MusicMeta {
     pub id: MusicId,
     pub title: String,
+    #[serde_as(as = "Option<serde_with::DurationMilliSeconds<u64>>")]
     pub duration: Option<Duration>,
     pub order: Vec<u32>,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MusicAbstract {
     pub meta: MusicMeta,
     pub cover: Option<DataSourceKey>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum LyricLoadState {
     Loading,
     #[default]
@@ -28,14 +34,16 @@ pub enum LyricLoadState {
     Loaded,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MusicLyric {
     pub loc: StorageEntryLoc,
     pub data: Lyrics,
     pub loaded_state: LyricLoadState,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Music {
     pub meta: MusicMeta,
     pub loc: StorageEntryLoc,
@@ -74,11 +82,12 @@ impl MusicAbstract {
 }
 
 // ============================================================================
-// Player-facing records (mirrors of cantode types, UniFFI-friendly).
+// Player-facing records (mirrors of cantode types).
 // ============================================================================
 
 /// PCM format of a decoded audio source.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioFormatRecord {
     /// Channel count (1 = mono, 2 = stereo, ...).
     pub channels: u16,
@@ -87,28 +96,29 @@ pub struct AudioFormatRecord {
 }
 
 /// A single free-form metadata tag.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TagRecord {
     pub key: String,
     pub value: String,
 }
 
-/// Probed metadata for an audio source, surfaced across UniFFI.
+/// Probed metadata for an audio source, surfaced across the bridge.
 ///
-/// Durations are in milliseconds (UniFFI's `Duration` mapping adds friction
-/// we don't need for a UI-consumable record). Cover-art bytes are NOT
-/// included here — fetch them separately via `ct_get_asset(DataSourceKey::Cover)`
-/// when needed. The `has_cover` flag lets the UI decide whether to bother.
-#[derive(Debug, Clone, uniffi::Record)]
+/// Durations are in milliseconds. Cover-art bytes are NOT included here —
+/// fetch them separately via `asset.get(DataSourceKey::Cover)` when needed.
+/// The `has_cover` flag lets the UI decide whether to bother.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MetadataRecord {
     pub format: AudioFormatRecord,
     /// Total duration in milliseconds, if known.
     pub duration_ms: Option<u64>,
     pub tags: Vec<TagRecord>,
     /// Whether the source carried embedded cover art. (The bytes are
-    /// available via `ct_get_asset(DataSourceKey::Cover)`; for freshly-
+    /// available via `asset.get(DataSourceKey::Cover)`; for freshly-
     /// loaded musics without a DB cover, the backend writes the probed
-    /// bytes back asynchronously — see `ct_player_load_music`.)
+    /// bytes back asynchronously — see `player.loadMusic`.)
     pub has_cover: bool,
 }
 
@@ -136,8 +146,9 @@ impl MetadataRecord {
     }
 }
 
-/// Mirror of [`cantode::PlayerState`] for the FFI surface.
-#[derive(Debug, Clone, Copy, uniffi::Enum)]
+/// Mirror of [`cantode::PlayerState`] for the bridge surface.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PlayerStateRecord {
     Idle,
     Loading,

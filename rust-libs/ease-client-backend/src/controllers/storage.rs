@@ -23,7 +23,6 @@ fn normalize_arg_upsert_storage(mut arg: ArgUpsertStorage) -> ArgUpsertStorage {
     arg
 }
 
-#[uniffi::export]
 pub async fn ct_list_storage(cx: Arc<Backend>) -> BResult<Vec<Storage>> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -33,7 +32,6 @@ pub async fn ct_list_storage(cx: Arc<Backend>) -> BResult<Vec<Storage>> {
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_upsert_storage(cx: Arc<Backend>, arg: ArgUpsertStorage) -> BResult<()> {
     tokio_runtime().handle().spawn(async move {
         let arg = normalize_arg_upsert_storage(arg);
@@ -45,7 +43,6 @@ pub async fn ct_upsert_storage(cx: Arc<Backend>, arg: ArgUpsertStorage) -> BResu
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_get_refresh_token(cx: Arc<Backend>, code: String) -> BResult<String> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -54,7 +51,6 @@ pub async fn ct_get_refresh_token(cx: Arc<Backend>, code: String) -> BResult<Str
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_remove_storage(cx: Arc<Backend>, id: StorageId) -> BResult<()> {
     tokio_runtime().handle().spawn(async move {
         let cx = cx.get_context();
@@ -64,7 +60,6 @@ pub async fn ct_remove_storage(cx: Arc<Backend>, id: StorageId) -> BResult<()> {
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_test_storage(
     cx: Arc<Backend>,
     arg: ArgUpsertStorage,
@@ -91,7 +86,6 @@ pub async fn ct_test_storage(
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub async fn ct_list_storage_entry_children(
     cx: Arc<Backend>,
     arg: StorageEntryLoc,
@@ -119,7 +113,7 @@ pub async fn ct_list_storage_entry_children(
                         is_dir: entry.is_dir,
                     })
                     .collect();
-                Ok(ListStorageEntryChildrenResp::Ok(entries))
+                Ok(ListStorageEntryChildrenResp::Ok { data: entries })
             }
             Err(e) => {
                 tracing::warn!("ct_list_storage_entry_children, {e:?}");
@@ -135,7 +129,6 @@ pub async fn ct_list_storage_entry_children(
     }).await.unwrap()
 }
 
-#[uniffi::export]
 pub fn ct_onedrive_oauth_url() -> String {
     onedrive_oauth_url()
 }

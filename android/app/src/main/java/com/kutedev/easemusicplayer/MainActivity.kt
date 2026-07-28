@@ -24,7 +24,6 @@ import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.easeLog
 import javax.inject.Inject
 import kotlin.system.exitProcess
 
@@ -72,15 +71,16 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Build the cantode PlayerContextHandle + PlayerHandle + CantodeEngine
-     * via [PlayerControllerRepository]. The CantodeEngine gets its own
+     * Build the cantode player context + player + CantodeEngine via
+     * [PlayerControllerRepository]. The CantodeEngine gets its own
      * CoroutineScope for the 10Hz state poll loop.
      */
     private fun setupCantodeEngine() {
-        playerControllerRepository.setupCantodeEngine { handle ->
+        playerControllerRepository.setupCantodeEngine { playerHandleId ->
             CantodeEngine(
+                bridge = bridge,
                 playerRepository = playerRepository,
-                handle = handle,
+                playerHandleId = playerHandleId,
                 scope = kotlinx.coroutines.CoroutineScope(
                     kotlinx.coroutines.Dispatchers.Default + SupervisorJob(),
                 ),
@@ -90,8 +90,8 @@ class MainActivity : ComponentActivity() {
 
     private fun setupExceptionHandler() {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            easeLog("on uncaught exception: $throwable")
-            easeLog("on uncaught exception stacktrace: ${throwable.stackTraceToString()}")
+            bridge.logRaw("error", "on uncaught exception: $throwable")
+            bridge.logRaw("error", "on uncaught exception stacktrace: ${throwable.stackTraceToString()}")
 
             android.os.Process.killProcess(android.os.Process.myPid())
             exitProcess(1)

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use ease_client_schema::{DataSourceKey, MusicId, MusicModel, PlaylistId, StorageEntryLoc};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ctx::BackendContext,
@@ -11,39 +12,45 @@ use crate::{
 
 use super::{lyrics::parse_lrc, storage::load_storage_entry_data};
 
-#[derive(Debug, uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgUpdatePlaylist {
     pub id: PlaylistId,
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToAddMusicEntry {
     pub entry: StorageEntry,
     pub name: String,
 }
 
-#[derive(Debug, uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgCreatePlaylist {
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
     pub entries: Vec<ToAddMusicEntry>,
 }
 
-#[derive(Debug, uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgAddMusicsToPlaylist {
     pub id: PlaylistId,
     pub entries: Vec<ToAddMusicEntry>,
 }
 
-#[derive(Debug, uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgRemoveMusicFromPlaylist {
     pub playlist_id: PlaylistId,
     pub music_id: MusicId,
 }
 
-#[derive(Debug, uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgUpdateMusicLyric {
     pub id: MusicId,
     pub lyric_loc: Option<StorageEntryLoc>,
@@ -150,9 +157,12 @@ pub async fn get_music_cover_bytes(cx: &BackendContext, id: MusicId) -> BResult<
     }
 }
 
-#[derive(uniffi::Record)]
+#[serde_with::serde_as]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgUpdateMusicDuration {
     pub id: MusicId,
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
     pub duration: Duration,
 }
 pub(crate) async fn update_music_duration(
@@ -165,7 +175,8 @@ pub(crate) async fn update_music_duration(
     Ok(())
 }
 
-#[derive(uniffi::Record)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgUpdateMusicCover {
     pub id: MusicId,
     pub cover: Vec<u8>,

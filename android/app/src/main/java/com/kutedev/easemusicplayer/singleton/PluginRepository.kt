@@ -5,9 +5,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginKvAppend
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import uniffi.ease_client_backend.ctPluginKvMultiAppend
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -133,9 +133,14 @@ class PluginRepository @Inject constructor(
                     put("ts", event.timestamp)
                 }.toString()
                 _scope.launch(Dispatchers.IO) {
-                    bridge.run {
-                        ctPluginKvMultiAppend(it, PLAYCOUNT_ID, key, payload)
-                    }
+                    bridge.call(
+                        BridgeMethods.Plugin.KV_MULTI_APPEND,
+                        ArgPluginKvAppend(
+                            pluginId = PLAYCOUNT_ID,
+                            key = key,
+                            value = payload,
+                        ),
+                    ).unwrapOrNull()
                 }
             }
             is PluginEvent.MusicPause, is PluginEvent.MusicStop, is PluginEvent.MusicComplete -> {

@@ -31,9 +31,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.Music
-import uniffi.ease_client_backend.Playlist
-import uniffi.ease_client_backend.easeLog
+import com.kutedev.easemusicplayer.singleton.types.Music
+import com.kutedev.easemusicplayer.singleton.types.Playlist
 import javax.inject.Inject
 
 
@@ -63,6 +62,7 @@ import javax.inject.Inject
 class PlaybackService : android.app.Service() {
     @Inject lateinit var playerRepository: PlayerRepository
     @Inject lateinit var playerControllerRepository: PlayerControllerRepository
+    @Inject lateinit var bridge: com.kutedev.easemusicplayer.singleton.Bridge
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
@@ -83,7 +83,7 @@ class PlaybackService : android.app.Service() {
     private val becomingNoisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
-                easeLog("audio becoming noisy → pause")
+                bridge.logRaw("info", "audio becoming noisy → pause")
                 playerControllerRepository.pause()
             }
         }
@@ -91,14 +91,14 @@ class PlaybackService : android.app.Service() {
 
     override fun onCreate() {
         super.onCreate()
-        easeLog("Playback service creating...")
+        bridge.logRaw("info", "Playback service creating...")
         notificationManager = getSystemService(NotificationManager::class.java)
         audioManager = getSystemService(AudioManager::class.java)
         createNotificationChannel()
         buildAudioFocusRequest()
         buildSession()
         observeState()
-        easeLog("Playback service created")
+        bridge.logRaw("info", "Playback service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -126,7 +126,7 @@ class PlaybackService : android.app.Service() {
             release()
         }
         mediaSession = null
-        easeLog("Playback service destroyed")
+        bridge.logRaw("info", "Playback service destroyed")
     }
 
     // ----- session -----
@@ -277,7 +277,7 @@ class PlaybackService : android.app.Service() {
                 )
                 .putLong(
                     MediaMetadataCompat.METADATA_KEY_DURATION,
-                    music.meta.duration?.toMillis() ?: 0L,
+                    music.meta.duration ?: 0L,
                 )
                 .build()
             session.setMetadata(meta)
@@ -393,7 +393,7 @@ class PlaybackService : android.app.Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (req == null) return
             val result = am.requestAudioFocus(req)
-            easeLog("requestAudioFocus: result=$result")
+            bridge.logRaw("info", "requestAudioFocus: result=$result")
             if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
                 focusRequested = true
             }
@@ -422,16 +422,16 @@ class PlaybackService : android.app.Service() {
     private fun onAudioFocusChange(focusChange: Int) {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS -> {
-                easeLog("audio focus lost → pause (will not auto-resume)")
+                bridge.logRaw("info", "audio focus lost → pause (will not auto-resume)")
                 playerControllerRepository.pause()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                easeLog("audio focus transient loss → pause")
+                bridge.logRaw("info", "audio focus transient loss → pause")
                 playerControllerRepository.pause()
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                easeLog("audio focus regained")
+                bridge.logRaw("info", "audio focus regained")
             }
         }
     }

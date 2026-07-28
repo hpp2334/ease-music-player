@@ -1,10 +1,10 @@
-mod lyric;
-mod music;
-mod player;
-mod playlist;
-mod storage;
+pub(crate) mod lyric;
+pub(crate) mod music;
+pub(crate) mod player;
+pub(crate) mod playlist;
+pub(crate) mod storage;
 
-mod env;
+pub(crate) mod env;
 
 pub use env::*;
 pub use lyric::*;

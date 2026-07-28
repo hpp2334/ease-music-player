@@ -60,13 +60,12 @@ import com.kutedev.easemusicplayer.components.FormWidget
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import kotlinx.coroutines.flow.update
-import uniffi.ease_client_backend.StorageConnectionTestResult
-import uniffi.ease_client_backend.ctOnedriveOauthUrl
-import uniffi.ease_client_schema.StorageType
+import com.kutedev.easemusicplayer.singleton.types.StorageConnectionTestResult
+import com.kutedev.easemusicplayer.singleton.types.StorageType
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.ArgUpsertStorage
+import com.kutedev.easemusicplayer.singleton.types.ArgUpsertStorage
 
 
 private fun buildStr(s: String): AnnotatedString {
@@ -263,7 +262,10 @@ private fun OneDriveConfig(
                 type = EaseTextButtonType.PrimaryVariant,
                 size = EaseTextButtonSize.Medium,
                 onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW, ctOnedriveOauthUrl().toUri())
+                    val url: String? = kotlinx.coroutines.runBlocking {
+                        editStorageVM.onedriveOauthUrl()
+                    }
+                    val intent = Intent(Intent.ACTION_VIEW, (url ?: "").toUri())
                     intent.flags = FLAG_ACTIVITY_NEW_TASK
                     context.startActivity(intent)
                 },

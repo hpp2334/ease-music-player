@@ -6,5 +6,4 @@ license = "GPL-3.0"
 
 [dependencies]
 serde = { workspace = true }
-uniffi = { workspace = true }
 sea-orm = { workspace = true }

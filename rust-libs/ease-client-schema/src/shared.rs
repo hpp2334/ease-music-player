@@ -11,10 +11,10 @@ macro_rules! define_id {
             PartialOrd,
             Ord,
             Copy,
-            uniffi::Record,
-            Serialize,
-            Deserialize,
+            serde::Serialize,
+            serde::Deserialize,
         )]
+        #[serde(transparent)]
         pub struct $s {
             value: i64,
         }
@@ -79,10 +79,10 @@ mod tests {
     Hash,
     PartialEq,
     Eq,
-    uniffi::Record,
     PartialOrd,
     Ord,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct StorageEntryLoc {
     pub storage_id: StorageId,
     pub path: String,
@@ -98,8 +98,8 @@ pub struct StorageEntryLoc {
     Hash,
     Serialize,
     Deserialize,
-    uniffi::Enum,
 )]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StorageType {
     Local,
     #[default]
@@ -116,8 +116,8 @@ pub enum StorageType {
     Eq,
     Serialize,
     Deserialize,
-    uniffi::Enum,
 )]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PlayMode {
     #[default]
     Single,

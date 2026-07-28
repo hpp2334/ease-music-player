@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::objects::EASEM_ONEDRIVE_ID;
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StorageEntry {
     pub storage_id: StorageId,
     pub name: String,
@@ -12,7 +13,8 @@ pub struct StorageEntry {
     pub is_dir: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgUpsertStorage {
     pub id: Option<StorageId>,
     pub addr: String,
@@ -23,7 +25,8 @@ pub struct ArgUpsertStorage {
     pub typ: StorageType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StorageConnectionTestResult {
     #[default]
     None,
@@ -34,7 +37,8 @@ pub enum StorageConnectionTestResult {
     OtherError,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StorageEntryType {
     Folder,
     Music,
@@ -43,7 +47,8 @@ pub enum StorageEntryType {
     Other,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Storage {
     pub id: StorageId,
     pub addr: String,
@@ -55,7 +60,8 @@ pub struct Storage {
     pub music_count: u64,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CurrentStorageImportType {
     #[default]
     None,
@@ -70,7 +76,8 @@ pub enum CurrentStorageImportType {
     },
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, uniffi::Enum)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CurrentStorageStateType {
     #[default]
     Loading,
@@ -90,9 +97,10 @@ impl StorageEntry {
     }
 }
 
-#[derive(Debug, Clone, uniffi::Enum)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ListStorageEntryChildrenResp {
-    Ok(Vec<StorageEntry>),
+    Ok { data: Vec<StorageEntry> },
     AuthenticationFailed,
     Timeout,
     Unknown,
@@ -101,7 +109,7 @@ pub enum ListStorageEntryChildrenResp {
 impl ListStorageEntryChildrenResp {
     pub fn is_error(&self) -> bool {
         match self {
-            ListStorageEntryChildrenResp::Ok(_) => false,
+            ListStorageEntryChildrenResp::Ok { .. } => false,
             ListStorageEntryChildrenResp::AuthenticationFailed => false,
             ListStorageEntryChildrenResp::Timeout => false,
             ListStorageEntryChildrenResp::Unknown => false,

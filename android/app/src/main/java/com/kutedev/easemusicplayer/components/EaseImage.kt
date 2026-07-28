@@ -13,7 +13,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.core.DataSourceKeyH
 import com.kutedev.easemusicplayer.viewmodels.AssetVM
-import uniffi.ease_client_schema.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
 
 @Composable
 fun EaseImage(

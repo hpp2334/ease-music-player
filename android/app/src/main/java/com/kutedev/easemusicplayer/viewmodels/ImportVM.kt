@@ -3,6 +3,7 @@ package com.kutedev.easemusicplayer.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.BridgeMethods
 import com.kutedev.easemusicplayer.singleton.ImportRepository
 import com.kutedev.easemusicplayer.singleton.PermissionRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
@@ -18,14 +19,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.CurrentStorageStateType
-import uniffi.ease_client_backend.ListStorageEntryChildrenResp
-import uniffi.ease_client_backend.Storage
-import uniffi.ease_client_backend.StorageEntry
-import uniffi.ease_client_backend.ctListStorageEntryChildren
-import uniffi.ease_client_schema.StorageEntryLoc
-import uniffi.ease_client_schema.StorageId
-import uniffi.ease_client_schema.StorageType
+import com.kutedev.easemusicplayer.singleton.types.CurrentStorageStateType
+import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
+import com.kutedev.easemusicplayer.singleton.types.Storage
+import com.kutedev.easemusicplayer.singleton.types.StorageEntry
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
+import com.kutedev.easemusicplayer.singleton.types.StorageId
+import com.kutedev.easemusicplayer.singleton.types.StorageType
 import java.net.URLDecoder
 
 data class SplitPathItem(
@@ -178,19 +178,23 @@ class ImportVM @Inject constructor(
         _entries.value = emptyList()
 
         viewModelScope.launch {
-            val resp = bridge.runRaw {
-                ctListStorageEntryChildren(
-                    it, StorageEntryLoc(
-                        storageId = storage.id,
-                        path = currentPath()
-                    )
-                )
+            val loc = StorageEntryLoc(
+                storageId = storage.id,
+                path = currentPath(),
+            )
+            val resp: ListStorageEntryChildrenResp? = try {
+                bridge.call(BridgeMethods.Storage.LIST_ENTRY_CHILDREN, loc).unwrapOrThrow().payload
+            } catch (e: Throwable) {
+                null
             }
 
             when (resp) {
+                null -> {
+                    _loadState.value = CurrentStorageStateType.UNKNOWN_ERROR
+                }
                 is ListStorageEntryChildrenResp.Ok -> {
                     _loadState.value = CurrentStorageStateType.OK
-                    _entries.value = resp.v1
+                    _entries.value = resp.data
                 }
 
                 ListStorageEntryChildrenResp.AuthenticationFailed -> {

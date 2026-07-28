@@ -4,7 +4,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.ViewModel
 import com.kutedev.easemusicplayer.singleton.AssetRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import uniffi.ease_client_schema.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
 import javax.inject.Inject
 
 
