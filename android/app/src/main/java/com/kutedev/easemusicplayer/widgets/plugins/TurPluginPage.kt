@@ -141,6 +141,7 @@ fun TurPluginPage(
 private fun pluginDisplayName(pluginId: String): String {
     return when (pluginId) {
         PluginRepository.PLAYCOUNT_ID -> "Play Counts"
+        PluginRepository.TURTEST_ID -> "Tur Test"
         else -> pluginId
     }
 }
