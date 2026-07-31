@@ -76,7 +76,7 @@ class PluginRepository @Inject constructor(
     init {
         // Register built-in plugins. Loaded once on construction; future
         // dynamic installs will append to this list at runtime.
-        _enabledPlugins.value = listOf(BUILT_IN_PLAYCOUNT)
+        _enabledPlugins.value = listOf(BUILT_IN_PLAYCOUNT, BUILT_IN_TURTEST)
         recomputeViews()
 
         // Subscribe to the player event bus and dispatch.
@@ -168,6 +168,7 @@ class PluginRepository @Inject constructor(
 
     companion object {
         const val PLAYCOUNT_ID = "com.ease.playcount"
+        const val TURTEST_ID = "com.ease.turtest"
 
         private val BUILT_IN_PLAYCOUNT = PluginManifest(
             id = PLAYCOUNT_ID,
@@ -177,6 +178,20 @@ class PluginRepository @Inject constructor(
             events = listOf(PluginEvent.MUSIC_PLAY),
             views = listOf(
                 PluginViewContribution(id = "main", title = "Play Counts"),
+            ),
+        )
+
+        // Built-in: com.ease.turtest. Minimal repro views for tur engine
+        // layout questions; no events, no KV. Currently hosts the
+        // `followerAnchor` CompositedTransform repro.
+        private val BUILT_IN_TURTEST = PluginManifest(
+            id = TURTEST_ID,
+            name = "Tur Test",
+            version = "1.0.0",
+            main = "plugin.js",
+            events = emptyList(),
+            views = listOf(
+                PluginViewContribution(id = "follower-anchor", title = "Follower Anchor"),
             ),
         )
     }
