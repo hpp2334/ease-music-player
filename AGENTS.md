@@ -153,6 +153,11 @@ These are **not checked in** and must be regenerated (via `pnpm build:jni`) befo
 - **Release tags**: `vX.Y.Z` and `pre-vX.Y.Z-beta.N` (trigger the APK build/release CI).
 - **ProGuard** (`android/app/proguard-rules.pro`): keeps `uniffi.**` and `com.sun.jna.**`; `-dontwarn` for AWT classes (legacy from the KMP experiment; harmless on Android); `-keepattributes LineNumberTable,SourceFile`.
 
+## On-device verification
+
+- **Device + adb**: follow the `android-dev` skill. The wireless adb link is flaky — reconnect before each call (the reliable pattern is a small `SH()` wrapper that `disconnect`→`connect`→sleep→runs the command). MIUI rejects silent installs — use `adb push` + `pm install -r` (rc=255 output is normal; verify with `pm path`/`dumpsys`), not `adb install`. tur-rendered plugin views don't expose text to `uiautomator dump` (only the Compose top bar does), so tap targets inside them must be found from a screenshot, not a UI dump.
+- **Analyzing screenshots: ALWAYS delegate to the `image-reader` subagent** via the Task tool — do not hand-parse pixels with PIL/Python scripts. Give it full context in the prompt: screen size + dpr, what the screen should show, the colors/labels of the elements of interest, and the precise question (e.g. "is box X to the left or right of target Y, and is it clipped?"). For exact geometry, ask it for bounding boxes of distinctly-colored solid-fill elements (unique colors are easiest to measure); treat text-only estimates as ±tens of px.
+
 ## Gotchas
 
 - **Gradle root is at `android/`, not the repo root.** All `gradlew` invocations must `cd android/` first (the `build-apk.ts` script does this automatically).
