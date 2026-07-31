@@ -8,12 +8,16 @@
 // does the append on the host side). This module reads the rows back via
 // `ease:storage.multiGetAllMulti`, aggregates per musicId in JS, and renders
 // a sorted list with a time-range selector.
+//
+// Layout note: the tur `Container` only lays out its FIRST child
+// (`tur-engine/.../container/layout.rs`), so every decorated `Container`
+// below wraps a single `Column`/`Row`. Flex (`Row`/`Column`) lays out all
+// children.
 
 import {
     Column,
     Container,
     Row,
-    ScrollView,
     SizedBox,
     Text,
     Color,
@@ -21,19 +25,19 @@ import {
     CrossAxisAlignment,
     MainAxisAlignment,
     MainAxisSize,
-    PointerInteract,
     Switch,
-    Each,
     Expanded,
+    Stack,
+    LazyList,
     view,
     source,
     derive,
     set,
     get,
-    mutate,
 } from "tur:std";
-import type { Atom, Readable, Element } from "tur:core";
+import type { Source, Readable, Element } from "tur:core";
 import * as Storage from "ease:storage";
+import { createSelector } from "./ui/selector";
 
 const PLUGIN_ID = "com.ease.playcount";
 
@@ -73,9 +77,9 @@ const RANGES: RangeDef[] = [
 // Reactive state
 // ---------------------------------------------------------------------------
 
-const selectedRange$: Atom<number> = source(0);
-const entries$: Atom<PlayCountEntry[]> = source<PlayCountEntry[]>([]);
-const loading$: Atom<boolean> = source(false);
+const selectedRange$: Source<number> = source(0);
+const entries$: Source<PlayCountEntry[]> = source<PlayCountEntry[]>([]);
+const loading$: Source<boolean> = source(false);
 
 const status$: Readable<Status> = derive<Status>(() => {
     if (get(loading$)) return "loading";
@@ -169,11 +173,9 @@ function refresh(): void {
     }
 }
 
-function selectRange(i: number): void {
-    if (i === get(selectedRange$)) return;
-    set(selectedRange$, i);
-    refresh();
-}
+// Range selection is driven by the shared `rangeSel` selector handle
+// (built below, after the palette/constants). Its `onSelect` maps a range
+// id back to the `selectedRange$` index and refreshes.
 
 // ---------------------------------------------------------------------------
 // Palette — aligned with EaseMusicPlayerTheme (Material 3 light scheme):
@@ -190,72 +192,51 @@ const COLOR_TEXT: Color = Color.hex("#0F172A");
 const COLOR_TEXT_MUTED: Color = Color.hex("#64748B");
 const COLOR_DIVIDER: Color = Color.hex("#E2E8F0");
 const COLOR_BAR_TRACK: Color = Color.hex("#E2E8F0");
+const COLOR_SHADOW: Color = Color.rgba(15, 23, 42, 31);
+const COLOR_CLEAR: Color = Color.rgba(0, 0, 0, 0);
 
 // ---------------------------------------------------------------------------
 // Layout constants
 // ---------------------------------------------------------------------------
 
-const PAGE_PADDING = 16;
-const CARD_RADIUS = 12;
+const PAGE_PADDING = 20;
+const CARD_RADIUS = 14;
 const CHIP_RADIUS = 999;
 const BAR_HEIGHT = 6;
 
 // ---------------------------------------------------------------------------
-// Widgets
+// Range selector — built from the reusable `createSelector` (CompositedTransform
+// anchored to the trigger; the menu floats over the list, no absolute coords).
 // ---------------------------------------------------------------------------
 
-interface RangeChipProps {
-    index: number;
-    label: string;
-}
+const rangeSel = createSelector<string>({
+    options: RANGES.map((r) => ({ value: r.id, label: r.label })),
+    selectedValue$: derive(
+        () => RANGES[get(selectedRange$)]?.id ?? RANGES[0].id,
+    ),
+    onSelect: (id) => {
+        const i = RANGES.findIndex((r) => r.id === id);
+        if (i >= 0 && i !== get(selectedRange$)) {
+            set(selectedRange$, i);
+            refresh();
+        }
+    },
+    style: {
+        primary: COLOR_PRIMARY,
+        primarySoft: COLOR_PRIMARY_SOFT,
+        surface: COLOR_CARD,
+        text: COLOR_TEXT,
+        textMuted: COLOR_TEXT_MUTED,
+        divider: COLOR_DIVIDER,
+        shadow: COLOR_SHADOW,
+    },
+});
 
-function RangeChip(props: RangeChipProps) {
-    return PointerInteract({
-        onPointerDown: mutate(() => selectRange(props.index)),
-        child: Container({
-            color: derive(({ get }) =>
-                props.index === get(selectedRange$)
-                    ? COLOR_PRIMARY
-                    : Color.hex("#FFFFFF"),
-            ),
-            borderColor: derive(({ get }) =>
-                props.index === get(selectedRange$)
-                    ? COLOR_PRIMARY
-                    : COLOR_DIVIDER,
-            ),
-            borderWidth: 1,
-            borderRadius: CHIP_RADIUS,
-            padding: 10,
-            children: [
-                Text({
-                    text: props.label,
-                    fontSize: 12,
-                    color: derive(({ get }) =>
-                        props.index === get(selectedRange$)
-                            ? Color.hex("#FFFFFF")
-                            : COLOR_TEXT_MUTED,
-                    ),
-                }),
-            ],
-        }),
-    });
-}
+// ---------------------------------------------------------------------------
+// Header
+// ---------------------------------------------------------------------------
 
-function RangeRow() {
-    const children: Element[] = [];
-    RANGES.forEach((r, i) => {
-        if (i > 0) children.push(SizedBox({ width: 8 }));
-        children.push(RangeChip({ index: i, label: r.label }));
-    });
-    return Row({
-        mainAlignment: MainAxisAlignment.Start,
-        crossAlignment: CrossAxisAlignment.Center,
-        mainAxisSize: MainAxisSize.Min,
-        children,
-    });
-}
-
-function Header() {
+function HeaderSummary() {
     return Column({
         crossAlignment: CrossAxisAlignment.Start,
         mainAxisSize: MainAxisSize.Min,
@@ -282,6 +263,21 @@ function Header() {
     });
 }
 
+// Header row: title + subtitle on the left, range trigger pill on the
+// right. The trigger is a CompositedTransform target; the menu (follower)
+// anchors to its bottom-left from the page-level `Stack` in `rootView`.
+function HeaderRow() {
+    return Row({
+        mainAlignment: MainAxisAlignment.SpaceBetween,
+        crossAlignment: CrossAxisAlignment.Center,
+        children: [HeaderSummary(), rangeSel.SelectorTrigger()],
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Bar entry (one per music)
+// ---------------------------------------------------------------------------
+
 interface BarEntryProps {
     entry: PlayCountEntry;
     maxCount: number;
@@ -291,9 +287,10 @@ function BarEntry(props: BarEntryProps) {
     const fillFlex = props.entry.count;
     const trackFlex = Math.max(0, props.maxCount - props.entry.count);
 
-    // Bar row — two Expanded segments share the width in proportion to
-    // count / maxCount. When the entry owns the max, trackFlex is 0 and
-    // the fill takes the whole row.
+    // The bar is a Row of Expanded segments sharing the card width in
+    // proportion to count / maxCount. `crossAlignment: Stretch` is required
+    // so the segments fill the 6px bar height (the default Center would
+    // collapse childless fill Containers to 0 height).
     const barChildren: Element[] = [
         Expanded({
             flex: fillFlex,
@@ -327,31 +324,29 @@ function BarEntry(props: BarEntryProps) {
                 mainAxisSize: MainAxisSize.Min,
                 children: [
                     Row({
-                        mainAlignment: MainAxisAlignment.SpaceBetween,
+                        mainAlignment: MainAxisAlignment.Start,
                         crossAlignment: CrossAxisAlignment.Center,
                         children: [
-                            Row({
-                                mainAlignment: MainAxisAlignment.Start,
-                                crossAlignment: CrossAxisAlignment.Center,
-                                mainAxisSize: MainAxisSize.Min,
-                                children: [
-                                    Text({
-                                        text: "♪",
-                                        fontSize: 14,
-                                        color: COLOR_PRIMARY,
-                                    }),
-                                    SizedBox({ width: 6 }),
-                                    Text({
-                                        text: props.entry.title,
-                                        fontSize: 14,
-                                        color: COLOR_TEXT,
-                                    }),
-                                ],
+                            Text({
+                                text: "♪",
+                                fontSize: 14,
+                                color: COLOR_PRIMARY,
                             }),
+                            SizedBox({ width: 8 }),
+                            Expanded({
+                                child: Text({
+                                    text: props.entry.title,
+                                    fontSize: 14,
+                                    color: COLOR_TEXT,
+                                    maxLines: 1,
+                                    overflow: "ellipsis",
+                                }),
+                            }),
+                            SizedBox({ width: 10 }),
                             Container({
                                 color: COLOR_PRIMARY_SOFT,
-                                borderRadius: 999,
-                                padding: 6,
+                                borderRadius: CHIP_RADIUS,
+                                padding: 5,
                                 children: [
                                     Text({
                                         text: String(props.entry.count),
@@ -367,6 +362,7 @@ function BarEntry(props: BarEntryProps) {
                         height: BAR_HEIGHT,
                         children: [
                             Row({
+                                crossAlignment: CrossAxisAlignment.Stretch,
                                 children: barChildren,
                             }),
                         ],
@@ -378,33 +374,32 @@ function BarEntry(props: BarEntryProps) {
 }
 
 function ReadyBody() {
-    return ScrollView({
+    // Virtualized list: only visible items (+ overscan) are mounted, so the
+    // view stays cheap with hundreds of tracks. `itemCount` is reactive on
+    // `entries$`, so a refresh re-layouts automatically.
+    return LazyList({
         axis: Axis.Vertical,
-        child: Column({
-            crossAlignment: CrossAxisAlignment.Stretch,
-            mainAxisSize: MainAxisSize.Min,
-            children: [
-                Each<PlayCountEntry>({
-                    items: entries$,
-                    build: (entry, index) => {
-                        const maxCount = get(entries$).reduce(
-                            (m, e) => Math.max(m, e.count),
-                            0,
-                        );
-                        return Column({
-                            crossAlignment: CrossAxisAlignment.Stretch,
-                            mainAxisSize: MainAxisSize.Min,
-                            children: [
-                                index === 0
-                                    ? SizedBox({ width: 0, height: 0 })
-                                    : SizedBox({ height: 8 }),
-                                BarEntry({ entry, maxCount }),
-                            ],
-                        });
-                    },
-                }),
-            ],
-        }),
+        itemCount: derive(() => get(entries$).length),
+        overscan: 6,
+        builder: (index: number) => {
+            const entries = get(entries$);
+            const entry = entries[index];
+            const maxCount = entries.reduce(
+                (m, e) => Math.max(m, e.count),
+                0,
+            );
+            const children: Element[] = [];
+            if (index > 0) children.push(SizedBox({ height: 8 }));
+            children.push(BarEntry({ entry, maxCount }));
+            if (index === entries.length - 1) {
+                children.push(SizedBox({ height: 24 }));
+            }
+            return Column({
+                crossAlignment: CrossAxisAlignment.Stretch,
+                mainAxisSize: MainAxisSize.Min,
+                children,
+            });
+        },
     });
 }
 
@@ -450,27 +445,44 @@ function EmptyBody() {
 // Root view
 // ---------------------------------------------------------------------------
 
+// Root: a page-level `Stack`.
+//   z0 — base content (padded page bg + header row + the status body, the
+//        list body wrapped in `Expanded` so the `LazyList` gets a bounded
+//        height and can scroll);
+//   z1 — selector scrim (page-wide backdrop, tap to close);
+//   z2 — selector menu (a CompositedTransformFollower that anchors itself
+//        to the trigger's bottom-left + padding — no absolute coordinates).
+// The scrim + follower are `Condition`-gated fragments, so the `Stack` sees
+// the nested `Positioned`/follower directly. The follower lives in this
+// root `Stack` (the "root overlay slot") so it isn't clipped by ancestors.
 export const rootView = view(() =>
-    Column({
-        crossAlignment: CrossAxisAlignment.Stretch,
+    Stack({
         children: [
             Container({
                 color: COLOR_PAGE_BG,
                 padding: PAGE_PADDING,
                 children: [
-                    Header(),
-                    SizedBox({ height: 16 }),
-                    RangeRow(),
+                    Column({
+                        crossAlignment: CrossAxisAlignment.Stretch,
+                        children: [
+                            HeaderRow(),
+                            SizedBox({ height: 14 }),
+                            Expanded({
+                                child: Switch({
+                                    value: status$,
+                                    cases: [
+                                        { key: "loading", child: LoadingBody },
+                                        { key: "empty", child: EmptyBody },
+                                        { key: "ready", child: ReadyBody },
+                                    ],
+                                }),
+                            }),
+                        ],
+                    }),
                 ],
             }),
-            Switch({
-                value: status$,
-                cases: [
-                    { key: "loading", child: LoadingBody },
-                    { key: "empty", child: EmptyBody },
-                    { key: "ready", child: ReadyBody },
-                ],
-            }),
+            rangeSel.SelectorScrim(),
+            rangeSel.SelectorMenu(),
         ],
     }),
 );

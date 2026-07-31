@@ -42,13 +42,15 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ b34e0d9).
+# tur engine integration (https://github.com/hpp2334/tur @ 964a3bc).
+# Brings CompositedTransformTarget/Follower (Flutter-style anchor linking)
+# used by the Play Counts range Selector — engine impl + @tur-ng/std 0.0.3.
 # All crates live in the same repo; cargo clones once and resolves their
 # internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "b34e0d9" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "b34e0d9" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "b34e0d9" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "b34e0d9" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "964a3bc1b06695138a46a85f3ab5637b59b55d49" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "964a3bc1b06695138a46a85f3ab5637b59b55d49" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "964a3bc1b06695138a46a85f3ab5637b59b55d49" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "964a3bc1b06695138a46a85f3ab5637b59b55d49" }
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
 # compiles against.
