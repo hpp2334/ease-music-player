@@ -4,9 +4,6 @@ pub(crate) mod player;
 pub(crate) mod playlist;
 pub(crate) mod storage;
 
-pub(crate) mod env;
-
-pub use env::*;
 pub use lyric::*;
 pub use music::*;
 pub use player::*;
