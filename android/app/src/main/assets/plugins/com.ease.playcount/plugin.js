@@ -220,6 +220,17 @@ function createSelector(opts) {
 // `ease:storage.multiGetAllMulti`, aggregates per musicId in JS, and renders
 // a sorted list with a time-range selector.
 //
+// Reactivity note: a tur `LazyList` only invokes its `builder` when an item
+// is freshly MOUNTED — it never rebuilds an already-mounted item when the
+// underlying data changes (it reacts only to axis/itemExtent/itemCount, and
+// even an itemCount change only destroys/grows the tail, leaving kept items
+// stale). `refresh()` is synchronous, so the `loading → ready` interlude is
+// batched away and the `Switch` does NOT remount the list. Therefore every
+// data-dependent prop inside a row is a `derive` over `entries$`/`maxCount$`,
+// so mounted rows update IN PLACE when the range switches. (Verified in
+// `tur-engine/.../lazy_list/element.rs`: `build_item_spec` runs only at
+// mount; `react_to_prop_changes`/`remount` never rebuild same-index items.)
+//
 // Layout note: the tur `Container` only lays out its FIRST child
 // (`tur-engine/.../container/layout.rs`), so every decorated `Container`
 // below wraps a single `Column`/`Row`. Flex (`Row`/`Column`) lays out all
@@ -278,6 +289,13 @@ const loading$ = source(false);
 const status$ = derive(()=>{
     if (get(loading$)) return "loading";
     return get(entries$).length === 0 ? "empty" : "ready";
+});
+// Max play count across the current range — drives every bar's fill ratio.
+// Reactive so all mounted bars rescale together when `entries$` changes.
+const maxCount$ = derive(()=>{
+    let m = 0;
+    for (const e of get(entries$))if (e.count > m) m = e.count;
+    return m;
 });
 // ---------------------------------------------------------------------------
 // Date helpers (local time, so the day-key matches what the Kotlin appender
@@ -346,14 +364,15 @@ function refresh() {
         set(loading$, false);
     }
 }
-// Range selection is driven by the shared `rangeSel` selector handle
-// (built below, after the palette/constants). Its `onSelect` maps a range
-// id back to the `selectedRange$` index and refreshes.
 // ---------------------------------------------------------------------------
-// Palette — aligned with EaseMusicPlayerTheme (Material 3 light scheme):
+// Palette — design rule: ONE tier accent per card, expressed ONLY by the
+// medal. Everything else (border, bar, count pill) is neutral / brand-blue
+// and identical across ranks, so each card reads as one coherent object
+// rather than a collection of colored parts.
+//
+// Brand (aligned with EaseMusicPlayerTheme, Material 3 light scheme):
 //   primary         = #2E89B0
 //   secondary       = #C9EBFA
-//   surfaceVariant  = #E3E3E3
 // ---------------------------------------------------------------------------
 const COLOR_PRIMARY = Color.hex("#2E89B0");
 const COLOR_PRIMARY_SOFT = Color.hex("#C9EBFA");
@@ -363,15 +382,25 @@ const COLOR_TEXT = Color.hex("#0F172A");
 const COLOR_TEXT_MUTED = Color.hex("#64748B");
 const COLOR_DIVIDER = Color.hex("#E2E8F0");
 const COLOR_BAR_TRACK = Color.hex("#E2E8F0");
-const COLOR_SHADOW = Color.rgba(15, 23, 42, 31);
-const COLOR_CLEAR = Color.rgba(0, 0, 0, 0);
+const COLOR_SHADOW = Color.rgba(15, 23, 42, 28);
+// Medal fills — the SINGLE tier signal (gold / silver / bronze for the
+// podium; a muted disc for the long tail).
+const COLOR_GOLD = Color.hex("#F5C400");
+const COLOR_GOLD_RING = Color.hex("#E2B400");
+const COLOR_GOLD_NUM = Color.hex("#3D2E00");
+const COLOR_SILVER = Color.hex("#C4CBD5");
+const COLOR_SILVER_RING = Color.hex("#9AA3AF");
+const COLOR_SILVER_NUM = Color.hex("#2F3640");
+const COLOR_BRONZE = Color.hex("#CD7F32");
+const COLOR_BRONZE_RING = Color.hex("#A05A1E");
+const COLOR_BRONZE_NUM = Color.hex("#FFFFFF");
+const COLOR_MUTED_BADGE = Color.hex("#E8EDF2");
+const COLOR_MUTED_NUM = Color.hex("#6E7B8B");
 // ---------------------------------------------------------------------------
 // Layout constants
 // ---------------------------------------------------------------------------
 const PAGE_PADDING = 20;
-const CARD_RADIUS = 14;
 const CHIP_RADIUS = 999;
-const BAR_HEIGHT = 6;
 // ---------------------------------------------------------------------------
 // Range selector — built from the reusable `createSelector` (CompositedTransform
 // anchored to the trigger; the menu floats over the list, no absolute coords).
@@ -440,89 +469,178 @@ function HeaderRow() {
         ]
     });
 }
-function BarEntry(props) {
-    const fillFlex = props.entry.count;
-    const trackFlex = Math.max(0, props.maxCount - props.entry.count);
-    // The bar is a Row of Expanded segments sharing the card width in
-    // proportion to count / maxCount. `crossAlignment: Stretch` is required
-    // so the segments fill the 6px bar height (the default Center would
-    // collapse childless fill Containers to 0 height).
+// Top 3 get medal discs (gold/silver/bronze); rank 4+ gets a small muted
+// disc. The medal is the ONLY tier-colored element on a card.
+function medalSpec(rank) {
+    if (rank === 1) return {
+        diameter: 36,
+        fill: COLOR_GOLD,
+        ring: COLOR_GOLD_RING,
+        num: COLOR_GOLD_NUM,
+        fontSize: 16,
+        bold: true
+    };
+    if (rank === 2) return {
+        diameter: 32,
+        fill: COLOR_SILVER,
+        ring: COLOR_SILVER_RING,
+        num: COLOR_SILVER_NUM,
+        fontSize: 15,
+        bold: true
+    };
+    if (rank === 3) return {
+        diameter: 32,
+        fill: COLOR_BRONZE,
+        ring: COLOR_BRONZE_RING,
+        num: COLOR_BRONZE_NUM,
+        fontSize: 15,
+        bold: true
+    };
+    return {
+        diameter: 26,
+        fill: COLOR_MUTED_BADGE,
+        ring: COLOR_MUTED_BADGE,
+        num: COLOR_MUTED_NUM,
+        fontSize: 13,
+        bold: false
+    };
+}
+// Leading rank badge — a centered numeral on a colored disc.
+function RankBadge(props) {
+    const m = medalSpec(props.rank);
+    return Container({
+        width: m.diameter,
+        height: m.diameter,
+        alignment: Alignment.Center,
+        color: m.fill,
+        borderColor: m.ring,
+        borderWidth: m.bold ? 1.5 : 1,
+        borderRadius: m.diameter / 2,
+        children: [
+            Text({
+                text: String(props.rank),
+                spans: [
+                    {
+                        content: String(props.rank),
+                        bold: m.bold,
+                        color: m.num
+                    }
+                ],
+                fontSize: m.fontSize
+            })
+        ]
+    });
+}
+// One ranked row. Reads `entries$` REACTIVELY by `index` (see the file-top
+// reactivity note): because a `LazyList` builder only runs at mount, every
+// data-dependent value below is a `derive`, so switching range updates the
+// title / count / bar in place without remounting.
+//
+// Visual system (cohesive): the medal is the single tier signal. Card
+// border, shadow, and the brand-blue bar are identical for every rank, so
+// the podium reads as one family of cards (distinguished by medal + bolder
+// title + slightly taller padding) rather than four colored echoes.
+function RankedRow(props) {
+    const { rank, index } = props;
+    const tierA = rank <= 3;
+    const m = medalSpec(rank);
+    const barHeight = tierA ? 8 : 6;
+    const pad = tierA ? 16 : 12;
+    const entry$ = derive(()=>get(entries$)[index]);
+    const title$ = derive(()=>get(entry$)?.title ?? "");
+    const count$ = derive(()=>get(entry$)?.count ?? 0);
+    const fillFlex$ = derive(()=>get(count$));
+    const trackFlex$ = derive(()=>Math.max(0, get(maxCount$) - get(count$)));
     const barChildren = [
         Expanded({
-            flex: fillFlex,
+            flex: fillFlex$,
             child: Container({
                 color: COLOR_PRIMARY,
-                borderRadius: BAR_HEIGHT / 2
+                borderRadius: barHeight / 2
+            })
+        }),
+        Expanded({
+            flex: trackFlex$,
+            child: Container({
+                color: COLOR_BAR_TRACK,
+                borderRadius: barHeight / 2
             })
         })
     ];
-    if (trackFlex > 0) {
-        barChildren.push(Expanded({
-            flex: trackFlex,
-            child: Container({
-                color: COLOR_BAR_TRACK,
-                borderRadius: BAR_HEIGHT / 2
+    // NOTE: tur `Text` has no `fontWeight` prop, and span `content` is parsed
+    // to a static `String` at build time — so a *reactive* bold title (spans
+    // over a reactive `text`) is impossible: the base text refreshes at
+    // layout while the span byte-ranges stay frozen, desyncing. Hierarchy is
+    // therefore expressed via size + color contrast (podium dark, tail muted)
+    // plus the medal, not bold weight.
+    const title = Text({
+        text: title$,
+        fontSize: tierA ? 16 : 14,
+        color: tierA ? COLOR_TEXT : COLOR_TEXT_MUTED,
+        maxLines: 1,
+        overflow: "ellipsis"
+    });
+    const countBadge = Container({
+        color: COLOR_PRIMARY_SOFT,
+        borderRadius: CHIP_RADIUS,
+        padding: tierA ? 6 : 5,
+        children: [
+            Text({
+                text: derive(()=>String(get(count$))),
+                fontSize: tierA ? 13 : 12,
+                color: COLOR_PRIMARY
             })
-        }));
-    }
+        ]
+    });
     return Container({
         color: COLOR_CARD,
         borderColor: COLOR_DIVIDER,
         borderWidth: 1,
-        borderRadius: CARD_RADIUS,
-        padding: 14,
+        borderRadius: tierA ? 12 : 10,
+        shadowColor: COLOR_SHADOW,
+        shadowBlur: 6,
+        shadowOffset: [
+            0,
+            2
+        ],
         children: [
-            Column({
-                crossAlignment: CrossAxisAlignment.Stretch,
-                mainAxisSize: MainAxisSize.Min,
+            Container({
+                padding: pad,
                 children: [
-                    Row({
-                        mainAlignment: MainAxisAlignment.Start,
-                        crossAlignment: CrossAxisAlignment.Center,
-                        children: [
-                            Text({
-                                text: "♪",
-                                fontSize: 14,
-                                color: COLOR_PRIMARY
-                            }),
-                            SizedBox({
-                                width: 8
-                            }),
-                            Expanded({
-                                child: Text({
-                                    text: props.entry.title,
-                                    fontSize: 14,
-                                    color: COLOR_TEXT,
-                                    maxLines: 1,
-                                    overflow: "ellipsis"
-                                })
-                            }),
-                            SizedBox({
-                                width: 10
-                            }),
-                            Container({
-                                color: COLOR_PRIMARY_SOFT,
-                                borderRadius: CHIP_RADIUS,
-                                padding: 5,
-                                children: [
-                                    Text({
-                                        text: String(props.entry.count),
-                                        fontSize: 12,
-                                        color: COLOR_PRIMARY
-                                    })
-                                ]
-                            })
-                        ]
-                    }),
-                    SizedBox({
-                        height: 10
-                    }),
-                    Container({
-                        height: BAR_HEIGHT,
+                    Column({
+                        crossAlignment: CrossAxisAlignment.Stretch,
+                        mainAxisSize: MainAxisSize.Min,
                         children: [
                             Row({
-                                crossAlignment: CrossAxisAlignment.Stretch,
-                                children: barChildren
+                                mainAlignment: MainAxisAlignment.Start,
+                                crossAlignment: CrossAxisAlignment.Center,
+                                children: [
+                                    RankBadge({
+                                        rank
+                                    }),
+                                    SizedBox({
+                                        width: 12
+                                    }),
+                                    Expanded({
+                                        child: title
+                                    }),
+                                    SizedBox({
+                                        width: 10
+                                    }),
+                                    countBadge
+                                ]
+                            }),
+                            SizedBox({
+                                height: tierA ? 10 : 8
+                            }),
+                            Container({
+                                height: barHeight,
+                                children: [
+                                    Row({
+                                        crossAlignment: CrossAxisAlignment.Stretch,
+                                        children: barChildren
+                                    })
+                                ]
                             })
                         ]
                     })
@@ -532,26 +650,46 @@ function BarEntry(props) {
     });
 }
 function ReadyBody() {
-    // Virtualized list: only visible items (+ overscan) are mounted, so the
-    // view stays cheap with hundreds of tracks. `itemCount` is reactive on
-    // `entries$`, so a refresh re-layouts automatically.
+    // Virtualized list: only visible items (+ overscan) are mounted. The
+    // builder captures `index`; each row reads `entries$` reactively, so a
+    // range switch updates mounted rows in place (no remount needed).
     return LazyList({
         axis: Axis.Vertical,
         itemCount: derive(()=>get(entries$).length),
         overscan: 6,
         builder: (index)=>{
-            const entries = get(entries$);
-            const entry = entries[index];
-            const maxCount = entries.reduce((m, e)=>Math.max(m, e.count), 0);
+            const rank = index + 1;
+            const tierA = rank <= 3;
             const children = [];
-            if (index > 0) children.push(SizedBox({
-                height: 8
+            if (index > 0) {
+                if (index <= 2) {
+                    // within the top-3 podium cluster
+                    children.push(SizedBox({
+                        height: 10
+                    }));
+                } else if (index === 3) {
+                    // boundary between podium (1–3) and the tail (4+)
+                    children.push(SizedBox({
+                        height: 20
+                    }));
+                    children.push(Container({
+                        height: 1,
+                        color: COLOR_DIVIDER
+                    }));
+                    children.push(SizedBox({
+                        height: 14
+                    }));
+                } else {
+                    children.push(SizedBox({
+                        height: 10
+                    }));
+                }
+            }
+            children.push(RankedRow({
+                rank,
+                index
             }));
-            children.push(BarEntry({
-                entry,
-                maxCount
-            }));
-            if (index === entries.length - 1) {
+            if (index === get(entries$).length - 1) {
                 children.push(SizedBox({
                     height: 24
                 }));
