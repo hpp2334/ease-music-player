@@ -85,8 +85,8 @@
         <item quantity="other">%d log files found</item>
     </plurals>
     <string name="debug_trigger_rs_panic">Trigger Rust panic!</string>
-    <string name="plugins_title">PLUGINS</string>
-    <string name="plugins_empty">No plugins installed.</string>
+    <string name="plugins_title">PLUGIN VIEWS</string>
+    <string name="plugins_empty">No plugin views installed.</string>
     <string name="playcount_title">Play Counts</string>
     <string name="playcount_range_today">Today</string>
     <string name="playcount_range_yesterday">Yesterday</string>

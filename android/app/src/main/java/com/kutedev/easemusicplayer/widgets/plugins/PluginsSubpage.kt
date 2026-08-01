@@ -78,12 +78,53 @@ fun PluginsSubpage(
                 )
             }
         } else {
-            for (item in views) {
-                PluginViewRow(item) {
-                    navController.navigate(RoutePlugin(item.pluginId, item.viewId))
+            // Group views by plugin (preserving first-appearance order) so the
+            // one-to-many relationship — one plugin, possibly many views — is
+            // visible: each plugin is a section header, its views listed beneath.
+            val grouped = linkedMapOf<String, MutableList<PluginViewItem>>()
+            for (v in views) {
+                grouped.getOrPut(v.pluginId) { mutableListOf() }.add(v)
+            }
+            for ((_, items) in grouped) {
+                PluginSectionHeader(
+                    pluginName = items.first().pluginName,
+                    viewCount = items.size,
+                )
+                for (item in items) {
+                    PluginViewRow(item) {
+                        navController.navigate(RoutePlugin(item.pluginId, item.viewId))
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PluginSectionHeader(
+    pluginName: String,
+    viewCount: Int,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(pluginsPaddingX, 12.dp, pluginsPaddingX, 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = pluginName,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = viewCount.toString(),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 12.sp,
+        )
     }
 }
 
@@ -98,32 +139,20 @@ private fun PluginViewRow(
             .clickable(onClick = onClick)
             .padding(pluginsPaddingX, 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                modifier = Modifier.size(32.dp),
-                painter = painterResource(id = R.drawable.icon_extension),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Box(modifier = Modifier.width(20.dp))
-            Column {
-                Text(
-                    text = item.viewTitle,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = item.pluginName,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+        Icon(
+            modifier = Modifier.size(32.dp),
+            painter = painterResource(id = R.drawable.icon_extension),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Box(modifier = Modifier.width(20.dp))
+        Text(
+            text = item.viewTitle,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

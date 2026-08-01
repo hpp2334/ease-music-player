@@ -84,4 +84,6 @@
         <item quantity="other">找到 %d 个日志文件</item>
     </plurals>
     <string name="debug_trigger_rs_panic">Trigger Rust panic!</string>
+    <string name="plugins_title">插件视图</string>
+    <string name="plugins_empty">没有已安装的插件视图。</string>
 </resources>
