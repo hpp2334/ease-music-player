@@ -129,8 +129,8 @@ fun TurPluginPage(
                 )
             }
             else -> TurView(
+                runtime = EasePluginBridge.runtime(context),
                 js = jsSource!!,
-                engineFactory = EasePluginBridge.factory,
                 modifier = Modifier.fillMaxSize(),
             )
         }

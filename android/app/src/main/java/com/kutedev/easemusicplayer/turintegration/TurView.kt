@@ -13,31 +13,32 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 
 /**
- * A Compose surface that runs a tur engine instance and renders the given JS.
+ * A Compose surface that spawns an isolated tur instance from [runtime] and
+ * renders the given JS into it.
  *
- * Drop this composable into any Compose UI, pass a JS bundle string (an ES
- * module importing from `tur:std` / `ease:storage` / etc.) and a
- * [TurEngineFactory] (which builds the native engine and returns its opaque
- * handle). Pointer (touch) and resize are wired automatically.
+ * Drop this composable into any Compose UI, pass the shared [TurRuntime] and
+ * a JS bundle string (an ES module importing from `tur:std` / `ease:storage` /
+ * etc.). When the surface becomes ready the view spawns an instance via
+ * [TurRuntime.createInstance]; when the surface is destroyed the instance is
+ * torn down (the runtime survives, shared across views). Pointer (touch) and
+ * resize are wired automatically.
  *
+ * @param runtime the shared [TurRuntime] to spawn the instance from.
  * @param js an ES module source. Imports of `tur:*` / `ease:*` are resolved
  *   by the engine's module loader.
- * @param engineFactory builds the native engine over the surface and returns
- *   its handle. The app owns this — `libease_client_backend.so` is loaded
- *   by the `Application`'s companion object.
  * @param dpr force a DPR (defaults to the window's display density).
  */
 @Composable
 fun TurView(
+    runtime: TurRuntime,
     js: String,
-    engineFactory: TurEngineFactory,
     modifier: Modifier = Modifier,
     dpr: Double? = null,
 ) {
     val context = LocalContext.current
     val resolvedDpr = dpr ?: context.resources.displayMetrics.density.toDouble()
 
-    val surfaceView = remember { TurSurfaceView(context) }
+    val surfaceView = remember { TurSurfaceView(context, runtime, resolvedDpr) }
 
     AndroidView(
         factory = { surfaceView },
@@ -45,22 +46,25 @@ fun TurView(
     )
 
     DisposableEffect(surfaceView) {
-        surfaceView.bind(js, context, resolvedDpr, engineFactory)
+        surfaceView.bind(js)
         onDispose { surfaceView.unbind() }
     }
 }
 
 /**
- * `SurfaceView` subclass that owns the [TurEngine] lifecycle + touch dispatch.
+ * `SurfaceView` subclass that owns the [TurInstance] lifecycle + touch dispatch.
  *
- * The engine is created lazily via [bind] once the surface is ready. All
- * methods must be called on the main looper.
+ * The instance is created lazily via [bind] once the surface is ready, spawned
+ * from the [TurRuntime] passed at construction. All methods must be called on
+ * the main looper.
  */
-private class TurSurfaceView(context: Context) : SurfaceView(context) {
-    private var engine: TurEngine? = null
+private class TurSurfaceView(
+    context: Context,
+    private val runtime: TurRuntime,
+    private val dprValue: Double,
+) : SurfaceView(context) {
+    private var instance: TurInstance? = null
     private var pendingJs: String? = null
-    private var dprValue: Double = 0.0
-    private var engineFactory: TurEngineFactory? = null
 
     init {
         // SurfaceView renders on its own layer; place it on top with an
@@ -69,18 +73,16 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
         holder.setFormat(PixelFormat.RGBA_8888)
     }
 
-    fun bind(js: String, context: Context, dpr: Double, factory: TurEngineFactory) {
+    fun bind(js: String) {
         pendingJs = js
-        dprValue = dpr
-        engineFactory = factory
         isFocusable = true
         isFocusableInTouchMode = true
         requestFocus()
         holder.addCallback(surfaceCallback)
         setOnTouchListener { _, event ->
-            val eng = engine ?: return@setOnTouchListener false
+            val inst = instance ?: return@setOnTouchListener false
             val d = dprValue.coerceAtLeast(1.0)
-            eng.pushPointer(
+            inst.pushPointer(
                 event.actionMasked,
                 event.x.toDouble() / d,
                 event.y.toDouble() / d,
@@ -93,38 +95,33 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
     fun unbind() {
         holder.removeCallback(surfaceCallback)
         setOnTouchListener(null)
-        engine?.close()
-        engine = null
+        instance?.setAfterPump(null)
+        instance?.close()
+        instance = null
     }
 
     private val surfaceCallback = object : SurfaceHolder.Callback {
         override fun surfaceCreated(holder: SurfaceHolder) {
-            if (engine != null) return
+            if (instance != null) return
             val js = pendingJs ?: return
-            val factory = engineFactory ?: return
             // SurfaceHolder.surfaceFrame reports *physical* pixels; the
             // engine's viewport is in *logical* px, so divide by dpr.
             val d = dprValue.coerceAtLeast(1.0)
             val w = (holder.surfaceFrame.width() / d).toInt().coerceAtLeast(1)
             val h = (holder.surfaceFrame.height() / d).toInt().coerceAtLeast(1)
-            engine = try {
-                val frameLoop = FrameLoop()
-                val handle = factory.create(context, holder.surface, w, h, dprValue, frameLoop)
-                if (handle == 0L) {
-                    android.util.Log.e("TurView", "engineFactory.create returned 0 (see logcat)")
-                    null
-                } else {
-                    TurEngine(handle, frameLoop).also { it.loadModule(js) }
+            instance = try {
+                runtime.createInstance(holder.surface, w, h, dprValue).also {
+                    it.loadModule(js)
                 }
             } catch (e: Throwable) {
-                android.util.Log.e("TurView", "engine create failed", e)
+                android.util.Log.e("TurView", "instance create failed", e)
                 null
             }
         }
 
         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
             val d = dprValue.coerceAtLeast(1.0)
-            engine?.resize(
+            instance?.resize(
                 (width / d).toInt().coerceAtLeast(1),
                 (height / d).toInt().coerceAtLeast(1),
                 dprValue,
@@ -132,8 +129,8 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
         }
 
         override fun surfaceDestroyed(holder: SurfaceHolder) {
-            engine?.close()
-            engine = null
+            instance?.close()
+            instance = null
         }
     }
 }

@@ -9,7 +9,7 @@ import android.view.Choreographer
  *
  * The engine decides when it wants the next wake-up verdict and calls one
  * of `scheduleVsync` / `scheduleDelayed` / `cancel` back through JNI. When
- * the wake-up fires, [FrameLoop] invokes [onWake] (which [TurEngine] wires
+ * the wake-up fires, [FrameLoop] invokes [onWake] (which [TurInstance] wires
  * to the engine's `pump`), completing the loop.
  *
  * Lives on the main looper (where `SurfaceHolder.Callback` and input
@@ -21,7 +21,7 @@ class FrameLoop {
     private var frameCallback: Choreographer.FrameCallback? = null
     private var delayedToken: Runnable? = null
 
-    /** Fired when a scheduled wake-up is due. [TurEngine] sets this to `pump`. */
+    /** Fired when a scheduled wake-up is due. [TurInstance] sets this to `pump`. */
     var onWake: (() -> Unit)? = null
 
     /** Optional callback fired after [onWake] in each wake-up. */

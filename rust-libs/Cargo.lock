@@ -1600,6 +1600,7 @@ checksum = "a88cf1f829d945f548cf8fec32c61b1f202b6d93b45848602fc02af4b12ad218"
 dependencies = [
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -1705,6 +1706,7 @@ version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a77a90a256fce34da66415271e30f94ee91c57b04b8a2c042d9cf3220179deaa"
 dependencies = [
+ "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -4021,6 +4023,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures-core",
+ "futures-util",
  "h2 0.4.15",
  "http 1.4.2",
  "http-body 1.1.0",
@@ -4041,12 +4044,14 @@ dependencies = [
  "sync_wrapper 1.0.2",
  "tokio",
  "tokio-rustls 0.26.4",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
  "webpki-roots 1.0.9",
 ]
@@ -5820,7 +5825,7 @@ dependencies = [
 [[package]]
 name = "tur-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=964a3bc1b06695138a46a85f3ab5637b59b55d49#964a3bc1b06695138a46a85f3ab5637b59b55d49"
+source = "git+https://github.com/hpp2334/tur?rev=0814aa57e9369d3f8a4298cfbb32c3d96cb14c28#0814aa57e9369d3f8a4298cfbb32c3d96cb14c28"
 dependencies = [
  "android_logger",
  "boa_engine",
@@ -5843,7 +5848,7 @@ dependencies = [
 [[package]]
 name = "tur-animation"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=964a3bc1b06695138a46a85f3ab5637b59b55d49#964a3bc1b06695138a46a85f3ab5637b59b55d49"
+source = "git+https://github.com/hpp2334/tur?rev=0814aa57e9369d3f8a4298cfbb32c3d96cb14c28#0814aa57e9369d3f8a4298cfbb32c3d96cb14c28"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5855,7 +5860,7 @@ dependencies = [
 [[package]]
 name = "tur-async"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=964a3bc1b06695138a46a85f3ab5637b59b55d49#964a3bc1b06695138a46a85f3ab5637b59b55d49"
+source = "git+https://github.com/hpp2334/tur?rev=0814aa57e9369d3f8a4298cfbb32c3d96cb14c28#0814aa57e9369d3f8a4298cfbb32c3d96cb14c28"
 dependencies = [
  "tokio",
  "tracing",
@@ -5864,7 +5869,7 @@ dependencies = [
 [[package]]
 name = "tur-clipboard-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=964a3bc1b06695138a46a85f3ab5637b59b55d49#964a3bc1b06695138a46a85f3ab5637b59b55d49"
+source = "git+https://github.com/hpp2334/tur?rev=0814aa57e9369d3f8a4298cfbb32c3d96cb14c28#0814aa57e9369d3f8a4298cfbb32c3d96cb14c28"
 dependencies = [
  "jni",
  "tracing",
@@ -5874,7 +5879,7 @@ dependencies = [
 [[package]]
 name = "tur-engine"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=964a3bc1b06695138a46a85f3ab5637b59b55d49#964a3bc1b06695138a46a85f3ab5637b59b55d49"
+source = "git+https://github.com/hpp2334/tur?rev=0814aa57e9369d3f8a4298cfbb32c3d96cb14c28#0814aa57e9369d3f8a4298cfbb32c3d96cb14c28"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5897,7 +5902,7 @@ dependencies = [
 [[package]]
 name = "tur-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=964a3bc1b06695138a46a85f3ab5637b59b55d49#964a3bc1b06695138a46a85f3ab5637b59b55d49"
+source = "git+https://github.com/hpp2334/tur?rev=0814aa57e9369d3f8a4298cfbb32c3d96cb14c28#0814aa57e9369d3f8a4298cfbb32c3d96cb14c28"
 dependencies = [
  "parley",
  "tur-engine",
@@ -5906,9 +5911,11 @@ dependencies = [
 [[package]]
 name = "tur-net-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=964a3bc1b06695138a46a85f3ab5637b59b55d49#964a3bc1b06695138a46a85f3ab5637b59b55d49"
+source = "git+https://github.com/hpp2334/tur?rev=0814aa57e9369d3f8a4298cfbb32c3d96cb14c28#0814aa57e9369d3f8a4298cfbb32c3d96cb14c28"
 dependencies = [
  "boa_engine",
+ "boa_gc",
+ "futures",
  "tracing",
  "tur-engine",
 ]
@@ -5916,8 +5923,9 @@ dependencies = [
 [[package]]
 name = "tur-net-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=964a3bc1b06695138a46a85f3ab5637b59b55d49#964a3bc1b06695138a46a85f3ab5637b59b55d49"
+source = "git+https://github.com/hpp2334/tur?rev=0814aa57e9369d3f8a4298cfbb32c3d96cb14c28#0814aa57e9369d3f8a4298cfbb32c3d96cb14c28"
 dependencies = [
+ "futures",
  "reqwest 0.12.28",
  "tracing",
  "tur-net-capability",
