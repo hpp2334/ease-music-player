@@ -1311,6 +1311,7 @@ name = "ease-tur-rpc"
 version = "0.1.0"
 dependencies = [
  "boa_engine",
+ "bytes",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

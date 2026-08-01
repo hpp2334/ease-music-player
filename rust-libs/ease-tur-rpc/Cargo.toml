@@ -8,6 +8,7 @@ description = "Private tur plugin wrapping the event bus into a typed request/re
 [dependencies]
 tur-engine = { git = "https://github.com/hpp2334/tur", rev = "0814aa57e9369d3f8a4298cfbb32c3d96cb14c28" }
 tokio = { version = "1", features = ["sync"] }
+bytes = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
