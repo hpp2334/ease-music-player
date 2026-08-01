@@ -1,0 +1,15 @@
+{
+    "name": "com.ease.onedrive",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "rspack build",
+        "typecheck": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "@rspack/cli": "^1.2.0",
+        "@rspack/core": "^1.2.0",
+        "typescript": "^5.7.0"
+    }
+}
