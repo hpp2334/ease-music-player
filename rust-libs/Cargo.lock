@@ -1307,6 +1307,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ease-tur-rpc"
+version = "0.1.0"
+dependencies = [
+ "boa_engine",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tur-engine",
+ "tur-native",
+]
+
+[[package]]
 name = "either"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
