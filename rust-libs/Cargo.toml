@@ -9,6 +9,7 @@ members = [
     "ease-client-tokio",
     "ease-order-key",
     "ease-tur-rpc",
+    "ease-js-storage",
 ]
 
 [profile.bench]
