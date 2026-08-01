@@ -11,7 +11,7 @@
 use tur_engine::core::plugin::{Plugin, PluginContext};
 use tur_engine::error::TurError;
 
-use super::storage_bridge;
+use super::{secret_bridge, storage_bridge};
 
 pub struct EaseMusicPlugin;
 
@@ -30,6 +30,15 @@ impl Plugin for EaseMusicPlugin {
             .map(|(n, f, l)| (n.to_string(), f, l))
             .collect();
         ctx.register_host_module("ease:storage", exports);
+
+        // `ease:secret` — owner-scoped secret access (get/put/remove). The
+        // SecretStore enforces `scope == "plugin:<pluginId>"`.
+        let secret_exports: Vec<(String, boa_engine::NativeFunction, usize)> =
+            secret_bridge::build_host_fns()
+                .into_iter()
+                .map(|(n, f, l)| (n.to_string(), f, l))
+                .collect();
+        ctx.register_host_module("ease:secret", secret_exports);
 
         // Export KIND_SINGLE / KIND_MULTI as consts so plugin JS does not
         // hardcode the integer discriminants. We expose them by registering
@@ -56,7 +65,7 @@ impl Plugin for EaseMusicPlugin {
             ],
         );
 
-        tracing::info!("EaseMusicPlugin registered ease:storage");
+        tracing::info!("EaseMusicPlugin registered ease:storage + ease:secret");
         Ok(())
     }
 }
