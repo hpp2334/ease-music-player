@@ -1,40 +1,26 @@
 package com.kutedev.easemusicplayer.widgets.devices
 
-import android.content.Intent
-import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -44,28 +30,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.components.EaseTextButton
-import com.kutedev.easemusicplayer.components.EaseTextButtonSize
-import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
-import com.kutedev.easemusicplayer.components.FormWidget
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.core.LocalNavController
-import kotlinx.coroutines.flow.update
 import com.kutedev.easemusicplayer.singleton.types.StorageConnectionTestResult
-import com.kutedev.easemusicplayer.singleton.types.StorageType
-import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
-import com.kutedev.easemusicplayer.singleton.types.ArgUpsertStorage
 
 
 private fun buildStr(s: String): AnnotatedString {
@@ -127,41 +104,6 @@ private fun RemoveDialog(
         )
     }
 }
-
-@Composable
-private fun StorageBlock(
-    title: String,
-    isActive: Boolean,
-    onSelect: () -> Unit
-) {
-    val bgColor = if (isActive) { MaterialTheme.colorScheme.primary } else { MaterialTheme.colorScheme.surfaceVariant }
-    val tint = if (isActive) { MaterialTheme.colorScheme.surface } else { MaterialTheme.colorScheme.onSurface }
-
-    Box(
-        modifier = Modifier
-            .size(100.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(bgColor)
-            .clickable { onSelect() }
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .align(Alignment.Center)
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.icon_cloud),
-                contentDescription = null,
-                tint = tint,
-            )
-            Text(
-                text = title,
-                color = tint,
-            )
-        }
-    }
-}
-
 
 @Composable
 private fun WebdavConfig(
@@ -232,83 +174,13 @@ private fun WebdavConfig(
 }
 
 @Composable
-private fun OneDriveConfig(
-    editStorageVM: EditStorageVM = hiltViewModel()
-) {
-    val context = LocalContext.current
-    val form by editStorageVM.form.collectAsState()
-    val validated by editStorageVM.validated.collectAsState()
-    val connected = form.password.isNotEmpty()
-
-    FormText(
-        label = stringResource(id = R.string.storage_edit_alias),
-        value = form.alias,
-        onChange = { value -> editStorageVM.updateForm { storage ->
-            storage.alias = value
-            storage
-        } },
-        error = if (validated.aliasEmpty) {
-            R.string.storage_edit_onedrive_alias_not_empty
-        } else {
-            null
-        }
-    )
-    FormWidget(
-        label = stringResource(R.string.storage_edit_oauth)
-    ) {
-        if (!connected) {
-            EaseTextButton(
-                text = stringResource(R.string.storage_edit_onedrive_connect),
-                type = EaseTextButtonType.PrimaryVariant,
-                size = EaseTextButtonSize.Medium,
-                onClick = {
-                    val url: String? = kotlinx.coroutines.runBlocking {
-                        editStorageVM.onedriveOauthUrl()
-                    }
-                    val intent = Intent(Intent.ACTION_VIEW, (url ?: "").toUri())
-                    intent.flags = FLAG_ACTIVITY_NEW_TASK
-                    context.startActivity(intent)
-                },
-            )
-            if (validated.passwordEmpty) {
-                Text(
-                    modifier = Modifier.padding(
-                        horizontal = 0.dp,
-                        vertical = 2.dp,
-                    ),
-                    text = stringResource(R.string.storage_edit_onedrive_should_auth),
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 11.sp,
-                )
-            }
-        }
-        if (connected) {
-            EaseTextButton(
-                text = stringResource(R.string.storage_edit_onedrive_disconnect),
-                type = EaseTextButtonType.Error,
-                size = EaseTextButtonSize.Medium,
-                onClick = {
-                    editStorageVM.updateForm { storage ->
-                        storage.password = ""
-                        storage
-                    }
-                },
-            )
-        }
-    }
-}
-
-@Composable
 fun EditStoragesPage(
     editStorageVM: EditStorageVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val coroutineScope = rememberCoroutineScope()
-    val form by editStorageVM.form.collectAsState();
     val isCreated by editStorageVM.isCreated.collectAsState();
     val testing by editStorageVM.testResult.collectAsState()
-
-    val storageType = form.typ;
 
     val testingColors = when (testing) {
         StorageConnectionTestResult.NONE -> null
@@ -394,31 +266,7 @@ fun EditStoragesPage(
                     .imePadding()
                     .padding(30.dp, 12.dp)
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    StorageBlock(
-                        title = "WebDAV",
-                        isActive = storageType == StorageType.WEBDAV,
-                        onSelect = {
-                            editStorageVM.changeType(StorageType.WEBDAV)
-                        }
-                    )
-                    StorageBlock(
-                        title = "OneDrive",
-                        isActive = storageType == StorageType.ONE_DRIVE,
-                        onSelect = {
-                            editStorageVM.changeType(StorageType.ONE_DRIVE)
-                        }
-                    )
-                }
-                Box(modifier = Modifier.height(30.dp))
-                if (storageType == StorageType.WEBDAV) {
-                    WebdavConfig()
-                }
-                if (storageType == StorageType.ONE_DRIVE) {
-                    OneDriveConfig()
-                }
+                WebdavConfig()
             }
         }
     }

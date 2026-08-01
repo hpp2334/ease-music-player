@@ -2,10 +2,10 @@
 
 use ease_client_schema::{
     BlobId, DbKeyAlloc, MusicId, MusicModel, PlayMode, PlaylistId, PlaylistModel, PreferenceModel,
-    StorageEntryLoc, StorageId, StorageModel, StorageType,
+    StorageEntryLoc, StorageId,
 };
 
-use ease_client_schema::entities::{blob, id_alloc, music, playlist, playlist_music, preference, storage};
+use ease_client_schema::entities::{blob, id_alloc, music, playlist, playlist_music, preference};
 
 const FALSE_I32: i32 = 0;
 const TRUE_I32: i32 = 1;
@@ -15,23 +15,6 @@ fn db_key_alloc_index(k: &DbKeyAlloc) -> i32 {
         DbKeyAlloc::Playlist => 0,
         DbKeyAlloc::Music => 1,
         DbKeyAlloc::Storage => 2,
-    }
-}
-
-fn storage_type_index(t: StorageType) -> i32 {
-    match t {
-        StorageType::Local => 0,
-        StorageType::Webdav => 1,
-        StorageType::OneDrive => 2,
-    }
-}
-
-fn storage_type_from_index(i: i32) -> StorageType {
-    match i {
-        0 => StorageType::Local,
-        1 => StorageType::Webdav,
-        2 => StorageType::OneDrive,
-        _ => StorageType::default(),
     }
 }
 
@@ -137,30 +120,6 @@ pub fn playlist_music_from(playlist_id: PlaylistId, music_id: MusicId) -> playli
     playlist_music::ActiveModel {
         playlist_id: sea_orm::ActiveValue::Set(*playlist_id.as_ref()),
         music_id: sea_orm::ActiveValue::Set(*music_id.as_ref()),
-    }
-}
-
-pub fn storage_from(m: StorageModel) -> storage::ActiveModel {
-    storage::ActiveModel {
-        id: sea_orm::ActiveValue::Set(*m.id.as_ref()),
-        addr: sea_orm::ActiveValue::Set(m.addr),
-        alias: sea_orm::ActiveValue::Set(m.alias),
-        username: sea_orm::ActiveValue::Set(m.username),
-        password: sea_orm::ActiveValue::Set(m.password),
-        is_anonymous: sea_orm::ActiveValue::Set(if m.is_anonymous { TRUE_I32 } else { FALSE_I32 }),
-        typ: sea_orm::ActiveValue::Set(storage_type_index(m.typ)),
-    }
-}
-
-pub fn storage_to_model(row: storage::Model) -> StorageModel {
-    StorageModel {
-        id: StorageId::wrap(row.id),
-        addr: row.addr,
-        alias: row.alias,
-        username: row.username,
-        password: row.password,
-        is_anonymous: row.is_anonymous != FALSE_I32,
-        typ: storage_type_from_index(row.typ),
     }
 }
 

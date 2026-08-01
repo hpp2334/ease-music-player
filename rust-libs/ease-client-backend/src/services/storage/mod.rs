@@ -4,18 +4,21 @@ use std::{
     time::Duration,
 };
 
+use ease_client_schema::entities::storage as storage_entity;
+use ease_client_schema::{
+    DataSourceKey, PluginId, PluginStorageId, SecretId, SecretScope, StorageEntryLoc, StorageHandle,
+    StorageId, StorageType, WebdavStorageId,
+};
+use ease_remote_storage::{BuildWebdavArg, LocalBackend, StorageBackend, StreamFile, Webdav};
+use tracing::instrument;
+
 use crate::{
     ctx::BackendContext,
-    error::BResult,
-    objects::{ArgUpsertStorage, Storage},
+    error::{BError, BResult},
+    objects::{Storage, ArgUpsertWebdavStorage},
+    repositories::secret::SecretStore,
     services::{get_music, get_music_cover_bytes},
 };
-use ease_client_schema::{DataSourceKey, StorageEntryLoc, StorageId, StorageModel, StorageType};
-use ease_remote_storage::{
-    BuildOneDriveArg, BuildWebdavArg, LocalBackend, OneDriveBackend, StorageBackend, StreamFile,
-    Webdav,
-};
-use tracing::instrument;
 
 #[derive(Default)]
 pub(crate) struct StorageState {
@@ -46,43 +49,23 @@ pub(crate) async fn load_storage_entry_data(
     }
 }
 
-pub fn build_storage(model: StorageModel, music_count: u64) -> Storage {
-    Storage {
-        id: model.id,
-        addr: model.addr,
-        alias: model.alias,
-        username: model.username,
-        password: model.password,
-        is_anonymous: model.is_anonymous,
-        typ: model.typ,
-        music_count,
-    }
-}
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub fn build_storage_backend_by_arg(
-    _cx: &BackendContext,
-    arg: ArgUpsertStorage,
-) -> BResult<Arc<dyn StorageBackend + Send + Sync>> {
-    let connect_timeout = Duration::from_secs(5);
-
-    let ret: Arc<dyn StorageBackend + Send + Sync + 'static> = match arg.typ {
-        StorageType::Local => Arc::new(LocalBackend::new()),
-        StorageType::Webdav => {
-            let arg = BuildWebdavArg {
-                addr: arg.addr,
-                username: arg.username,
-                password: arg.password,
-                is_anonymous: arg.is_anonymous,
-                connect_timeout,
-            };
-            Arc::new(Webdav::new(arg))
-        }
-        StorageType::OneDrive => {
-            let arg = BuildOneDriveArg { code: arg.password };
-            Arc::new(OneDriveBackend::new(arg))
-        }
-    };
-    Ok(ret)
+/// Build a WebDAV backend directly from connection params (no DB). Used by
+/// `ct_test_storage` to validate a connection before persisting.
+pub fn build_webdav_backend(
+    addr: String,
+    username: String,
+    password: String,
+    is_anonymous: bool,
+) -> Arc<dyn StorageBackend + Send + Sync + 'static> {
+    Arc::new(Webdav::new(BuildWebdavArg {
+        addr,
+        username,
+        password,
+        is_anonymous,
+        connect_timeout: CONNECT_TIMEOUT,
+    }))
 }
 
 pub(crate) fn evict_storage_backend_cache(cx: &BackendContext, storage_id: StorageId) {
@@ -90,146 +73,173 @@ pub(crate) fn evict_storage_backend_cache(cx: &BackendContext, storage_id: Stora
     w.remove(&storage_id);
 }
 
+/// Resolve a `StorageId` to a live backend, dispatching on the registry row's
+/// kind. Local -> `LocalBackend`; Webdav -> load detail + internal secret ->
+/// `Webdav`; Plugin -> `JsStorageBackend` (not yet wired — returns an error
+/// until the plugin service-runtime hosting lands).
 pub async fn get_storage_backend(
     cx: &BackendContext,
     storage_id: StorageId,
 ) -> BResult<Option<Arc<dyn StorageBackend + Send + Sync>>> {
     {
         let state = cx.storage_state().cache.read().unwrap();
-        let cached = state.get(&storage_id);
-        if let Some(cached) = cached {
+        if let Some(cached) = state.get(&storage_id) {
             return Ok(Some(cached.clone()));
         }
     }
 
-    // The synthetic Local storage is not persisted in the DB — build a
-    // LocalBackend directly so browse and playback always succeed.
-    if storage_id.is_local() {
-        let backend = build_storage_backend_by_arg(
-            cx,
-            ArgUpsertStorage {
-                id: None,
-                addr: String::new(),
-                alias: "Local".to_string(),
-                username: String::new(),
-                password: String::new(),
-                is_anonymous: false,
-                typ: StorageType::Local,
-            },
-        )?;
-        let mut state = cx.storage_state().cache.write().unwrap();
-        state.insert(storage_id, backend.clone());
-        return Ok(Some(backend));
-    }
-
-    let model = cx.database_server().load_storage(storage_id).await?;
-    let music_count = cx.database_server().load_storage_music_count(storage_id).await?;
-
-    if model.is_none() {
+    let ds = cx.database_server();
+    let Some(row) = ds.load_storage_row(storage_id).await? else {
         return Ok(None);
-    }
-    let storage = model.unwrap();
-    let storage = build_storage(storage, music_count);
-    let backend = build_storage_backend_by_arg(
-        cx,
-        ArgUpsertStorage {
-            id: None,
-            addr: storage.addr,
-            alias: storage.alias,
-            username: storage.username,
-            password: storage.password,
-            is_anonymous: storage.is_anonymous,
-            typ: storage.typ,
-        },
-    )?;
+    };
 
-    {
-        let mut state = cx.storage_state().cache.write().unwrap();
-        state.insert(storage_id, backend.clone());
-    }
+    let backend: Arc<dyn StorageBackend + Send + Sync + 'static> = match StorageType::from_i32(
+        row.r#type,
+    ) {
+        Some(StorageType::Local) => Arc::new(LocalBackend::new()),
+        Some(StorageType::Webdav) => {
+            let wid = row.webdav_storage_id.ok_or_else(|| BError::CustomError {
+                message: "webdav storage row missing webdav_storage_id".into(),
+            })?;
+            let w = ds
+                .load_webdav_storage(WebdavStorageId::wrap(wid))
+                .await?
+                .ok_or_else(|| BError::CustomError {
+                    message: "webdav_storage row missing".into(),
+                })?;
+            let password = match w.secret_id {
+                Some(sid) => ds
+                    .secret_get(SecretScope::Internal, SecretId::wrap(sid))
+                    .await?
+                    .unwrap_or_default(),
+                None => String::new(),
+            };
+            build_webdav_backend(w.addr, w.username, password, w.is_anonymous != 0)
+        }
+        Some(StorageType::Plugin) => {
+            return Err(BError::CustomError {
+                message: "plugin storage backends are not yet wired".into(),
+            });
+        }
+        None => return Ok(None),
+    };
+
+    let mut state = cx.storage_state().cache.write().unwrap();
+    state.insert(storage_id, backend.clone());
     Ok(Some(backend))
 }
 
-pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
-    let models = cx.database_server().load_storages().await?;
+/// Build the UI-facing [`Storage`] from a registry row, joining the
+/// kind-specific detail (WebDAV addr/alias/etc. for WebDAV).
+async fn build_storage_from_row(
+    cx: &BackendContext,
+    row: storage_entity::Model,
+) -> BResult<Storage> {
+    let id = StorageId::wrap(row.id);
+    let music_count = cx.database_server().load_storage_music_count(id).await?;
 
-    let mut storages: Vec<Storage> = Vec::with_capacity(models.len() + 1);
-    for m in models.into_iter() {
-        // Local is always the synthetic sentinel-id entry injected below;
-        // skip any DB-persisted Local row (e.g. carried over from a legacy
-        // redb migration) so it is not shown twice.
-        if m.typ == StorageType::Local {
-            continue;
+    match StorageType::from_i32(row.r#type) {
+        Some(StorageType::Local) => Ok(Storage {
+            id,
+            handle: StorageHandle::Local,
+            alias: "Local".to_string(),
+            music_count,
+            addr: None,
+            username: None,
+            is_anonymous: None,
+        }),
+        Some(StorageType::Webdav) => {
+            let wid = row.webdav_storage_id.ok_or_else(|| BError::CustomError {
+                message: "webdav storage row missing webdav_storage_id".into(),
+            })?;
+            let w = cx
+                .database_server()
+                .load_webdav_storage(WebdavStorageId::wrap(wid))
+                .await?
+                .ok_or_else(|| BError::CustomError {
+                    message: "webdav_storage row missing".into(),
+                })?;
+            Ok(Storage {
+                id,
+                handle: StorageHandle::Webdav {
+                    webdav_storage_id: WebdavStorageId::wrap(wid),
+                },
+                alias: w.alias,
+                music_count,
+                addr: Some(w.addr),
+                username: Some(w.username),
+                is_anonymous: Some(w.is_anonymous != 0),
+            })
         }
-        let music_count = cx.database_server().load_storage_music_count(m.id).await?;
-        storages.push(build_storage(m, music_count));
+        Some(StorageType::Plugin) => {
+            // Plugin alias display waits on the plugin runtime; surface the
+            // plugin_storage_id as a placeholder so the row is still visible.
+            let plugin_id = row.plugin_id.unwrap_or_default();
+            let plugin_storage_id = row.plugin_storage_id.unwrap_or_default();
+            let alias = plugin_storage_id.clone();
+            Ok(Storage {
+                id,
+                handle: StorageHandle::Plugin {
+                    plugin_id: PluginId::new(plugin_id),
+                    plugin_storage_id: PluginStorageId::new(plugin_storage_id),
+                },
+                alias,
+                music_count,
+                addr: None,
+                username: None,
+                is_anonymous: None,
+            })
+        }
+        None => Err(BError::CustomError {
+            message: format!("unknown storage type discriminant: {}", row.r#type),
+        }),
     }
+}
 
-    // Always inject the synthetic Local storage so the biz layer can hit it
-    // regardless of DB / migration state. See `StorageId::local`.
-    storages.push(build_local_storage(cx).await?);
-
+pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
+    let rows = cx.database_server().load_all_storage_rows().await?;
+    let mut storages: Vec<Storage> = Vec::with_capacity(rows.len());
+    for row in rows {
+        storages.push(build_storage_from_row(cx, row).await?);
+    }
+    // Local first, then by id.
     storages.sort_by(|lhs, rhs| {
-        let l_local = lhs.typ == StorageType::Local;
-        let r_local = rhs.typ == StorageType::Local;
-
+        let l_local = matches!(lhs.handle, StorageHandle::Local);
+        let r_local = matches!(rhs.handle, StorageHandle::Local);
         if l_local != r_local {
             l_local.cmp(&r_local)
         } else {
             lhs.id.cmp(&rhs.id)
         }
     });
-
     Ok(storages)
 }
 
-/// Build the synthetic, always-present Local storage. Reads the live music
-/// count from the DB but is not itself a DB row — `StorageId::local()` is a
-/// negative sentinel that never appears in the `storage` table.
-pub async fn build_local_storage(cx: &BackendContext) -> BResult<Storage> {
-    let local_id = StorageId::local();
-    let local_count = cx.database_server().load_storage_music_count(local_id).await?;
-    Ok(Storage {
-        id: local_id,
-        addr: String::new(),
-        alias: "Local".to_string(),
-        username: String::new(),
-        password: String::new(),
-        is_anonymous: false,
-        typ: StorageType::Local,
-        music_count: local_count,
-    })
-}
-
-/// Create or update a storage row, rejecting attempts to write the synthetic
-/// Local storage. Local is not persisted — it is always synthesized on read
-/// by `list_storage` / `build_local_storage`, so persisting a row with
-/// `typ = Local` would be a no-op from the user's perspective (the row gets
-/// skipped on read) and would shadow the synthetic entry's intent.
-pub async fn upsert_storage(cx: &BackendContext, arg: ArgUpsertStorage) -> BResult<StorageId> {
-    if arg.typ == StorageType::Local {
-        return Err(crate::error::BError::CustomError {
-            message: "cannot create or update the synthetic Local storage".to_string(),
-        });
-    }
-    let id = cx.database_server().upsert_storage(arg).await?;
+/// Create or update a WebDAV storage (delegates the secret + detail rows to
+/// the repository). Evicts the backend cache for the resulting id.
+pub async fn upsert_webdav_storage(
+    cx: &BackendContext,
+    arg: ArgUpsertWebdavStorage,
+) -> BResult<StorageId> {
+    let arg = normalize_arg_upsert_webdav(arg);
+    let id = cx.database_server().upsert_webdav_storage(arg).await?;
     evict_storage_backend_cache(cx, id);
     Ok(id)
 }
 
-/// Remove a storage row, rejecting attempts to delete the synthetic Local
-/// storage. Deleting Local would cascade-delete every music row whose
-/// `loc_storage_id` matches the Local sentinel and detach them from all
-/// playlists — catastrophic, and never what a caller intends.
+/// Remove a storage registry row (+ cascade). Evicts the backend cache.
 pub async fn remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()> {
-    if id.is_local() {
-        return Err(crate::error::BError::CustomError {
-            message: "cannot remove the synthetic Local storage".to_string(),
-        });
-    }
     cx.database_server().remove_storage(id).await?;
     evict_storage_backend_cache(cx, id);
     Ok(())
+}
+
+fn normalize_arg_upsert_webdav(mut arg: ArgUpsertWebdavStorage) -> ArgUpsertWebdavStorage {
+    if arg.is_anonymous {
+        arg.username = String::new();
+        arg.password = String::new();
+    }
+    arg
 }
 
 async fn get_asset_file_by_loc(

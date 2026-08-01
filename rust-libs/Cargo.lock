@@ -1210,6 +1210,7 @@ dependencies = [
  "ease-client-tokio",
  "ease-order-key",
  "ease-remote-storage",
+ "futures",
  "getset",
  "jni",
  "libsqlite3-sys",

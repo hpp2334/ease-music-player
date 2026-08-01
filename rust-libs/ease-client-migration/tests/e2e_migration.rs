@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use ease_client_migration::{migrate, SCHEMA_VERSION};
 use ease_client_schema::entities::{
-    blob, id_alloc, music, playlist, playlist_music, preference, schema_version, storage,
+    blob, id_alloc, music, playlist, playlist_music, preference, schema_version, secret, storage,
+    webdav_storage,
 };
 use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder};
 
@@ -93,7 +94,7 @@ async fn e2e_migration_preserves_all_data() {
     // ---------- counts ----------
     assert_eq!(playlists.len(), 3, "playlist count");
     assert_eq!(music_rows.len(), 18, "music count");
-    assert_eq!(storage_rows.len(), 2, "storage count");
+    assert_eq!(storage_rows.len(), 2, "storage registry count");
     assert_eq!(pm_rows.len(), 18, "playlist_music count");
     assert_eq!(allocs.len(), 3, "id_alloc count");
 
@@ -111,22 +112,45 @@ async fn e2e_migration_preserves_all_data() {
     assert_eq!(allocs[2].kind, 2, "id_alloc[2] kind");
     assert_eq!(allocs[2].next_id, 2, "id_alloc[2] next_id");
 
-    // ---------- storage rows ----------
+    // ---------- storage registry rows (new shape) ----------
+    // storage[0] = Local (id=1, type=Local=0, no detail ref).
     assert_eq!(storage_rows[0].id, 1);
-    assert_eq!(storage_rows[0].addr, "");
-    assert_eq!(storage_rows[0].alias, "Local");
-    assert_eq!(storage_rows[0].username, "");
-    assert_eq!(storage_rows[0].password, "");
-    assert_eq!(storage_rows[0].is_anonymous, 0);
-    assert_eq!(storage_rows[0].typ, 0, "storage[0] typ (Local)");
+    assert_eq!(storage_rows[0].r#type, 0, "storage[0] type (Local)");
+    assert_eq!(storage_rows[0].webdav_storage_id, None);
+    assert_eq!(storage_rows[0].plugin_id, None);
+    assert_eq!(storage_rows[0].plugin_storage_id, None);
 
+    // storage[1] = Webdav (id=2, type=Webdav=1, webdav_storage_id=2).
     assert_eq!(storage_rows[1].id, 2);
-    assert_eq!(storage_rows[1].addr, "http://0.0.0.0:81");
-    assert_eq!(storage_rows[1].alias, "A");
-    assert_eq!(storage_rows[1].username, "admin");
-    assert_eq!(storage_rows[1].password, "123456");
-    assert_eq!(storage_rows[1].is_anonymous, 0);
-    assert_eq!(storage_rows[1].typ, 1, "storage[1] typ (Webdav)");
+    assert_eq!(storage_rows[1].r#type, 1, "storage[1] type (Webdav)");
+    assert_eq!(storage_rows[1].webdav_storage_id, Some(2));
+    assert_eq!(storage_rows[1].plugin_id, None);
+    assert_eq!(storage_rows[1].plugin_storage_id, None);
+
+    // ---------- webdav_storage detail row ----------
+    let webdav_rows = webdav_storage::Entity::find()
+        .order_by_asc(webdav_storage::Column::Id)
+        .all(&db)
+        .await
+        .unwrap();
+    assert_eq!(webdav_rows.len(), 1, "webdav_storage count");
+    assert_eq!(webdav_rows[0].id, 2);
+    assert_eq!(webdav_rows[0].addr, "http://0.0.0.0:81");
+    assert_eq!(webdav_rows[0].alias, "A");
+    assert_eq!(webdav_rows[0].username, "admin");
+    assert_eq!(webdav_rows[0].is_anonymous, 0);
+    let webdav_secret_id = webdav_rows[0].secret_id.expect("webdav secret id");
+
+    // ---------- secret row (WebDAV password, scope=internal) ----------
+    let secret_rows = secret::Entity::find()
+        .order_by_asc(secret::Column::Id)
+        .all(&db)
+        .await
+        .unwrap();
+    assert_eq!(secret_rows.len(), 1, "secret count");
+    assert_eq!(secret_rows[0].id, webdav_secret_id);
+    assert_eq!(secret_rows[0].scope, "internal");
+    assert_eq!(secret_rows[0].secret, "123456");
 
     // ---------- playlist rows ----------
     assert_eq!(playlists[0].id, 1);
@@ -222,8 +246,18 @@ async fn fresh_install_stamps_schema_version() {
     assert!(!dir.path().join("data.redb").exists());
     assert!(dir.path().join("data.db").exists());
 
-    // All user tables empty.
+    // All user tables empty; storage holds only the seeded Local registry row.
     assert_eq!(music::Entity::find().count(&db).await.unwrap(), 0);
     assert_eq!(playlist::Entity::find().count(&db).await.unwrap(), 0);
-    assert_eq!(storage::Entity::find().count(&db).await.unwrap(), 0);
+    assert_eq!(storage::Entity::find().count(&db).await.unwrap(), 1);
+    assert_eq!(
+        storage::Entity::find()
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .r#type,
+        0,
+        "the single storage row is the Local seed"
+    );
 }

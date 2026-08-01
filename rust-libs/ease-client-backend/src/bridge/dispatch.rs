@@ -29,15 +29,13 @@ use crate::{
             ArgReorderPlaylist,
         },
         plugin::ct_plugin_kv_multi_append,
-        storage::{
-            ct_get_refresh_token, ct_list_storage, ct_list_storage_entry_children,
-            ct_onedrive_oauth_url, ct_remove_storage, ct_test_storage, ct_upsert_storage,
-        },
+        storage::{ct_list_storage, ct_list_storage_entry_children, ct_remove_storage},
+        storage_webdav::{ct_test_webdav_storage, ct_upsert_webdav_storage},
     },
     error::{BError, BResult},
     objects::{
         music::{MetadataRecord, PlayerStateRecord},
-        storage::ArgUpsertStorage,
+        storage::ArgUpsertWebdavStorage,
     },
     objects::player::{
         ct_player_context_new, ct_player_duration_ms, ct_player_load_music, ct_player_new,
@@ -253,10 +251,10 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let result = ct_list_storage(cx).await?;
             Ok((serde_json::to_value(result)?, vec![]))
         }
-        "storage.upsert" => {
-            let arg: ArgUpsertStorage = serde_json::from_value(req.args)?;
+        "storage_webdav.upsert" => {
+            let arg: ArgUpsertWebdavStorage = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            ct_upsert_storage(cx, arg).await?;
+            ct_upsert_webdav_storage(cx, arg).await?;
             Ok((Value::Null, vec![]))
         }
         "storage.remove" => {
@@ -265,16 +263,10 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             ct_remove_storage(cx, id).await?;
             Ok((Value::Null, vec![]))
         }
-        "storage.getRefreshToken" => {
-            let code: String = serde_json::from_value(req.args)?;
+        "storage_webdav.test" => {
+            let arg: ArgUpsertWebdavStorage = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            let token = ct_get_refresh_token(cx, code).await?;
-            Ok((serde_json::to_value(token)?, vec![]))
-        }
-        "storage.test" => {
-            let arg: ArgUpsertStorage = serde_json::from_value(req.args)?;
-            let cx = must_backend(handle)?;
-            let result = ct_test_storage(cx, arg).await?;
+            let result = ct_test_webdav_storage(cx, arg).await?;
             Ok((serde_json::to_value(result)?, vec![]))
         }
         "storage.listEntryChildren" => {
@@ -282,10 +274,6 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx = must_backend(handle)?;
             let result = ct_list_storage_entry_children(cx, loc).await?;
             Ok((serde_json::to_value(result)?, vec![]))
-        }
-        "storage.onedriveOauthUrl" => {
-            let url = ct_onedrive_oauth_url();
-            Ok((serde_json::to_value(url)?, vec![]))
         }
 
         // ====================================================================

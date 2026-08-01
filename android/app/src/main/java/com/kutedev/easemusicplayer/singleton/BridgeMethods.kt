@@ -12,7 +12,7 @@ import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicDuration
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
-import com.kutedev.easemusicplayer.singleton.types.ArgUpsertStorage
+import com.kutedev.easemusicplayer.singleton.types.ArgUpsertWebdavStorage
 import com.kutedev.easemusicplayer.singleton.types.ListLogFiles
 import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
 import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
@@ -69,16 +69,18 @@ import com.kutedev.easemusicplayer.singleton.types.Storage as TStorage
  */
 object BridgeMethods {
 
-    /** `storage.*` — cloud storage CRUD + WebDAV/OneDrive operations. */
+    /** `storage.*` — registry CRUD + entry browsing (kind-agnostic). */
     object Storage {
         val LIST = bridgeSpecNoArg<List<TStorage>>("storage.list")
-        val UPSERT = bridgeSpecArg<ArgUpsertStorage, Unit>("storage.upsert")
         val REMOVE = bridgeSpecArg<StorageId, Unit>("storage.remove")
-        val TEST = bridgeSpecArg<ArgUpsertStorage, StorageConnectionTestResult>("storage.test")
         val LIST_ENTRY_CHILDREN =
             bridgeSpecArg<StorageEntryLoc, ListStorageEntryChildrenResp>("storage.listEntryChildren")
-        val ONEDRIVE_OAUTH_URL = bridgeSpecNoArg<String>("storage.onedriveOauthUrl")
-        val GET_REFRESH_TOKEN = bridgeSpecArg<String, String?>("storage.getRefreshToken")
+    }
+
+    /** `storage_webdav.*` — WebDAV-only create/update + connection test. */
+    object StorageWebdav {
+        val UPSERT = bridgeSpecArg<ArgUpsertWebdavStorage, Unit>("storage_webdav.upsert")
+        val TEST = bridgeSpecArg<ArgUpsertWebdavStorage, StorageConnectionTestResult>("storage_webdav.test")
     }
 
     /** `playlist.*` — playlist CRUD + music membership + reorder. */

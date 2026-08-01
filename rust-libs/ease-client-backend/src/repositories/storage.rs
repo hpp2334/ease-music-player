@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
-use ease_client_migration::converter;
 use ease_client_schema::entities::{music, playlist_music, storage};
-use ease_client_schema::{BlobId, StorageId, StorageModel};
+use ease_client_schema::{BlobId, StorageHandle, StorageId, StorageType};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
-use crate::{error::BResult, objects::ArgUpsertStorage};
+use crate::error::BResult;
 
 use super::core::DatabaseServer;
 
 impl DatabaseServer {
-    pub async fn load_storage_music_count(self: &Arc<Self>, id: StorageId) -> BResult<u64> {
+    pub async fn load_storage_music_count(&self, id: StorageId) -> BResult<u64> {
         let db = self.db();
         let count = music::Entity::find()
             .filter(music::Column::LocStorageId.eq(*id.as_ref()))
@@ -19,68 +18,97 @@ impl DatabaseServer {
         Ok(count as u64)
     }
 
-    pub async fn load_storage(self: &Arc<Self>, id: StorageId) -> BResult<Option<StorageModel>> {
-        let db = self.db();
-        let row = storage::Entity::find_by_id(*id.as_ref()).one(&db).await?;
-        Ok(row.map(converter::storage_to_model))
+    /// Load one registry row.
+    pub async fn load_storage_row(&self, id: StorageId) -> BResult<Option<storage::Model>> {
+        Ok(storage::Entity::find_by_id(*id.as_ref())
+            .one(&self.db())
+            .await?)
     }
 
-    pub async fn load_storages(self: &Arc<Self>) -> BResult<Vec<StorageModel>> {
-        let db = self.db();
-        let rows = storage::Entity::find().all(&db).await?;
-        Ok(rows.into_iter().map(converter::storage_to_model).collect())
+    /// Load every registry row.
+    pub async fn load_all_storage_rows(&self) -> BResult<Vec<storage::Model>> {
+        Ok(storage::Entity::find().all(&self.db()).await?)
     }
 
-    pub async fn upsert_storage(self: &Arc<Self>, arg: ArgUpsertStorage) -> BResult<StorageId> {
+    /// Find-or-create the registry row for a handle. Idempotent — the
+    /// uniqueness indexes (`idx_storage_webdav`, `idx_storage_plugin`) make the
+    /// find authoritative for WebDAV / Plugin.
+    pub async fn obtain_storage(&self, handle: &StorageHandle) -> BResult<StorageId> {
         let db = self.db();
-        let typ_i = match arg.typ {
-            ease_client_schema::StorageType::Local => 0,
-            ease_client_schema::StorageType::Webdav => 1,
-            ease_client_schema::StorageType::OneDrive => 2,
-        };
-        let id = match arg.id {
-            Some(id) => {
-                let am = storage::ActiveModel {
-                    id: ActiveValue::Unchanged(*id.as_ref()),
-                    addr: ActiveValue::Set(arg.addr),
-                    alias: ActiveValue::Set(arg.alias),
-                    username: ActiveValue::Set(arg.username),
-                    password: ActiveValue::Set(arg.password),
-                    is_anonymous: ActiveValue::Set(if arg.is_anonymous { 1 } else { 0 }),
-                    typ: ActiveValue::Set(typ_i),
-                };
-                let updated = am.update(&db).await?;
-                StorageId::wrap(updated.id)
+        let typ_i = handle.storage_type().as_i32();
+
+        let existing = match handle {
+            StorageHandle::Local => {
+                storage::Entity::find()
+                    .filter(storage::Column::Type.eq(typ_i))
+                    .one(&db)
+                    .await?
             }
-            None => {
-                let am = storage::ActiveModel {
-                    id: ActiveValue::NotSet,
-                    addr: ActiveValue::Set(arg.addr),
-                    alias: ActiveValue::Set(arg.alias),
-                    username: ActiveValue::Set(arg.username),
-                    password: ActiveValue::Set(arg.password),
-                    is_anonymous: ActiveValue::Set(if arg.is_anonymous { 1 } else { 0 }),
-                    typ: ActiveValue::Set(typ_i),
-                };
-                let inserted = am.insert(&db).await?;
-                StorageId::wrap(inserted.id)
+            StorageHandle::Webdav { webdav_storage_id } => {
+                storage::Entity::find()
+                    .filter(storage::Column::Type.eq(typ_i))
+                    .filter(storage::Column::WebdavStorageId.eq(*webdav_storage_id.as_ref()))
+                    .one(&db)
+                    .await?
+            }
+            StorageHandle::Plugin {
+                plugin_id,
+                plugin_storage_id,
+            } => {
+                storage::Entity::find()
+                    .filter(storage::Column::Type.eq(typ_i))
+                    .filter(storage::Column::PluginId.eq(&plugin_id.id))
+                    .filter(storage::Column::PluginStorageId.eq(&plugin_storage_id.id))
+                    .one(&db)
+                    .await?
             }
         };
+        if let Some(row) = existing {
+            return Ok(StorageId::wrap(row.id));
+        }
 
-        Ok(id)
+        let am = storage::ActiveModel {
+            id: ActiveValue::NotSet,
+            r#type: ActiveValue::Set(typ_i),
+            webdav_storage_id: ActiveValue::Set(match handle {
+                StorageHandle::Webdav { webdav_storage_id } => {
+                    Some(*webdav_storage_id.as_ref())
+                }
+                _ => None,
+            }),
+            plugin_id: ActiveValue::Set(match handle {
+                StorageHandle::Plugin { plugin_id, .. } => Some(plugin_id.id.clone()),
+                _ => None,
+            }),
+            plugin_storage_id: ActiveValue::Set(match handle {
+                StorageHandle::Plugin {
+                    plugin_storage_id, ..
+                } => Some(plugin_storage_id.id.clone()),
+                _ => None,
+            }),
+        };
+        let m = am.insert(&db).await?;
+        Ok(StorageId::wrap(m.id))
     }
 
+    /// Remove a registry row and cascade: detach + delete every music whose
+    /// `loc_storage_id` points here (and its cover blob), then drop the
+    /// kind-specific detail rows. WebDAV detail (`webdav_storage` + its
+    /// internal-scoped secret) is handled here; plugin detail (kv + secret) is
+    /// the plugin's responsibility.
     pub async fn remove_storage(self: &Arc<Self>, id: StorageId) -> BResult<()> {
         let db = self.db();
-        let id_val = *id.as_ref();
+        let reg = storage::Entity::find_by_id(*id.as_ref())
+            .one(&db)
+            .await?;
+        let Some(reg) = reg else {
+            return Ok(());
+        };
 
-        // Cascade: for each music in this storage, detach from playlists and
-        // remove its cover blob.
         let musics = music::Entity::find()
-            .filter(music::Column::LocStorageId.eq(id_val))
+            .filter(music::Column::LocStorageId.eq(*id.as_ref()))
             .all(&db)
             .await?;
-
         let mut to_remove_blobs: Vec<BlobId> = Default::default();
         for m in musics {
             playlist_music::Entity::delete_many()
@@ -93,12 +121,17 @@ impl DatabaseServer {
             music::Entity::delete_by_id(m.id).exec(&db).await?;
         }
 
-        storage::Entity::delete_by_id(id_val).exec(&db).await?;
+        if matches!(StorageType::from_i32(reg.r#type), Some(StorageType::Webdav)) {
+            if let Some(wid) = reg.webdav_storage_id {
+                self.remove_webdav_storage_detail(wid).await?;
+            }
+        }
+
+        storage::Entity::delete_by_id(*id.as_ref()).exec(&db).await?;
 
         for blob_id in to_remove_blobs {
             self.blob().remove(blob_id)?;
         }
-
         Ok(())
     }
 }

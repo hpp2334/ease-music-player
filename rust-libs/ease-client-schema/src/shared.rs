@@ -33,43 +33,65 @@ macro_rules! define_id {
     };
 }
 
+macro_rules! define_string_id {
+    ($s:ident) => {
+        #[derive(
+            Debug,
+            Clone,
+            Hash,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
+        #[serde(transparent)]
+        pub struct $s {
+            pub id: String,
+        }
+
+        impl $s {
+            pub fn new(id: impl Into<String>) -> Self {
+                Self { id: id.into() }
+            }
+        }
+
+        impl From<String> for $s {
+            fn from(id: String) -> Self {
+                Self { id }
+            }
+        }
+
+        impl AsRef<str> for $s {
+            fn as_ref(&self) -> &str {
+                &self.id
+            }
+        }
+
+        impl std::fmt::Display for $s {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.id)
+            }
+        }
+    };
+}
+
+// `StorageId` is the universal registry id (the `storage` table PK). Every
+// music / playlist storage reference (`loc_storage_id`, `lyric_storage_id`,
+// `picture_storage_id`) points at a `storage` row regardless of whether the
+// backing source is Local, a WebDAV connection, or a plugin provider. Resolve
+// the concrete backend through `obtain(StorageHandle) -> StorageId` /
+// `get_storage_backend(StorageId)`.
 define_id!(StorageId);
+define_id!(WebdavStorageId);
+define_id!(SecretId);
 define_id!(BlobId);
 define_id!(MusicId);
 define_id!(PlaylistId);
 
-impl StorageId {
-    /// Sentinel id for the synthetic, always-present Local storage.
-    ///
-    /// Negative so it can never collide with a real auto-incremented row in
-    /// the `storage` table. The Local storage is not persisted — it is
-    /// injected by the biz layer on every `list_storage` call, so callers can
-    /// always resolve it regardless of DB / migration state.
-    pub fn local() -> Self {
-        Self::wrap(-1)
-    }
-
-    /// True if this id refers to the synthetic Local storage.
-    pub fn is_local(self) -> bool {
-        self == Self::local()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn local_storage_id_is_negative_sentinel() {
-        let local = StorageId::local();
-        assert!(local.is_local());
-        assert_eq!(*local.as_ref(), -1);
-        // Must never collide with a real auto-increment id (always >= 1).
-        assert_ne!(StorageId::wrap(0), local);
-        assert_ne!(StorageId::wrap(1), local);
-        assert_ne!(StorageId::wrap(i64::MAX), local);
-    }
-}
+define_string_id!(PluginId);
+define_string_id!(PluginStorageId);
 
 #[derive(
     Debug,
@@ -88,23 +110,97 @@ pub struct StorageEntryLoc {
     pub path: String,
 }
 
+/// Discriminant stored in the `storage` registry table's `type` column.
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    Hash,
-    Serialize,
-    Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
 )]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StorageType {
     Local,
-    #[default]
     Webdav,
-    OneDrive,
+    Plugin,
+}
+
+impl StorageType {
+    pub fn as_i32(self) -> i32 {
+        match self {
+            StorageType::Local => 0,
+            StorageType::Webdav => 1,
+            StorageType::Plugin => 2,
+        }
+    }
+
+    pub fn from_i32(v: i32) -> Option<Self> {
+        match v {
+            0 => Some(StorageType::Local),
+            1 => Some(StorageType::Webdav),
+            2 => Some(StorageType::Plugin),
+            _ => None,
+        }
+    }
+}
+
+/// Parametric descriptor of a storage source — the input to
+/// `obtain(StorageHandle) -> StorageId`. The registry row is find-or-created
+/// from this; the returned `StorageId` is what music / playlists persist.
+#[derive(
+    Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StorageHandle {
+    Local,
+    #[serde(rename_all = "camelCase")]
+    Webdav {
+        webdav_storage_id: WebdavStorageId,
+    },
+    #[serde(rename_all = "camelCase")]
+    Plugin {
+        plugin_id: PluginId,
+        plugin_storage_id: PluginStorageId,
+    },
+}
+
+impl StorageHandle {
+    pub fn storage_type(&self) -> StorageType {
+        match self {
+            StorageHandle::Local => StorageType::Local,
+            StorageHandle::Webdav { .. } => StorageType::Webdav,
+            StorageHandle::Plugin { .. } => StorageType::Plugin,
+        }
+    }
+}
+
+/// Ownership scope of a `secret` row. Persisted in the `secret.scope` TEXT
+/// column as `"internal"` (host-owned, e.g. a WebDAV password) or
+/// `"plugin:<plugin_id>"` (owned by that plugin). Enforcement: a caller may
+/// only `get` / `remove` a secret whose scope matches its own.
+#[derive(
+    Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize,
+)]
+pub enum SecretScope {
+    Internal,
+    Plugin(PluginId),
+}
+
+impl SecretScope {
+    /// The string stored in the `secret.scope` column.
+    pub fn to_scope_string(&self) -> String {
+        match self {
+            SecretScope::Internal => "internal".to_string(),
+            SecretScope::Plugin(pid) => format!("plugin:{}", pid.id),
+        }
+    }
+
+    /// Parse a `secret.scope` column value back into a `SecretScope`.
+    /// Unknown values default to `Internal` (defensive: a corrupt row becomes
+    /// host-owned rather than accessible to an arbitrary plugin).
+    pub fn from_scope_string(s: &str) -> Self {
+        if let Some(rest) = s.strip_prefix("plugin:") {
+            SecretScope::Plugin(PluginId::new(rest))
+        } else {
+            SecretScope::Internal
+        }
+    }
 }
 
 #[derive(
@@ -114,6 +210,7 @@ pub enum StorageType {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     Serialize,
     Deserialize,
 )]
