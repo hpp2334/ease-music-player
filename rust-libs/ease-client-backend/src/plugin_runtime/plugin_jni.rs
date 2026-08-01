@@ -103,17 +103,59 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     tur_android::ops::destroy(handle)
 }
 
-/// `EasePluginBridge.createEngine(env, context, surface, w, h, dpr, frameLoop): long`
+/// `TurNative.createInstance(runtimeHandle, surface, w, h, dpr, frameLoop): long`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createEngine(
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_createInstance(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
-    context: tur_android::JObject,
+    runtime_handle: tur_android::jlong,
     surface: tur_android::JObject,
     width: tur_android::jint,
     height: tur_android::jint,
     dpr: tur_android::jdouble,
     frame_loop: tur_android::JObject,
+) -> tur_android::jlong {
+    tur_android::ops::create_instance(
+        &mut env,
+        runtime_handle,
+        surface,
+        width,
+        height,
+        dpr,
+        frame_loop,
+    )
+}
+
+/// `TurNative.createHeadlessInstance(runtimeHandle, frameLoop): long`
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_createHeadlessInstance(
+    mut env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    runtime_handle: tur_android::jlong,
+    frame_loop: tur_android::JObject,
+) -> tur_android::jlong {
+    tur_android::ops::create_headless_instance(&mut env, runtime_handle, frame_loop)
+}
+
+/// `TurNative.destroyRuntime(handle)`
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_destroyRuntime(
+    _env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    handle: tur_android::jlong,
+) {
+    tur_android::ops::destroy_runtime(handle)
+}
+
+/// `EasePluginBridge.createRuntime(env, context): long` — builds the shared
+/// tur runtime once, with the Ease plugin set registered on it. Instances
+/// (one per TurView, or a headless one for a service plugin) are spawned from
+/// it via `TurNative.createInstance` / `createHeadlessInstance`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createRuntime(
+    mut env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    context: tur_android::JObject,
 ) -> tur_android::jlong {
     use tur_animation::TurAnimationPlugin;
     use tur_engine::{TurClipboardPlugin, TurStdPlugin};
@@ -121,21 +163,12 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
 
     use crate::plugin_runtime::EaseMusicPlugin;
 
-    tur_android::ops::create_with_plugins(
-        &mut env,
-        context,
-        surface,
-        width,
-        height,
-        dpr,
-        frame_loop,
-        |builder| {
-            builder
-                .plugin(TurStdPlugin)
-                .plugin(TurAnimationPlugin)
-                .plugin(TurClipboardPlugin)
-                .plugin(TurNetPlugin)
-                .plugin(EaseMusicPlugin)
-        },
-    )
+    tur_android::ops::create_runtime(&mut env, context, |builder| {
+        builder
+            .plugin(TurStdPlugin)
+            .plugin(TurAnimationPlugin)
+            .plugin(TurClipboardPlugin)
+            .plugin(TurNetPlugin)
+            .plugin(EaseMusicPlugin)
+    })
 }

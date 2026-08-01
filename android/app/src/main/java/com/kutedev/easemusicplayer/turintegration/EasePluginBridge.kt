@@ -1,44 +1,45 @@
 package com.kutedev.easemusicplayer.turintegration
 
 import android.content.Context
-import android.view.Surface
 
 /**
- * JNI bridge to the ease-specific tur engine **creation** entry point.
+ * JNI bridge to the ease-specific tur **runtime** creation entry point.
  *
- * Mirrors `Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createEngine`
+ * Mirrors `Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createRuntime`
  * in `rust-libs/ease-client-backend/src/plugin_runtime/plugin_jni.rs`. The
- * standard engine-operation symbols (`Java_org_tur_TurNative_*`) live in
- * the same `.so` and are addressed via [TurNative].
+ * standard instance-operation symbols (`TurNative.*`) live in the same `.so`.
  *
  * The library is already loaded by `EaseMusicPlayerApplication`'s
  * `companion object { init { System.loadLibrary("ease_client_backend") } }`,
  * so the `external fun` resolves at first call without an explicit
  * `System.loadLibrary` here.
  *
- * Call [createEngine] from inside a [TurEngineFactory] to obtain an
- * engine handle.
+ * The runtime is built **once** (system-font discovery + plugin registration
+ * happen a single time); [runtime] caches it for the app lifetime and hands
+ * it to [TurView], which spawns an isolated instance per surface.
  */
 object EasePluginBridge {
     /**
-     * Build the tur engine over the given Android [Surface] with the Ease
-     * plugin set (TurStdPlugin + TurAnimationPlugin + TurClipboardPlugin +
-     * TurNetPlugin + EaseMusicPlugin) and return an opaque native handle.
-     * Returns `0L` on failure (a `RuntimeException` is also thrown by the
-     * native side).
+     * Build the shared tur runtime with the Ease plugin set
+     * (TurStdPlugin + TurAnimationPlugin + TurClipboardPlugin + TurNetPlugin +
+     * EaseMusicPlugin) and return its opaque native handle.
+     * Returns `0L` on failure (the native side also throws).
      */
     @JvmStatic
-    external fun createEngine(
-        context: Context,
-        surface: Surface,
-        width: Int,
-        height: Int,
-        dpr: Double,
-        frameLoop: FrameLoop,
-    ): Long
+    external fun createRuntime(context: Context): Long
 
-    /** Convenience factory suitable for passing to [TurView]'s `engineFactory`. */
-    val factory: TurEngineFactory = TurEngineFactory { ctx, surface, w, h, dpr, loop ->
-        createEngine(ctx, surface, w, h, dpr, loop)
+    private var cached: TurRuntime? = null
+
+    /**
+     * The app-lifetime [TurRuntime], created lazily on first call (using the
+     * application context so it is configuration-stable). Subsequent calls
+     * return the same instance.
+     */
+    @Synchronized
+    fun runtime(context: Context): TurRuntime {
+        cached?.let { return it }
+        val handle = createRuntime(context.applicationContext)
+        check(handle != 0L) { "createRuntime returned 0 (see logcat)" }
+        return TurRuntime(handle).also { cached = it }
     }
 }
