@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.BridgeMethods
-import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import com.kutedev.easemusicplayer.singleton.ToastRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,10 +17,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import com.kutedev.easemusicplayer.singleton.types.ArgUpsertStorage
+import com.kutedev.easemusicplayer.singleton.types.ArgUpsertWebdavStorage
 import com.kutedev.easemusicplayer.singleton.types.StorageConnectionTestResult
 import com.kutedev.easemusicplayer.singleton.types.StorageId
-import com.kutedev.easemusicplayer.singleton.types.StorageType
 import javax.inject.Inject
 
 
@@ -36,15 +34,14 @@ data class Validated(
     }
 }
 
-private fun defaultArgUpsertStorage(): ArgUpsertStorage {
-    return ArgUpsertStorage(
+private fun defaultArgUpsertWebdavStorage(): ArgUpsertWebdavStorage {
+    return ArgUpsertWebdavStorage(
         id = null,
         addr = "",
         alias = "",
         username = "",
         password = "",
         isAnonymous = true,
-        typ = StorageType.WEBDAV,
     )
 }
 
@@ -59,8 +56,7 @@ class EditStorageVM @Inject constructor(
 
     private val _title = MutableStateFlow("")
     private val _musicCount = MutableStateFlow(0uL)
-    private val _form = MutableStateFlow(defaultArgUpsertStorage())
-    private var _formBackups = HashMap<StorageType, ArgUpsertStorage>()
+    private val _form = MutableStateFlow(defaultArgUpsertWebdavStorage())
 
     private val _validated = MutableStateFlow(Validated())
     private val _removeModalOpen = MutableStateFlow(false)
@@ -78,25 +74,13 @@ class EditStorageVM @Inject constructor(
     val testResult = _testResult.asStateFlow()
 
     init {
-        viewModelScope.launch {
-            storageRepository.oauthRefreshToken.collect {
-                    refreshToken ->
-                updateForm { storage ->
-                    if (storage.typ == StorageType.ONE_DRIVE) {
-                        storage.password = refreshToken
-                    }
-                    storage
-                }
-            }
-        }
-
-        _form.value = defaultArgUpsertStorage()
+        _form.value = defaultArgUpsertWebdavStorage()
         _title.value = ""
         _musicCount.value = 0u
 
         val id: Long? = savedStateHandle["id"]
         // The route determines mode: `RouteCreateStorage` passes no id
-        // (id == null → create new), `RouteEditStorage/{id}` passes a real
+        // (id == null -> create new), `RouteEditStorage/{id}` passes a real
         // storage id (edit existing). No sentinel, no ambiguity.
         val storage = if (id == null) {
             null
@@ -104,14 +88,15 @@ class EditStorageVM @Inject constructor(
             storageRepository.storages.value.find { v -> v.id == StorageId(id) }
         }
         if (storage != null) {
-            _form.value = ArgUpsertStorage(
+            // Password is write-only: blank on edit means "keep the existing
+            // secret" (the backend rotates only when a non-empty value is sent).
+            _form.value = ArgUpsertWebdavStorage(
                 id = storage.id,
-                addr = storage.addr,
+                addr = storage.addr ?: "",
                 alias = storage.alias,
-                username = storage.username,
-                password = storage.password,
-                isAnonymous = storage.isAnonymous,
-                typ = storage.typ
+                username = storage.username ?: "",
+                password = "",
+                isAnonymous = storage.isAnonymous ?: false,
             )
             _title.value = VImportStorageEntry(storage).name
             _musicCount.value = storage.musicCount
@@ -127,7 +112,7 @@ class EditStorageVM @Inject constructor(
 
         _testJob = viewModelScope.launch {
             val result: StorageConnectionTestResult = try {
-                bridge.call(BridgeMethods.Storage.TEST, form.value).unwrapOrThrow().payload
+                bridge.call(BridgeMethods.StorageWebdav.TEST, form.value).unwrapOrThrow().payload
             } catch (e: Throwable) {
                 StorageConnectionTestResult.OTHER_ERROR
             }
@@ -138,10 +123,6 @@ class EditStorageVM @Inject constructor(
             resetTestResult()
         }
     }
-
-    /** Returns the OneDrive OAuth URL (launch in a browser). */
-    suspend fun onedriveOauthUrl(): String? =
-        bridge.call(BridgeMethods.Storage.ONEDRIVE_OAUTH_URL).unwrapOrNull()?.payload
 
     private fun sendTestToast() {
         val testing = _testResult.value
@@ -175,38 +156,18 @@ class EditStorageVM @Inject constructor(
         _removeModalOpen.value = false
     }
 
-    fun updateForm(block: (form: ArgUpsertStorage) -> ArgUpsertStorage) {
+    fun updateForm(block: (form: ArgUpsertWebdavStorage) -> ArgUpsertWebdavStorage) {
         _form.value = block(form.value.copy())
-    }
-
-    fun changeType(typ: StorageType) {
-        _formBackups.set(_form.value.typ, _form.value.copy())
-
-        val backup = _formBackups.get(typ)
-        if (backup != null) {
-            _form.value = backup
-        } else {
-            val newForm = ArgUpsertStorage(
-                id = _form.value.id,
-                addr = "",
-                alias = _form.value.alias,
-                username = "",
-                password = "",
-                isAnonymous = false,
-                typ = typ
-            )
-            _form.value = newForm
-        }
-        _validated.value = Validated()
     }
 
     private fun validate(): Boolean {
         val f = form.value
         _validated.value = Validated(
-            addrEmpty = if (f.typ == StorageType.WEBDAV) {  f.addr.isBlank() } else { false },
-            aliasEmpty = if (f.typ == StorageType.WEBDAV) { false } else { f.alias.isBlank() },
-            usernameEmpty = if (f.typ == StorageType.WEBDAV) { !f.isAnonymous && f.username.isBlank() } else { false },
-            passwordEmpty = if (f.typ == StorageType.WEBDAV) { !f.isAnonymous && f.password.isBlank() } else { f.password.isBlank() },
+            addrEmpty = f.addr.isBlank(),
+            aliasEmpty = f.alias.isBlank(),
+            usernameEmpty = !f.isAnonymous && f.username.isBlank(),
+            // Password required on create for non-anonymous; blank on edit = keep.
+            passwordEmpty = !f.isAnonymous && f.id == null && f.password.isBlank(),
         )
         return _validated.value.valid()
     }

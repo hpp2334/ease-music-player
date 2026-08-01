@@ -24,8 +24,8 @@ import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
 import com.kutedev.easemusicplayer.singleton.types.Storage
 import com.kutedev.easemusicplayer.singleton.types.StorageEntry
 import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
+import com.kutedev.easemusicplayer.singleton.types.StorageHandle
 import com.kutedev.easemusicplayer.singleton.types.StorageId
-import com.kutedev.easemusicplayer.singleton.types.StorageType
 import java.net.URLDecoder
 
 data class SplitPathItem(
@@ -169,7 +169,7 @@ class ImportVM @Inject constructor(
     fun reload() {
         val storage = currentStorage() ?: return
 
-        if (storage.typ == StorageType.LOCAL && !permissionRepository.havePermission.value) {
+        if (storage.handle is StorageHandle.Local && !permissionRepository.havePermission.value) {
             _loadState.value = CurrentStorageStateType.NEED_PERMISSION
             return
         }
@@ -265,20 +265,20 @@ class VImportStorageEntry(private val storage: Storage) {
         get() = storage.id
 
     val isLocal: Boolean
-        get() = storage.typ == StorageType.LOCAL
+        get() = storage.handle is StorageHandle.Local
 
     val name: String
         get() {
             if (storage.alias != "") {
                 return storage.alias
             }
-            return storage.addr
+            return storage.addr ?: ""
         }
 
     val subtitle: String
         get() {
             if (storage.alias != "") {
-                return storage.addr
+                return storage.addr ?: ""
             }
             return ""
         }

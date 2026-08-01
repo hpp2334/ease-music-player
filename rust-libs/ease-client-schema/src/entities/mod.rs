@@ -8,4 +8,6 @@ pub mod plugin_kv_multi;
 pub mod plugin_kv_single;
 pub mod preference;
 pub mod schema_version;
+pub mod secret;
 pub mod storage;
+pub mod webdav_storage;

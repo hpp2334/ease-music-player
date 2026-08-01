@@ -113,14 +113,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        intent?.data?.let { uri ->
-            val code = uri.getQueryParameter("code")
-            if (code != null) {
-                lifecycleScope.launch {
-                    storageRepository.updateRefreshToken(code)
-                }
-            }
-        }
+        // OneDrive OAuth redirect (`easem://oauth2redirect?code=...`). The core
+        // OneDrive storage kind was removed (it is now a JS plugin provider);
+        // the plugin will handle its own OAuth exchange in a later stage.
     }
 
     private fun ensurePostNotificationsPermission() {

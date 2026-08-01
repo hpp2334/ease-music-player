@@ -49,7 +49,7 @@ import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteCreateStorage
 import com.kutedev.easemusicplayer.core.RouteEditStorage
 import com.kutedev.easemusicplayer.singleton.types.Storage
-import com.kutedev.easemusicplayer.singleton.types.StorageType
+import com.kutedev.easemusicplayer.singleton.types.StorageHandle
 
 private val paddingX = 24.dp
 private val paddingY = 12.dp
@@ -174,9 +174,9 @@ private fun ColumnScope.DevicesBlock(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val title = item.alias.ifBlank {
-                    item.addr
+                    item.addr ?: ""
                 }
-                val subTitle = item.addr
+                val subTitle = item.addr ?: ""
 
                 Box(modifier = Modifier.height(48.dp))
                 Icon(
@@ -217,7 +217,7 @@ fun DashboardSubpage(
 ) {
     val navController = LocalNavController.current
     val storages by storageVM.storages.collectAsState()
-    val storageItems = storages.filter { v -> v.typ != StorageType.LOCAL }
+    val storageItems = storages.filter { v -> v.handle !is StorageHandle.Local }
 
     LaunchedEffect(Unit) {
         storageVM.reload()

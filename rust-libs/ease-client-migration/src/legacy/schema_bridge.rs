@@ -29,15 +29,12 @@ impl From<v2::BlobId> for schema::BlobId {
     }
 }
 
-impl From<v2::StorageType> for schema::StorageType {
-    fn from(v: v2::StorageType) -> Self {
-        match v {
-            v2::StorageType::Local => schema::StorageType::Local,
-            v2::StorageType::Webdav => schema::StorageType::Webdav,
-            v2::StorageType::OneDrive => schema::StorageType::OneDrive,
-        }
-    }
-}
+// NOTE: the legacy `v2::StorageType` -> `schema::StorageType` and
+// `v3::StorageModel` -> `schema::StorageModel` conversions were removed: the
+// schema no longer carries a flat `StorageModel` (the `storage` table is now a
+// kind-agnostic registry, with details split into `webdav_storage` /
+// `secret`), and `schema::StorageType` lost the `OneDrive` variant. Legacy
+// storage rows are imported directly from their v3 shape in `import_from_redb`.
 
 impl From<v2::PlayMode> for schema::PlayMode {
     fn from(v: v2::PlayMode) -> Self {
@@ -92,20 +89,6 @@ impl From<v3::PlaylistModel> for schema::PlaylistModel {
             created_time: v.created_time,
             picture: v.picture.map(Into::into),
             order: v.order,
-        }
-    }
-}
-
-impl From<v3::StorageModel> for schema::StorageModel {
-    fn from(v: v3::StorageModel) -> Self {
-        schema::StorageModel {
-            id: v.id.into(),
-            addr: v.addr,
-            alias: v.alias,
-            username: v.username,
-            password: v.password,
-            is_anonymous: v.is_anonymous,
-            typ: v.typ.into(),
         }
     }
 }

@@ -1,7 +1,5 @@
-use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc, StorageId, StorageType};
+use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc, StorageHandle, StorageId};
 use serde::{Deserialize, Serialize};
-
-use crate::objects::EASEM_ONEDRIVE_ID;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,16 +11,20 @@ pub struct StorageEntry {
     pub is_dir: bool,
 }
 
+/// Create / update a WebDAV storage. WebDAV-only: OneDrive is no longer a core
+/// storage kind (it is a JS plugin provider); Local is always-present and not
+/// user-createable. `password` is write-only plaintext (blank on edit = keep
+/// the existing secret); it never appears on the returned [`Storage`].
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ArgUpsertStorage {
+pub struct ArgUpsertWebdavStorage {
+    /// Registry `StorageId` to update; `None` to create.
     pub id: Option<StorageId>,
     pub addr: String,
     pub alias: String,
     pub username: String,
     pub password: String,
     pub is_anonymous: bool,
-    pub typ: StorageType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -47,17 +49,20 @@ pub enum StorageEntryType {
     Other,
 }
 
+/// A storage source surfaced to the UI. `handle` identifies the kind; the
+/// WebDAV-specific fields (`addr` / `username` / `is_anonymous`) are `Some`
+/// only for WebDAV and `None` for Local / Plugin. The password is never
+/// carried here.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Storage {
     pub id: StorageId,
-    pub addr: String,
+    pub handle: StorageHandle,
     pub alias: String,
-    pub username: String,
-    pub password: String,
-    pub is_anonymous: bool,
-    pub typ: StorageType,
     pub music_count: u64,
+    pub addr: Option<String>,
+    pub username: Option<String>,
+    pub is_anonymous: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, Deserialize)]
@@ -115,13 +120,4 @@ impl ListStorageEntryChildrenResp {
             ListStorageEntryChildrenResp::Unknown => false,
         }
     }
-}
-
-pub fn onedrive_oauth_url() -> String {
-    let base_url = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
-    let client_id: &str = EASEM_ONEDRIVE_ID;
-    let redirect_uri = "easem://oauth2redirect/";
-    let scope = urlencoding::encode("Files.Read offline_access").to_string();
-
-    format!("{base_url}?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&scope={scope}")
 }

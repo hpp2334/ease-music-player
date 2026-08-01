@@ -37,6 +37,21 @@ value class PlaylistId(val value: Long)
 @JvmInline
 value class StorageId(val value: Long)
 
+// WebDAV detail-row id + plugin storage-contribution ids (mirror the Rust
+// `WebdavStorageId` / `PluginId` / `PluginStorageId` newtypes). Rust uses
+// `#[serde(transparent)]`, so these serialize as bare JSON numbers / strings.
+@Serializable
+@JvmInline
+value class WebdavStorageId(val value: Long)
+
+@Serializable
+@JvmInline
+value class PluginId(val id: String)
+
+@Serializable
+@JvmInline
+value class PluginStorageId(val id: String)
+
 // ============================================================================
 // Enums
 // ============================================================================
@@ -44,8 +59,8 @@ value class StorageId(val value: Long)
 @Serializable
 enum class PlayMode { SINGLE, SINGLE_LOOP, LIST, LIST_LOOP }
 
-@Serializable
-enum class StorageType { LOCAL, WEBDAV, ONE_DRIVE }
+// `StorageType` is gone — replaced by `StorageHandle`, which carries the kind
+// AND the kind-specific id. Surfaced on `Storage.handle`.
 
 @Serializable
 enum class StorageEntryType { FOLDER, MUSIC, IMAGE, LYRIC, OTHER }
@@ -74,6 +89,29 @@ data class StorageEntryLoc(
     val storageId: StorageId,
     val path: String,
 )
+
+// Parametric storage descriptor — the `kind` tag matches the Rust enum's
+// `#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]`; the
+// per-variant fields are camelCase.
+@Serializable
+sealed class StorageHandle {
+    @Serializable
+    @SerialName("LOCAL")
+    data object Local : StorageHandle()
+
+    @Serializable
+    @SerialName("WEBDAV")
+    data class Webdav(
+        @SerialName("webdavStorageId") val webdavStorageId: WebdavStorageId,
+    ) : StorageHandle()
+
+    @Serializable
+    @SerialName("PLUGIN")
+    data class Plugin(
+        @SerialName("pluginId") val pluginId: PluginId,
+        @SerialName("pluginStorageId") val pluginStorageId: PluginStorageId,
+    ) : StorageHandle()
+}
 
 @Serializable
 sealed class DataSourceKey {
@@ -172,13 +210,12 @@ data class Playlist(
 @Serializable
 data class Storage(
     val id: StorageId,
-    val addr: String,
+    val handle: StorageHandle,
     val alias: String,
-    val username: String,
-    val password: String,
-    val isAnonymous: Boolean,
-    val typ: StorageType,
     val musicCount: ULong,
+    val addr: String? = null,
+    val username: String? = null,
+    val isAnonymous: Boolean? = null,
 )
 
 @Serializable
@@ -264,14 +301,13 @@ data class ArgInitializeApp(
 )
 
 @Serializable
-data class ArgUpsertStorage(
+data class ArgUpsertWebdavStorage(
     var id: StorageId? = null,
     var addr: String = "",
     var alias: String = "",
     var username: String = "",
     var password: String = "",
     var isAnonymous: Boolean = false,
-    var typ: StorageType = StorageType.WEBDAV,
 )
 
 @Serializable
