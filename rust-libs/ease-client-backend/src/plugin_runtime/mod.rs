@@ -21,7 +21,8 @@
 //! [`EaseMusicPlugin`] in `plugin_jni::create_ease_plugin_engine`.
 
 pub mod plugin;
-pub mod storage_bridge;
 pub mod plugin_jni;
+pub mod secret_bridge;
+pub mod storage_bridge;
 
 pub use plugin::EaseMusicPlugin;
