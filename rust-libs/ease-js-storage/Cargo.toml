@@ -1,0 +1,23 @@
+[package]
+name = "ease-js-storage"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "StorageBackend impl backed by a JS storage-provider plugin (via ease-tur-rpc)."
+
+[dependencies]
+ease-remote-storage = { path = "../ease-remote-storage" }
+ease-tur-rpc = { path = "../ease-tur-rpc" }
+tokio = { version = "1", features = ["sync", "rt"] }
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-channel = "2.5"
+futures-util = "0.3"
+tracing = "0.1"
+
+[dev-dependencies]
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "0814aa57e9369d3f8a4298cfbb32c3d96cb14c28" }
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "0814aa57e9369d3f8a4298cfbb32c3d96cb14c28" }
+boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "6ef5370c1cff770c51f3e4f8600590f11d66eeaf" }
+ease-client-tokio = { path = "../ease-client-tokio" }

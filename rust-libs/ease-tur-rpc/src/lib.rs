@@ -220,12 +220,14 @@ impl Plugin for TurRpcPlugin {
 // ---------------------------------------------------------------------------
 
 /// Send-able handle for invoking JS handlers and opening byte streams. Obtain
-/// via [`RpcClient::of`].
+/// via [`RpcClient::of`]. Cheaply cloneable so multiple backend tasks can share
+/// one (id counters are shared via `Arc`).
+#[derive(Clone)]
 pub struct RpcClient {
     tx: mpsc::Sender<RpcRequest>,
     streams: StreamTable,
-    next_req_id: AtomicU64,
-    next_stream_id: AtomicU64,
+    next_req_id: Arc<AtomicU64>,
+    next_stream_id: Arc<AtomicU64>,
 }
 
 impl RpcClient {
@@ -253,8 +255,8 @@ impl RpcClient {
         Ok(RpcClient {
             tx: sender.0.clone(),
             streams: inner.streams.clone(),
-            next_req_id: AtomicU64::new(1),
-            next_stream_id: AtomicU64::new(1),
+            next_req_id: Arc::new(AtomicU64::new(1)),
+            next_stream_id: Arc::new(AtomicU64::new(1)),
         })
     }
 
