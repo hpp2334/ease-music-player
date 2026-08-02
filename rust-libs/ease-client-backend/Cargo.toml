@@ -43,16 +43,19 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ 0814aa5).
+# tur engine integration (https://github.com/hpp2334/tur @ ef01200).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
 # bidirectional event bus, streaming HTTP (requestStream), numeric font
-# weight, and CompositedTransformTarget/Follower for the Play Counts range
-# Selector — engine impl + @tur-ng/std. All crates live in the same repo;
-# cargo clones once and resolves their internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "0814aa57e9369d3f8a4298cfbb32c3d96cb14c28" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "0814aa57e9369d3f8a4298cfbb32c3d96cb14c28" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "0814aa57e9369d3f8a4298cfbb32c3d96cb14c28" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "0814aa57e9369d3f8a4298cfbb32c3d96cb14c28" }
+# weight, CompositedTransformTarget/Follower for the Play Counts range
+# Selector — engine impl + @tur-ng/std — AND the "drop tokio from engine
+# core" refactor: tur-async/tur-engine are tokio-free, so the embedder
+# provides a tokio Handle to NativeHttp (registered on the runtime builder).
+# All crates live in the same repo; cargo clones once and resolves their
+# internal path deps against the checkout.
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
 # compiles against.

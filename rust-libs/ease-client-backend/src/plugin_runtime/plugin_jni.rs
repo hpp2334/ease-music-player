@@ -159,12 +159,18 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
 ) -> tur_android::jlong {
     use tur_animation::TurAnimationPlugin;
     use tur_engine::{TurClipboardPlugin, TurStdPlugin};
-    use tur_net_native::TurNetPlugin;
+    use tur_net_native::{Http, NativeHttp, TurNetPlugin};
 
     use crate::plugin_runtime::EaseMusicPlugin;
 
     tur_android::ops::create_runtime(&mut env, context, |builder| {
+        // tur's engine core is tokio-free (since the drop-tokio refactor); the
+        // embedder must hand NativeHttp a Handle onto a runtime it owns + keeps
+        // alive for the engine's lifetime. We use the shared ease-client-tokio
+        // runtime (same one the backend + JsStorageBackend spawn onto).
+        let handle = ease_client_tokio::tokio_runtime().handle().clone();
         builder
+            .capability(Http::new(NativeHttp::new(handle)))
             .plugin(TurStdPlugin)
             .plugin(TurAnimationPlugin)
             .plugin(TurClipboardPlugin)
