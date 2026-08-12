@@ -28,6 +28,16 @@ object EasePluginBridge {
     @JvmStatic
     external fun createRuntime(context: Context): Long
 
+    /**
+     * Connect the headless service instance's event bus to ease-tur-rpc and
+     * stash the resulting `Send` `RpcClient` into the global backend context.
+     * Call once, on the instance's own (JNI) thread, after
+     * `createHeadlessInstance` + `loadModule(plugin.js)` so the JS dispatcher
+     * + provider handlers are registered. Returns `true` on success.
+     */
+    @JvmStatic
+    external fun wireServiceRpc(instanceHandle: Long): Boolean
+
     private var cached: TurRuntime? = null
 
     /**

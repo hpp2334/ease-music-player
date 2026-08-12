@@ -44,12 +44,14 @@ private val pluginsPaddingX = 24.dp
  * Generic plugin-view page. Looks up the plugin's `main` JS source from
  * the app's `assets/plugins/<pluginId>/` directory and renders it via a
  * [TurView]. The plugin JS owns all view logic and data access via the
- * `ease:storage` and `tur:std` modules — the host stays decoupled from
- * any plugin's biz logic.
+ * `ease` and `tur:std` modules — the host stays decoupled from any
+ * plugin's biz logic.
  *
- * `pluginId` selects the asset subdirectory; `viewId` is currently not
- * branched on at the host level (the plugin JS itself can route between
- * its own declared views).
+ * `pluginId` selects the asset subdirectory AND is stamped into the
+ * instance's per-instance data slot so `ease:*` bridge fns resolve the
+ * calling plugin from Rust; `viewId` is currently not branched on at the
+ * host level (the plugin JS itself can route between its own declared
+ * views).
  */
 @Composable
 fun TurPluginPage(
@@ -131,6 +133,7 @@ fun TurPluginPage(
             else -> TurView(
                 runtime = EasePluginBridge.runtime(context),
                 js = jsSource!!,
+                pluginId = pluginId,
                 modifier = Modifier.fillMaxSize(),
             )
         }

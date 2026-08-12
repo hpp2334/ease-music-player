@@ -6,8 +6,8 @@
 //
 // Each `music:play` event appends one row (the Kotlin `PluginRepository`
 // does the append on the host side). This module reads the rows back via
-// `ease:storage.multiGetAllMulti`, aggregates per musicId in JS, and renders
-// a sorted list with a time-range selector.
+// `storage.multiGetAllMulti` from the unified `ease` module, aggregates
+// per musicId in JS, and renders a sorted list with a time-range selector.
 //
 // Reactivity note: a tur `LazyList` only invokes its `builder` when an item
 // is freshly MOUNTED — it never rebuilds an already-mounted item when the
@@ -48,10 +48,8 @@ import {
     get,
 } from "tur:std";
 import type { Source, Readable, Element } from "tur:core";
-import * as Storage from "ease:storage";
+import { storage as Storage } from "ease";
 import { createSelector } from "./ui/selector";
-
-const PLUGIN_ID = "com.ease.playcount";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -153,7 +151,7 @@ function refresh(): void {
     try {
         const range = RANGES[get(selectedRange$)];
         const keys = dateKeysForRange(range);
-        const grouped = Storage.multiGetAllMulti(PLUGIN_ID, keys);
+        const grouped = Storage.multiGetAllMulti(keys);
 
         const counts = new Map<string, PlayCountEntry>();
         for (const entry of grouped) {

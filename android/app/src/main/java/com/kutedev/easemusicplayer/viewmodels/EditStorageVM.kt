@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.BridgeMethods
+import com.kutedev.easemusicplayer.singleton.PluginRepository
+import com.kutedev.easemusicplayer.singleton.StorageProvider
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import com.kutedev.easemusicplayer.singleton.ToastRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,6 +21,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.kutedev.easemusicplayer.singleton.types.ArgUpsertWebdavStorage
 import com.kutedev.easemusicplayer.singleton.types.StorageConnectionTestResult
+import com.kutedev.easemusicplayer.singleton.types.StorageHandle
 import com.kutedev.easemusicplayer.singleton.types.StorageId
 import javax.inject.Inject
 
@@ -50,6 +53,7 @@ private fun defaultArgUpsertWebdavStorage(): ArgUpsertWebdavStorage {
 class EditStorageVM @Inject constructor(
     private val bridge: Bridge,
     private val storageRepository: StorageRepository,
+    private val pluginRepository: PluginRepository,
     private val toastRepository: ToastRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -62,13 +66,23 @@ class EditStorageVM @Inject constructor(
     private val _removeModalOpen = MutableStateFlow(false)
     private val _testResult = MutableStateFlow(StorageConnectionTestResult.NONE)
     private var _testJob: Job? = null
+    // True when editing an existing JS-plugin storage. In create mode the
+    // type is chosen via the UI chooser, so this only reflects the loaded
+    // storage's kind.
+    private val _pluginMode = MutableStateFlow(false)
 
     val form = _form.asStateFlow()
     val musicCount = _musicCount.asStateFlow()
     val title = _title.asStateFlow()
     val validated = _validated.asStateFlow()
+    val pluginMode = _pluginMode.asStateFlow()
+    /** Discovered plugin storage providers (drives the create-mode chooser). */
+    val storageProviders = pluginRepository.storageProviders
 
     val removeModalOpen = _removeModalOpen.asStateFlow()
+    /** Fires when a JS plugin OAuth exchange mints a new storage row.
+     *  `EditStoragesPage` collects this to pop back from the setup form. */
+    val pluginConnectedEvent = storageRepository.pluginConnectedEvent
     val isCreated = form.map { form -> form.id == null }
         .stateIn(viewModelScope, SharingStarted.Lazily, true)
     val testResult = _testResult.asStateFlow()
@@ -88,6 +102,8 @@ class EditStorageVM @Inject constructor(
             storageRepository.storages.value.find { v -> v.id == StorageId(id) }
         }
         if (storage != null) {
+            val isPlugin = storage.handle is StorageHandle.Plugin
+            _pluginMode.value = isPlugin
             // Password is write-only: blank on edit means "keep the existing
             // secret" (the backend rotates only when a non-empty value is sent).
             _form.value = ArgUpsertWebdavStorage(
@@ -100,6 +116,11 @@ class EditStorageVM @Inject constructor(
             )
             _title.value = VImportStorageEntry(storage).name
             _musicCount.value = storage.musicCount
+        }
+
+        // Discover plugin storage providers for the create-mode chooser.
+        viewModelScope.launch {
+            pluginRepository.scanStorageProviders()
         }
     }
 
@@ -177,7 +198,11 @@ class EditStorageVM @Inject constructor(
 
         if (id != null) {
             viewModelScope.launch {
-                storageRepository.remove(id)
+                if (_pluginMode.value) {
+                    storageRepository.pluginRemoveInstance(id)
+                } else {
+                    storageRepository.remove(id)
+                }
             }
         }
     }

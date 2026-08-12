@@ -19,6 +19,7 @@ import com.kutedev.easemusicplayer.singleton.PermissionRepository
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
+import com.kutedev.easemusicplayer.singleton.PluginOAuthState
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
@@ -36,6 +37,9 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var playerRepository: PlayerRepository
     @Inject lateinit var permissionRepository: PermissionRepository
     @Inject lateinit var pluginRepository: com.kutedev.easemusicplayer.singleton.PluginRepository
+    @Inject lateinit var pluginOAuthState: PluginOAuthState
+    @Inject lateinit var oauthHandler: com.kutedev.easemusicplayer.turintegration.OauthHandler
+    @Inject lateinit var storageHandler: com.kutedev.easemusicplayer.turintegration.StorageHandler
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,6 +47,11 @@ class MainActivity : ComponentActivity() {
 
         startService(Intent(this, KeepBackendService::class.java))
         bridge.initialize();
+        // Wire the `ease:oauth` + `ease:context` Rust→Kotlin upcall targets
+        // so plugin views can trigger OAuth (`ease:oauth.start`) and the
+        // edit view can disconnect (`ease:context.disconnect`).
+        com.kutedev.easemusicplayer.turintegration.EaseOauthHost.install(oauthHandler)
+        com.kutedev.easemusicplayer.turintegration.EaseStorageHost.install(storageHandler)
         setupExceptionHandler()
 
         val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -113,9 +122,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        // OneDrive OAuth redirect (`easem://oauth2redirect?code=...`). The core
-        // OneDrive storage kind was removed (it is now a JS plugin provider);
-        // the plugin will handle its own OAuth exchange in a later stage.
+        // OneDrive (and other JS plugin) OAuth redirect, e.g.
+        // `easem://oauth2redirect/?code=...`. Take the pending provider/alias
+        // stashed when the browser was launched, exchange the code via the
+        // plugin, and reload the storage list.
+        val data = intent?.data
+        val code = data?.getQueryParameter("code")
+        if (code.isNullOrBlank()) return
+        val pending = pluginOAuthState.take() ?: return
+        lifecycleScope.launch {
+            val id = storageRepository.pluginOAuthExchange(pending.first, code, pending.second)
+            if (id != null) {
+                bridge.logRaw("info", "plugin OAuth connected: provider=${pending.first} id=$id")
+            } else {
+                bridge.logRaw("error", "plugin OAuth exchange failed: provider=${pending.first}")
+            }
+        }
     }
 
     private fun ensurePostNotificationsPermission() {

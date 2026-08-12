@@ -18,7 +18,7 @@ module.exports = {
     externalsType: "module",
     externals: [
         /^tur:/,
-        /^ease:/,
+        "ease",
     ],
     optimization: {
         minimize: false,

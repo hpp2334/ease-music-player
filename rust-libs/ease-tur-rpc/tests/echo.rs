@@ -1,22 +1,15 @@
-//! Round-trip spike for `ease-tur-rpc`: proves the host can call a JS handler
-//! (sync and async) and await its result across threads, and that handler
-//! errors propagate. This is the de-risk gate for the JS storage-provider
-//! (OneDrive) work — it exercises the exact production path: a caller on a
-//! tokio thread awaits a result computed in the JS realm on the instance
-//! thread, mediated by the event bus + id-correlation.
-//!
-//! Tests are plain `#[test]` (NOT `#[tokio::test]`): tur's executor panics if
-//! `run_frame()` is driven from inside a tokio context ("cannot start a runtime
-//! from within a runtime"). So the instance thread (test thread) pumps frames
-//! with no tokio, and the caller side runs on a dedicated tokio runtime on a
-//! worker thread.
+//! Round-trip tests for `ease-tur-rpc`: the host (on a tokio thread) calls a
+//! JS handler (sync / async / throwing) and awaits its result, mediated by the
+//! tur event bus + id correlation. Exercises the production path end-to-end
+//! (EventBusHandle.emit_to_js → worker flush → JS dispatcher → reply →
+//! MainMsg::EventBusToHost → on_bus_event router → oneshot), just with the
+//! test harness (`TurTestApp`) driving frames instead of an Android FrameLoop.
 
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
-use boa_engine::context::time::StdClock;
 use ease_tur_rpc::{RpcClient, RpcError, StreamChunk, TurRpcPlugin};
-use tur_engine::{TurApp, TurRuntime, TurStdPlugin};
-use tur_native::NativeFontLoader;
+use tur_engine::core::plugin::Plugin;
+use tur_integration_tests::TurTestApp;
 
 const RPC_JS: &str = r#"
 import { registerHandler } from "tur:rpc";
@@ -34,26 +27,22 @@ registerHandler("asyncEcho", async (args) => {
 registerHandler("fail", () => { throw new Error("boom"); });
 "#;
 
-fn build_runtime() -> Rc<TurRuntime> {
-    TurRuntime::builder()
-        .font_loader(Rc::new(NativeFontLoader::new()))
-        .clock(Rc::new(StdClock::new()))
-        .plugin(TurStdPlugin)
-        .plugin(TurRpcPlugin)
-        .build()
-        .expect("runtime build")
+fn build_app() -> TurTestApp {
+    let extra: Vec<Box<dyn Plugin>> = vec![Box::new(TurRpcPlugin)];
+    TurTestApp::new_with_extra_plugins(200.0, 100.0, extra).expect("test app")
 }
 
-/// Spawn `client.call(...)` on a dedicated tokio runtime (worker thread); pump
-/// frames on this thread until it resolves. Mirrors production: caller on
-/// tokio, JS on the instance thread.
+/// Run `client.call(op, args)` on a dedicated tokio runtime (worker thread)
+/// while the test thread pumps frames via `wait_for`. Mirrors production:
+/// caller on tokio, JS on the worker thread.
 fn call_with_pump(
-    app: &Rc<TurApp>,
+    app: &mut TurTestApp,
     client: RpcClient,
     op: &str,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, RpcError> {
-    let (done_tx, done_rx) = std::sync::mpsc::channel::<Result<serde_json::Value, RpcError>>();
+    let slot: Arc<Mutex<Option<Result<serde_json::Value, RpcError>>>> = Arc::new(Mutex::new(None));
+    let slot_for_task = slot.clone();
     let op = op.to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -61,50 +50,35 @@ fn call_with_pump(
         .build()
         .expect("tokio runtime");
     rt.spawn(async move {
-        let _ = done_tx.send(client.call(&op, args).await);
+        let r = client.call(&op, args).await;
+        *slot_for_task.lock().unwrap() = Some(r);
     });
 
-    let mut tries = 0u32;
-    let result = loop {
-        let _ = app.run_frame();
-        match done_rx.try_recv() {
-            Ok(r) => break r,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                tries += 1;
-                if tries > 50_000 {
-                    panic!("rpc round-trip timed out after {tries} frames");
-                }
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                panic!("caller task died before sending a result")
-            }
-        }
-    };
+    app.wait_for(|_| slot.lock().unwrap().is_some());
+    let result = slot.lock().unwrap().take().expect("result settled");
     drop(rt);
     result
 }
 
 #[test]
 fn sync_handler_round_trip() {
-    let runtime = build_runtime();
-    let app = runtime.create_headless_app((0.0, 0.0)).expect("headless app");
-    let client = RpcClient::of(&app).expect("rpc client");
-    app.load_module(RPC_JS).expect("load js");
+    let mut app = build_app();
+    let client = RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(RPC_JS).expect("load js");
 
-    let result = call_with_pump(&app, client, "echo", serde_json::json!({ "value": 42 }))
+    let result = call_with_pump(&mut app, client, "echo", serde_json::json!({ "value": 42 }))
         .expect("call ok");
     assert_eq!(result, serde_json::json!({ "value": 42 }));
 }
 
 #[test]
 fn async_handler_round_trip() {
-    let runtime = build_runtime();
-    let app = runtime.create_headless_app((0.0, 0.0)).expect("headless app");
-    let client = RpcClient::of(&app).expect("rpc client");
-    app.load_module(RPC_JS).expect("load js");
+    let mut app = build_app();
+    let client = RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(RPC_JS).expect("load js");
 
     let result = call_with_pump(
-        &app,
+        &mut app,
         client,
         "asyncEcho",
         serde_json::json!([1, "two", { "three": 3 }]),
@@ -115,12 +89,11 @@ fn async_handler_round_trip() {
 
 #[test]
 fn handler_error_propagates() {
-    let runtime = build_runtime();
-    let app = runtime.create_headless_app((0.0, 0.0)).expect("headless app");
-    let client = RpcClient::of(&app).expect("rpc client");
-    app.load_module(RPC_JS).expect("load js");
+    let mut app = build_app();
+    let client = RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(RPC_JS).expect("load js");
 
-    let err = call_with_pump(&app, client, "fail", serde_json::json!(null))
+    let err = call_with_pump(&mut app, client, "fail", serde_json::json!(null))
         .expect_err("handler should have thrown");
     match err {
         RpcError::Handler(msg) => assert!(msg.contains("boom"), "got: {msg}"),
@@ -130,12 +103,11 @@ fn handler_error_propagates() {
 
 #[test]
 fn unknown_op_returns_error() {
-    let runtime = build_runtime();
-    let app = runtime.create_headless_app((0.0, 0.0)).expect("headless app");
-    let client = RpcClient::of(&app).expect("rpc client");
-    app.load_module(RPC_JS).expect("load js");
+    let mut app = build_app();
+    let client = RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(RPC_JS).expect("load js");
 
-    let err = call_with_pump(&app, client, "nope", serde_json::json!(null))
+    let err = call_with_pump(&mut app, client, "nope", serde_json::json!(null))
         .expect_err("unknown op should error");
     match err {
         RpcError::Handler(msg) => assert!(msg.contains("no handler"), "got: {msg}"),
@@ -166,15 +138,17 @@ registerHandler("failing", (args) => {
 });
 "#;
 
-/// Open a stream on a tokio worker, collect chunks until End/Error on this
-/// thread while pumping frames.
+/// Open a stream on a tokio worker, collect chunks until End/Error, pumping
+/// frames on the test thread meanwhile.
 fn stream_with_pump(
-    app: &Rc<TurApp>,
+    app: &mut TurTestApp,
     client: RpcClient,
     op: &str,
     args: serde_json::Value,
 ) -> (serde_json::Value, Result<Vec<u8>, String>) {
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let slot: Arc<Mutex<Option<(serde_json::Value, Result<Vec<u8>, String>)>>> =
+        Arc::new(Mutex::new(None));
+    let slot_for_task = slot.clone();
     let op = op.to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -185,7 +159,7 @@ fn stream_with_pump(
         let (meta, mut rx) = match client.open_stream(&op, args).await {
             Ok(v) => v,
             Err(e) => {
-                let _ = done_tx.send((serde_json::Value::Null, Err(format!("{e:?}"))));
+                *slot_for_task.lock().unwrap() = Some((serde_json::Value::Null, Err(format!("{e:?}"))));
                 return;
             }
         };
@@ -198,37 +172,22 @@ fn stream_with_pump(
                 Some(StreamChunk::Error(m)) => break Err(m),
             }
         };
-        let _ = done_tx.send((meta, outcome));
+        *slot_for_task.lock().unwrap() = Some((meta, outcome));
     });
 
-    let mut tries = 0u32;
-    let result = loop {
-        let _ = app.run_frame();
-        match done_rx.try_recv() {
-            Ok(r) => break r,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                tries += 1;
-                if tries > 50_000 {
-                    panic!("stream round-trip timed out after {tries} frames");
-                }
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                panic!("stream task died before sending a result")
-            }
-        }
-    };
+    app.wait_for(|_| slot.lock().unwrap().is_some());
+    let result = slot.lock().unwrap().take().expect("stream settled");
     drop(rt);
     result
 }
 
 #[test]
 fn open_stream_delivers_chunks_until_end() {
-    let runtime = build_runtime();
-    let app = runtime.create_headless_app((0.0, 0.0)).expect("headless app");
-    let client = RpcClient::of(&app).expect("rpc client");
-    app.load_module(STREAM_JS).expect("load js");
+    let mut app = build_app();
+    let client = RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(STREAM_JS).expect("load js");
 
-    let (meta, outcome) = stream_with_pump(&app, client, "blob", serde_json::json!({}));
+    let (meta, outcome) = stream_with_pump(&mut app, client, "blob", serde_json::json!({}));
     let buf = outcome.expect("stream should complete cleanly");
     assert_eq!(meta, serde_json::json!({ "size": 6 }));
     assert_eq!(&buf, b"Hello!");
@@ -236,12 +195,11 @@ fn open_stream_delivers_chunks_until_end() {
 
 #[test]
 fn open_stream_propagates_error() {
-    let runtime = build_runtime();
-    let app = runtime.create_headless_app((0.0, 0.0)).expect("headless app");
-    let client = RpcClient::of(&app).expect("rpc client");
-    app.load_module(STREAM_JS).expect("load js");
+    let mut app = build_app();
+    let client = RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(STREAM_JS).expect("load js");
 
-    let (_meta, outcome) = stream_with_pump(&app, client, "failing", serde_json::json!({}));
+    let (_meta, outcome) = stream_with_pump(&mut app, client, "failing", serde_json::json!({}));
     let err = outcome.expect_err("stream should have errored");
     assert!(err.contains("boom"), "got: {err}");
 }

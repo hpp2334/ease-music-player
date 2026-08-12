@@ -4,12 +4,14 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "rspack build",
+        "build": "rspack build && cp manifest.json ../../android/app/src/main/assets/plugins/com.ease.onedrive/manifest.json",
         "typecheck": "tsc --noEmit"
     },
     "devDependencies": {
         "@rspack/cli": "^1.2.0",
         "@rspack/core": "^1.2.0",
+        "@tur-ng/net": "^0.0.2",
+        "@tur-ng/std": "^0.0.5",
         "typescript": "^5.7.0"
     }
 }
