@@ -245,15 +245,17 @@ fun DashboardSubpage(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Title(title = stringResource(id = R.string.dashboard_devices))
-            if (storageItems.isNotEmpty()) {
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Small,
-                    buttonType = EaseIconButtonType.Primary,
-                    painter = painterResource(id = R.drawable.icon_plus),
-                    onClick = {
-                        navController.navigate(RouteCreateStorage())
-                    }
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (storageItems.isNotEmpty()) {
+                    EaseIconButton(
+                        sizeType = EaseIconButtonSize.Small,
+                        buttonType = EaseIconButtonType.Primary,
+                        painter = painterResource(id = R.drawable.icon_plus),
+                        onClick = {
+                            navController.navigate(RouteCreateStorage())
+                        }
+                    )
+                }
             }
         }
         DevicesBlock(storageItems)

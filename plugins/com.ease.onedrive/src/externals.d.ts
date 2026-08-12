@@ -1,34 +1,11 @@
-// Ambient declarations for the host-provided JS modules this plugin imports.
-// Resolved at runtime by the tur engine (rspack treats them as externals).
-
-declare module "tur:net" {
-    export interface RequestOptions {
-        url: string;
-        method?: string;
-        headers?: Record<string, string>;
-        body?: string | ArrayBuffer;
-        responseType?: "text" | "bytes";
-        username?: string;
-        password?: string;
-    }
-    export interface Response {
-        ok: boolean;
-        status: number;
-        statusText: string;
-        headers: Record<string, string>;
-        bodyText?: string;
-        bodyBytes?: ArrayBuffer;
-    }
-    export interface StreamResponse {
-        ok: boolean;
-        status: number;
-        statusText: string;
-        headers: Record<string, string>;
-        body: AsyncIterable<Uint8Array>;
-    }
-    export function request(opts: RequestOptions): Promise<Response>;
-    export function requestStream(opts: RequestOptions): Promise<StreamResponse>;
-}
+// Ambient declarations for host-provided JS modules that are NOT covered by
+// the published `@tur-ng/*` packages. `tur:std` / `tur:net` types come from
+// the tsconfig `paths` mapping to `@tur-ng/std` / `@tur-ng/net`; rspack leaves
+// all `tur:*` / `ease` imports as externals for the engine to resolve.
+//
+// The unified `ease` module (storage / secret / oauth / themes namespaces)
+// is declared in `plugins/infra/ease.d.ts` at the repo root; tsconfig
+// includes it via the `include` glob.
 
 declare module "tur:rpc" {
     export function registerHandler(op: string, fn: (args: any) => any): void;

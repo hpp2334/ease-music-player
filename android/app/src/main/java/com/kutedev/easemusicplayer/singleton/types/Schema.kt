@@ -311,6 +311,22 @@ data class ArgUpsertWebdavStorage(
 )
 
 @Serializable
+data class ArgStoragePluginProvider(val provider: String)
+
+@Serializable
+data class ArgStoragePluginOauthExchange(
+    val provider: String,
+    val code: String,
+    val alias: String? = null,
+)
+
+@Serializable
+data class PluginOauthUrl(val url: String)
+
+@Serializable
+data class PluginOauthExchangeResult(val storageId: StorageId)
+
+@Serializable
 data class ArgUpdatePlaylist(
     val id: PlaylistId,
     val title: String,

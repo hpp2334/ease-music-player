@@ -6,7 +6,7 @@ publish = false
 description = "Private tur plugin wrapping the event bus into a typed request/response RPC (host↔JS), for JS storage-provider plugins."
 
 [dependencies]
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
 tokio = { version = "1", features = ["sync"] }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
@@ -15,6 +15,7 @@ thiserror = "1"
 tracing = "0.1"
 
 [dev-dependencies]
-tur-native = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
+tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "6ef5370c1cff770c51f3e4f8600590f11d66eeaf" }

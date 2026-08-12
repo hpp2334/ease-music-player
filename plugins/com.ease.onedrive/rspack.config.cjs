@@ -2,10 +2,13 @@
 module.exports = {
     mode: "production",
     target: ["web", "es2020"],
-    entry: "./src/index.ts",
+    entry: {
+        plugin: "./src/index.ts",
+        setup: "./src/setup.ts",
+    },
     output: {
         path: __dirname + "/../../android/app/src/main/assets/plugins/com.ease.onedrive",
-        filename: "plugin.js",
+        filename: "[name].js",
         library: { type: "module" },
         clean: true,
     },
@@ -18,7 +21,7 @@ module.exports = {
     externalsType: "module",
     externals: [
         /^tur:/,
-        /^ease:/,
+        "ease",
     ],
     optimization: {
         minimize: false,

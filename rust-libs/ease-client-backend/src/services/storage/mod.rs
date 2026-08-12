@@ -10,7 +10,17 @@ use ease_client_schema::{
     StorageId, StorageType, WebdavStorageId,
 };
 use ease_remote_storage::{BuildWebdavArg, LocalBackend, StorageBackend, StreamFile, Webdav};
+use ease_js_storage::JsStorageBackend;
 use tracing::instrument;
+
+/// JSON shape the OneDrive plugin stores under
+/// `plugin_kv_single(plugin_id, "storage:<plugin_storage_id>")`:
+/// `{ alias, secretId }`. Only `alias` is read here (for the storage list).
+#[derive(serde::Deserialize)]
+struct PluginStorageMeta {
+    #[serde(default)]
+    alias: String,
+}
 
 use crate::{
     ctx::BackendContext,
@@ -117,9 +127,30 @@ pub async fn get_storage_backend(
             build_webdav_backend(w.addr, w.username, password, w.is_anonymous != 0)
         }
         Some(StorageType::Plugin) => {
-            return Err(BError::CustomError {
-                message: "plugin storage backends are not yet wired".into(),
-            });
+            // A plugin storage references a JS service plugin instance. The
+            // provider is the prefix of `plugin_storage_id` (e.g. `onedrive`
+            // in `onedrive:<uuid>`); the full id is the `instance` carried in
+            // every RPC. The JS handlers live under `<provider>:<op>`.
+            let plugin_storage_id = row.plugin_storage_id.clone().unwrap_or_default();
+            let (provider, instance) = match plugin_storage_id.split_once(':') {
+                Some((p, rest)) if !p.is_empty() && !rest.is_empty() => (p.to_string(), plugin_storage_id.clone()),
+                _ => {
+                    return Err(BError::CustomError {
+                        message: format!(
+                            "plugin storage has malformed plugin_storage_id: {plugin_storage_id:?}"
+                        ),
+                    });
+                }
+            };
+            let rpc = cx.service_rpc().ok_or_else(|| BError::CustomError {
+                message: "plugin storage requested but service RPC is not wired (headless instance not up)".into(),
+            })?;
+            Arc::new(JsStorageBackend::new(
+                rpc,
+                provider,
+                instance,
+                cx.tokio_handle(),
+            ))
         }
         None => return Ok(None),
     };
@@ -172,11 +203,22 @@ async fn build_storage_from_row(
             })
         }
         Some(StorageType::Plugin) => {
-            // Plugin alias display waits on the plugin runtime; surface the
-            // plugin_storage_id as a placeholder so the row is still visible.
+            // Display alias is stored by the plugin under
+            // `plugin_kv_single(plugin_id, "storage:<plugin_storage_id>")` as
+            // JSON `{ alias, secretId }` (written during OAuth exchange).
             let plugin_id = row.plugin_id.unwrap_or_default();
             let plugin_storage_id = row.plugin_storage_id.unwrap_or_default();
-            let alias = plugin_storage_id.clone();
+            let kv_key = format!("storage:{plugin_storage_id}");
+            let alias = cx
+                .database_server()
+                .plugin_kv_single_get(&plugin_id, &kv_key)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|v| serde_json::from_str::<PluginStorageMeta>(&v).ok())
+                .map(|m| m.alias)
+                .filter(|a| !a.is_empty())
+                .unwrap_or_else(|| plugin_storage_id.clone());
             Ok(Storage {
                 id,
                 handle: StorageHandle::Plugin {

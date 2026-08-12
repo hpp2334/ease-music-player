@@ -1,4 +1,4 @@
-//! `ease:storage` JS bridge — synchronous KV access for plugins.
+//! `ease.storage` JS bridge — synchronous KV access for plugins.
 //!
 //! All operations run via `tokio_runtime().block_on(...)` because tur's
 //! boa engine is single-threaded and `!Send`. Each call blocks the
@@ -6,47 +6,63 @@
 //! variants use indexed `IN (...)` queries so the per-call cost is
 //! independent of the key count.
 //!
-//! The bridge is registered as a **host module** (ctx-free) because
-//! none of the fns need tur's `TurJsContext` — they all reach the
-//! backend via the [`crate::BACKEND_CONTEXT`] OnceLock.
+//! Bridge fns are **ctx-bound** (`FnEntry`): the engine prepends the
+//! bound `TurInstanceContext` to `args`, and the first line of every fn
+//! is `let js_ctx = extract_js_ctx(args)?;`. The calling plugin's
+//! identity comes from the per-instance data slot
+//! (`js_ctx.data::<PluginId>()`), stamped at build time by the Kotlin
+//! host — never from a JS argument.
 
 use boa_engine::object::builtins::JsArray;
 use boa_engine::object::JsObject;
-use boa_engine::{js_string, JsArgs, JsError, JsNativeError, JsResult, JsValue, NativeFunction};
+use boa_engine::{js_string, JsArgs, JsError, JsNativeError, JsResult, JsValue};
 use ease_client_schema::PluginKvEntry;
+use tur_engine::core::js_runtime::helpers::{extract_js_ctx, FnEntry, Ptr};
 
 use crate::error::BResult;
+use crate::plugin_runtime::PluginId;
 
-const ARG_PLUGIN_ID: usize = 0;
-
-/// Build the export table for `ease:storage`. Returns
-/// `(name, NativeFunction, length)` tuples for `register_host_module`.
-pub fn build_host_fns() -> Vec<(&'static str, NativeFunction, usize)> {
+/// Build the `FnEntry` table for the `storage` namespace object. Each entry
+/// becomes a ctx-bound method (`extract_js_ctx(args)` reads identity from
+/// the per-instance data slot).
+pub fn build_fns() -> Vec<FnEntry> {
     vec![
         // ---- single-value (overwrite) ----
-        ("singleGet", NativeFunction::from_copy_closure(single_get), 2),
-        ("singleGetMulti", NativeFunction::from_copy_closure(single_get_multi), 2),
-        ("singleSet", NativeFunction::from_copy_closure(single_set), 3),
-        ("singleSetMulti", NativeFunction::from_copy_closure(single_set_multi), 2),
-        ("singleDelete", NativeFunction::from_copy_closure(single_delete), 2),
-        ("singleDeleteMulti", NativeFunction::from_copy_closure(single_delete_multi), 2),
+        ("singleGet", 1, single_get as Ptr),
+        ("singleGetMulti", 1, single_get_multi as Ptr),
+        ("singleSet", 2, single_set as Ptr),
+        ("singleSetMulti", 1, single_set_multi as Ptr),
+        ("singleDelete", 1, single_delete as Ptr),
+        ("singleDeleteMulti", 1, single_delete_multi as Ptr),
         // ---- multi-value (append) ----
-        ("multiAppend", NativeFunction::from_copy_closure(multi_append), 3),
-        ("multiAppendMulti", NativeFunction::from_copy_closure(multi_append_multi), 2),
-        ("multiGetAll", NativeFunction::from_copy_closure(multi_get_all), 2),
-        ("multiGetAllMulti", NativeFunction::from_copy_closure(multi_get_all_multi), 2),
-        ("multiCount", NativeFunction::from_copy_closure(multi_count), 2),
-        ("multiCountMulti", NativeFunction::from_copy_closure(multi_count_multi), 2),
-        ("multiDelete", NativeFunction::from_copy_closure(multi_delete), 2),
-        ("multiDeleteMulti", NativeFunction::from_copy_closure(multi_delete_multi), 2),
+        ("multiAppend", 2, multi_append as Ptr),
+        ("multiAppendMulti", 1, multi_append_multi as Ptr),
+        ("multiGetAll", 1, multi_get_all as Ptr),
+        ("multiGetAllMulti", 1, multi_get_all_multi as Ptr),
+        ("multiCount", 1, multi_count as Ptr),
+        ("multiCountMulti", 1, multi_count_multi as Ptr),
+        ("multiDelete", 1, multi_delete as Ptr),
+        ("multiDeleteMulti", 1, multi_delete_multi as Ptr),
         // ---- listing ----
-        ("listKeys", NativeFunction::from_copy_closure(list_keys), 2),
+        ("listKeys", 0, list_keys as Ptr),
     ]
 }
 
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+/// Pull the calling plugin's identity from the per-instance data slot.
+/// Errors with a clear message if the host forgot to stamp one at build
+/// time (e.g. a non-plugin test instance).
+fn plugin_id(args: &[JsValue]) -> JsResult<PluginId> {
+    let js_ctx = extract_js_ctx(args)?;
+    js_ctx.data::<PluginId>().ok_or_else(|| {
+        JsError::from(JsNativeError::typ().with_message(
+            "ease:storage: no plugin context bound to this instance",
+        ))
+    })
+}
 
 fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
     let v = args.get_or_undefined(idx);
@@ -178,11 +194,11 @@ fn db_clone() -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServ
 // ---------------------------------------------------------------------------
 
 fn single_get(_this: &JsValue, args: &[JsValue], _ctx: &mut boa_engine::Context) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_get(&plugin_id, &key).await
+        db.plugin_kv_single_get(pid.as_str(), &key).await
     });
     match run_blocking("singleGet", result)? {
         Some(value) => Ok(JsValue::from(js_string!(value.as_str()))),
@@ -195,11 +211,11 @@ fn single_get_multi(
     args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_get_multi(&plugin_id, keys).await
+        db.plugin_kv_single_get_multi(pid.as_str(), keys).await
     });
     let entries = run_blocking("singleGetMulti", result)?;
     let arr = JsArray::new(ctx)?;
@@ -211,12 +227,12 @@ fn single_get_multi(
 }
 
 fn single_set(_this: &JsValue, args: &[JsValue], _ctx: &mut boa_engine::Context) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let value = require_string(args, 2)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_set(&plugin_id, &key, &value).await
+        db.plugin_kv_single_set(pid.as_str(), &key, &value).await
     });
     run_blocking("singleSet", result)?;
     Ok(JsValue::undefined())
@@ -227,11 +243,11 @@ fn single_set_multi(
     args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let entries = read_entry_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_set_multi(&plugin_id, entries).await
+        db.plugin_kv_single_set_multi(pid.as_str(), entries).await
     });
     run_blocking("singleSetMulti", result)?;
     Ok(JsValue::undefined())
@@ -242,11 +258,11 @@ fn single_delete(
     args: &[JsValue],
     _ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_delete(&plugin_id, &key).await
+        db.plugin_kv_single_delete(pid.as_str(), &key).await
     });
     run_blocking("singleDelete", result)?;
     Ok(JsValue::undefined())
@@ -257,11 +273,11 @@ fn single_delete_multi(
     args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_delete_multi(&plugin_id, keys).await
+        db.plugin_kv_single_delete_multi(pid.as_str(), keys).await
     });
     run_blocking("singleDeleteMulti", result)?;
     Ok(JsValue::undefined())
@@ -276,12 +292,12 @@ fn multi_append(
     args: &[JsValue],
     _ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let value = require_string(args, 2)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_append(&plugin_id, &key, &value).await
+        db.plugin_kv_multi_append(pid.as_str(), &key, &value).await
     });
     run_blocking("multiAppend", result)?;
     Ok(JsValue::undefined())
@@ -292,11 +308,11 @@ fn multi_append_multi(
     args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let entries = read_entry_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_append_multi(&plugin_id, entries).await
+        db.plugin_kv_multi_append_multi(pid.as_str(), entries).await
     });
     run_blocking("multiAppendMulti", result)?;
     Ok(JsValue::undefined())
@@ -307,11 +323,11 @@ fn multi_get_all(
     args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_get_all(&plugin_id, &key).await
+        db.plugin_kv_multi_get_all(pid.as_str(), &key).await
     });
     let values = run_blocking("multiGetAll", result)?;
     let arr = JsArray::new(ctx)?;
@@ -326,11 +342,11 @@ fn multi_get_all_multi(
     args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_get_all_multi(&plugin_id, keys).await
+        db.plugin_kv_multi_get_all_multi(pid.as_str(), keys).await
     });
     let entries = run_blocking("multiGetAllMulti", result)?;
     let arr = JsArray::new(ctx)?;
@@ -346,11 +362,11 @@ fn multi_count(
     args: &[JsValue],
     _ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_count(&plugin_id, &key).await
+        db.plugin_kv_multi_count(pid.as_str(), &key).await
     });
     let count = run_blocking("multiCount", result)?;
     Ok(JsValue::from(count as f64))
@@ -361,11 +377,11 @@ fn multi_count_multi(
     args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_count_multi(&plugin_id, keys).await
+        db.plugin_kv_multi_count_multi(pid.as_str(), keys).await
     });
     let entries = run_blocking("multiCountMulti", result)?;
     let arr = JsArray::new(ctx)?;
@@ -381,11 +397,11 @@ fn multi_delete(
     args: &[JsValue],
     _ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_delete(&plugin_id, &key).await
+        db.plugin_kv_multi_delete(pid.as_str(), &key).await
     });
     run_blocking("multiDelete", result)?;
     Ok(JsValue::undefined())
@@ -396,11 +412,11 @@ fn multi_delete_multi(
     args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_delete_multi(&plugin_id, keys).await
+        db.plugin_kv_multi_delete_multi(pid.as_str(), keys).await
     });
     run_blocking("multiDeleteMulti", result)?;
     Ok(JsValue::undefined())
@@ -411,7 +427,7 @@ fn multi_delete_multi(
 // ---------------------------------------------------------------------------
 
 fn list_keys(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsResult<JsValue> {
-    let plugin_id = require_string(args, ARG_PLUGIN_ID)?;
+    let pid = plugin_id(args)?;
     let prefix_v = args.get_or_undefined(1);
     let prefix = if prefix_v.is_undefined() || prefix_v.is_null() {
         String::new()
@@ -427,7 +443,7 @@ fn list_keys(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -
     };
     let db = db_clone()?;
     let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_list_keys(&plugin_id, &prefix).await
+        db.plugin_kv_list_keys(pid.as_str(), &prefix).await
     });
     let entries = run_blocking("listKeys", result)?;
     let arr = JsArray::new(ctx)?;

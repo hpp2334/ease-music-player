@@ -24,21 +24,45 @@ class FrameLoop {
     /** Fired when a scheduled wake-up is due. [TurInstance] sets this to `pump`. */
     var onWake: (() -> Unit)? = null
 
+    /**
+     * Whether the engine's focused element is an editable text field, pushed
+     * from native via [onFocusChanged] (the engine emits a focus-change event
+     * each time the focused element / caret rect changes). Read by the
+     * Compose integration's per-frame IME sync ([onAfterPump]) to decide
+     * whether to raise the soft keyboard — without a JNI round-trip per frame.
+     */
+    var focusedIsEditable: Boolean = false
+        private set
+
     /** Optional callback fired after [onWake] in each wake-up. */
     var onAfterPump: (() -> Unit)? = null
 
-    /** Schedule a wake on the next display frame (Android `Choreographer`). */
+    /**
+     * Called from native (via JNI) when the engine's focused-element state
+     * changes. Stores the editable flag so [onAfterPump]'s IME sync can read
+     * it without a JNI round-trip per frame.
+     */
+    fun onFocusChanged(isEditable: Boolean) {
+        focusedIsEditable = isEditable
+    }
+
+    /** Schedule a wake on the next display frame (Android `Choreographer`).
+     *  Thread-safe: the engine's main-side channel waker fires this from the
+     *  worker thread, but `Choreographer.getInstance()` requires a Looper — so
+     *  marshal onto the main looper via [handler]. */
     fun scheduleVsync() {
-        if (frameCallback != null) return
-        val cb = object : Choreographer.FrameCallback {
-            override fun doFrame(frameTimeNanos: Long) {
-                frameCallback = null
-                onWake?.invoke()
-                onAfterPump?.invoke()
+        handler.post {
+            if (frameCallback != null) return@post
+            val cb = object : Choreographer.FrameCallback {
+                override fun doFrame(frameTimeNanos: Long) {
+                    frameCallback = null
+                    onWake?.invoke()
+                    onAfterPump?.invoke()
+                }
             }
+            frameCallback = cb
+            Choreographer.getInstance().postFrameCallback(cb)
         }
-        frameCallback = cb
-        Choreographer.getInstance().postFrameCallback(cb)
     }
 
     /** Schedule a wake [delayMs] milliseconds from now. */
@@ -53,11 +77,14 @@ class FrameLoop {
         handler.postDelayed(r, delayMs.coerceAtLeast(1))
     }
 
-    /** Cancel any pending wake-up (the engine went idle). */
+    /** Cancel any pending wake-up (the engine went idle). Thread-safe: marshal
+     *  the Choreographer access onto the main looper. */
     fun cancel() {
-        frameCallback?.let { Choreographer.getInstance().removeFrameCallback(it) }
-        frameCallback = null
-        delayedToken?.let { handler.removeCallbacks(it) }
-        delayedToken = null
+        handler.post {
+            frameCallback?.let { Choreographer.getInstance().removeFrameCallback(it) }
+            frameCallback = null
+            delayedToken?.let { handler.removeCallbacks(it) }
+            delayedToken = null
+        }
     }
 }

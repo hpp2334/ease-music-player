@@ -75,15 +75,6 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_focusedIsEditable(
-    _env: tur_android::JNIEnv,
-    _class: tur_android::JClass,
-    handle: tur_android::jlong,
-) -> tur_android::jboolean {
-    tur_android::ops::focused_is_editable(handle)
-}
-
-#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_pushIme(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
@@ -103,7 +94,17 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     tur_android::ops::destroy(handle)
 }
 
-/// `TurNative.createInstance(runtimeHandle, surface, w, h, dpr, frameLoop): long`
+/// `TurNative.createInstance(runtimeHandle, surface, w, h, dpr, frameLoop, pluginId, instance): long`
+///
+/// Spawns an isolated rendering instance for the given `pluginId`. The
+/// plugin id is stamped into the instance's per-instance data slot at
+/// build time (via `TurAppBuilder::instance_data`) so `ease:*` bridge fns
+/// can resolve the calling plugin via `extract_js_ctx` + `data::<PluginId>()`
+/// — without trusting a JS argument.
+///
+/// `instance` is the storage's `plugin_storage_id` for edit-mode views
+/// (stamped as [`PluginInstance::Some`]); pass an empty string for
+/// create-mode setup views (stamped as [`PluginInstance::None`]).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_createInstance(
     mut env: tur_android::JNIEnv,
@@ -114,7 +115,28 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     height: tur_android::jint,
     dpr: tur_android::jdouble,
     frame_loop: tur_android::JObject,
+    plugin_id: tur_android::JString,
+    instance: tur_android::JString,
 ) -> tur_android::jlong {
+    let pid: String = match env.get_string(&plugin_id) {
+        Ok(s) => s.into(),
+        Err(e) => {
+            tracing::error!("createInstance: get_string(plugin_id) failed: {e}");
+            return 0;
+        }
+    };
+    let instance_str: String = match env.get_string(&instance) {
+        Ok(s) => s.into(),
+        Err(e) => {
+            tracing::error!("createInstance: get_string(instance) failed: {e}");
+            return 0;
+        }
+    };
+    let instance_opt: Option<String> = if instance_str.is_empty() {
+        None
+    } else {
+        Some(instance_str)
+    };
     tur_android::ops::create_instance(
         &mut env,
         runtime_handle,
@@ -123,18 +145,53 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
         height,
         dpr,
         frame_loop,
+        move |builder| {
+            builder.instance_data(move |cx| {
+                cx.define::<crate::plugin_runtime::PluginId>(
+                    crate::plugin_runtime::PluginId::new(pid.clone()),
+                );
+                cx.define::<crate::plugin_runtime::PluginInstance>(
+                    crate::plugin_runtime::PluginInstance(instance_opt.clone()),
+                );
+            })
+        },
     )
 }
 
-/// `TurNative.createHeadlessInstance(runtimeHandle, frameLoop): long`
+/// `TurNative.createHeadlessInstance(runtimeHandle, frameLoop, pluginId): long`
+///
+/// Headless variant — same per-instance `PluginId` stamping as
+/// [`Java_..._TurNative_createInstance`], but no surface / renderer.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_createHeadlessInstance(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     runtime_handle: tur_android::jlong,
     frame_loop: tur_android::JObject,
+    plugin_id: tur_android::JString,
 ) -> tur_android::jlong {
-    tur_android::ops::create_headless_instance(&mut env, runtime_handle, frame_loop)
+    let pid: String = match env.get_string(&plugin_id) {
+        Ok(s) => s.into(),
+        Err(e) => {
+            tracing::error!("createHeadlessInstance: get_string(plugin_id) failed: {e}");
+            return 0;
+        }
+    };
+    tur_android::ops::create_headless_instance(
+        &mut env,
+        runtime_handle,
+        frame_loop,
+        move |builder| {
+            builder.instance_data(move |cx| {
+                cx.define::<crate::plugin_runtime::PluginId>(
+                    crate::plugin_runtime::PluginId::new(pid.clone()),
+                );
+                cx.define::<crate::plugin_runtime::PluginInstance>(
+                    crate::plugin_runtime::PluginInstance(None),
+                );
+            })
+        },
+    )
 }
 
 /// `TurNative.destroyRuntime(handle)`
@@ -162,19 +219,66 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     use tur_net_native::{Http, NativeHttp, TurNetPlugin};
 
     use crate::plugin_runtime::EaseMusicPlugin;
+    use ease_tur_rpc::TurRpcPlugin;
+
+    // Cache global refs to the Kotlin host classes (EaseOauthHost /
+    // EaseThemesHost) so the tur worker thread can call static methods on
+    // them — the worker attaches with the system ClassLoader and can't
+    // find_class app classes. Must run here (main thread, app ClassLoader).
+    if let Err(e) = crate::plugin_runtime::host_cache::cache_host_classes(&mut env) {
+        tracing::warn!("host_cache: {e}");
+    }
 
     tur_android::ops::create_runtime(&mut env, context, |builder| {
         // tur's engine core is tokio-free (since the drop-tokio refactor); the
         // embedder must hand NativeHttp a Handle onto a runtime it owns + keeps
         // alive for the engine's lifetime. We use the shared ease-client-tokio
-        // runtime (same one the backend + JsStorageBackend spawn onto).
+        // runtime (same one the backend + JsStorageBackend spawn onto). The
+        // builder's capability() takes a closure that may receive the engine's
+        // AsyncPluginContext; NativeHttp needs only the tokio Handle.
         let handle = ease_client_tokio::tokio_runtime().handle().clone();
         builder
-            .capability(Http::new(NativeHttp::new(handle)))
+            .capability(move |_| Ok(Http::new(NativeHttp::new(handle.clone()))))
             .plugin(TurStdPlugin)
             .plugin(TurAnimationPlugin)
             .plugin(TurClipboardPlugin)
             .plugin(TurNetPlugin)
+            .plugin(TurRpcPlugin)
             .plugin(EaseMusicPlugin)
     })
+}
+
+/// `EasePluginBridge.wireServiceRpc(instanceHandle): boolean` — connects the
+/// headless service instance's event bus to ease-tur-rpc and stashes the
+/// resulting `Send` [`RpcClient`] into the global backend context. Called once
+/// on the instance's own thread (the JNI thread) after `createHeadlessInstance`
+/// + `loadModule(plugin.js)`. Returns `true` on success.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_wireServiceRpc(
+    _env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    instance_handle: tur_android::jlong,
+) -> tur_android::jboolean {
+    let Some(rpc) = tur_android::ops::with_app(instance_handle, |app| {
+        ease_tur_rpc::RpcClient::wire(app)
+    }) else {
+        tracing::error!("wireServiceRpc: invalid instance handle");
+        return 0;
+    };
+    match rpc {
+        Ok(client) => {
+            if let Some(cx) = crate::BACKEND_CONTEXT.get() {
+                cx.set_service_rpc(client);
+                tracing::info!("wireServiceRpc: service RpcClient installed");
+                1
+            } else {
+                tracing::error!("wireServiceRpc: BACKEND_CONTEXT not set");
+                0
+            }
+        }
+        Err(e) => {
+            tracing::error!("wireServiceRpc: RpcClient::wire failed: {e}");
+            0
+        }
+    }
 }

@@ -25,17 +25,32 @@ class TurRuntime(
     /**
      * Spawn an isolated rendering instance attached to [surface] and return it.
      * Shares this runtime's fonts/clock/capabilities/plugins; gets its own JS
-     * realm, element tree, and renderer.
+     * realm, element tree, and renderer. [pluginId] is stamped into the
+     * instance's per-instance data slot so `ease:*` bridge fns resolve the
+     * calling plugin from Rust, not from a JS argument. [instance] is the
+     * storage's `plugin_storage_id` for edit-mode views (`null` for create
+     * mode) — exposed to JS as `ease.context.instance()`.
      */
     fun createInstance(
         surface: android.view.Surface,
         width: Int,
         height: Int,
         dpr: Double,
+        pluginId: String,
+        instance: String? = null,
     ): TurInstance {
         check(handle != 0L) { "runtime destroyed" }
         val frameLoop = FrameLoop()
-        val h = TurNative.createInstance(handle, surface, width, height, dpr, frameLoop)
+        val h = TurNative.createInstance(
+            handle,
+            surface,
+            width,
+            height,
+            dpr,
+            frameLoop,
+            pluginId,
+            instance ?: "",
+        )
         check(h != 0L) { "createInstance returned 0 (see logcat)" }
         return TurInstance(h, frameLoop)
     }
@@ -43,12 +58,13 @@ class TurRuntime(
     /**
      * Spawn an isolated headless instance (no surface, no rendering). Runs JS +
      * capabilities + events only. Useful for service plugins (e.g. a JS storage
-     * provider) that must stay alive independent of any view.
+     * provider) that must stay alive independent of any view. [pluginId] mirrors
+     * [`createInstance`]'s identity stamp.
      */
-    fun createHeadlessInstance(): TurInstance {
+    fun createHeadlessInstance(pluginId: String): TurInstance {
         check(handle != 0L) { "runtime destroyed" }
         val frameLoop = FrameLoop()
-        val h = TurNative.createHeadlessInstance(handle, frameLoop)
+        val h = TurNative.createHeadlessInstance(handle, frameLoop, pluginId)
         check(h != 0L) { "createHeadlessInstance returned 0 (see logcat)" }
         return TurInstance(h, frameLoop)
     }

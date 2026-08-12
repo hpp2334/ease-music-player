@@ -13,6 +13,8 @@ import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicDuration
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgUpsertWebdavStorage
+import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginOauthExchange
+import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginProvider
 import com.kutedev.easemusicplayer.singleton.types.ListLogFiles
 import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
 import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
@@ -21,6 +23,8 @@ import com.kutedev.easemusicplayer.singleton.types.PlayerPollState
 import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
 import com.kutedev.easemusicplayer.singleton.types.PlaylistId
 import com.kutedev.easemusicplayer.singleton.types.PlayMode
+import com.kutedev.easemusicplayer.singleton.types.PluginOauthExchangeResult
+import com.kutedev.easemusicplayer.singleton.types.PluginOauthUrl
 import com.kutedev.easemusicplayer.singleton.types.RetCreatePlaylist
 import com.kutedev.easemusicplayer.singleton.types.StorageConnectionTestResult
 import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
@@ -81,6 +85,21 @@ object BridgeMethods {
     object StorageWebdav {
         val UPSERT = bridgeSpecArg<ArgUpsertWebdavStorage, Unit>("storage_webdav.upsert")
         val TEST = bridgeSpecArg<ArgUpsertWebdavStorage, StorageConnectionTestResult>("storage_webdav.test")
+    }
+
+    /** `storage_plugin.*` — OAuth add + instance removal for JS plugin
+     *  storage providers (e.g. OneDrive). `provider` prefixes the JS op
+     *  namespace (`<provider>:oauth.url` / `<provider>:oauth.exchange` /
+     *  `<provider>:removeInstance`). */
+    object StoragePlugin {
+        val OAUTH_URL =
+            bridgeSpecArg<ArgStoragePluginProvider, PluginOauthUrl>("storage_plugin.oauth_url")
+        val OAUTH_EXCHANGE =
+            bridgeSpecArg<ArgStoragePluginOauthExchange, PluginOauthExchangeResult>(
+                "storage_plugin.oauth_exchange"
+            )
+        val REMOVE_INSTANCE =
+            bridgeSpecArg<StorageId, Unit>("storage_plugin.remove_instance")
     }
 
     /** `playlist.*` — playlist CRUD + music membership + reorder. */

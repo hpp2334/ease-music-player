@@ -10,6 +10,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 ease-remote-storage = { path = "../ease-remote-storage" }
+ease-tur-rpc = { path = "../ease-tur-rpc" }
+ease-js-storage = { path = "../ease-js-storage" }
 once_cell = "1.18.0"
 tracing = { workspace = true }
 num-traits = "0.2"
@@ -43,19 +45,19 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ ef01200).
+# tur engine integration (https://github.com/hpp2334/tur @ 5010615).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
-# bidirectional event bus, streaming HTTP (requestStream), numeric font
-# weight, CompositedTransformTarget/Follower for the Play Counts range
-# Selector — engine impl + @tur-ng/std — AND the "drop tokio from engine
-# core" refactor: tur-async/tur-engine are tokio-free, so the embedder
-# provides a tokio Handle to NativeHttp (registered on the runtime builder).
+# main↔worker threaded runtime (#178), the fully-wired bidirectional event
+# bus (#181 — host↔JS byte transport for the OneDrive service plugin), the
+# `with_app` escape hatch (#176), and streaming HTTP (requestStream). The
+# engine core is tokio-free; the embedder provides a tokio Handle to
+# NativeHttp (registered on the runtime builder) and for timer/sleep.
 # All crates live in the same repo; cargo clones once and resolves their
 # internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "ef01200cb3fd4f0a137078999445227809f1f055" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
 # compiles against.

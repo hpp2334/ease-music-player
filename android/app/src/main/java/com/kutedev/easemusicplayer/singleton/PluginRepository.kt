@@ -1,17 +1,21 @@
 package com.kutedev.easemusicplayer.singleton
 
+import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginKvAppend
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.json.JSONObject
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
+import dagger.hilt.android.qualifiers.ApplicationContext
 
 /**
  * One plugin's static metadata, mirroring its `manifest.json`. Built-in
@@ -30,12 +34,42 @@ data class PluginManifest(
     val main: String? = null,
     val events: List<String> = emptyList(),
     val views: List<PluginViewContribution> = emptyList(),
+    val storages: List<StorageContribution> = emptyList(),
 )
 
 /** One row in the Plugins tab. */
 data class PluginViewContribution(
     val id: String,
     val title: String,
+)
+
+/** A storage contribution declared in a plugin's `manifest.json`. */
+data class StorageContribution(
+    /** The storage provider id (e.g. `"onedrive"`); used as the `provider`
+     *  argument to `pluginOAuthUrl` / `pluginOAuthExchange`. */
+    val id: String,
+    /** Filename of the setup-view JS (e.g. `"setup.js"`), relative to the
+     *  plugin's asset dir. `null` if the plugin declares no setup view. */
+    val setup: String? = null,
+    /** Filename of the edit-view JS (e.g. `"edit.js"`), shown when editing
+     *  an existing plugin storage. `null` if the plugin declares no edit
+     *  view; the host falls back to a static alias label. */
+    val edit: String? = null,
+)
+
+/**
+ * A discoverable storage provider built from a plugin manifest. Drives the
+ * add-storage chooser ("WebDAV" + one card per provider) and, when selected,
+ * the setup-view JS path loaded into a `TurView`.
+ */
+data class StorageProvider(
+    val pluginId: String,
+    val storageId: String,
+    val displayName: String,
+    /** Absolute asset path of the setup-view JS, or null if none declared. */
+    val setupAssetPath: String?,
+    /** Absolute asset path of the edit-view JS, or null if none declared. */
+    val editAssetPath: String?,
 )
 
 /**
@@ -66,12 +100,17 @@ data class PluginViewItem(
 class PluginRepository @Inject constructor(
     private val bridge: Bridge,
     private val _scope: CoroutineScope,
+    @ApplicationContext private val context: Context,
 ) {
     private val _enabledPlugins = MutableStateFlow<List<PluginManifest>>(emptyList())
     val enabledPlugins = _enabledPlugins.asStateFlow()
 
     private val _pluginViews = MutableStateFlow<List<PluginViewItem>>(emptyList())
     val pluginViews = _pluginViews.asStateFlow()
+
+    private val _storageProviders = MutableStateFlow<List<StorageProvider>>(emptyList())
+    /** Plugin-declared storage providers, populated by [scanStorageProviders]. */
+    val storageProviders = _storageProviders.asStateFlow()
 
     init {
         // Register built-in plugins. Loaded once on construction; future
@@ -164,6 +203,40 @@ class PluginRepository @Inject constructor(
             }
         }
         _pluginViews.value = out
+    }
+
+    /**
+     * Scan each `assets/plugins/<dir>/manifest.json` for plugins declaring a
+     * `contributions.storages[*]` and publish them as [StorageProvider]s.
+     * Idempotent; safe to call from a ViewModel's `init`. Runs on
+     * [Dispatchers.IO] (asset + JSON parse).
+     */
+    suspend fun scanStorageProviders() {
+        val out = withContext(Dispatchers.IO) {
+            val providers = mutableListOf<StorageProvider>()
+            val dirs = runCatching { context.assets.list("plugins") }.getOrNull() ?: emptyArray()
+            for (dir in dirs) {
+                val manifestText = runCatching {
+                    context.assets.open("plugins/$dir/manifest.json").bufferedReader().use { it.readText() }
+                }.getOrNull() ?: continue
+                val manifest = runCatching { JSONObject(manifestText) }.getOrNull() ?: continue
+                val pluginId = manifest.optString("id", dir)
+                val name = manifest.optString("name", pluginId)
+                val storages = manifest.optJSONObject("contributions")?.optJSONArray("storages") ?: continue
+                for (i in 0 until storages.length()) {
+                    val s = storages.optJSONObject(i) ?: continue
+                    val sid = s.optString("id")
+                    if (sid.isBlank()) continue
+                    val setupFile = if (s.has("setup") && !s.isNull("setup")) s.getString("setup") else null
+                    val editFile = if (s.has("edit") && !s.isNull("edit")) s.getString("edit") else null
+                    val setupAssetPath = setupFile?.let { "plugins/$pluginId/$it" }
+                    val editAssetPath = editFile?.let { "plugins/$pluginId/$it" }
+                    providers.add(StorageProvider(pluginId, sid, name, setupAssetPath, editAssetPath))
+                }
+            }
+            providers
+        }
+        _storageProviders.value = out
     }
 
     companion object {

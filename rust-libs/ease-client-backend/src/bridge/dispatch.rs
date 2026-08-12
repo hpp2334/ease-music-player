@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use ease_client_schema::{MusicId, PlaylistId, PlayMode, StorageEntryLoc, StorageId};
+use ease_client_schema::{MusicId, PlaylistId, PlayMode, PluginId, PluginStorageId, StorageEntryLoc, StorageHandle, StorageId};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -274,6 +274,93 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx = must_backend(handle)?;
             let result = ct_list_storage_entry_children(cx, loc).await?;
             Ok((serde_json::to_value(result)?, vec![]))
+        }
+
+        // ====================================================================
+        // storage_plugin.* — OAuth add / instance removal for JS plugin
+        // storage providers (e.g. OneDrive). The provider prefixes the op
+        // namespace (`<provider>:oauth.url` etc.); the plugin id follows the
+        // `com.ease.<provider>` convention.
+        // ====================================================================
+        "storage_plugin.oauth_url" => {
+            #[derive(Deserialize)]
+            struct Args {
+                provider: String,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let rpc = cx.get_context().service_rpc().ok_or_else(|| BError::CustomError {
+                message: "service RPC not wired (headless instance not up)".into(),
+            })?;
+            let result = rpc
+                .call(&format!("{}:oauth.url", args.provider), serde_json::json!({}))
+                .await
+                .map_err(|e| BError::CustomError { message: format!("oauth.url rpc: {e}") })?;
+            Ok((serde_json::to_value(result)?, vec![]))
+        }
+        "storage_plugin.oauth_exchange" => {
+            #[derive(Deserialize)]
+            struct Args {
+                provider: String,
+                code: String,
+                #[serde(default)]
+                alias: Option<String>,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            let rpc = cx_cx.service_rpc().ok_or_else(|| BError::CustomError {
+                message: "service RPC not wired (headless instance not up)".into(),
+            })?;
+            let mut call_args = serde_json::json!({ "code": args.code });
+            if let Some(a) = &args.alias {
+                call_args["alias"] = serde_json::Value::String(a.clone());
+            }
+            let result = rpc
+                .call(&format!("{}:oauth.exchange", args.provider), call_args)
+                .await
+                .map_err(|e| BError::CustomError { message: format!("oauth.exchange rpc: {e}") })?;
+            let instance = result
+                .get("instance")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| BError::CustomError {
+                    message: "oauth.exchange: plugin did not return an instance id".into(),
+                })?;
+            let handle = StorageHandle::Plugin {
+                plugin_id: PluginId::new(format!("com.ease.{}", args.provider)),
+                plugin_storage_id: PluginStorageId::new(instance.to_string()),
+            };
+            let id = cx_cx.database_server().obtain_storage(&handle).await?;
+            crate::services::evict_storage_backend_cache(&cx_cx, id);
+            Ok((serde_json::json!({ "storageId": *id.as_ref() }), vec![]))
+        }
+        "storage_plugin.remove_instance" => {
+            let id: StorageId = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            // Load the row to find the provider + instance, then ask the plugin
+            // to drop its config (kv) + secret before removing the registry row.
+            if let Some(row) = cx_cx.database_server().load_storage_row(id).await? {
+                if let (Some(plugin_storage_id), Some(_plugin_id)) =
+                    (row.plugin_storage_id, row.plugin_id)
+                {
+                    let provider = plugin_storage_id
+                        .split(':')
+                        .next()
+                        .unwrap_or(&plugin_storage_id)
+                        .to_string();
+                    if let Some(rpc) = cx_cx.service_rpc() {
+                        let _ = rpc
+                            .call(
+                                &format!("{}:removeInstance", provider),
+                                serde_json::json!({ "instance": plugin_storage_id }),
+                            )
+                            .await;
+                    }
+                }
+            }
+            ct_remove_storage(cx, id).await?;
+            Ok((Value::Null, vec![]))
         }
 
         // ====================================================================

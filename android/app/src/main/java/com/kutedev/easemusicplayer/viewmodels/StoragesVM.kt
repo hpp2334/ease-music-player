@@ -9,7 +9,7 @@ import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
 
 @HiltViewModel
 class StoragesVM @Inject constructor(
-    private val storageRepository: StorageRepository
+    private val storageRepository: StorageRepository,
 ) : ViewModel() {
     val storages = storageRepository.storages
 

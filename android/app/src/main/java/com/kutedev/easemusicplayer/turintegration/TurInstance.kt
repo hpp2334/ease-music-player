@@ -75,9 +75,14 @@ class TurInstance(
         TurNative.pushKey(handle, key, code, action, ctrl, shift, alt, meta)
     }
 
-    /** Whether the focused element is an editable text field. */
+    /**
+     * Whether the focused element is an editable text field. Read from the
+     * [FrameLoop]'s retained value (pushed from native via
+     * `FrameLoop.onFocusChanged`), so this is a cheap Kotlin field read — no
+     * JNI round-trip.
+     */
     fun focusedIsEditable(): Boolean =
-        handle != 0L && TurNative.focusedIsEditable(handle)
+        handle != 0L && frameLoop.focusedIsEditable
 
     /**
      * Push an IME composition event. [kind]: `0=Start`, `1=Update`, `2=End`.

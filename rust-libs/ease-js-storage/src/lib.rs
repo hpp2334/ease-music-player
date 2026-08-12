@@ -20,18 +20,30 @@ use futures_util::future::BoxFuture;
 use serde::Deserialize;
 
 /// A `StorageBackend` backed by a JS plugin via `ease-tur-rpc`.
+///
+/// `provider_id` selects the op namespace (`<provider>:list` / `<provider>:get`);
+/// `instance` is the full `plugin_storage_id` (e.g. `onedrive:<uuid>`) carried
+/// in every RPC's args so the JS plugin multiplexes between configured
+/// instances (e.g. multiple OneDrive accounts).
 #[derive(Clone)]
 pub struct JsStorageBackend {
     rpc: RpcClient,
     provider_id: String,
+    instance: String,
     handle: tokio::runtime::Handle,
 }
 
 impl JsStorageBackend {
-    pub fn new(rpc: RpcClient, provider_id: impl Into<String>, handle: tokio::runtime::Handle) -> Self {
+    pub fn new(
+        rpc: RpcClient,
+        provider_id: impl Into<String>,
+        instance: impl Into<String>,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
         Self {
             rpc,
             provider_id: provider_id.into(),
+            instance: instance.into(),
             handle,
         }
     }
@@ -76,10 +88,11 @@ struct GetMeta {
 impl StorageBackend for JsStorageBackend {
     fn list(&self, dir: String) -> BoxFuture<StorageBackendResult<Vec<Entry>>> {
         let op = self.op("list");
+        let instance = self.instance.clone();
         Box::pin(async move {
             let val = self
                 .rpc
-                .call(&op, serde_json::json!({ "dir": dir }))
+                .call(&op, serde_json::json!({ "instance": instance, "dir": dir }))
                 .await
                 .map_err(|e| StorageBackendError::Other(format!("list rpc: {e}")))?;
             let entries: Vec<JsEntry> = serde_json::from_value(val)
@@ -91,10 +104,14 @@ impl StorageBackend for JsStorageBackend {
     fn get(&self, path: String, byte_offset: u64) -> BoxFuture<StorageBackendResult<StreamFile>> {
         let op = self.op("get");
         let handle = self.handle.clone();
+        let instance = self.instance.clone();
         Box::pin(async move {
             let (meta, mut rx) = self
                 .rpc
-                .open_stream(&op, serde_json::json!({ "path": path, "offset": byte_offset }))
+                .open_stream(
+                    &op,
+                    serde_json::json!({ "instance": instance, "path": path, "offset": byte_offset }),
+                )
                 .await
                 .map_err(|e| StorageBackendError::Other(format!("get rpc: {e}")))?;
             let meta: GetMeta = serde_json::from_value(meta)

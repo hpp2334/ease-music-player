@@ -1,26 +1,36 @@
 package com.kutedev.easemusicplayer.widgets.devices
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -36,12 +46,21 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.components.EaseTextButton
+import com.kutedev.easemusicplayer.components.EaseTextButtonSize
+import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.FormSwitch
 import com.kutedev.easemusicplayer.components.FormText
+import com.kutedev.easemusicplayer.components.FormWidget
+import com.kutedev.easemusicplayer.singleton.StorageProvider
+import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
+import com.kutedev.easemusicplayer.turintegration.TurView
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.singleton.types.StorageConnectionTestResult
 import androidx.hilt.navigation.compose.hiltViewModel
+import android.content.Intent
+import android.net.Uri
 import kotlinx.coroutines.launch
 
 
@@ -105,13 +124,47 @@ private fun RemoveDialog(
     }
 }
 
+/** Selectable storage-type card in the create-mode chooser. */
+@Composable
+private fun StorageBlock(
+    title: String,
+    isActive: Boolean,
+    onSelect: () -> Unit
+) {
+    val bgColor = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val tint = if (isActive) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface
+
+    Box(
+        modifier = Modifier
+            .size(100.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(bgColor)
+            .clickable { onSelect() }
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_cloud),
+                contentDescription = null,
+                tint = tint,
+            )
+            Text(
+                text = title,
+                color = tint,
+            )
+        }
+    }
+}
+
 @Composable
 private fun WebdavConfig(
     editStorageVM: EditStorageVM = hiltViewModel()
 ) {
     val form by editStorageVM.form.collectAsState()
     val validated by editStorageVM.validated.collectAsState()
-    val isAnonymous = form.isAnonymous;
+    val isAnonymous = form.isAnonymous
 
     FormSwitch(
         label = stringResource(id = R.string.storage_edit_anonymous),
@@ -173,14 +226,79 @@ private fun WebdavConfig(
     }
 }
 
+/**
+ * Hosts a plugin's setup-view JS in a [TurView]. The plugin owns all config
+ * UI (alias field, "Connect your account" button, …) and triggers OAuth via
+ * `ease.oauth.start(provider, alias)`; the host fetches the authorize URL,
+ * stashes the alias, and opens the browser.
+ *
+ * [assetPath] is the absolute asset path to the plugin's setup JS bundle
+ * (e.g. `plugins/com.ease.onedrive/setup.js`). [pluginId] is stamped into
+ * the instance's per-instance data slot so `ease:*` bridge fns resolve the
+ * calling plugin from Rust.
+ */
+@Composable
+private fun PluginSetupView(assetPath: String, pluginId: String) {
+    val context = LocalContext.current
+    var jsSource by remember(assetPath) { mutableStateOf<String?>(null) }
+    var loadError by remember(assetPath) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(assetPath) {
+        loadError = null
+        jsSource = runCatching {
+            context.assets.open(assetPath).bufferedReader().use { it.readText() }
+        }.getOrElse {
+            loadError = it.message ?: "unknown error"
+            null
+        }
+    }
+
+    when {
+        loadError != null -> Text(
+            text = "Plugin setup load failed: $loadError",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.error,
+        )
+        jsSource == null -> Text(
+            text = "Loading…",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        else -> TurView(
+            runtime = EasePluginBridge.runtime(context),
+            js = jsSource!!,
+            pluginId = pluginId,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(360.dp),
+        )
+    }
+}
+
 @Composable
 fun EditStoragesPage(
     editStorageVM: EditStorageVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val coroutineScope = rememberCoroutineScope()
-    val isCreated by editStorageVM.isCreated.collectAsState();
+    val isCreated by editStorageVM.isCreated.collectAsState()
+    val pluginMode by editStorageVM.pluginMode.collectAsState()
+    val providers by editStorageVM.storageProviders.collectAsState()
+    val title by editStorageVM.title.collectAsState()
     val testing by editStorageVM.testResult.collectAsState()
+
+    // When a plugin OAuth exchange succeeds (handled by `MainActivity` via
+    // the `easem://oauth2redirect` callback), pop back from the setup form.
+    LaunchedEffect(Unit) {
+        editStorageVM.pluginConnectedEvent.collect { navController.popBackStack() }
+    }
+
+    // Create-mode chooser selection: `null` = WebDAV, else the selected
+    // plugin provider. In edit mode the type is fixed by the loaded
+    // storage's handle (`pluginMode`).
+    var selectedProvider by remember { mutableStateOf<StorageProvider?>(null) }
+    val activeProvider = if (isCreated) selectedProvider else null
+    val showPlugin = if (isCreated) selectedProvider != null else pluginMode
 
     val testingColors = when (testing) {
         StorageConnectionTestResult.NONE -> null
@@ -231,29 +349,34 @@ fun EditStoragesPage(
                         }
                     )
                 }
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Medium,
-                    buttonType = EaseIconButtonType.Default,
-                    disabled = testing == StorageConnectionTestResult.TESTING,
-                    painter = painterResource(id = R.drawable.icon_wifitethering),
-                    overrideColors = testingColors,
-                    onClick = {
-                        editStorageVM.test()
-                    }
-                )
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Medium,
-                    buttonType = EaseIconButtonType.Default,
-                    painter = painterResource(id = R.drawable.icon_ok),
-                    onClick = {
-                        coroutineScope.launch {
-                            val finished = editStorageVM.finish()
-                            if (finished) {
-                                navController.popBackStack()
+                // Save / test only apply to WebDAV. Plugin storages are
+                // created via the setup view's OAuth flow + redirect, so
+                // neither button is shown in plugin mode.
+                if (!showPlugin) {
+                    EaseIconButton(
+                        sizeType = EaseIconButtonSize.Medium,
+                        buttonType = EaseIconButtonType.Default,
+                        disabled = testing == StorageConnectionTestResult.TESTING,
+                        painter = painterResource(id = R.drawable.icon_wifitethering),
+                        overrideColors = testingColors,
+                        onClick = {
+                            editStorageVM.test()
+                        }
+                    )
+                    EaseIconButton(
+                        sizeType = EaseIconButtonSize.Medium,
+                        buttonType = EaseIconButtonType.Default,
+                        painter = painterResource(id = R.drawable.icon_ok),
+                        onClick = {
+                            coroutineScope.launch {
+                                val finished = editStorageVM.finish()
+                                if (finished) {
+                                    navController.popBackStack()
+                                }
                             }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
         Box(
@@ -266,7 +389,44 @@ fun EditStoragesPage(
                     .imePadding()
                     .padding(30.dp, 12.dp)
             ) {
-                WebdavConfig()
+                if (isCreated) {
+                    // Storage-type chooser: WebDAV (built-in) + one card per
+                    // discovered plugin storage provider.
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StorageBlock(
+                            title = "WebDAV",
+                            isActive = selectedProvider == null,
+                            onSelect = { selectedProvider = null }
+                        )
+                        for (p in providers) {
+                            StorageBlock(
+                                title = p.displayName,
+                                isActive = selectedProvider?.storageId == p.storageId,
+                                onSelect = { selectedProvider = p }
+                            )
+                        }
+                    }
+                    Box(modifier = Modifier.size(0.dp, 20.dp))
+                }
+                if (showPlugin) {
+                    val assetPath = activeProvider?.setupAssetPath
+                    val pid = activeProvider?.pluginId
+                    if (assetPath != null && pid != null) {
+                        PluginSetupView(assetPath, pid)
+                    } else {
+                        // Edit mode for a plugin storage: already connected —
+                        // show its alias; removal is via the top-bar trash.
+                        FormWidget(label = stringResource(R.string.storage_edit_oauth)) {
+                            Text(
+                                text = title.ifBlank { "Plugin" },
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                } else {
+                    WebdavConfig()
+                }
             }
         }
     }

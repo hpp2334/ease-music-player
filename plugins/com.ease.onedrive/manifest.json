@@ -8,7 +8,7 @@
   "events": [],
   "contributions": {
     "storages": [
-      { "id": "onedrive" }
+      { "id": "onedrive", "setup": "setup.js" }
     ]
   }
 }

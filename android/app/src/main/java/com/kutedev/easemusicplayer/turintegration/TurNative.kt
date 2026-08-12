@@ -20,8 +20,12 @@ package com.kutedev.easemusicplayer.turintegration
 object TurNative {
     /**
      * Spawn an isolated rendering instance attached to [surface], sharing the
-     * runtime's fonts/clock/capabilities. Returns an opaque instance handle,
-     * or `0` on failure.
+     * runtime's fonts/clock/capabilities. [pluginId] is stamped into the
+     * instance's per-instance data slot so `ease:*` bridge fns can resolve
+     * the calling plugin without a JS argument. [instance] is the storage's
+     * `plugin_storage_id` for edit-mode views (empty string for create mode)
+     * — exposed to JS as `ease.context.instance()`. Returns an opaque
+     * instance handle, or `0` on failure.
      */
     external fun createInstance(
         runtimeHandle: Long,
@@ -30,16 +34,20 @@ object TurNative {
         height: Int,
         dpr: Double,
         frameLoop: FrameLoop,
+        pluginId: String,
+        instance: String,
     ): Long
 
     /**
      * Spawn an isolated headless instance (no surface, no rendering) from the
-     * runtime. Runs JS + capabilities + events only. Returns an opaque instance
-     * handle, or `0` on failure.
+     * runtime. Runs JS + capabilities + events only. [pluginId] mirrors
+     * [`createInstance`]'s identity stamp. Returns an opaque instance handle,
+     * or `0` on failure.
      */
     external fun createHeadlessInstance(
         runtimeHandle: Long,
         frameLoop: FrameLoop,
+        pluginId: String,
     ): Long
 
     /** Evaluate [js] as an ES module (`import … from "tur:*"` resolved by the engine). */
@@ -72,11 +80,6 @@ object TurNative {
         alt: Boolean,
         meta: Boolean,
     )
-
-    /**
-     * Whether the currently-focused element is an editable text field.
-     */
-    external fun focusedIsEditable(handle: Long): Boolean
 
     /**
      * Push an IME composition event. [kind]: `0=CompositionStart`,

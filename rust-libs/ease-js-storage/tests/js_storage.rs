@@ -1,15 +1,15 @@
 //! Integration test for `ease-js-storage`: a stub JS storage provider serves
 //! `list` and `get`, and the Rust `JsStorageBackend` reads them through the
-//! `ease-tur-rpc` layer — proving the full storage-provider-over-RPC chain.
+//! `ease-tur-rpc` layer — proving the full storage-provider-over-RPC chain
+//! (event bus → worker flush → JS dispatcher → reply → router → oneshot).
 
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
-use boa_engine::context::time::StdClock;
 use ease_js_storage::JsStorageBackend;
 use ease_remote_storage::StorageBackend;
 use ease_tur_rpc::TurRpcPlugin;
-use tur_engine::{TurRuntime, TurStdPlugin};
-use tur_native::NativeFontLoader;
+use tur_engine::core::plugin::Plugin;
+use tur_integration_tests::TurTestApp;
 
 const STUB_JS: &str = r#"
 import { registerHandler, pushChunk, endStream } from "tur:rpc";
@@ -33,43 +33,26 @@ registerHandler("stub:get", (args) => {
 });
 "#;
 
-fn build_runtime() -> Rc<TurRuntime> {
-    TurRuntime::builder()
-        .font_loader(Rc::new(NativeFontLoader::new()))
-        .clock(Rc::new(StdClock::new()))
-        .plugin(TurStdPlugin)
-        .plugin(TurRpcPlugin)
-        .build()
-        .expect("runtime")
+fn build_app() -> TurTestApp {
+    let extra: Vec<Box<dyn Plugin>> = vec![Box::new(TurRpcPlugin)];
+    TurTestApp::new_with_extra_plugins(200.0, 100.0, extra).expect("test app")
 }
 
-/// Run `fut` on the tokio runtime while pumping engine frames on this thread
+/// Run `fut` on a tokio runtime while pumping engine frames on the test thread
 /// until it resolves. Returns the future's output.
 fn run_with_pump<R: Send + 'static>(
-    app: &Rc<tur_engine::TurApp>,
+    app: &mut TurTestApp,
     rt: &tokio::runtime::Runtime,
     fut: impl std::future::Future<Output = R> + Send + 'static,
 ) -> R {
-    let (tx, rx) = std::sync::mpsc::channel::<R>();
+    let slot: Arc<Mutex<Option<R>>> = Arc::new(Mutex::new(None));
+    let slot_for_task = slot.clone();
     rt.spawn(async move {
-        let _ = tx.send(fut.await);
+        *slot_for_task.lock().unwrap() = Some(fut.await);
     });
-    let mut tries = 0u32;
-    loop {
-        let _ = app.run_frame();
-        match rx.try_recv() {
-            Ok(v) => return v,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                tries += 1;
-                if tries > 20_000 {
-                    panic!("storage round-trip timed out after {tries} frames");
-                }
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                panic!("storage task died")
-            }
-        }
-    }
+    app.wait_for(|_| slot.lock().unwrap().is_some());
+    let out = slot.lock().unwrap().take().expect("result settled");
+    out
 }
 
 #[test]
@@ -80,16 +63,16 @@ fn js_backend_list_and_get() {
         .build()
         .expect("tokio runtime");
 
-    let runtime = build_runtime();
-    let app = runtime.create_headless_app((0.0, 0.0)).expect("headless app");
-    let client = ease_tur_rpc::RpcClient::of(&app).expect("rpc client");
-    app.load_module(STUB_JS).expect("load js");
+    let mut app = build_app();
+    let client = ease_tur_rpc::RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(STUB_JS).expect("load js");
 
-    let backend = JsStorageBackend::new(client, "stub", tokio_rt.handle().clone());
+    let backend =
+        JsStorageBackend::new(client, "stub", "stub:test", tokio_rt.handle().clone());
 
     // list
     let b1 = backend.clone();
-    let entries = run_with_pump(&app, &tokio_rt, async move {
+    let entries = run_with_pump(&mut app, &tokio_rt, async move {
         b1.list("/music".into()).await.expect("list")
     });
     assert_eq!(entries.len(), 2);
@@ -101,7 +84,7 @@ fn js_backend_list_and_get() {
 
     // get → fully buffer the chunks via StreamFile::bytes()
     let b2 = backend.clone();
-    let bytes = run_with_pump(&app, &tokio_rt, async move {
+    let bytes = run_with_pump(&mut app, &tokio_rt, async move {
         b2.get("/music/song.flac".into(), 0)
             .await
             .expect("get")
