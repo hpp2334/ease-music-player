@@ -28,7 +28,6 @@ use crate::{
             reorder_music_in_playlist_inner, reorder_playlist_inner, ArgReorderMusic,
             ArgReorderPlaylist,
         },
-        plugin::ct_plugin_kv_multi_append,
         storage::{ct_list_storage, ct_list_storage_entry_children, ct_remove_storage},
         storage_webdav::{ct_test_webdav_storage, ct_upsert_webdav_storage},
     },
@@ -289,9 +288,12 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            let rpc = cx.get_context().service_rpc().ok_or_else(|| BError::CustomError {
-                message: "service RPC not wired (headless instance not up)".into(),
-            })?;
+            let rpc = cx
+                .get_context()
+                .service_rpc_for(&format!("com.ease.{}", args.provider))
+                .ok_or_else(|| BError::CustomError {
+                    message: "service RPC not wired (headless instance not up)".into(),
+                })?;
             let result = rpc
                 .call(&format!("{}:oauth.url", args.provider), serde_json::json!({}))
                 .await
@@ -309,9 +311,11 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
             let cx_cx = cx.get_context().clone();
-            let rpc = cx_cx.service_rpc().ok_or_else(|| BError::CustomError {
-                message: "service RPC not wired (headless instance not up)".into(),
-            })?;
+            let rpc = cx_cx
+                .service_rpc_for(&format!("com.ease.{}", args.provider))
+                .ok_or_else(|| BError::CustomError {
+                    message: "service RPC not wired (headless instance not up)".into(),
+                })?;
             let mut call_args = serde_json::json!({ "code": args.code });
             if let Some(a) = &args.alias {
                 call_args["alias"] = serde_json::Value::String(a.clone());
@@ -341,7 +345,7 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             // Load the row to find the provider + instance, then ask the plugin
             // to drop its config (kv) + secret before removing the registry row.
             if let Some(row) = cx_cx.database_server().load_storage_row(id).await? {
-                if let (Some(plugin_storage_id), Some(_plugin_id)) =
+                if let (Some(plugin_storage_id), Some(plugin_id)) =
                     (row.plugin_storage_id, row.plugin_id)
                 {
                     let provider = plugin_storage_id
@@ -349,7 +353,7 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
                         .next()
                         .unwrap_or(&plugin_storage_id)
                         .to_string();
-                    if let Some(rpc) = cx_cx.service_rpc() {
+                    if let Some(rpc) = cx_cx.service_rpc_for(&plugin_id) {
                         let _ = rpc
                             .call(
                                 &format!("{}:removeInstance", provider),
@@ -485,19 +489,21 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
         // ====================================================================
         // plugin.* — only the methods actually called from Kotlin.
         // The other 14 plugin KV functions are routed in-process via
-        // BACKEND_CONTEXT (tur engine storage_bridge), not through this
+        // BACKEND_CONTEXT (tur engine db_bridge), not through this
         // bridge.
         // ====================================================================
-        "plugin.kvMultiAppend" => {
+        "plugin.event" => {
             #[derive(Deserialize)]
             struct Args {
                 pluginId: String,
-                key: String,
-                value: String,
+                #[serde(rename = "type")]
+                event_type: String,
+                payload: Value,
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            ct_plugin_kv_multi_append(cx, args.pluginId, args.key, args.value).await?;
+            cx.get_context()
+                .dispatch_plugin_event(&args.pluginId, &args.event_type, args.payload)?;
             Ok((Value::Null, vec![]))
         }
 

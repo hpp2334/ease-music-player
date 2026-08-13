@@ -9,9 +9,9 @@
 // exchange and mints the storage row — there is no "save" step on the host
 // side.
 //
-// This module is bundled to `setup.js` (see `rspack.config.cjs`) and loaded
-// by `PluginSetupView` in `EditStorage.kt`. It runs in an isolated view
-// instance, separate from the headless service instance that owns the
+// This module is bundled to `view.js` (see `rspack.config.cjs`) and loaded
+// by the plugin-storage view host in `EditStorage.kt`. It runs in an isolated
+// view instance, separate from the headless backend instance that owns the
 // `onedrive:*` RPC handlers.
 
 import {
@@ -19,6 +19,7 @@ import {
     HitTestBehavior, Input, MainAxisAlignment, MainAxisSize,
     PointerInteract, Row, SizedBox, Text, createTextEditingController,
     get, mutate, render, view, viewportSize$,
+    type Readable,
 } from "tur:std";
 import { oauth, themes } from "ease";
 
@@ -27,7 +28,7 @@ const PROVIDER = "onedrive";
 // Inherit the host app's Material 3 theme so the setup form matches the
 // surrounding UI. `themes.color(name)` returns "#RRGGBBAA" (or "" if the
 // host hasn't pushed a value yet — fall back to sensible defaults).
-function themed(name: string, fallback: string): unknown {
+function themed(name: string, fallback: string): Color {
     const hex = themes.color(name);
     return Color.hex(hex.length > 0 ? hex : fallback);
 }
@@ -93,7 +94,10 @@ function ConnectButton() {
 }
 
 const rootView = view(() => {
-    const vp = get(viewportSize$);
+    // NOTE: `@tur-ng/std`'s d.ts references `Derived` without importing it, so
+    // `viewportSize$` degrades to `any`/`unknown` at the call site; cast to the
+    // documented `{ width, height }` shape.
+    const vp = get(viewportSize$ as unknown as Readable<{ width: number; height: number }>);
     return Container({
         color: COLOR_CARD,
         width: vp.width,

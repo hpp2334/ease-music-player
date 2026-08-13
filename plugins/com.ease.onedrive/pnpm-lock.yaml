@@ -14,6 +14,9 @@ importers:
       '@rspack/core':
         specifier: ^1.2.0
         version: 1.7.12
+      '@tur-ng/core':
+        specifier: ^0.0.2
+        version: 0.0.2
       '@tur-ng/net':
         specifier: ^0.0.2
         version: 0.0.2
@@ -265,6 +268,9 @@ packages:
 
   '@rspack/lite-tapable@1.1.0':
     resolution: {integrity: sha512-E2B0JhYFmVAwdDiG14+DW0Di4Ze4Jg10Pc4/lILUrd5DRCaklduz2OvJ5HYQ6G+hd+WTzqQb3QnDNfK4yvAFYw==}
+
+  '@tur-ng/core@0.0.2':
+    resolution: {integrity: sha512-KanIdAX/rsNZsC2K8uCkaXpL6BZBHGUDN7TEuoXc9VNsylto/VYLj0Ct/vc2cytSGKWwt+d3/fF4BJAwZOU0Mg==}
 
   '@tur-ng/net@0.0.2':
     resolution: {integrity: sha512-mO30G0JlPCo6JuaHxccLa4JWbZ9ShZFJ4/t3V9E5KbOF6ni3+aeYddY4P93hZezRsCWE5tfJQzif3co+8dhAnA==}
@@ -1385,6 +1391,8 @@ snapshots:
       - webpack-cli
 
   '@rspack/lite-tapable@1.1.0': {}
+
+  '@tur-ng/core@0.0.2': {}
 
   '@tur-ng/net@0.0.2': {}
 

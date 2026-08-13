@@ -1,6 +1,9 @@
 package com.kutedev.easemusicplayer.singleton
 
 import com.kutedev.easemusicplayer.singleton.types.MusicId
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * Events emitted by [PlayerControllerRepository] that plugins can subscribe
@@ -8,6 +11,9 @@ import com.kutedev.easemusicplayer.singleton.types.MusicId
  *
  * Subscriptions are matched by the [type] string — e.g. a plugin that
  * declares `"events": ["music:play"]` receives only [MusicPlay] events.
+ * The host forwards each event to the subscribing plugin's backend JS
+ * module over the `tur:rpc` channel (`registerHandler(event.type, …)`);
+ * [toJsonElement] builds the payload the backend sees.
  *
  * Timestamps are wall-clock milliseconds (System.currentTimeMillis()).
  */
@@ -47,6 +53,28 @@ sealed class PluginEvent {
         override val timestamp: Long,
     ) : PluginEvent() {
         override val type: String = MUSIC_COMPLETE
+    }
+
+    /** The payload a JS backend receives as the handler arg. */
+    fun toJsonElement(): JsonElement = when (this) {
+        is MusicPlay -> buildJsonObject {
+            put("musicId", musicId.value)
+            put("title", title)
+            put("ts", timestamp)
+        }
+        is MusicPause -> buildJsonObject {
+            musicId?.let { put("musicId", it.value) }
+            put("ts", timestamp)
+            put("positionMs", positionMs)
+        }
+        is MusicStop -> buildJsonObject {
+            put("ts", timestamp)
+        }
+        is MusicComplete -> buildJsonObject {
+            put("musicId", musicId.value)
+            put("title", title)
+            put("ts", timestamp)
+        }
     }
 
     companion object {

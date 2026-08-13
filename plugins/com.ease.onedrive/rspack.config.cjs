@@ -3,8 +3,8 @@ module.exports = {
     mode: "production",
     target: ["web", "es2020"],
     entry: {
-        plugin: "./src/index.ts",
-        setup: "./src/setup.ts",
+        backend: "./src/backend.ts",
+        view: "./src/view.ts",
     },
     output: {
         path: __dirname + "/../../android/app/src/main/assets/plugins/com.ease.onedrive",

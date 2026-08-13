@@ -7,7 +7,7 @@
 //! one synthetic JS module to plugins:
 //!
 //! - `ease` — unified host module exporting four grouped namespace objects:
-//!   `storage`, `secret`, `oauth`, `themes`. Each method is ctx-bound
+//!   `db`, `secret`, `oauth`, `themes`. Each method is ctx-bound
 //!   (`extract_js_ctx`) so bridge fns can resolve the calling plugin's
 //!   identity from the per-instance data slot — never from a JS argument.
 //!
@@ -23,12 +23,12 @@
 //! [`EaseMusicPlugin`] in `plugin_jni::create_ease_plugin_engine`.
 
 pub mod context_bridge;
+pub mod db_bridge;
 pub mod host_cache;
 pub mod oauth_bridge;
 pub mod plugin;
 pub mod plugin_jni;
 pub mod secret_bridge;
-pub mod storage_bridge;
 pub mod themes_bridge;
 
 pub use plugin::EaseMusicPlugin;

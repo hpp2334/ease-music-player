@@ -35,7 +35,7 @@ metadata when creating an instance:
 ```kotlin
 // Kotlin host knows this instance is for the OneDrive plugin:
 val instance = runtime.createInstance(surface, w, h, dpr)
-instance.loadModule(setupJs) // setup.js for com.ease.onedrive
+instance.loadModule(setupJs) // view.js for com.ease.onedrive
 ```
 
 But `createInstance` doesn't accept metadata, and `TurJsContext` (the per-instance

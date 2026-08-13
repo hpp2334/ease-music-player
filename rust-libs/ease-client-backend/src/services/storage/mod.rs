@@ -142,8 +142,11 @@ pub async fn get_storage_backend(
                     });
                 }
             };
-            let rpc = cx.service_rpc().ok_or_else(|| BError::CustomError {
-                message: "plugin storage requested but service RPC is not wired (headless instance not up)".into(),
+            let plugin_id = row.plugin_id.clone().unwrap_or_default();
+            let rpc = cx.service_rpc_for(&plugin_id).ok_or_else(|| BError::CustomError {
+                message: format!(
+                    "plugin storage requested but service RPC is not wired for {plugin_id} (headless instance not up)"
+                ),
             })?;
             Arc::new(JsStorageBackend::new(
                 rpc,
