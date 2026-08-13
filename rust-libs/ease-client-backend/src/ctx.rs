@@ -1,16 +1,18 @@
 use std::{
+    collections::HashMap,
     fmt::Debug,
     sync::{
         atomic::AtomicU32,
-        Arc, OnceLock, RwLock, Weak,
+        Arc, RwLock, Weak,
     },
     time::Duration,
 };
 
 use ease_tur_rpc::RpcClient;
 use ease_client_tokio::tokio_runtime;
+use serde_json::Value;
 
-use crate::{repositories::core::DatabaseServer, services::StorageState};
+use crate::{error::BResult, repositories::core::DatabaseServer, services::StorageState};
 
 struct BackendContextInternal {
     storage_path: RwLock<String>,
@@ -18,10 +20,11 @@ struct BackendContextInternal {
     schema_version: AtomicU32,
     storage_state: Arc<StorageState>,
     database_server: Arc<DatabaseServer>,
-    /// Handle for invoking JS service-plugin handlers over the headless tur
-    /// instance's event bus. Set once by the `wireServiceRpc` JNI trampoline
-    /// after `createHeadlessInstance` + `loadModule`. `None` until then.
-    service_rpc: OnceLock<RpcClient>,
+    /// Handles for invoking JS backend-plugin handlers over each headless
+    /// tur instance's event bus, keyed by plugin id. Entries are added by
+    /// the `wireServiceRpc` JNI trampoline after
+    /// `createHeadlessInstance` + `loadModule` per plugin.
+    service_rpcs: RwLock<HashMap<String, RpcClient>>,
 }
 
 impl Drop for BackendContextInternal {
@@ -71,7 +74,7 @@ impl BackendContext {
                 schema_version: AtomicU32::new(0),
                 storage_state: Default::default(),
                 database_server: DatabaseServer::new(),
-                service_rpc: OnceLock::new(),
+                service_rpcs: RwLock::new(HashMap::new()),
             }),
         }
     }
@@ -103,17 +106,45 @@ impl BackendContext {
         &self.internal.database_server
     }
 
-    /// Publish the JS service-plugin RPC handle. Called once from the
-    /// `wireServiceRpc` JNI trampoline after the headless tur instance is
-    /// created + the plugin module is loaded.
-    pub fn set_service_rpc(&self, rpc: RpcClient) {
-        let _ = self.internal.service_rpc.set(rpc);
+    /// Publish the JS backend-plugin RPC handle for `plugin_id`. Called once
+    /// per plugin from the `wireServiceRpc` JNI trampoline after the
+    /// plugin's headless tur instance is created + its backend module loaded.
+    pub fn set_service_rpc(&self, plugin_id: &str, rpc: RpcClient) {
+        self.internal.service_rpcs.write().unwrap().insert(plugin_id.to_string(), rpc);
     }
 
-    /// The JS service-plugin RPC handle, if the headless instance is up.
-    /// `JsStorageBackend` clones this for each plugin storage row.
-    pub fn service_rpc(&self) -> Option<RpcClient> {
-        self.internal.service_rpc.get().cloned()
+    /// The JS backend-plugin RPC handle for `plugin_id`, if that plugin's
+    /// headless instance is up. `JsStorageBackend` clones this for each
+    /// plugin storage row; event dispatch targets it per plugin.
+    pub fn service_rpc_for(&self, plugin_id: &str) -> Option<RpcClient> {
+        self.internal.service_rpcs.read().unwrap().get(plugin_id).cloned()
+    }
+
+    /// Fire a `plugin.event` at one plugin's backend: invoke the JS handler
+    /// registered under `event_type` on that plugin's headless instance.
+    /// Fire-and-forget — the reply (which the JS dispatcher always sends)
+    /// resolves the RPC pending entry, and the result is discarded.
+    pub fn dispatch_plugin_event(
+        &self,
+        plugin_id: &str,
+        event_type: &str,
+        payload: Value,
+    ) -> BResult<()> {
+        let rpc = self.service_rpc_for(plugin_id).ok_or_else(|| {
+            crate::error::BError::CustomError {
+                message: format!(
+                    "no service RPC wired for plugin {plugin_id} (headless instance not up)"
+                ),
+            }
+        })?;
+        let event_type = event_type.to_string();
+        let plugin_id = plugin_id.to_string();
+        let _ = self.tokio_handle().spawn(async move {
+            if let Err(e) = rpc.call(&event_type, payload).await {
+                tracing::warn!("plugin.event {event_type} -> {plugin_id}: {e}");
+            }
+        });
+        Ok(())
     }
 
     /// The shared ease-client-tokio runtime handle (used by `JsStorageBackend`

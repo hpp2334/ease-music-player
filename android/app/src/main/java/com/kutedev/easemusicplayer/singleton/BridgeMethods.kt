@@ -5,7 +5,7 @@ package com.kutedev.easemusicplayer.singleton
 import com.kutedev.easemusicplayer.singleton.types.AddedMusic
 import com.kutedev.easemusicplayer.singleton.types.ArgAddMusicsToPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgCreatePlaylist
-import com.kutedev.easemusicplayer.singleton.types.ArgPluginKvAppend
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginEvent
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderMusic
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
@@ -146,9 +146,9 @@ object BridgeMethods {
         val POLL_STATE = bridgeSpecNoArg<PlayerPollState>("player.pollState", HandleKind.PLAYER)
     }
 
-    /** `plugin.*` — plugin KV store (playcount etc.). */
+    /** `plugin.*` — plugin event dispatch to JS backends. */
     object Plugin {
-        val KV_MULTI_APPEND = bridgeSpecArg<ArgPluginKvAppend, Unit>("plugin.kvMultiAppend")
+        val EVENT = bridgeSpecArg<ArgPluginEvent, Unit>("plugin.event")
     }
 
     /** `debug.*` — diagnostic helpers. */

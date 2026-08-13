@@ -15,9 +15,10 @@
         "baseUrl": ".",
         "paths": {
             "tur:std": ["./node_modules/@tur-ng/std/src/index.d.ts"],
+            "tur:core": ["./node_modules/@tur-ng/core/src/index.d.ts"],
             "tur:net": ["./node_modules/@tur-ng/net/src/index.d.ts"]
         }
     },
-    "include": ["src/**/*", "../infra/ease.d.ts"],
+    "include": ["src/**/*", "../infra/ease.d.ts", "../infra/tur-rpc.d.ts"],
     "exclude": ["node_modules"]
 }

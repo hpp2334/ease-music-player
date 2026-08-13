@@ -4,11 +4,11 @@
   "version": "1.0.0",
   "description": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
   "author": "ease",
-  "main": "plugin.js",
+  "backend": "backend.js",
   "events": ["music:play"],
   "contributions": {
     "views": [
-      { "id": "main", "title": "Play Counts" }
+      { "id": "main", "title": "Play Counts", "view": "view.js" }
     ]
   }
 }

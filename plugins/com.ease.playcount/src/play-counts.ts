@@ -4,9 +4,9 @@
 //   key   = "plays:YYYY-MM-DD"
 //   value = JSON `{ musicId, title, ts }`
 //
-// Each `music:play` event appends one row (the Kotlin `PluginRepository`
-// does the append on the host side). This module reads the rows back via
-// `storage.multiGetAllMulti` from the unified `ease` module, aggregates
+// Each `music:play` event appends one row (the plugin's own backend module
+// does the append, via `db.multiAppend`). This module reads the rows back via
+// `db.multiGetAllMulti` from the unified `ease` module, aggregates
 // per musicId in JS, and renders a sorted list with a time-range selector.
 //
 // Reactivity note: a tur `LazyList` only invokes its `builder` when an item
@@ -48,7 +48,7 @@ import {
     get,
 } from "tur:std";
 import type { Source, Readable, Element } from "tur:core";
-import { storage as Storage } from "ease";
+import { db as Storage } from "ease";
 import { createSelector } from "./ui/selector";
 
 // ---------------------------------------------------------------------------

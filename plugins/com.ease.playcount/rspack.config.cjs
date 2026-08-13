@@ -2,10 +2,13 @@
 module.exports = {
     mode: "production",
     target: ["web", "es2020"],
-    entry: "./src/index.ts",
+    entry: {
+        backend: "./src/backend.ts",
+        view: "./src/view.ts",
+    },
     output: {
         path: __dirname + "/../../android/app/src/main/assets/plugins/com.ease.playcount",
-        filename: "plugin.js",
+        filename: "[name].js",
         library: { type: "module" },
         clean: true,
     },

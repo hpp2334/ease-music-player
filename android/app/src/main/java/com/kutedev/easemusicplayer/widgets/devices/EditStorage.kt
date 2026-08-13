@@ -227,18 +227,18 @@ private fun WebdavConfig(
 }
 
 /**
- * Hosts a plugin's setup-view JS in a [TurView]. The plugin owns all config
- * UI (alias field, "Connect your account" button, …) and triggers OAuth via
- * `ease.oauth.start(provider, alias)`; the host fetches the authorize URL,
- * stashes the alias, and opens the browser.
+ * Hosts a plugin storage's view JS in a [TurView]. The plugin owns all
+ * config UI (alias field, "Connect your account" button, …) and triggers
+ * OAuth via `ease.oauth.start(provider, alias)`; the host fetches the
+ * authorize URL, stashes the alias, and opens the browser.
  *
- * [assetPath] is the absolute asset path to the plugin's setup JS bundle
- * (e.g. `plugins/com.ease.onedrive/setup.js`). [pluginId] is stamped into
+ * [assetPath] is the absolute asset path to the plugin's view JS bundle
+ * (e.g. `plugins/com.ease.onedrive/view.js`). [pluginId] is stamped into
  * the instance's per-instance data slot so `ease:*` bridge fns resolve the
  * calling plugin from Rust.
  */
 @Composable
-private fun PluginSetupView(assetPath: String, pluginId: String) {
+private fun PluginStorageView(assetPath: String, pluginId: String) {
     val context = LocalContext.current
     var jsSource by remember(assetPath) { mutableStateOf<String?>(null) }
     var loadError by remember(assetPath) { mutableStateOf<String?>(null) }
@@ -255,7 +255,7 @@ private fun PluginSetupView(assetPath: String, pluginId: String) {
 
     when {
         loadError != null -> Text(
-            text = "Plugin setup load failed: $loadError",
+            text = "Plugin view load failed: $loadError",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.error,
         )
@@ -409,10 +409,10 @@ fun EditStoragesPage(
                     Box(modifier = Modifier.size(0.dp, 20.dp))
                 }
                 if (showPlugin) {
-                    val assetPath = activeProvider?.setupAssetPath
+                    val assetPath = activeProvider?.viewAssetPath
                     val pid = activeProvider?.pluginId
                     if (assetPath != null && pid != null) {
-                        PluginSetupView(assetPath, pid)
+                        PluginStorageView(assetPath, pid)
                     } else {
                         // Edit mode for a plugin storage: already connected —
                         // show its alias; removal is via the top-bar trash.

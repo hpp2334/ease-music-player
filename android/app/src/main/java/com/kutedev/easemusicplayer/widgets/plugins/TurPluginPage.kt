@@ -2,7 +2,6 @@ package com.kutedev.easemusicplayer.widgets.plugins
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,54 +27,56 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.core.LocalNavController
-import com.kutedev.easemusicplayer.singleton.PluginRepository
 import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
 import com.kutedev.easemusicplayer.turintegration.TurView
+import com.kutedev.easemusicplayer.viewmodels.PluginsVM
 
 private val pluginsPaddingX = 24.dp
 
 /**
- * Generic plugin-view page. Looks up the plugin's `main` JS source from
- * the app's `assets/plugins/<pluginId>/` directory and renders it via a
+ * Generic plugin-view page. Resolves the view's JS source from the plugin
+ * manifest (`contributions.views[*].view`, e.g.
+ * `plugins/<pluginId>/view.js`) via [PluginsVM] and renders it in a
  * [TurView]. The plugin JS owns all view logic and data access via the
  * `ease` and `tur:std` modules — the host stays decoupled from any
  * plugin's biz logic.
  *
  * `pluginId` selects the asset subdirectory AND is stamped into the
  * instance's per-instance data slot so `ease:*` bridge fns resolve the
- * calling plugin from Rust; `viewId` is currently not branched on at the
- * host level (the plugin JS itself can route between its own declared
- * views).
+ * calling plugin from Rust; `viewId` selects the contribution entry whose
+ * view file is loaded.
  */
 @Composable
 fun TurPluginPage(
     pluginId: String,
     viewId: String,
     scaffoldPadding: PaddingValues,
+    pluginsVM: PluginsVM = hiltViewModel(),
 ) {
     val context = LocalContext.current
     val navController = LocalNavController.current
-    var jsSource by remember(pluginId) { mutableStateOf<String?>(null) }
-    var loadError by remember(pluginId) { mutableStateOf<String?>(null) }
+    val views by pluginsVM.pluginViews.collectAsState()
+    val item = views.find { it.pluginId == pluginId && it.viewId == viewId }
+    var jsSource by remember(pluginId, viewId) { mutableStateOf<String?>(null) }
+    var loadError by remember(pluginId, viewId) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(pluginId) {
-        try {
-            // Built-in plugins ship in assets/plugins/<id>/plugin.js. For
-            // installed (zip) plugins this lookup will be replaced by a
-            // file-read from the app-private plugin dir.
-            val path = "plugins/${pluginId}/plugin.js"
-            context.assets.open(path).bufferedReader().use { it.readText() }
-        } catch (e: Exception) {
-            loadError = e.message ?: "unknown error"
-            null
-        }.also { jsSource = it }
+    LaunchedEffect(item?.viewAssetPath) {
+        loadError = null
+        jsSource = item?.viewAssetPath?.let { path ->
+            runCatching {
+                context.assets.open(path).bufferedReader().use { it.readText() }
+            }.getOrElse {
+                loadError = it.message ?: "unknown error"
+                null
+            }
+        }
     }
 
     Column(
@@ -102,7 +104,7 @@ fun TurPluginPage(
             )
             Box(modifier = Modifier.width(16.dp))
             Text(
-                text = pluginDisplayName(pluginId),
+                text = item?.pluginName ?: pluginId,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -110,6 +112,16 @@ fun TurPluginPage(
         }
 
         when {
+            item == null -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "Unknown plugin: $pluginId / $viewId",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 14.sp,
+                )
+            }
             loadError != null -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
@@ -137,14 +149,5 @@ fun TurPluginPage(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-    }
-}
-
-/** Resolve a plugin's display name from the built-in registry, if known. */
-private fun pluginDisplayName(pluginId: String): String {
-    return when (pluginId) {
-        PluginRepository.PLAYCOUNT_ID -> "Play Counts"
-        PluginRepository.TURTEST_ID -> "Tur Test"
-        else -> pluginId
     }
 }

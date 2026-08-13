@@ -4,11 +4,11 @@
   "version": "0.1.0",
   "description": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless JS plugin.",
   "author": "ease",
-  "main": "plugin.js",
+  "backend": "backend.js",
   "events": [],
   "contributions": {
     "storages": [
-      { "id": "onedrive", "setup": "setup.js" }
+      { "id": "onedrive", "view": "view.js" }
     ]
   }
 }

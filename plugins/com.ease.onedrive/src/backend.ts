@@ -5,7 +5,7 @@
 //
 // Multi-instance: each configured OneDrive account is one *instance* named
 // `onedrive:<uuid>` (the storage row's `plugin_storage_id`). Per-instance
-// config lives in `ease.storage` (this plugin's KV) under
+// config lives in `ease.db` (this plugin's KV) under
 // `storage:<instance>` = JSON `{ alias, secretId }`; the refresh token lives
 // in `ease.secret` under that `secretId` (scope `plugin:com.ease.onedrive`).
 // Access tokens are cached in module state; on a 401 the refresh token is
@@ -28,7 +28,7 @@
 
 import { request, requestStream } from "tur:net";
 import { registerHandler, pushChunk, endStream, errorStream } from "tur:rpc";
-import { storage, secret } from "ease";
+import { db, secret } from "ease";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -67,7 +67,7 @@ function kvKey(instance: string): string {
 function configOf(instance: string): InstanceState {
     const st = instances.get(instance);
     if (st) return st;
-    const raw = storage.singleGet(kvKey(instance));
+    const raw = db.singleGet(kvKey(instance));
     if (raw == null) {
         throw new Error(`onedrive: no config for instance ${instance}`);
     }
@@ -112,7 +112,7 @@ function patchConfigSecretId(oldId: number, newId: number): void {
     // the loaded instances (cheap; typically a handful).
     for (const [instance, st] of instances) {
         if (st.secretId === newId) {
-            storage.singleSet(kvKey(instance), JSON.stringify({ alias: st.alias, secretId: newId }));
+            db.singleSet(kvKey(instance), JSON.stringify({ alias: st.alias, secretId: newId }));
         }
     }
 }
@@ -345,7 +345,7 @@ async function exchangeCode(args: { code: string; alias?: string }): Promise<{ i
     const instance = `onedrive:${uuid()}`;
     const secretId = secret.put(t.refresh_token);
     const alias = args.alias && args.alias.length > 0 ? args.alias : "OneDrive";
-    storage.singleSet(
+    db.singleSet(
         kvKey(instance),
         JSON.stringify({ alias, secretId }),
     );
@@ -359,7 +359,7 @@ function removeInstance(args: { instance: string }): void {
     const st = instances.get(args.instance);
     let secretId: number | undefined = st?.secretId;
     if (secretId === undefined) {
-        const raw = storage.singleGet(kvKey(args.instance));
+        const raw = db.singleGet(kvKey(args.instance));
         if (raw != null) {
             try {
                 secretId = JSON.parse(raw).secretId;
@@ -371,7 +371,7 @@ function removeInstance(args: { instance: string }): void {
     if (secretId !== undefined) {
         secret.remove(secretId);
     }
-    storage.singleDelete(kvKey(args.instance));
+    db.singleDelete(kvKey(args.instance));
     instances.delete(args.instance);
 }
 

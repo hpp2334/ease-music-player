@@ -3,8 +3,8 @@
 // Registered by the Rust plugin runtime (`plugin_runtime::plugin.rs`) as a
 // synthetic tur module with four grouped namespace consts:
 //
-//     import { storage, secret, oauth, themes } from "ease";
-//     storage.singleGet("key");          // identity resolved in Rust
+//     import { db, secret, oauth, themes } from "ease";
+//     db.singleGet("key");               // identity resolved in Rust
 //     secret.put("refresh-token");
 //     oauth.start("onedrive", alias);
 //     themes.color("primary");
@@ -17,7 +17,7 @@
 // a pluginId argument.
 
 declare module "ease" {
-    // ---- storage entry types ----------------------------------------------
+    // ---- db entry types ----------------------------------------------------
 
     /** Single-value entry returned by `singleGetMulti`. */
     export interface StorageEntry {
@@ -40,9 +40,9 @@ declare module "ease" {
         kind: number;
     }
 
-    // ---- storage namespace ------------------------------------------------
+    // ---- db namespace -----------------------------------------------------
 
-    export const storage: {
+    export const db: {
         // ----- single-value (overwrite) -----
         /** Returns the value, or `null` if the key doesn't exist. */
         singleGet(key: string): string | null;

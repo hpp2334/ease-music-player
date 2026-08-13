@@ -4,11 +4,10 @@
   "version": "1.0.0",
   "description": "Minimal repro views for tur engine layout questions.",
   "author": "ease",
-  "main": "plugin.js",
   "events": [],
   "contributions": {
     "views": [
-      { "id": "follower-anchor", "title": "Follower Anchor" }
+      { "id": "follower-anchor", "title": "Follower Anchor", "view": "view.js" }
     ]
   }
 }

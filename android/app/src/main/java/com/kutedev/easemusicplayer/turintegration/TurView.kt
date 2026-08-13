@@ -80,6 +80,7 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
     private var instance: TurInstance? = null
     private var pendingJs: String? = null
     private var pendingPluginId: String = ""
+    private var pendingInstance: String? = null
     private var dprValue: Double = 0.0
     private var runtime: TurRuntime? = null
     /** Tracks the last IME state we drove so we only call the IMM on
@@ -102,10 +103,10 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
 
     /** Stash the JS + pluginId + instance + dpr + runtime and register the surface callback; spawn the
      *  instance when the surface is ready. */
-    fun bind(runtime: TurRuntime, js: String, pluginId: String, instance: String?, dpr: Double) {
+    fun bind(runtime: TurRuntime, js: String, pluginId: String, instanceId: String?, dpr: Double) {
         pendingJs = js
         pendingPluginId = pluginId
-        pendingInstance = instance
+        pendingInstance = instanceId
         dprValue = dpr
         this.runtime = runtime
         isFocusable = true
@@ -149,7 +150,7 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
             val w = (holder.surfaceFrame.width() / d).toInt().coerceAtLeast(1)
             val h = (holder.surfaceFrame.height() / d).toInt().coerceAtLeast(1)
             instance = try {
-                rt.createInstance(holder.surface, w, h, dprValue, pendingPluginId).also {
+                rt.createInstance(holder.surface, w, h, dprValue, pendingPluginId, pendingInstance).also {
                     it.loadModule(js)
                     // After each frame, sync the soft keyboard with the
                     // engine's focused-element state (reads the value native

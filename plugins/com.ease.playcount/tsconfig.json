@@ -13,6 +13,6 @@
         "resolveJsonModule": true,
         "isolatedModules": true
     },
-    "include": ["src/**/*", "../infra/ease.d.ts"],
+    "include": ["src/**/*", "../infra/ease.d.ts", "../infra/tur-rpc.d.ts"],
     "exclude": ["node_modules"]
 }

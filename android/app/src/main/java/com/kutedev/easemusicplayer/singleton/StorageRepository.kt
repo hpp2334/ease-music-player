@@ -10,6 +10,7 @@ import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginProvider
 import com.kutedev.easemusicplayer.singleton.types.ArgUpsertWebdavStorage
 import com.kutedev.easemusicplayer.singleton.types.PluginOauthExchangeResult
 import com.kutedev.easemusicplayer.singleton.types.Storage
+import com.kutedev.easemusicplayer.singleton.types.StorageHandle
 import com.kutedev.easemusicplayer.singleton.types.StorageId
 import javax.inject.Inject
 import javax.inject.Singleton

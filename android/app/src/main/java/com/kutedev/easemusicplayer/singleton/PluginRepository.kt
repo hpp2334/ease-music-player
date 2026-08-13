@@ -7,31 +7,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.kutedev.easemusicplayer.singleton.types.ArgPluginKvAppend
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import org.json.JSONObject
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginEvent
 
 /**
- * One plugin's static metadata, mirroring its `manifest.json`. Built-in
- * plugins are constructed directly; installed plugins are parsed from
- * the manifest the install step wrote to the app-private dir.
+ * One plugin's static metadata, mirroring its `manifest.json` under
+ * `assets/plugins/<id>/`. Populated by [PluginRepository.scanPlugins].
  *
- * For now only `views` is consumed (each [PluginViewContribution] becomes
- * one row in the Plugins tab). `lyrics` and `storages` are recorded for
- * future use; their wiring lands with the lyric-parser / storage-backend
- * contribution support.
+ * [backend] is the plugin's long-lived module (loaded into a headless tur
+ * instance by `KeepBackendService`); each contribution's `view` is a
+ * short-lived module loaded per rendered page.
  */
 data class PluginManifest(
     val id: String,
     val name: String,
     val version: String,
-    val main: String? = null,
+    val backend: String? = null,
     val events: List<String> = emptyList(),
     val views: List<PluginViewContribution> = emptyList(),
     val storages: List<StorageContribution> = emptyList(),
@@ -41,6 +35,9 @@ data class PluginManifest(
 data class PluginViewContribution(
     val id: String,
     val title: String,
+    /** Filename of the view JS (e.g. `"view.js"`), relative to the plugin's
+     *  asset dir. `null` if the plugin declares no view file. */
+    val view: String? = null,
 )
 
 /** A storage contribution declared in a plugin's `manifest.json`. */
@@ -48,28 +45,22 @@ data class StorageContribution(
     /** The storage provider id (e.g. `"onedrive"`); used as the `provider`
      *  argument to `pluginOAuthUrl` / `pluginOAuthExchange`. */
     val id: String,
-    /** Filename of the setup-view JS (e.g. `"setup.js"`), relative to the
-     *  plugin's asset dir. `null` if the plugin declares no setup view. */
-    val setup: String? = null,
-    /** Filename of the edit-view JS (e.g. `"edit.js"`), shown when editing
-     *  an existing plugin storage. `null` if the plugin declares no edit
-     *  view; the host falls back to a static alias label. */
-    val edit: String? = null,
+    /** Filename of the storage view JS (e.g. `"view.js"`), relative to the
+     *  plugin's asset dir. `null` if the plugin declares no view. */
+    val view: String? = null,
 )
 
 /**
  * A discoverable storage provider built from a plugin manifest. Drives the
  * add-storage chooser ("WebDAV" + one card per provider) and, when selected,
- * the setup-view JS path loaded into a `TurView`.
+ * the view JS path loaded into a `TurView`.
  */
 data class StorageProvider(
     val pluginId: String,
     val storageId: String,
     val displayName: String,
-    /** Absolute asset path of the setup-view JS, or null if none declared. */
-    val setupAssetPath: String?,
-    /** Absolute asset path of the edit-view JS, or null if none declared. */
-    val editAssetPath: String?,
+    /** Absolute asset path of the view JS, or null if none declared. */
+    val viewAssetPath: String?,
 )
 
 /**
@@ -82,19 +73,23 @@ data class PluginViewItem(
     val pluginName: String,
     val viewId: String,
     val viewTitle: String,
+    /** Absolute asset path of the view JS, or null if none declared. */
+    val viewAssetPath: String?,
 )
 
 /**
- * Plugin runtime.
+ * Plugin runtime registry.
  *
- * Holds the registry of enabled plugins and routes [PlayerControllerRepository]'s
- * plugin-event bus to each enabled plugin whose `events` declaration matches.
+ * Scans `assets/plugins/<id>/manifest.json` ([scanPlugins]) and publishes the
+ * parsed manifests ([enabledPlugins]), their view contributions
+ * ([pluginViews]) and storage contributions ([storageProviders]).
  *
- * For now only the built-in `com.ease.playcount` plugin is registered. The
- * play-count handler runs entirely on the Kotlin side — it appends one row
- * per play event to the plugin's multi-value KV namespace under a per-day
- * key. When tur integration lands, the handler will be replaced by a JS
- * callback; the data model stays the same.
+ * Routes [PlayerControllerRepository]'s plugin-event bus to each plugin
+ * whose `events` declaration matches: the host calls `plugin.event` on the
+ * bridge, which dispatches to the plugin's backend JS module via its
+ * headless tur instance's RpcClient. No per-plugin logic lives on the
+ * Kotlin side — backends register `tur:rpc` handlers for the event types
+ * they declare.
  */
 @Singleton
 class PluginRepository @Inject constructor(
@@ -109,23 +104,8 @@ class PluginRepository @Inject constructor(
     val pluginViews = _pluginViews.asStateFlow()
 
     private val _storageProviders = MutableStateFlow<List<StorageProvider>>(emptyList())
-    /** Plugin-declared storage providers, populated by [scanStorageProviders]. */
+    /** Plugin-declared storage providers, populated by [scanPlugins]. */
     val storageProviders = _storageProviders.asStateFlow()
-
-    init {
-        // Register built-in plugins. Loaded once on construction; future
-        // dynamic installs will append to this list at runtime.
-        _enabledPlugins.value = listOf(BUILT_IN_PLAYCOUNT, BUILT_IN_TURTEST)
-        recomputeViews()
-
-        // Subscribe to the player event bus and dispatch.
-        _scope.launch(Dispatchers.Default) {
-            // Late-binding collect: PlayerControllerRepository is constructed
-            // before this repo in the Hilt graph, so by the time init runs
-            // its SharedFlow is hot. Inject is by constructor so we use a
-            // setter to attach the event source.
-        }
-    }
 
     /**
      * Connects the player's plugin-event bus. Called once from
@@ -135,57 +115,80 @@ class PluginRepository @Inject constructor(
     fun bindPlayerEvents(playerController: PlayerControllerRepository) {
         _scope.launch(Dispatchers.Default) {
             playerController.pluginEvents.collect { event ->
-                dispatch(event)
-            }
-        }
-    }
-
-    private fun dispatch(event: PluginEvent) {
-        for (plugin in _enabledPlugins.value) {
-            if (event.type !in plugin.events) continue
-            when (plugin.id) {
-                PLAYCOUNT_ID -> handlePlaycountEvent(event)
-                // future plugins dispatch here
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Built-in: com.ease.playcount
-    //
-    // KV layout (append-only / multi mode):
-    //   key   = "plays:YYYY-MM-DD"
-    //   value = JSON {"musicId": <i64>, "ts": <ms>}
-    // Each music:play event appends one row. The view fetches counts per
-    // day via ctPluginKvMultiCountMulti(keys) — one SQL round-trip per
-    // selected time range.
-    // ------------------------------------------------------------------
-
-    private fun handlePlaycountEvent(event: PluginEvent) {
-        when (event) {
-            is PluginEvent.MusicPlay -> {
-                val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-                val key = "plays:$today"
-                val payload = buildJsonObject {
-                    put("musicId", event.musicId.value)
-                    put("title", event.title)
-                    put("ts", event.timestamp)
-                }.toString()
-                _scope.launch(Dispatchers.IO) {
-                    bridge.call(
-                        BridgeMethods.Plugin.KV_MULTI_APPEND,
-                        ArgPluginKvAppend(
-                            pluginId = PLAYCOUNT_ID,
-                            key = key,
-                            value = payload,
-                        ),
-                    ).unwrapOrNull()
+                val payload = event.toJsonElement()
+                for (plugin in _enabledPlugins.value) {
+                    if (event.type in plugin.events) {
+                        bridge.call(
+                            BridgeMethods.Plugin.EVENT,
+                            ArgPluginEvent(plugin.id, event.type, payload),
+                        ).unwrapOrNull()
+                    }
                 }
             }
-            is PluginEvent.MusicPause, is PluginEvent.MusicStop, is PluginEvent.MusicComplete -> {
-                // Play-count only tracks starts. Other plugins may hook these.
-            }
         }
+    }
+
+    /**
+     * Scan each `assets/plugins/<dir>/manifest.json` and publish the parsed
+     * manifests / views / storage providers. Idempotent; safe to call from a
+     * ViewModel's `init` or a service. Runs on [Dispatchers.IO] (asset +
+     * JSON parse).
+     */
+    suspend fun scanPlugins() {
+        val manifests = withContext(Dispatchers.IO) {
+            val out = mutableListOf<PluginManifest>()
+            val dirs = runCatching { context.assets.list("plugins") }.getOrNull() ?: emptyArray()
+            for (dir in dirs) {
+                val manifestText = runCatching {
+                    context.assets.open("plugins/$dir/manifest.json").bufferedReader().use { it.readText() }
+                }.getOrNull() ?: continue
+                val m = runCatching { JSONObject(manifestText) }.getOrNull() ?: continue
+                val pluginId = m.optString("id", dir)
+                val backend = if (m.has("backend") && !m.isNull("backend")) m.getString("backend") else null
+                val events = m.optJSONArray("events")?.let { arr ->
+                    (0 until arr.length()).map { arr.getString(it) }
+                } ?: emptyList()
+                val contributions = m.optJSONObject("contributions")
+                val views = contributions?.optJSONArray("views")?.let { arr ->
+                    (0 until arr.length()).mapNotNull { i ->
+                        val v = arr.optJSONObject(i) ?: return@mapNotNull null
+                        val vid = v.optString("id")
+                        if (vid.isBlank()) return@mapNotNull null
+                        PluginViewContribution(
+                            id = vid,
+                            title = v.optString("title", vid),
+                            view = if (v.has("view") && !v.isNull("view")) v.getString("view") else null,
+                        )
+                    }
+                } ?: emptyList()
+                val storages = contributions?.optJSONArray("storages")?.let { arr ->
+                    (0 until arr.length()).mapNotNull { i ->
+                        val s = arr.optJSONObject(i) ?: return@mapNotNull null
+                        val sid = s.optString("id")
+                        if (sid.isBlank()) return@mapNotNull null
+                        StorageContribution(
+                            id = sid,
+                            view = if (s.has("view") && !s.isNull("view")) s.getString("view") else null,
+                        )
+                    }
+                } ?: emptyList()
+                out.add(
+                    PluginManifest(
+                        id = pluginId,
+                        name = m.optString("name", pluginId),
+                        version = m.optString("version", "0.0.0"),
+                        backend = backend,
+                        events = events,
+                        views = views,
+                        storages = storages,
+                    )
+                )
+            }
+            out
+        }
+        _enabledPlugins.value = manifests
+        recomputeViews()
+        recomputeStorageProviders()
     }
 
     private fun recomputeViews() {
@@ -198,6 +201,7 @@ class PluginRepository @Inject constructor(
                         pluginName = p.name,
                         viewId = v.id,
                         viewTitle = v.title,
+                        viewAssetPath = v.view?.let { "plugins/${p.id}/$it" },
                     )
                 )
             }
@@ -205,67 +209,20 @@ class PluginRepository @Inject constructor(
         _pluginViews.value = out
     }
 
-    /**
-     * Scan each `assets/plugins/<dir>/manifest.json` for plugins declaring a
-     * `contributions.storages[*]` and publish them as [StorageProvider]s.
-     * Idempotent; safe to call from a ViewModel's `init`. Runs on
-     * [Dispatchers.IO] (asset + JSON parse).
-     */
-    suspend fun scanStorageProviders() {
-        val out = withContext(Dispatchers.IO) {
-            val providers = mutableListOf<StorageProvider>()
-            val dirs = runCatching { context.assets.list("plugins") }.getOrNull() ?: emptyArray()
-            for (dir in dirs) {
-                val manifestText = runCatching {
-                    context.assets.open("plugins/$dir/manifest.json").bufferedReader().use { it.readText() }
-                }.getOrNull() ?: continue
-                val manifest = runCatching { JSONObject(manifestText) }.getOrNull() ?: continue
-                val pluginId = manifest.optString("id", dir)
-                val name = manifest.optString("name", pluginId)
-                val storages = manifest.optJSONObject("contributions")?.optJSONArray("storages") ?: continue
-                for (i in 0 until storages.length()) {
-                    val s = storages.optJSONObject(i) ?: continue
-                    val sid = s.optString("id")
-                    if (sid.isBlank()) continue
-                    val setupFile = if (s.has("setup") && !s.isNull("setup")) s.getString("setup") else null
-                    val editFile = if (s.has("edit") && !s.isNull("edit")) s.getString("edit") else null
-                    val setupAssetPath = setupFile?.let { "plugins/$pluginId/$it" }
-                    val editAssetPath = editFile?.let { "plugins/$pluginId/$it" }
-                    providers.add(StorageProvider(pluginId, sid, name, setupAssetPath, editAssetPath))
-                }
+    private fun recomputeStorageProviders() {
+        val out = mutableListOf<StorageProvider>()
+        for (p in _enabledPlugins.value) {
+            for (s in p.storages) {
+                out.add(
+                    StorageProvider(
+                        pluginId = p.id,
+                        storageId = s.id,
+                        displayName = p.name,
+                        viewAssetPath = s.view?.let { "plugins/${p.id}/$it" },
+                    )
+                )
             }
-            providers
         }
         _storageProviders.value = out
-    }
-
-    companion object {
-        const val PLAYCOUNT_ID = "com.ease.playcount"
-        const val TURTEST_ID = "com.ease.turtest"
-
-        private val BUILT_IN_PLAYCOUNT = PluginManifest(
-            id = PLAYCOUNT_ID,
-            name = "Play Counts",
-            version = "1.0.0",
-            main = "plugin.js",
-            events = listOf(PluginEvent.MUSIC_PLAY),
-            views = listOf(
-                PluginViewContribution(id = "main", title = "Play Counts"),
-            ),
-        )
-
-        // Built-in: com.ease.turtest. Minimal repro views for tur engine
-        // layout questions; no events, no KV. Currently hosts the
-        // `followerAnchor` CompositedTransform repro.
-        private val BUILT_IN_TURTEST = PluginManifest(
-            id = TURTEST_ID,
-            name = "Tur Test",
-            version = "1.0.0",
-            main = "plugin.js",
-            events = emptyList(),
-            views = listOf(
-                PluginViewContribution(id = "follower-anchor", title = "Follower Anchor"),
-            ),
-        )
     }
 }

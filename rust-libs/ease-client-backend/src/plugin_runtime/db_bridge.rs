@@ -1,4 +1,4 @@
-//! `ease.storage` JS bridge — synchronous KV access for plugins.
+//! `ease.db` JS bridge — synchronous KV access for plugins.
 //!
 //! All operations run via `tokio_runtime().block_on(...)` because tur's
 //! boa engine is single-threaded and `!Send`. Each call blocks the
@@ -22,7 +22,7 @@ use tur_engine::core::js_runtime::helpers::{extract_js_ctx, FnEntry, Ptr};
 use crate::error::BResult;
 use crate::plugin_runtime::PluginId;
 
-/// Build the `FnEntry` table for the `storage` namespace object. Each entry
+/// Build the `FnEntry` table for the `db` namespace object. Each entry
 /// becomes a ctx-bound method (`extract_js_ctx(args)` reads identity from
 /// the per-instance data slot).
 pub fn build_fns() -> Vec<FnEntry> {
@@ -59,7 +59,7 @@ fn plugin_id(args: &[JsValue]) -> JsResult<PluginId> {
     let js_ctx = extract_js_ctx(args)?;
     js_ctx.data::<PluginId>().ok_or_else(|| {
         JsError::from(JsNativeError::typ().with_message(
-            "ease:storage: no plugin context bound to this instance",
+            "ease:db: no plugin context bound to this instance",
         ))
     })
 }
@@ -68,12 +68,12 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
     let v = args.get_or_undefined(idx);
     if v.is_undefined() || v.is_null() {
         return Err(JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:storage: missing required string argument at index {idx}"
+            "ease:db: missing required string argument at index {idx}"
         ))));
     }
     let s = v.as_string().ok_or_else(|| {
         JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:storage: expected string at index {idx}"
+            "ease:db: expected string at index {idx}"
         )))
     })?;
     Ok(s.to_std_string_escaped())
@@ -81,10 +81,10 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
 
 fn read_string_array(arg: &JsValue, ctx: &mut boa_engine::Context) -> JsResult<Vec<String>> {
     let obj = arg.as_object().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message("ease:storage: expected array"))
+        JsError::from(JsNativeError::typ().with_message("ease:db: expected array"))
     })?;
     let arr = JsArray::from_object(obj.clone()).map_err(|_| {
-        JsError::from(JsNativeError::typ().with_message("ease:storage: expected array"))
+        JsError::from(JsNativeError::typ().with_message("ease:db: expected array"))
     })?;
     let len = arr.length(ctx).unwrap_or(0);
     let mut out = Vec::with_capacity(len as usize);
@@ -92,7 +92,7 @@ fn read_string_array(arg: &JsValue, ctx: &mut boa_engine::Context) -> JsResult<V
         let v = arr.at(i as i64, ctx)?;
         let s = v.as_string().ok_or_else(|| {
             JsError::from(JsNativeError::typ().with_message(
-                "ease:storage: array elements must be strings",
+                "ease:db: array elements must be strings",
             ))
         })?;
         out.push(s.to_std_string_escaped());
@@ -105,10 +105,10 @@ fn read_entry_array(
     ctx: &mut boa_engine::Context,
 ) -> JsResult<Vec<PluginKvEntry>> {
     let obj = arg.as_object().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message("ease:storage: expected array"))
+        JsError::from(JsNativeError::typ().with_message("ease:db: expected array"))
     })?;
     let arr = JsArray::from_object(obj.clone()).map_err(|_| {
-        JsError::from(JsNativeError::typ().with_message("ease:storage: expected array"))
+        JsError::from(JsNativeError::typ().with_message("ease:db: expected array"))
     })?;
     let len = arr.length(ctx).unwrap_or(0);
     let mut out = Vec::with_capacity(len as usize);
@@ -116,7 +116,7 @@ fn read_entry_array(
         let v = arr.at(i as i64, ctx)?;
         let obj = v.as_object().ok_or_else(|| {
             JsError::from(JsNativeError::typ().with_message(
-                "ease:storage: array elements must be { key, value }",
+                "ease:db: array elements must be { key, value }",
             ))
         })?;
         let key = obj
@@ -124,7 +124,7 @@ fn read_entry_array(
             .as_string()
             .ok_or_else(|| {
                 JsError::from(JsNativeError::typ().with_message(
-                    "ease:storage: entry.key must be a string",
+                    "ease:db: entry.key must be a string",
                 ))
             })?
             .to_std_string_escaped();
@@ -133,7 +133,7 @@ fn read_entry_array(
             .as_string()
             .ok_or_else(|| {
                 JsError::from(JsNativeError::typ().with_message(
-                    "ease:storage: entry.value must be a string",
+                    "ease:db: entry.value must be a string",
                 ))
             })?
             .to_std_string_escaped();
@@ -175,7 +175,7 @@ fn make_count_object(key: &str, count: u64, ctx: &mut boa_engine::Context) -> Js
 fn run_blocking<R>(description: &str, result: BResult<R>) -> JsResult<R> {
     result.map_err(|e| {
         JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:storage {description} failed: {e:?}"
+            "ease:db {description} failed: {e:?}"
         )))
     })
 }
@@ -183,7 +183,7 @@ fn run_blocking<R>(description: &str, result: BResult<R>) -> JsResult<R> {
 fn db_clone() -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServer>> {
     let cx = crate::BACKEND_CONTEXT.get().ok_or_else(|| {
         JsError::from(JsNativeError::typ().with_message(
-            "ease:storage: backend not initialized (BACKEND_CONTEXT is unset)",
+            "ease:db: backend not initialized (BACKEND_CONTEXT is unset)",
         ))
     })?;
     Ok(cx.database_server().clone())
@@ -436,7 +436,7 @@ fn list_keys(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -
             .as_string()
             .ok_or_else(|| {
                 JsError::from(JsNativeError::typ().with_message(
-                    "ease:storage: prefix must be a string",
+                    "ease:db: prefix must be a string",
                 ))
             })?
             .to_std_string_escaped()

@@ -46,7 +46,7 @@ Root Java package: `com.kutedev.easemusicplayer`. Namespace / applicationId: `co
 - `Root.kt` — main `@Composable` (`NavHost`, routes, theme).
 - `core/`
   - `MusicPlayer.kt` — `PlaybackService` (plain `android.app.Service` owning a `MediaSessionCompat` for system integration). `@AndroidEntryPoint`.
-  - `KeepBackendService.kt` — foreground service that keeps the Rust backend process alive. `@AndroidEntryPoint`.
+  - `KeepBackendService.kt` — foreground service that keeps the Rust backend process alive AND hosts the plugin backends: one headless tur instance per plugin manifest declaring a `backend` field (`createHeadlessInstance(pluginId)` + `loadModule(backend.js)` + `wireServiceRpc(handle, pluginId)`). `@AndroidEntryPoint`.
   - `CantodeEngine.kt` — Kotlin wrapper around a cantode `PlayerHandle` (Rust audio engine over UniFFI). Owns the 10 Hz state-poll loop, surfaces state via `@Volatile` fields + an `endedEvent` `SharedFlow`.
   - `CoroutineScopeModule.kt` — Hilt `@Module` providing the app-wide `CoroutineScope` (`SupervisorJob + Dispatchers.Default`).
 - `singleton/` — `Bridge` + repositories (see [Key patterns](#key-patterns)).
@@ -108,7 +108,30 @@ All in `singleton/`, constructed with `Bridge` + `CoroutineScope`, expose `State
 - `PlaylistRepository` — playlist list (debounced reload), reorder via `ease-order-key`, reacts to storage-removal events.
 - `StorageRepository` — cloud storage list, OAuth refresh token, remove events.
 - `AssetRepository` — in-memory cache for cover art bytes + decoded bitmaps.
+- `PluginRepository` — plugin registry: `scanPlugins()` walks `assets/plugins/<id>/manifest.json` and publishes `enabledPlugins` / `pluginViews` / `storageProviders`; `bindPlayerEvents()` forwards player events to JS backends (see [Plugin system](#plugin-system-js-plugins)).
 - `PlayerControllerRepository`, `PermissionRepository`, `ImportRepository`, `ToastRepository`.
+
+### Plugin system (JS plugins)
+Plugins live under [`plugins/`](./plugins/) (TS sources, rspack bundles) and ship into `android/app/src/main/assets/plugins/<id>/` (`pnpm run build` per plugin; it also copies `manifest.json`). Manifest schema:
+
+```json
+{
+  "id": "com.ease.onedrive",
+  "backend": "backend.js",                    // optional; long-lived module (headless tur instance)
+  "events": ["music:play"],
+  "contributions": {
+    "storages": [{ "id": "onedrive", "view": "view.js" }],   // per-storage config view (short-lived)
+    "views":    [{ "id": "main", "title": "…", "view": "view.js" }]
+  }
+}
+```
+
+- **`backend`** — one per plugin; all contributions share it. Loaded once by `KeepBackendService` into a headless tur instance stamped with `PluginId`; registers `tur:rpc` handlers (`registerHandler`) for storage ops (`onedrive:list` etc.) and/or event subscriptions (`music:play` in `com.ease.playcount`'s backend).
+- **`view`** — per contribution; loaded into a `TurView` when the page opens (add-storage form, plugin page) and destroyed on leave.
+- **Host event pipeline** (no per-plugin Kotlin logic): `PlayerControllerRepository.pluginEvents` → `PluginRepository.bindPlayerEvents` filters by the manifest's `events` list → `bridge.call(BridgeMethods.Plugin.EVENT, ArgPluginEvent(pluginId, type, payload))` → Rust `plugin.event` dispatch → `BackendContext.dispatch_plugin_event` → that plugin's `RpcClient.call(type, payload)` → JS `registerHandler(type, …)`.
+- **RPC map**: `BackendContext.service_rpcs: RwLock<HashMap<String /* pluginId */, RpcClient>>` — one entry per backend, installed by the `wireServiceRpc(handle, pluginId)` JNI call (`ctx.rs`). Storage dispatch (`services/storage/mod.rs`) resolves the client by the storage row's `plugin_id`.
+- **`ease` host module** (`plugin_runtime/plugin.rs`) exports 5 namespaces: `db` (KV, formerly `ease.storage`), `secret`, `oauth`, `themes`, `context`. All ctx-bound; identity comes from the per-instance `PluginId` data slot — never from JS args. Type declarations: [`plugins/infra/ease.d.ts`](./plugins/infra/ease.d.ts) + [`plugins/infra/tur-rpc.d.ts`](./plugins/infra/tur-rpc.d.ts).
+- **Plugin TS layout**: `src/backend.ts` + `src/view.ts`, rspack entries `{ backend, view }`. Built bundles + copied `manifest.json` are gitignored.
 
 ### ViewModels
 `@HiltViewModel` extending `androidx.lifecycle.ViewModel`, using `viewModelScope`. UI state classes are co-located (e.g. `PlaylistsState`, `SleepModeState`, `PlaylistsMode` enum). Example: `PlayerVM` polls playback position every 1 s.
@@ -155,7 +178,8 @@ These are **not checked in** and must be regenerated (via `pnpm build:jni`) befo
 
 ## On-device verification
 
-- **Device + adb**: follow the `android-dev` skill. The wireless adb link is flaky — reconnect before each call (the reliable pattern is a small `SH()` wrapper that `disconnect`→`connect`→sleep→runs the command). MIUI rejects silent installs — use `adb push` + `pm install -r` (rc=255 output is normal; verify with `pm path`/`dumpsys`), not `adb install`. tur-rendered plugin views don't expose text to `uiautomator dump` (only the Compose top bar does), so tap targets inside them must be found from a screenshot, not a UI dump.
+- **Device + adb**: follow the `android-dev` skill. The wireless adb link is flaky — reconnect before each call (the reliable pattern is a small `SH()` wrapper that `disconnect`→`connect`→sleep→runs the command). The device's wireless-debugging port changes when its adbd restarts — if the proxy target port stops accepting, check the port on the device (or use port `5555` if `adb tcpip` is enabled) and restart the proxy. A **dozing device** drops the link mid-transfer and produces empty screencaps — `input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard` first.
+- **Installing**: MIUI rejects silent installs — use `adb push` + `pm install -r` (run `pm install` detached via `nohup … > /data/local/tmp/install.log 2>&1 &` and poll `lastUpdateTime` in `dumpsys package` — the install outlives the stable link window). Large pushes (>40 MB) reliably die mid-transfer; **split the APK into 2–5 MB chunks** (`split -b 5m`), push each with a reconnect, `cat` on device, then install. Screencaps are **physical pixels** (1440×3200 on the test device, Mi 11); `uiautomator dump` bounds are exact — prefer them over screenshot-based estimates for Compose UI. tur-rendered plugin views don't expose text to `uiautomator dump` (only the Compose top bar does), so tap targets inside them must be found from a screenshot, not a UI dump.
 - **Analyzing screenshots: ALWAYS delegate to the `image-reader` subagent** via the Task tool — do not hand-parse pixels with PIL/Python scripts. Give it full context in the prompt: screen size + dpr, what the screen should show, the colors/labels of the elements of interest, and the precise question (e.g. "is box X to the left or right of target Y, and is it clipped?"). For exact geometry, ask it for bounding boxes of distinctly-colored solid-fill elements (unique colors are easiest to measure); treat text-only estimates as ±tens of px.
 
 ## Gotchas

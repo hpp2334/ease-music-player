@@ -385,10 +385,10 @@ data class ArgReorderMusic(
 // ============================================================================
 
 @Serializable
-data class ArgPluginKvAppend(
+data class ArgPluginEvent(
     val pluginId: String,
-    val key: String,
-    val value: String,
+    val type: String,
+    val payload: JsonElement,
 )
 
 @Serializable

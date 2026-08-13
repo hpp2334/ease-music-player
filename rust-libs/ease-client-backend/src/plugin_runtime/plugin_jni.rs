@@ -248,17 +248,26 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     })
 }
 
-/// `EasePluginBridge.wireServiceRpc(instanceHandle): boolean` — connects the
-/// headless service instance's event bus to ease-tur-rpc and stashes the
-/// resulting `Send` [`RpcClient`] into the global backend context. Called once
-/// on the instance's own thread (the JNI thread) after `createHeadlessInstance`
-/// + `loadModule(plugin.js)`. Returns `true` on success.
+/// `EasePluginBridge.wireServiceRpc(instanceHandle, pluginId): boolean` —
+/// connects the headless service instance's event bus to ease-tur-rpc and
+/// stashes the resulting `Send` [`RpcClient`] into the global backend
+/// context under `pluginId`. Called once per plugin, on the instance's own
+/// thread (the JNI thread) after `createHeadlessInstance` +
+/// `loadModule(backend.js)`. Returns `true` on success.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_wireServiceRpc(
-    _env: tur_android::JNIEnv,
+    mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     instance_handle: tur_android::jlong,
+    plugin_id: tur_android::JString,
 ) -> tur_android::jboolean {
+    let pid: String = match env.get_string(&plugin_id) {
+        Ok(s) => s.into(),
+        Err(e) => {
+            tracing::error!("wireServiceRpc: get_string(plugin_id) failed: {e}");
+            return 0;
+        }
+    };
     let Some(rpc) = tur_android::ops::with_app(instance_handle, |app| {
         ease_tur_rpc::RpcClient::wire(app)
     }) else {
@@ -268,8 +277,8 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     match rpc {
         Ok(client) => {
             if let Some(cx) = crate::BACKEND_CONTEXT.get() {
-                cx.set_service_rpc(client);
-                tracing::info!("wireServiceRpc: service RpcClient installed");
+                cx.set_service_rpc(&pid, client);
+                tracing::info!("wireServiceRpc: service RpcClient installed for {pid}");
                 1
             } else {
                 tracing::error!("wireServiceRpc: BACKEND_CONTEXT not set");

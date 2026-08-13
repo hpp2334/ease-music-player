@@ -1,4 +1,4 @@
-// Play Counts plugin — entry module.
+// Play Counts plugin — view module.
 //
 // Mounted by the tur engine when the user opens the plugin's "main" view.
 // Top-level side effects here run at module-eval time:

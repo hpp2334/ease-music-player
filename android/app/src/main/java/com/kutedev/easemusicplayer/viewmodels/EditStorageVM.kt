@@ -120,7 +120,7 @@ class EditStorageVM @Inject constructor(
 
         // Discover plugin storage providers for the create-mode chooser.
         viewModelScope.launch {
-            pluginRepository.scanStorageProviders()
+            pluginRepository.scanPlugins()
         }
     }
 

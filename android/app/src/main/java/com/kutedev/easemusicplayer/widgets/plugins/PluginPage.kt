@@ -8,15 +8,13 @@ import androidx.compose.material3.Text
  * Top-level router for `RoutePlugin(pluginId, viewId)`. Dispatches to the
  * right composable per plugin.
  *
- * Plugins with a JS entry (`main` field in their manifest) render through
- * [TurPluginPage] — a tur engine view that imports `ease:storage` and
- * `tur:std`. The plugin JS owns all view + biz logic; the host stays
- * decoupled.
+ * Plugins with a view contribution render through [TurPluginPage] — a tur
+ * engine view that imports `ease` and `tur:std`. The plugin JS owns all
+ * view + biz logic; the host stays decoupled.
  *
- * Currently every built-in plugin routes through [TurPluginPage]; the
- * fallback stub only fires for unknown plugin ids (e.g. a partially
- * installed plugin whose manifest declares a view but whose assets are
- * missing).
+ * Currently every plugin routes through [TurPluginPage]; the fallback stub
+ * only fires for unknown plugin ids (e.g. a partially installed plugin
+ * whose manifest declares a view but whose assets are missing).
  */
 @Composable
 fun PluginPage(
