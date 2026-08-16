@@ -45,7 +45,7 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ b7c6c1d).
+# tur engine integration (https://github.com/hpp2334/tur @ 97d005a).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
 # main↔worker threaded runtime (#178), the fully-wired bidirectional event
 # bus (#181 — host↔JS byte transport for the OneDrive service plugin), the
@@ -58,10 +58,10 @@ anyhow = { workspace = true }
 # (registered on the runtime builder) and for timer/sleep.
 # All crates live in the same repo; cargo clones once and resolves their
 # internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "b7c6c1d0435eb0f4511971ff4d00a7407482554c" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "b7c6c1d0435eb0f4511971ff4d00a7407482554c" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "b7c6c1d0435eb0f4511971ff4d00a7407482554c" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "b7c6c1d0435eb0f4511971ff4d00a7407482554c" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "97d005a9981b321f991639bff89ec211bf9ee5ea" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "97d005a9981b321f991639bff89ec211bf9ee5ea" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "97d005a9981b321f991639bff89ec211bf9ee5ea" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "97d005a9981b321f991639bff89ec211bf9ee5ea" }
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
 # compiles against.

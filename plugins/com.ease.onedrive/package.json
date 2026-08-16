@@ -10,9 +10,9 @@
     "devDependencies": {
         "@rspack/cli": "^1.2.0",
         "@rspack/core": "^1.2.0",
-        "@tur-ng/core": "^0.0.2",
+        "@tur-ng/core": "^0.0.4",
         "@tur-ng/net": "^0.0.2",
-        "@tur-ng/std": "^0.0.6",
+        "@tur-ng/std": "^0.0.7",
         "typescript": "^5.7.0"
     }
 }

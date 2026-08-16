@@ -17,7 +17,7 @@
 // the Condition-gated content path.
 
 import {
-    render,
+    mount,
     view,
     source,
     get,
@@ -207,4 +207,8 @@ export const rootView = view(() =>
     }),
 );
 
-render(rootView);
+// Module lifecycle contract: mount inside `start()` (engine-owned root-tree
+// lifecycle — no cleanup needed).
+export function start(): void {
+    mount(rootView);
+}

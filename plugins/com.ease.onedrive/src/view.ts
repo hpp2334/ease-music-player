@@ -28,7 +28,7 @@ import {
     Color, Column, Container, CrossAxisAlignment,
     HitTestBehavior, Input, MainAxisAlignment, MainAxisSize,
     PointerInteract, Row, SizedBox, Text, createTextEditingController,
-    get, mutate, render, view, viewportSize$,
+    get, mutate, mount, view, viewportSize$,
     type Readable,
 } from "tur:std";
 import { db, oauth, context, themes } from "ease";
@@ -186,4 +186,10 @@ const rootView = view(() => {
     });
 });
 
-render(rootView);
+// Module lifecycle contract: mount inside `start()` (the engine runs the
+// returned cleanup before the next load / at destroy). The root-tree
+// lifecycle is engine-owned — `mount` replaces any existing root and module
+// teardown clears it — so no cleanup is returned.
+export function start(): void {
+    mount(rootView);
+}
