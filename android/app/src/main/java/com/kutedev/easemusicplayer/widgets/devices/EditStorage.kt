@@ -113,22 +113,25 @@ private fun RemoveDialog(
     }
 }
 
-/** Selectable storage-provider card in the create-mode chooser. */
+/** Storage-provider card in the chooser. Non-selectable cards (other
+ *  providers in edit mode — a storage can't change its type) render dimmed. */
 @Composable
 private fun StorageBlock(
     title: String,
     isActive: Boolean,
+    disabled: Boolean = false,
     onSelect: () -> Unit
 ) {
     val bgColor = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
     val tint = if (isActive) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface
+    val dim = if (disabled) 0.4f else 1f
 
     Box(
         modifier = Modifier
             .size(100.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(bgColor)
-            .clickable { onSelect() }
+            .background(bgColor.copy(alpha = dim))
+            .clickable(enabled = !disabled) { onSelect() }
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -137,11 +140,11 @@ private fun StorageBlock(
             Icon(
                 painter = painterResource(id = R.drawable.icon_cloud),
                 contentDescription = null,
-                tint = tint,
+                tint = tint.copy(alpha = dim),
             )
             Text(
                 text = title,
-                color = tint,
+                color = tint.copy(alpha = dim),
             )
         }
     }
@@ -299,6 +302,7 @@ fun EditStoragesPage(
                         StorageBlock(
                             title = p.displayName,
                             isActive = active,
+                            disabled = !isCreated && !active,
                             onSelect = { if (isCreated) selectedProvider = p }
                         )
                     }
