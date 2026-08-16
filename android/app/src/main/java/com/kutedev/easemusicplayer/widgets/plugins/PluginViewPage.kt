@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -30,51 +31,49 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
 import com.kutedev.easemusicplayer.turintegration.TurView
-import com.kutedev.easemusicplayer.viewmodels.PluginsVM
-
-private val pluginsPaddingX = 24.dp
+import com.kutedev.easemusicplayer.viewmodels.DashboardVM
 
 /**
- * Generic plugin-view page. Resolves the view's JS source from the plugin
- * manifest (`contributions.views[*].view`, e.g.
- * `plugins/<pluginId>/view.js`) via [PluginsVM] and renders it in a
- * [TurView]. The plugin JS owns all view logic and data access via the
- * `ease` and `tur:std` modules — the host stays decoupled from any
- * plugin's biz logic.
+ * Standalone plugin-view page (pushed from a Dashboard entry card). Resolves
+ * the contribution's JS source from the plugin manifest
+ * (`contributions.dashboard[*].view`) via [DashboardVM] and renders it in a
+ * full-screen [TurView]. The plugin JS owns all view logic and data access
+ * via the `ease` and `tur:std` modules — the host stays decoupled.
  *
- * `pluginId` selects the asset subdirectory AND is stamped into the
+ * `pluginId` selects the installed plugin dir AND is stamped into the
  * instance's per-instance data slot so `ease:*` bridge fns resolve the
  * calling plugin from Rust; `viewId` selects the contribution entry whose
  * view file is loaded.
  */
 @Composable
-fun TurPluginPage(
+fun PluginViewPage(
     pluginId: String,
     viewId: String,
     scaffoldPadding: PaddingValues,
-    pluginsVM: PluginsVM = hiltViewModel(),
+    dashboardVM: DashboardVM = hiltViewModel(),
 ) {
     val context = LocalContext.current
     val navController = LocalNavController.current
-    val views by pluginsVM.pluginViews.collectAsState()
-    val item = views.find { it.pluginId == pluginId && it.viewId == viewId }
+    val items by dashboardVM.dashboardItems.collectAsState()
+    val item = items.find { it.pluginId == pluginId && it.contributionId == viewId }
     var jsSource by remember(pluginId, viewId) { mutableStateOf<String?>(null) }
     var loadError by remember(pluginId, viewId) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(item?.viewAssetPath) {
+    LaunchedEffect(item?.viewFile) {
         loadError = null
-        jsSource = item?.viewAssetPath?.let { path ->
-            runCatching {
-                context.assets.open(path).bufferedReader().use { it.readText() }
-            }.getOrElse {
-                loadError = it.message ?: "unknown error"
-                null
+        jsSource = null
+        val file = item?.viewFile
+        if (file != null) {
+            val js = dashboardVM.openPluginFile(pluginId, file)
+            if (js == null) {
+                loadError = "file missing"
+            } else {
+                jsSource = js
             }
         }
     }
@@ -89,7 +88,7 @@ fun TurPluginPage(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .padding(pluginsPaddingX, 0.dp),
+                .padding(24.dp, 0.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -104,7 +103,7 @@ fun TurPluginPage(
             )
             Box(modifier = Modifier.width(16.dp))
             Text(
-                text = item?.pluginName ?: pluginId,
+                text = item?.title ?: pluginId,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -117,7 +116,7 @@ fun TurPluginPage(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Unknown plugin: $pluginId / $viewId",
+                    text = "Unknown plugin view: $pluginId / $viewId",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 14.sp,
                 )
@@ -127,7 +126,7 @@ fun TurPluginPage(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Plugin load failed: $loadError",
+                    text = "Plugin view load failed: $loadError",
                     color = MaterialTheme.colorScheme.error,
                     fontSize = 14.sp,
                 )

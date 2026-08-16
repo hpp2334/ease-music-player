@@ -30,7 +30,9 @@ import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.core.RouteLog
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.core.RoutePlaylist
-import com.kutedev.easemusicplayer.core.RoutePlugin
+import com.kutedev.easemusicplayer.core.RoutePluginAvailable
+import com.kutedev.easemusicplayer.core.RoutePluginManagement
+import com.kutedev.easemusicplayer.core.RoutePluginView
 import com.kutedev.easemusicplayer.core.RoutesProvider
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.widgets.ToastFrame
@@ -42,7 +44,9 @@ import com.kutedev.easemusicplayer.widgets.musics.MusicPlayerPage
 import com.kutedev.easemusicplayer.widgets.playlists.CreatePlaylistsDialog
 import com.kutedev.easemusicplayer.widgets.playlists.EditPlaylistsDialog
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
-import com.kutedev.easemusicplayer.widgets.plugins.PluginPage
+import com.kutedev.easemusicplayer.widgets.plugins.AvailablePluginsPage
+import com.kutedev.easemusicplayer.widgets.plugins.PluginManagementPage
+import com.kutedev.easemusicplayer.widgets.plugins.PluginViewPage
 import com.kutedev.easemusicplayer.widgets.settings.DebugMorePage
 import com.kutedev.easemusicplayer.widgets.settings.LogPage
 
@@ -142,8 +146,18 @@ fun Root() {
                             composable(RouteDebugMore()) {
                                 DebugMorePage()
                             }
+                            composable(RoutePluginManagement()) {
+                                PluginManagementPage(
+                                    scaffoldPadding = scaffoldPadding,
+                                )
+                            }
+                            composable(RoutePluginAvailable()) {
+                                AvailablePluginsPage(
+                                    scaffoldPadding = scaffoldPadding,
+                                )
+                            }
                             composable(
-                                RoutePlugin("{pluginId}", "{viewId}"),
+                                RoutePluginView("{pluginId}", "{viewId}"),
                                 arguments = listOf(
                                     navArgument("pluginId") { type = NavType.StringType },
                                     navArgument("viewId") { type = NavType.StringType },
@@ -151,7 +165,7 @@ fun Root() {
                             ) { backStackEntry ->
                                 val pluginId = backStackEntry.arguments?.getString("pluginId") ?: ""
                                 val viewId = backStackEntry.arguments?.getString("viewId") ?: ""
-                                PluginPage(
+                                PluginViewPage(
                                     pluginId = pluginId,
                                     viewId = viewId,
                                     scaffoldPadding = scaffoldPadding,

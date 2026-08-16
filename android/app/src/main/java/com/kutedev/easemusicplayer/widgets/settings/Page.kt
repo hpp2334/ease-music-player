@@ -34,6 +34,7 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteDebugMore
 import com.kutedev.easemusicplayer.core.RouteLog
+import com.kutedev.easemusicplayer.core.RoutePluginManagement
 
 
 private val paddingX = SettingPaddingX
@@ -120,6 +121,15 @@ fun SettingSubpage() {
             .padding(paddingX, paddingX)
             .verticalScroll(rememberScrollState())
     ) {
+        Title(title = stringResource(id = R.string.setting_general))
+        Item(
+            iconPainter = painterResource(R.drawable.icon_extension),
+            title = stringResource(id = R.string.setting_plugin_management),
+            content = null,
+            onClick = {
+                navController.navigate(RoutePluginManagement())
+            }
+        )
         Title(title = stringResource(id = R.string.setting_debug))
         Item(
             iconPainter = painterResource(R.drawable.icon_log),

@@ -60,6 +60,15 @@ object EasePluginBridge {
     @JvmStatic
     external fun wireServiceRpc(instanceHandle: Long, pluginId: String): Boolean
 
+    /**
+     * Drop the backend context's service `RpcClient` entry for [pluginId]
+     * (its headless instance is being torn down — the plugin was disabled /
+     * uninstalled / upgraded). Storage dispatch + event delivery for the
+     * plugin degrade gracefully until a fresh instance is wired.
+     */
+    @JvmStatic
+    external fun unwireServiceRpc(pluginId: String)
+
     private var cached: TurRuntime? = null
 
     /**

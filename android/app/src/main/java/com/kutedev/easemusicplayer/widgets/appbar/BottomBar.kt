@@ -51,25 +51,18 @@ private object BPlaylist: IBottomItem {
         get() = 0;
 }
 
-private object BPlugins: IBottomItem {
-    override val painterId: Int
-        get() = R.drawable.icon_extension
-    override val pageIndex: Int
-        get() = 1;
-}
-
 private object BDashboard: IBottomItem {
     override val painterId: Int
         get() = R.drawable.icon_dashboard
     override val pageIndex: Int
-        get() = 2;
+        get() = 1;
 }
 
 private object BSetting: IBottomItem {
     override val painterId: Int
         get() = R.drawable.icon_setting
     override val pageIndex: Int
-        get() = 3;
+        get() = 2;
 }
 
 fun getBottomBarSpace(
@@ -104,7 +97,6 @@ fun BoxScope.BottomBar(
     val current by playerVM.music.collectAsState()
     val items = listOf(
         BPlaylist,
-        BPlugins,
         BDashboard,
         BSetting
     )

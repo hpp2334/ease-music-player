@@ -7,7 +7,7 @@
   "backend": "backend.js",
   "events": ["music:play"],
   "contributions": {
-    "views": [
+    "dashboard": [
       { "id": "main", "title": "Play Counts", "view": "view.js" }
     ]
   }

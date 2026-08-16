@@ -158,26 +158,32 @@ private fun StorageBlock(
  * (e.g. WebDAV) persist their instance from the view via a backend RPC +
  * `ease.context.createStorage`.
  *
- * [assetPath] is the absolute asset path to the plugin's view JS bundle
- * (e.g. `plugins/com.ease.webdav/view.js`). [pluginId] is stamped into
- * the instance's per-instance data slot so `ease:*` bridge fns resolve the
- * calling plugin from Rust. [instance] is the storage's
+ * [pluginId] is stamped into the instance's per-instance data slot so
+ * `ease:*` bridge fns resolve the calling plugin from Rust. [viewFile] is
+ * the view JS filename inside the plugin's install dir (read via
+ * [EditStorageVM.openPluginFile]). [instance] is the storage's
  * `plugin_storage_id` for edit views (non-null → `ease.context.storageId$`
  * reports the id; null = create-mode setup view).
  */
 @Composable
-private fun PluginStorageView(assetPath: String, pluginId: String, instance: String?) {
+private fun PluginStorageView(
+    editStorageVM: EditStorageVM,
+    pluginId: String,
+    viewFile: String,
+    instance: String?,
+) {
     val context = LocalContext.current
-    var jsSource by remember(assetPath) { mutableStateOf<String?>(null) }
-    var loadError by remember(assetPath) { mutableStateOf<String?>(null) }
+    var jsSource by remember(pluginId, viewFile) { mutableStateOf<String?>(null) }
+    var loadError by remember(pluginId, viewFile) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(assetPath) {
+    LaunchedEffect(pluginId, viewFile) {
         loadError = null
-        jsSource = runCatching {
-            context.assets.open(assetPath).bufferedReader().use { it.readText() }
-        }.getOrElse {
-            loadError = it.message ?: "unknown error"
-            null
+        jsSource = null
+        val js = editStorageVM.openPluginFile(pluginId, viewFile)
+        if (js == null) {
+            loadError = "file missing"
+        } else {
+            jsSource = js
         }
     }
 
@@ -311,10 +317,10 @@ fun EditStoragesPage(
                 if (showPlugin) {
                     if (isCreated) {
                         // Create-mode chooser selection.
-                        val assetPath = activeProvider?.viewAssetPath
+                        val viewFile = activeProvider?.viewFile
                         val pid = activeProvider?.pluginId
-                        if (assetPath != null && pid != null) {
-                            PluginStorageView(assetPath, pid, instance = null)
+                        if (viewFile != null && pid != null) {
+                            PluginStorageView(editStorageVM, pid, viewFile, instance = null)
                         }
                     } else {
                         // Edit mode: render the storage's plugin view,
@@ -323,8 +329,9 @@ fun EditStoragesPage(
                         val epv = editPluginView
                         if (epv != null) {
                             PluginStorageView(
-                                assetPath = epv.viewAssetPath,
+                                editStorageVM = editStorageVM,
                                 pluginId = epv.pluginId,
+                                viewFile = epv.viewFile,
                                 instance = epv.pluginStorageId,
                             )
                         } else {
