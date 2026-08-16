@@ -387,24 +387,29 @@ function removeInstance(args: { instance: string }): void {
 // Register handlers
 // ---------------------------------------------------------------------------
 
-registerHandler("onedrive:list", (args) =>
-    withRetry(args.instance, (token) => listImpl(token, args.dir)),
-);
+// The module lifecycle contract: the engine calls `start()` after eval (and
+// runs the returned cleanup before the next load / at destroy). Handlers are
+// per-instance and die with the instance, so no cleanup is needed.
+export function start(): void {
+    registerHandler("onedrive:list", (args) =>
+        withRetry(args.instance, (token) => listImpl(token, args.dir)),
+    );
 
-registerHandler("onedrive:get", (args) => {
-    const { instance, streamId, path, offset } = args;
-    return withRetry(instance, (token) => getImpl(token, streamId, path, offset)).catch((e: any) => {
-        // surface non-401 failures as a stream error
-        errorStream(streamId, String(e?.message ?? e));
+    registerHandler("onedrive:get", (args) => {
+        const { instance, streamId, path, offset } = args;
+        return withRetry(instance, (token) => getImpl(token, streamId, path, offset)).catch((e: any) => {
+            // surface non-401 failures as a stream error
+            errorStream(streamId, String(e?.message ?? e));
+            return {};
+        });
+    });
+
+    registerHandler("onedrive:oauth.url", () => ({ url: authorizeUrl() }));
+
+    registerHandler("onedrive:oauth.exchange", (args) => exchangeCode(args));
+
+    registerHandler("onedrive:removeInstance", (args) => {
+        removeInstance(args);
         return {};
     });
-});
-
-registerHandler("onedrive:oauth.url", () => ({ url: authorizeUrl() }));
-
-registerHandler("onedrive:oauth.exchange", (args) => exchangeCode(args));
-
-registerHandler("onedrive:removeInstance", (args) => {
-    removeInstance(args);
-    return {};
-});
+}

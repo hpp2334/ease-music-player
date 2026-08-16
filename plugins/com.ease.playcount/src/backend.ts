@@ -32,9 +32,14 @@ function dayKey(ts: number): string {
     return `plays:${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-onEvent("music:play", (args: MusicPlayPayload) => {
-    db.multiAppend(
-        dayKey(args.ts),
-        JSON.stringify({ musicId: args.musicId, title: args.title, ts: args.ts }),
-    );
-});
+// The module lifecycle contract: the engine calls `start()` after eval (and
+// runs the returned cleanup before the next load / at destroy). The event
+// subscription dies with the instance, so no cleanup is needed.
+export function start(): void {
+    onEvent("music:play", (args: MusicPlayPayload) => {
+        db.multiAppend(
+            dayKey(args.ts),
+            JSON.stringify({ musicId: args.musicId, title: args.title, ts: args.ts }),
+        );
+    });
+}
