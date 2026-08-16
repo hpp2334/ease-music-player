@@ -23,7 +23,7 @@ import javax.inject.Inject
 
 /** Resolved view descriptor for an edited plugin storage (edit mode only). */
 data class EditPluginView(
-    val viewAssetPath: String,
+    val viewFile: String,
     val pluginId: String,
     val pluginStorageId: String,
 )
@@ -59,8 +59,8 @@ class EditStorageVM @Inject constructor(
     /** Discovered plugin storage providers (drives the create-mode chooser). */
     val storageProviders = pluginRepository.storageProviders
     /**
-     * For an edited plugin storage: the resolved view JS asset path + ids
-     * (null in create mode, or until `scanPlugins` resolves the provider).
+     * For an edited plugin storage: the resolved view JS file + ids (null
+     * in create mode, or until `scanPlugins` resolves the provider).
      * `EditStoragesPage` renders this into a `TurView` stamped with the
      * storage id so `ease.context.storageId$` is non-null (edit mode).
      */
@@ -71,8 +71,8 @@ class EditStorageVM @Inject constructor(
             } else {
                 providers
                     .firstOrNull { it.pluginId == handle.pluginId }
-                    ?.viewAssetPath
-                    ?.let { path -> EditPluginView(path, handle.pluginId, handle.pluginStorageId) }
+                    ?.viewFile
+                    ?.let { file -> EditPluginView(file, handle.pluginId, handle.pluginStorageId) }
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     /** Fires when the edited storage disappears from the list (the plugin
@@ -168,4 +168,8 @@ class EditStorageVM @Inject constructor(
             }
         }
     }
+
+    /** Read one file from an installed plugin's dir (view JS bundles). */
+    suspend fun openPluginFile(pluginId: String, fileName: String): String? =
+        pluginRepository.openPluginFile(pluginId, fileName)
 }

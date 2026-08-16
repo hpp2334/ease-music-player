@@ -7,7 +7,7 @@ module.exports = {
         view: "./src/view.ts",
     },
     output: {
-        path: __dirname + "/../../android/app/src/main/assets/plugins/com.ease.onedrive",
+        path: __dirname + "/dist",
         filename: "[name].js",
         library: { type: "module" },
         clean: true,

@@ -113,6 +113,15 @@ impl BackendContext {
         self.internal.service_rpcs.write().unwrap().insert(plugin_id.to_string(), rpc);
     }
 
+    /// Drop the JS backend-plugin RPC handle for `plugin_id` (its headless
+    /// instance is being torn down — the plugin was disabled / uninstalled /
+    /// upgraded). Subsequent `service_rpc_for` calls miss, so storage
+    /// dispatch + event delivery for it degrade gracefully until the
+    /// instance is re-wired.
+    pub fn remove_service_rpc(&self, plugin_id: &str) {
+        self.internal.service_rpcs.write().unwrap().remove(plugin_id);
+    }
+
     /// The JS backend-plugin RPC handle for `plugin_id`, if that plugin's
     /// headless instance is up. `JsStorageBackend` clones this for each
     /// plugin storage row; event dispatch targets it per plugin.

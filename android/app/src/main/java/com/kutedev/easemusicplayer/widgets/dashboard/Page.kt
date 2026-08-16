@@ -29,8 +29,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,6 +43,7 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.viewmodels.DashboardVM
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.viewmodels.SleepModeLeftTime
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
@@ -48,8 +51,12 @@ import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteCreateStorage
 import com.kutedev.easemusicplayer.core.RouteEditStorage
+import com.kutedev.easemusicplayer.core.RoutePluginView
+import com.kutedev.easemusicplayer.singleton.DashboardItem
 import com.kutedev.easemusicplayer.singleton.types.Storage
 import com.kutedev.easemusicplayer.singleton.types.StorageHandle
+import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
+import com.kutedev.easemusicplayer.turintegration.TurView
 
 private val paddingX = 24.dp
 private val paddingY = 12.dp
@@ -125,6 +132,7 @@ private fun SleepModeBlock(vm: SleepModeVM = hiltViewModel()) {
 @Composable
 private fun ColumnScope.DevicesBlock(
     storageItems: List<Storage>,
+    enabledPluginIds: Set<String>,
     editStoragesVM: EditStorageVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
@@ -165,17 +173,23 @@ private fun ColumnScope.DevicesBlock(
             return
         }
         for (item in storageItems) {
+            val handle = item.handle as? StorageHandle.Plugin
+            val pluginAlive = handle == null || handle.pluginId.id in enabledPluginIds
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        navController.navigate(RouteEditStorage(item.id.value.toString()))
+                    .clickable(enabled = pluginAlive) {
+                        if (pluginAlive) {
+                            navController.navigate(RouteEditStorage(item.id.value.toString()))
+                        }
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val title = item.alias.ifBlank { item.id.value.toString() }
-                val subTitle = when (val handle = item.handle) {
-                    is StorageHandle.Plugin -> handle.pluginStorageId.id.substringBefore(':')
+                val subTitle = when {
+                    handle != null && !pluginAlive ->
+                        stringResource(id = R.string.plugin_storage_removed)
+                    handle != null -> handle.pluginStorageId.id.substringBefore(':')
                     else -> ""
                 }
 
@@ -211,14 +225,67 @@ private fun ColumnScope.DevicesBlock(
     }
 }
 
+/**
+ * One plugin dashboard **entry card**: the contribution's title + plugin
+ * id. Not the view itself — tapping pushes [PluginViewPage], the
+ * standalone full-screen page that renders the plugin's view JS.
+ */
+@Composable
+private fun DashboardCard(
+    item: DashboardItem,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(paddingX, 0.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onClick() }
+            .padding(20.dp, 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            modifier = Modifier.size(32.dp),
+            painter = painterResource(id = R.drawable.icon_extension),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Box(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = item.pluginId,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            modifier = Modifier.size(16.dp),
+            painter = painterResource(id = R.drawable.icon_collapse),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 fun DashboardSubpage(
     storageVM: StoragesVM = hiltViewModel(),
-    editStoragesVM: EditStorageVM = hiltViewModel()
+    editStoragesVM: EditStorageVM = hiltViewModel(),
+    dashboardVM: DashboardVM = hiltViewModel(),
 ) {
     val navController = LocalNavController.current
     val storages by storageVM.storages.collectAsState()
     val storageItems = storages.filter { v -> v.handle !is StorageHandle.Local }
+    val enabledPlugins by dashboardVM.enabledPlugins.collectAsState()
+    val dashboardItems by dashboardVM.dashboardItems.collectAsState()
+    val enabledPluginIds = enabledPlugins.map { it.id }.toSet()
 
     LaunchedEffect(Unit) {
         storageVM.reload()
@@ -259,6 +326,26 @@ fun DashboardSubpage(
                 }
             }
         }
-        DevicesBlock(storageItems)
+        DevicesBlock(storageItems, enabledPluginIds)
+        if (dashboardItems.isNotEmpty()) {
+            Box(modifier = Modifier.height(48.dp))
+            Row(
+                modifier = Modifier
+                    .padding(paddingX, 4.dp)
+                    .fillMaxWidth(),
+            ) {
+                Title(title = stringResource(id = R.string.dashboard_plugins))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                for (item in dashboardItems) {
+                    DashboardCard(item) {
+                        navController.navigate(
+                            RoutePluginView(item.pluginId, item.contributionId)
+                        )
+                    }
+                }
+            }
+            Box(modifier = Modifier.height(24.dp))
+        }
     }
 }

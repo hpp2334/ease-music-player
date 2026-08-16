@@ -66,6 +66,31 @@
         <item quantity="other">找到 %d 个日志文件</item>
     </plurals>
     <string name="debug_trigger_rs_panic">Trigger Rust panic!</string>
-    <string name="plugins_title">插件视图</string>
-    <string name="plugins_empty">没有已安装的插件视图。</string>
+    <string name="setting_general">通用</string>
+    <string name="setting_plugin_management">插件管理</string>
+    <string name="dashboard_plugins">插件</string>
+    <string name="plugin_management_title">插件管理</string>
+    <string name="plugin_installed_section">已安装</string>
+    <string name="plugin_installed_empty">暂无已安装插件。</string>
+    <string name="plugin_installed_tag">已安装</string>
+    <string name="plugin_bundled_tag">内置</string>
+    <string name="plugin_install_from_zip">从 ZIP 安装…</string>
+    <string name="plugin_install_ok">插件安装成功。</string>
+    <string name="plugin_install_fail">插件安装失败。</string>
+    <string name="plugin_uninstall_confirm">卸载插件 “E_NAME”？其数据会保留，重新安装后恢复。</string>
+    <string name="plugin_uninstall_storage_warning">有 E_COUNT 个存储依赖它，卸载后将无法访问。</string>
+    <string name="plugin_storage_removed">存储已移除</string>
+    <string name="plugin_available_title">获取插件</string>
+    <string name="plugin_source_label">插件源</string>
+    <string name="plugin_source_custom">自定义源…</string>
+    <string name="plugin_source_custom_desc">提供 plugins.json 及插件 zip 的基础 URL。</string>
+    <string name="plugin_source_verify">验证</string>
+    <string name="plugin_source_verify_fail">源验证失败。</string>
+    <string name="plugin_registry_fail">无法获取插件列表。</string>
+    <string name="plugin_registry_cached">缓存</string>
+    <string name="plugin_available_empty">此源中没有插件。</string>
+    <string name="plugin_retry">重试</string>
+    <string name="plugin_install">安装</string>
+    <string name="plugin_update">更新</string>
+    <string name="plugin_update_available">新版本</string>
 </resources>

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.PluginManager
 import com.kutedev.easemusicplayer.singleton.PluginRepository
 import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
 import com.kutedev.easemusicplayer.turintegration.TurInstance
@@ -17,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -25,12 +28,15 @@ import javax.inject.Inject
 class KeepBackendService : Service() {
     @Inject lateinit var bridge: Bridge
     @Inject lateinit var pluginRepository: PluginRepository
+    @Inject lateinit var pluginManager: PluginManager
     private val _channelId: String = "EaseMusicBackendServiceChannel"
 
     /** Held for the service lifetime so the headless instances are not GC'd. */
     private var serviceRuntime: TurRuntime? = null
     private var serviceScope: CoroutineScope? = null
     private val serviceInstances = mutableListOf<TurInstance>()
+    /** Guards [loadPluginBackends] re-entries (initial load + revision bumps). */
+    private val loadMutex = Mutex()
 
     override fun onCreate() {
         super.onCreate()
@@ -53,15 +59,20 @@ class KeepBackendService : Service() {
     }
 
     /**
-     * Bring up the headless tur instances that host JS plugin backends
-     * (every manifest declaring a `backend` field — e.g. the OneDrive
-     * storage provider, the play-count event hook). Sequence: build the
-     * shared runtime (registers `TurRpcPlugin` + `EaseMusicPlugin`), scan
-     * `assets/plugins/<id>/manifest.json`, then for each backend spawn a
-     * headless instance stamped with the plugin's id, load its module, and
-     * wire the event bus into a `Send` `RpcClient` the backend can call from
-     * any thread. The scan runs on [Dispatchers.IO]; instance creation +
-     * wiring run on the main looper (where `with_app` / the `FrameLoop`
+     * Bring up the plugin install layer + the headless tur instances that
+     * host JS plugin backends. Sequence: build the shared runtime
+     * (registers `TurRpcPlugin` + `EaseMusicPlugin`), run the first-run
+     * install bootstrap ([PluginManager.bootstrapDefaults] — bundled
+     * WebDAV + any storage-referenced plugins), then load every *enabled*
+     * plugin's backend module into a headless instance stamped with the
+     * plugin's id and wire the event bus into a `Send` `RpcClient` the
+     * backend can call from any thread.
+     *
+     * [PluginManager.revision] is collected for the service lifetime: every
+     * install / uninstall / enable / disable mutation tears all instances
+     * down (unwiring their service RPC entries) and reloads the enabled
+     * set. The scan runs on [Dispatchers.IO]; instance creation + wiring
+     * run on the main looper (where `with_app` / the `FrameLoop`
      * Choreographer are valid); failures are logged but never crash the
      * service.
      */
@@ -74,21 +85,11 @@ class KeepBackendService : Service() {
             serviceScope = scope
             scope.launch {
                 try {
-                    pluginRepository.scanPlugins()
-                    for (plugin in pluginRepository.enabledPlugins.value) {
-                        val backendFile = plugin.backend ?: continue
-                        val js = withContext(Dispatchers.IO) {
-                            assets.open("plugins/${plugin.id}/$backendFile").bufferedReader().use { it.readText() }
-                        }
-                        val instance = runtime.createHeadlessInstance(plugin.id)
-                        serviceInstances += instance
-                        instance.loadModule(js)
-                        val ok = EasePluginBridge.wireServiceRpc(instance.nativeHandle(), plugin.id)
-                        if (!ok) {
-                            bridge.logRaw("error", "wireServiceRpc failed for ${plugin.id} (see logcat)")
-                        } else {
-                            bridge.logRaw("info", "plugin backend loaded: ${plugin.id}/$backendFile")
-                        }
+                    pluginManager.bootstrapDefaults()
+                    loadPluginBackends()
+                    pluginManager.revision.collect {
+                        bridge.logRaw("info", "plugin set changed (revision $it) — reloading backends")
+                        loadPluginBackends()
                     }
                 } catch (e: Throwable) {
                     bridge.logRaw("error", "service plugin bootstrap failed: ${e.message}")
@@ -96,6 +97,49 @@ class KeepBackendService : Service() {
             }
         } catch (e: Throwable) {
             bridge.logRaw("error", "service plugin bootstrap failed: ${e.message}")
+        }
+    }
+
+    /** Plugin ids whose backend instance is currently live (wired into the
+     *  backend context). Tracked so teardown can unwire exactly those. */
+    private val loadedPluginIds = mutableListOf<String>()
+
+    /** (Re)load the headless backend instances for all enabled plugins.
+     *  Tears down any live instances first — closing each instance and
+     *  unwiring its service RPC entry so storage dispatch + events for a
+     *  disabled/uninstalled plugin stop at the source. */
+    private suspend fun loadPluginBackends() {
+        loadMutex.withLock {
+            pluginRepository.scanPlugins()
+            for (instance in serviceInstances) {
+                runCatching { instance.close() }
+            }
+            serviceInstances.clear()
+            for (id in loadedPluginIds.toList()) {
+                runCatching { EasePluginBridge.unwireServiceRpc(id) }
+            }
+            loadedPluginIds.clear()
+            for (plugin in pluginRepository.enabledPlugins.value) {
+                val backendFile = plugin.backend ?: continue
+                try {
+                    val js = withContext(Dispatchers.IO) {
+                        val text = pluginRepository.openPluginFile(plugin.id, backendFile)
+                        checkNotNull(text) { "backend file missing: $backendFile" }
+                    }
+                    val instance = serviceRuntime?.createHeadlessInstance(plugin.id) ?: continue
+                    serviceInstances += instance
+                    loadedPluginIds += plugin.id
+                    instance.loadModule(js)
+                    val ok = EasePluginBridge.wireServiceRpc(instance.nativeHandle(), plugin.id)
+                    if (!ok) {
+                        bridge.logRaw("error", "wireServiceRpc failed for ${plugin.id} (see logcat)")
+                    } else {
+                        bridge.logRaw("info", "plugin backend loaded: ${plugin.id}/$backendFile")
+                    }
+                } catch (e: Throwable) {
+                    bridge.logRaw("error", "plugin backend load failed: ${plugin.id} (${e.message})")
+                }
+            }
         }
     }
 
@@ -109,7 +153,13 @@ class KeepBackendService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        serviceInstances.forEach { it.close() }
+        for (id in loadedPluginIds.toList()) {
+            runCatching { EasePluginBridge.unwireServiceRpc(id) }
+        }
+        loadedPluginIds.clear()
+        serviceInstances.forEach { instance ->
+            runCatching { instance.close() }
+        }
         serviceInstances.clear()
         serviceScope?.cancel()
         serviceScope = null

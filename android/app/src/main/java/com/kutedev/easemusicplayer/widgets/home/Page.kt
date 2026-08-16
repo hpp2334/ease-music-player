@@ -19,7 +19,6 @@ import com.kutedev.easemusicplayer.widgets.appbar.BottomBar
 import com.kutedev.easemusicplayer.widgets.appbar.getBottomBarSpace
 import com.kutedev.easemusicplayer.widgets.dashboard.DashboardSubpage
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistsSubpage
-import com.kutedev.easemusicplayer.widgets.plugins.PluginsSubpage
 import com.kutedev.easemusicplayer.widgets.settings.SettingSubpage
 
 @Composable
@@ -28,7 +27,7 @@ fun HomePage(
     scaffoldPadding: PaddingValues,
 ) {
     val pagerState = rememberPagerState(pageCount = {
-        4
+        3
     })
     val isPlaying by playerVM.playing.collectAsState()
 
@@ -45,12 +44,9 @@ fun HomePage(
                 PlaylistsSubpage()
             }
             if (page == 1) {
-                PluginsSubpage()
-            }
-            if (page == 2) {
                 DashboardSubpage()
             }
-            if (page == 3) {
+            if (page == 2) {
                 SettingSubpage()
             }
         }

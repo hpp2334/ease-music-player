@@ -398,3 +398,29 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         }
     }
 }
+
+/// `EasePluginBridge.unwireServiceRpc(pluginId)` — drop the backend
+/// context's service `RpcClient` entry for `plugin_id` (its headless
+/// instance is being torn down: the plugin was disabled / uninstalled /
+/// upgraded). Storage dispatch + event delivery for the plugin degrade
+/// gracefully (miss on `service_rpc_for`) until a fresh instance is wired.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_unwireServiceRpc(
+    mut env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    plugin_id: tur_android::JString,
+) {
+    let pid: String = match env.get_string(&plugin_id) {
+        Ok(s) => s.into(),
+        Err(e) => {
+            tracing::error!("unwireServiceRpc: get_string(plugin_id) failed: {e}");
+            return;
+        }
+    };
+    if let Some(cx) = crate::BACKEND_CONTEXT.get() {
+        cx.remove_service_rpc(&pid);
+        tracing::info!("unwireServiceRpc: service RpcClient removed for {pid}");
+    } else {
+        tracing::error!("unwireServiceRpc: BACKEND_CONTEXT not set");
+    }
+}

@@ -4,7 +4,7 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "rspack build && cp manifest.json ../../android/app/src/main/assets/plugins/com.ease.playcount/manifest.json",
+        "build": "rspack build",
         "typecheck": "tsc --noEmit"
     },
     "devDependencies": {

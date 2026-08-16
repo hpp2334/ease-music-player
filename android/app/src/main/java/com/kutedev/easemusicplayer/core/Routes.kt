@@ -50,12 +50,28 @@ fun RouteDebugMore(): String {
     return "Debug/More"
 }
 
-fun RoutePlugin(pluginId: String, viewId: String): String {
-    return "Plugin/${pluginId}/${viewId}"
+fun RoutePluginManagement(): String {
+    return "PluginManagement"
 }
 
-fun isRoutePlugin(route: String): Boolean {
-    return route.startsWith("Plugin/")
+fun isRoutePluginManagement(route: String): Boolean {
+    return route == "PluginManagement"
+}
+
+fun RoutePluginAvailable(): String {
+    return "PluginAvailable"
+}
+
+fun isRoutePluginAvailable(route: String): Boolean {
+    return route == "PluginAvailable"
+}
+
+fun RoutePluginView(pluginId: String, viewId: String): String {
+    return "PluginView/${pluginId}/${viewId}"
+}
+
+fun isRoutePluginView(route: String): Boolean {
+    return route.startsWith("PluginView/")
 }
 
 val LocalNavController = compositionLocalOf<NavHostController> {

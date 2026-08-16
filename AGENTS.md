@@ -108,11 +108,11 @@ All in `singleton/`, constructed with `Bridge` + `CoroutineScope`, expose `State
 - `PlaylistRepository` — playlist list (debounced reload), reorder via `ease-order-key`, reacts to storage-removal events.
 - `StorageRepository` — cloud storage list, OAuth refresh token, remove events.
 - `AssetRepository` — in-memory cache for cover art bytes + decoded bitmaps.
-- `PluginRepository` — plugin registry: `scanPlugins()` walks `assets/plugins/<id>/manifest.json` and publishes `enabledPlugins` / `pluginViews` / `storageProviders`; `bindPlayerEvents()` forwards player events to JS backends (see [Plugin system](#plugin-system-js-plugins)).
-- `PlayerControllerRepository`, `PermissionRepository`, `ImportRepository`, `ToastRepository`.
+- `PluginRepository` — plugin registry: `scanPlugins()` walks `filesDir/plugins/<id>/manifest.json` and publishes `installedPlugins` / `enabledPlugins` / `dashboardItems` / `storageProviders`; `bindPlayerEvents()` forwards player events to JS backends (see [Plugin system](#plugin-system-js-plugins)).
+- `PlayerControllerRepository`, `PermissionRepository`, `ImportRepository`, `ToastRepository`, `PluginManager`, `PluginStateStore`, `PluginRegistryRepository`.
 
 ### Plugin system (JS plugins)
-Plugins live under [`plugins/`](./plugins/) (TS sources, rspack bundles) and ship into `android/app/src/main/assets/plugins/<id>/` (`pnpm run build` per plugin; it also copies `manifest.json`). Manifest schema:
+Plugins live under [`plugins/`](./plugins/) (TS sources, rspack bundles into `plugins/<id>/dist/`) and are distributed as registry zips ([`plugins/registry/`](./plugins/registry/), committed); only `com.ease.webdav` is additionally bundled into `assets/plugin-bundles/` for first-run offline install (see [Plugin install model](#plugin-install-model-kotlin-side)). At runtime plugins are installed under `filesDir/plugins/<id>/` — `PluginRepository.scanPlugins()` walks those folders (enabled plugins only contribute storages/dashboard items). Manifest schema:
 
 ```json
 {
@@ -120,8 +120,8 @@ Plugins live under [`plugins/`](./plugins/) (TS sources, rspack bundles) and shi
   "backend": "backend.js",                    // optional; long-lived module (headless tur instance)
   "events": ["music:play"],
   "contributions": {
-    "storages": [{ "id": "onedrive", "view": "view.js" }],   // per-storage config view (short-lived)
-    "views":    [{ "id": "main", "title": "…", "view": "view.js" }]
+    "storages":  [{ "id": "onedrive", "view": "view.js" }], // per-storage config view (short-lived)
+    "dashboard": [{ "id": "main", "title": "…", "view": "view.js" }]  // dashboard entry cards → standalone view page
   }
 }
 ```
@@ -132,7 +132,13 @@ Plugins live under [`plugins/`](./plugins/) (TS sources, rspack bundles) and shi
 - **Host event pipeline** (no per-plugin Kotlin logic): `PlayerControllerRepository.pluginEvents` → `PluginRepository.bindPlayerEvents` filters by the manifest's `events` list → `bridge.call(BridgeMethods.Plugin.EVENT, ArgPluginEvent(pluginId, type, payload))` → Rust `plugin.event` dispatch → `BackendContext.dispatch_plugin_event` → that plugin's `RpcClient.emit_event` (fire-and-forget on the plugin-event bus channel, `ease_tur_rpc::EVENT_CHANNEL_ID = 1`; RPC control + streams ride channel 0) → JS `onEvent(type, …)`.
 - **RPC map**: `BackendContext.service_rpcs: RwLock<HashMap<String /* pluginId */, RpcClient>>` — one entry per backend, installed by the `wireServiceRpc(handle, pluginId)` JNI call (`ctx.rs`). Storage dispatch (`services/storage/mod.rs`) resolves the client by the storage row's `plugin_id`.
 - **`ease` host module** (`plugin_runtime/plugin.rs`) exports 6 namespaces: `db` (KV, formerly `ease.storage`), `secret`, `oauth`, `themes`, `rpc`, `context`. All ctx-bound; identity comes from the per-instance `PluginId` data slot — never from JS args. `context.storageId$` is a per-instance `Readable<string|null>` (null = create-mode view, a `plugin_storage_id` = edit view) minted via `PluginContext::reactive()` (tur #189). `context.notifyChange()` triggers a host storage-list reload; `context.removeStorage(id)` deletes the host row (called by a backend to complete its own disconnect). `rpc.call(op, args)` lets a view invoke a handler on its own backend (`service_rpc_for(pluginId)`), reused — no cross-bus relay. Type declarations: [`plugins/infra/ease.d.ts`](./plugins/infra/ease.d.ts) + [`plugins/infra/tur-rpc.d.ts`](./plugins/infra/tur-rpc.d.ts).
-- **Plugin TS layout**: `src/backend.ts` + `src/view.ts`, rspack entries `{ backend, view }`. Built bundles + copied `manifest.json` are gitignored.
+- **Plugin TS layout**: `src/backend.ts` + `src/view.ts`, rspack entries `{ backend, view }` (one entry per declared contribution view file); `pnpm build` emits into `plugins/<id>/dist/`. Built zips + the committed registry live in [`plugins/registry/`](./plugins/registry/) (`zips/<id>-<version>.zip` + `plugins.json` with sha256/size), produced by `scripts/package-plugin.ts` (`pnpm run build:plugins` packages all plugins and copies the WebDAV zip into `assets/plugin-bundles/`).
+
+### Plugin install model (Kotlin side)
+Plugins are **installable at runtime**, not baked into assets. Installed plugins live as folders under `filesDir/plugins/<id>/` (manifest.json + JS). [`PluginManager`](./android/app/src/main/java/com/kutedev/easemusicplayer/singleton/PluginManager.kt) owns all mutations (install-from-zip SAF, install-from-registry sha256-verified, enable/disable, uninstall), validates zips (manifest at root, id regex, entry sanitization, size/entry caps), extracts via a staging dir + atomic swap, and bumps a `revision: StateFlow<Int>`. `KeepBackendService` collects the revision: teardown (close instances + `unwireServiceRpc`) → rescan → reload **enabled** backends only. Persisted state (`filesDir/plugin-state.json`): firstRunDone, enabled map, lastSourceUrl, verified custom sources — owned by `PluginStateStore`.
+- **First run** (`bootstrapDefaults`): install the bundled `com.ease.webdav` zip from `assets/plugin-bundles/` (offline-friendly), then any plugin referenced by existing storage rows (bundled, else best-effort from the default registry source). Plugin data (`plugin_kv`, secrets) survives uninstall; storages whose plugin is gone render "storage removed".
+- **Distribution**: [`plugins/registry/plugins.json`](./plugins/registry/plugins.json) (committed; served from the repo via jsDelivr/GitHub Raw) is fetched by `PluginRegistryRepository` — source presets (jsDelivr / fastly / gcore / GitHub Raw) + user-added custom sources (verified by fetching `plugins.json`, then saved). Registry lists are cached per source under `filesDir/plugin-registry-cache/`.
+- **UI**: Settings → 通用 → 插件管理 (`PluginManagementPage`): installed rows (enable `Switch`, uninstall w/ storage-count warning) + 从 ZIP 安装 (SAF). Its top-right button pushes `AvailablePluginsPage` (`获取插件`): source picker dialog (presets + saved customs + 自定义源 verify dialog), registry rows with 安装/更新 (version compare), offline cache fallback. Dashboard shows one **entry card** per `contributions.dashboard` item; tapping pushes `PluginViewPage` (full-screen standalone TurView).
 
 ### ViewModels
 `@HiltViewModel` extending `androidx.lifecycle.ViewModel`, using `viewModelScope`. UI state classes are co-located (e.g. `PlaylistsState`, `SleepModeState`, `PlaylistsMode` enum). Example: `PlayerVM` polls playback position every 1 s.
@@ -151,6 +157,7 @@ Plugins live under [`plugins/`](./plugins/) (TS sources, rspack bundles) and shi
 |---|---|
 | `pnpm build:jni` | `cargo build -p ease-client-backend` (host debug) → regenerate UniFFI Kotlin bindings into `android/app/src/main/java/` → `cargo ndk` cross-compile `arm64-v8a` release into `android/app/src/main/jniLibs/`. |
 | `pnpm build:apk` | `EBUILD=1 build:jni` + `:app:assembleRelease` + copy APK to `artifacts/apk/`. Requires `ANDROID_SIGN_JKS` (brotli + base64) and `ANDROID_SIGN_PASSWORD` secrets. |
+| `pnpm build:plugins` | rspack-build every plugin into `plugins/<id>/dist/` → package registry zips + `plugins/registry/plugins.json` (sha256/size) → copy the WebDAV zip into `assets/plugin-bundles/`. |
 | `pnpm test` | `cd rust-libs && cargo nextest run` (Rust tests). |
 
 ### Gradle tasks (run from `android/`)
@@ -158,9 +165,10 @@ Plugins live under [`plugins/`](./plugins/) (TS sources, rspack bundles) and shi
 - `cd android && ./gradlew :app:assembleRelease` — release APK (after JNI libs are present).
 
 ### Generated / gitignored artifacts
-These are **not checked in** and must be regenerated (via `pnpm build:jni`) before a clean checkout will compile:
-- `android/app/src/main/java/uniffi/` — UniFFI Kotlin bindings.
-- `android/app/src/main/jniLibs/arm64-v8a/` — Android native lib.
+These are **not checked in** and must be regenerated before a clean checkout will compile:
+- `android/app/src/main/java/uniffi/` — UniFFI Kotlin bindings (via `pnpm build:jni`).
+- `android/app/src/main/jniLibs/arm64-v8a/` — Android native lib (via `pnpm build:jni`).
+- `assets/plugin-bundles/com.ease.webdav.zip` + `plugins/<id>/dist/` — plugin build outputs (via `pnpm build:plugins`; the registry zips + `plugins.json` under `plugins/registry/` **are** committed).
 
 ## Conventions
 
