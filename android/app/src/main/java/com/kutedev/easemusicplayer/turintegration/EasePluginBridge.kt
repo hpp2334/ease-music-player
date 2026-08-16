@@ -20,13 +20,34 @@ import android.content.Context
  */
 object EasePluginBridge {
     /**
-     * Build the shared tur runtime with the Ease plugin set
-     * (TurStdPlugin + TurAnimationPlugin + TurClipboardPlugin + TurNetPlugin +
-     * EaseMusicPlugin) and return its opaque native handle.
-     * Returns `0L` on failure (the native side also throws).
+     * Allocate the two shared plugin worker pools (`ease-plugin-backend` /
+     * `ease-plugin-view`, 2 lane threads each — all headless backends share
+     * the former, all TurViews the latter) and return an opaque native
+     * handle. Pass it to [createRuntime] (register on the runtime) and to
+     * `TurNative.createInstance` / `createHeadlessInstance` (assign per
+     * instance). Free with [destroyPluginWorkerPools] after
+     * `TurNative.destroyRuntime`. Returns `0L` on failure.
      */
     @JvmStatic
-    external fun createRuntime(context: Context): Long
+    external fun createPluginWorkerPools(): Long
+
+    /**
+     * Free the worker pools behind [poolsHandle]. Call after the runtime
+     * built with it is destroyed. `0L` is a no-op.
+     */
+    @JvmStatic
+    external fun destroyPluginWorkerPools(poolsHandle: Long)
+
+    /**
+     * Build the shared tur runtime with the Ease plugin set
+     * (TurStdPlugin + TurAnimationPlugin + TurClipboardPlugin + TurNetPlugin +
+     * EaseMusicPlugin) and return its opaque native handle. A non-zero
+     * [poolsHandle] also registers the shared plugin worker pools on the
+     * runtime; `0L` falls back to the engine default (one lane thread per
+     * instance). Returns `0L` on failure (the native side also throws).
+     */
+    @JvmStatic
+    external fun createRuntime(context: Context, poolsHandle: Long): Long
 
     /**
      * Connect a headless backend instance's event bus to ease-tur-rpc and
@@ -49,8 +70,10 @@ object EasePluginBridge {
     @Synchronized
     fun runtime(context: Context): TurRuntime {
         cached?.let { return it }
-        val handle = createRuntime(context.applicationContext)
+        val pools = createPluginWorkerPools()
+        check(pools != 0L) { "createPluginWorkerPools returned 0 (see logcat)" }
+        val handle = createRuntime(context.applicationContext, pools)
         check(handle != 0L) { "createRuntime returned 0 (see logcat)" }
-        return TurRuntime(handle).also { cached = it }
+        return TurRuntime(handle, pools).also { cached = it }
     }
 }

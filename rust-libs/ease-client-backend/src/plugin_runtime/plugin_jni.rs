@@ -14,6 +14,40 @@
 
 #![cfg(target_os = "android")]
 
+use tur_engine::core::scheduler::WorkerPoolHandle;
+
+/// The two capped worker pools all plugin instances share, registered on
+/// the tur runtime at `createRuntime` and assigned per-app in
+/// `createInstance` / `createHeadlessInstance` — instead of the engine
+/// default (one dedicated lane thread per app):
+///
+/// - `backend` (cap 2): all headless service backends,
+/// - `view` (cap 2): all TurView rendering instances.
+///
+/// Owned by the Kotlin host as an opaque `jlong` handle (boxed here), so
+/// every entry point receives it explicitly — no process-global stash
+/// whose handles could outlive a destroyed runtime.
+struct PluginWorkerPools {
+    backend: WorkerPoolHandle,
+    view: WorkerPoolHandle,
+}
+
+impl PluginWorkerPools {
+    fn new() -> Self {
+        Self {
+            backend: WorkerPoolHandle::new("ease-plugin-backend", 2),
+            view: WorkerPoolHandle::new("ease-plugin-view", 2),
+        }
+    }
+}
+
+/// Borrow the pools from a Kotlin-held `PluginWorkerPools` handle. `0`
+/// (Kotlin "no handle") yields `None` — callers then leave the engine's
+/// default pool in place.
+fn borrow_pools(pools: tur_android::jlong) -> Option<&'static PluginWorkerPools> {
+    (pools != 0).then(|| unsafe { &*(pools as *const PluginWorkerPools) })
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_loadModule(
     mut env: tur_android::JNIEnv,
@@ -31,6 +65,18 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     handle: tur_android::jlong,
 ) -> tur_android::jint {
     tur_android::ops::pump(handle)
+}
+
+/// `TurNative.pumpMessages(handle): int` — poll the engine's main loop
+/// WITHOUT firing a vsync (the coalesced message-pump path; keeps an idle
+/// instance at 0% CPU instead of ping-ponging at display refresh rate).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_pumpMessages(
+    _env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    handle: tur_android::jlong,
+) -> tur_android::jint {
+    tur_android::ops::pump_messages(handle)
 }
 
 #[unsafe(no_mangle)]
@@ -94,13 +140,16 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     tur_android::ops::destroy(handle)
 }
 
-/// `TurNative.createInstance(runtimeHandle, surface, w, h, dpr, frameLoop, pluginId, instance): long`
+/// `TurNative.createInstance(runtimeHandle, poolsHandle, surface, w, h, dpr, frameLoop, pluginId, instance): long`
 ///
 /// Spawns an isolated rendering instance for the given `pluginId`. The
 /// plugin id is stamped into the instance's per-instance data slot at
 /// build time (via `TurAppBuilder::instance_data`) so `ease:*` bridge fns
 /// can resolve the calling plugin via `extract_js_ctx` + `data::<PluginId>()`
 /// — without trusting a JS argument.
+///
+/// `poolsHandle` assigns the instance to the shared `ease-plugin-view`
+/// worker pool (see [`PluginWorkerPools`]); `0` keeps the engine default.
 ///
 /// `instance` is the storage's `plugin_storage_id` for edit-mode views
 /// (stamped as [`PluginInstance::Some`]); pass an empty string for
@@ -110,6 +159,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     runtime_handle: tur_android::jlong,
+    pools_handle: tur_android::jlong,
     surface: tur_android::JObject,
     width: tur_android::jint,
     height: tur_android::jint,
@@ -137,6 +187,8 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     } else {
         Some(instance_str)
     };
+    let view_pool = borrow_pools(pools_handle)
+        .map(|pools| pools.view.clone());
     tur_android::ops::create_instance(
         &mut env,
         runtime_handle,
@@ -146,6 +198,10 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
         dpr,
         frame_loop,
         move |builder| {
+            let builder = match view_pool {
+                Some(ref pool) => builder.worker_pool(pool.clone()),
+                None => builder,
+            };
             builder.instance_data(move |cx| {
                 cx.define::<crate::plugin_runtime::PluginId>(
                     crate::plugin_runtime::PluginId::new(pid.clone()),
@@ -158,15 +214,18 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     )
 }
 
-/// `TurNative.createHeadlessInstance(runtimeHandle, frameLoop, pluginId): long`
+/// `TurNative.createHeadlessInstance(runtimeHandle, poolsHandle, frameLoop, pluginId): long`
 ///
 /// Headless variant — same per-instance `PluginId` stamping as
 /// [`Java_..._TurNative_createInstance`], but no surface / renderer.
+/// `poolsHandle` assigns the instance to the shared `ease-plugin-backend`
+/// worker pool (see [`PluginWorkerPools`]); `0` keeps the engine default.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_createHeadlessInstance(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     runtime_handle: tur_android::jlong,
+    pools_handle: tur_android::jlong,
     frame_loop: tur_android::JObject,
     plugin_id: tur_android::JString,
 ) -> tur_android::jlong {
@@ -177,11 +236,17 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
             return 0;
         }
     };
+    let backend_pool = borrow_pools(pools_handle)
+        .map(|pools| pools.backend.clone());
     tur_android::ops::create_headless_instance(
         &mut env,
         runtime_handle,
         frame_loop,
         move |builder| {
+            let builder = match backend_pool {
+                Some(ref pool) => builder.worker_pool(pool.clone()),
+                None => builder,
+            };
             builder.instance_data(move |cx| {
                 cx.define::<crate::plugin_runtime::PluginId>(
                     crate::plugin_runtime::PluginId::new(pid.clone()),
@@ -204,15 +269,44 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     tur_android::ops::destroy_runtime(handle)
 }
 
-/// `EasePluginBridge.createRuntime(env, context): long` — builds the shared
+/// `EasePluginBridge.createPluginWorkerPools(): long` — allocate the two
+/// capped shared worker pools (see [`PluginWorkerPools`]) and return an
+/// opaque handle for the Kotlin host to pass back into `createRuntime` /
+/// `createInstance` / `createHeadlessInstance`. Returns `0` on failure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createPluginWorkerPools(
+    _env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+) -> tur_android::jlong {
+    Box::into_raw(Box::new(PluginWorkerPools::new())) as tur_android::jlong
+}
+
+/// `EasePluginBridge.destroyPluginWorkerPools(poolsHandle)` — free pools
+/// allocated by [`Java_..._EasePluginBridge_createPluginWorkerPools`].
+/// Call after `destroyRuntime`. `0` is a no-op. Idempotent per handle.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_destroyPluginWorkerPools(
+    _env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    pools_handle: tur_android::jlong,
+) {
+    if pools_handle != 0 {
+        drop(unsafe { Box::from_raw(pools_handle as *mut PluginWorkerPools) });
+    }
+}
+
+/// `EasePluginBridge.createRuntime(env, context, poolsHandle): long` — builds the shared
 /// tur runtime once, with the Ease plugin set registered on it. Instances
 /// (one per TurView, or a headless one for a service plugin) are spawned from
-/// it via `TurNative.createInstance` / `createHeadlessInstance`.
+/// it via `TurNative.createInstance` / `createHeadlessInstance`. A non-zero
+/// `poolsHandle` also registers the shared plugin worker pools on the
+/// runtime; `0` falls back to the engine default (one lane per instance).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createRuntime(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     context: tur_android::JObject,
+    pools_handle: tur_android::jlong,
 ) -> tur_android::jlong {
     use tur_animation::TurAnimationPlugin;
     use tur_engine::{TurClipboardPlugin, TurStdPlugin};
@@ -229,6 +323,13 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         tracing::warn!("host_cache: {e}");
     }
 
+    // Clone up front — the builder closure must be 'static and the Kotlin
+    // host keeps the pools handle alive independently of this runtime.
+    let pools = borrow_pools(pools_handle).map(|pools| (pools.backend.clone(), pools.view.clone()));
+    if pools_handle != 0 && pools.is_none() {
+        tracing::error!("createRuntime: nonzero poolsHandle is not a live PluginWorkerPools");
+    }
+
     tur_android::ops::create_runtime(&mut env, context, |builder| {
         // tur's engine core is tokio-free (since the drop-tokio refactor); the
         // embedder must hand NativeHttp a Handle onto a runtime it owns + keeps
@@ -237,6 +338,12 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         // builder's capability() takes a closure that may receive the engine's
         // AsyncPluginContext; NativeHttp needs only the tokio Handle.
         let handle = ease_client_tokio::tokio_runtime().handle().clone();
+        let builder = match pools {
+            Some((ref backend, ref view)) => {
+                builder.worker_pool(backend.clone()).worker_pool(view.clone())
+            }
+            None => builder,
+        };
         builder
             .capability(move |_| Ok(Http::new(NativeHttp::new(handle.clone()))))
             .plugin(TurStdPlugin)

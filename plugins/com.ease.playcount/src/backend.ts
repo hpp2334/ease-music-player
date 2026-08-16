@@ -1,10 +1,11 @@
 // Play Counts plugin — backend module (long-lived).
 //
 // Loaded by `KeepBackendService` into a headless tur instance stamped with
-// `PluginId("com.ease.playcount")`. Registers a `tur:rpc` handler for the
-// `music:play` event; the host (`PluginRepository.bindPlayerEvents`) calls
+// `PluginId("com.ease.playcount")`. Subscribes to the `music:play` event on
+// the plugin-event bus channel (fire-and-forget, one channel per plugin
+// instance); the host (`PluginRepository.bindPlayerEvents`) calls
 // `plugin.event { pluginId, type, payload }` for each play and the Rust
-// side dispatches to this handler via the plugin's RpcClient.
+// side emits it to this handler via the plugin's RpcClient.
 //
 // Data model (KV multi-value, append-only):
 //   key   = "plays:YYYY-MM-DD"
@@ -12,7 +13,7 @@
 // The view module (`view.ts` → `play-counts.ts`) reads the rows back via
 // `db.multiGetAllMulti` and aggregates per musicId.
 
-import { registerHandler } from "tur:rpc";
+import { onEvent } from "tur:rpc";
 import { db } from "ease";
 
 interface MusicPlayPayload {
@@ -31,10 +32,9 @@ function dayKey(ts: number): string {
     return `plays:${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-registerHandler("music:play", (args: MusicPlayPayload) => {
+onEvent("music:play", (args: MusicPlayPayload) => {
     db.multiAppend(
         dayKey(args.ts),
         JSON.stringify({ musicId: args.musicId, title: args.title, ts: args.ts }),
     );
-    return {};
 });

@@ -45,19 +45,21 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ 5010615).
+# tur engine integration (https://github.com/hpp2334/tur @ ea335de).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
 # main↔worker threaded runtime (#178), the fully-wired bidirectional event
 # bus (#181 — host↔JS byte transport for the OneDrive service plugin), the
-# `with_app` escape hatch (#176), and streaming HTTP (requestStream). The
-# engine core is tokio-free; the embedder provides a tokio Handle to
-# NativeHttp (registered on the runtime builder) and for timer/sleep.
+# `with_app` escape hatch (#176), streaming HTTP (requestStream), and the
+# plugin-facing reactive bridge (#189 — `PluginContext::reactive()` lets a
+# plugin mint `Source`/`Derived`/`Mutation` atoms from Rust). The engine
+# core is tokio-free; the embedder provides a tokio Handle to NativeHttp
+# (registered on the runtime builder) and for timer/sleep.
 # All crates live in the same repo; cargo clones once and resolves their
 # internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "04554cad0f4a4623ea34420343a30d79786915a2" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "ea335de784b28a9d5a361bb52a5310ca6151abcb" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "ea335de784b28a9d5a361bb52a5310ca6151abcb" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "ea335de784b28a9d5a361bb52a5310ca6151abcb" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "ea335de784b28a9d5a361bb52a5310ca6151abcb" }
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
 # compiles against.

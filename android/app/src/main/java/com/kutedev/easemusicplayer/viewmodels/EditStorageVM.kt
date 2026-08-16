@@ -13,9 +13,12 @@ import com.kutedev.easemusicplayer.singleton.ToastRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -48,6 +51,18 @@ private fun defaultArgUpsertWebdavStorage(): ArgUpsertWebdavStorage {
     )
 }
 
+/** Resolved view descriptor for an edited plugin storage (edit mode only). */
+data class EditPluginView(
+    val viewAssetPath: String,
+    val pluginId: String,
+    val pluginStorageId: String,
+)
+
+private data class EditPluginHandle(
+    val pluginId: String,
+    val pluginStorageId: String,
+)
+
 
 @HiltViewModel
 class EditStorageVM @Inject constructor(
@@ -70,6 +85,10 @@ class EditStorageVM @Inject constructor(
     // type is chosen via the UI chooser, so this only reflects the loaded
     // storage's kind.
     private val _pluginMode = MutableStateFlow(false)
+    // For an edited plugin storage: its (pluginId, pluginStorageId). Drives
+    // the derived `editPluginView` (resolved against `storageProviders`).
+    private val _editPluginHandle = MutableStateFlow<EditPluginHandle?>(null)
+    private val _removedEvent = MutableSharedFlow<Unit>()
 
     val form = _form.asStateFlow()
     val musicCount = _musicCount.asStateFlow()
@@ -78,6 +97,27 @@ class EditStorageVM @Inject constructor(
     val pluginMode = _pluginMode.asStateFlow()
     /** Discovered plugin storage providers (drives the create-mode chooser). */
     val storageProviders = pluginRepository.storageProviders
+    /**
+     * For an edited plugin storage: the resolved view JS asset path + ids
+     * (null in create mode, or until `scanPlugins` resolves the provider).
+     * `EditStoragesPage` renders this into a `TurView` stamped with the
+     * storage id so `ease.context.storageId$` is non-null (edit mode).
+     */
+    val editPluginView: kotlinx.coroutines.flow.StateFlow<EditPluginView?> =
+        combine(_editPluginHandle, pluginRepository.storageProviders) { handle, providers ->
+            if (handle == null) {
+                null
+            } else {
+                providers
+                    .firstOrNull { it.pluginId == handle.pluginId }
+                    ?.viewAssetPath
+                    ?.let { path -> EditPluginView(path, handle.pluginId, handle.pluginStorageId) }
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    /** Fires when the edited storage disappears from the list (the plugin
+     *  backend called `ease.context.removeStorage`, or the trash removed it).
+     *  `EditStoragesPage` collects this to pop back. */
+    val removedEvent = _removedEvent.asSharedFlow()
 
     val removeModalOpen = _removeModalOpen.asStateFlow()
     /** Fires when a JS plugin OAuth exchange mints a new storage row.
@@ -104,6 +144,13 @@ class EditStorageVM @Inject constructor(
         if (storage != null) {
             val isPlugin = storage.handle is StorageHandle.Plugin
             _pluginMode.value = isPlugin
+            if (isPlugin) {
+                val handle = storage.handle as StorageHandle.Plugin
+                _editPluginHandle.value = EditPluginHandle(
+                    pluginId = handle.pluginId.id,
+                    pluginStorageId = handle.pluginStorageId.id,
+                )
+            }
             // Password is write-only: blank on edit means "keep the existing
             // secret" (the backend rotates only when a non-empty value is sent).
             _form.value = ArgUpsertWebdavStorage(
@@ -116,6 +163,29 @@ class EditStorageVM @Inject constructor(
             )
             _title.value = VImportStorageEntry(storage).name
             _musicCount.value = storage.musicCount
+
+            // Pop the edit page when the storage is removed out from under
+            // us (view-side disconnect via the plugin backend, or the
+            // top-bar trash). `wasPresent` guards the initial load; `done`
+            // stops repeats after the first removal (collect is
+            // crossinline so a non-local return isn't allowed).
+            viewModelScope.launch {
+                var wasPresent = false
+                var done = false
+                storageRepository.storages.collect { list ->
+                    if (!done) {
+                        val editId = _form.value.id
+                        if (editId != null) {
+                            val present = list.any { it.id == editId }
+                            if (wasPresent && !present) {
+                                _removedEvent.tryEmit(Unit)
+                                done = true
+                            }
+                            wasPresent = present
+                        }
+                    }
+                }
+            }
         }
 
         // Discover plugin storage providers for the create-mode chooser.

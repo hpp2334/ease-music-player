@@ -28,6 +28,7 @@ pub mod host_cache;
 pub mod oauth_bridge;
 pub mod plugin;
 pub mod plugin_jni;
+pub mod rpc_bridge;
 pub mod secret_bridge;
 pub mod themes_bridge;
 
@@ -67,7 +68,8 @@ impl AsRef<str> for PluginId {
 ///
 /// `None` for create-mode setup views (no storage row yet) and for the
 /// headless service instance (which serves *all* instances, not one).
-/// The `ease.context` namespace exposes this to JS as
-/// `context.instance(): string | null`.
+/// The `ease.context` namespace surfaces this to JS as the reactive
+/// `storageId$` const (`null` = create, a real id = edit), minted in
+/// [`plugin::EaseMusicPlugin::register`].
 #[derive(Debug, Clone)]
 pub struct PluginInstance(pub Option<String>);

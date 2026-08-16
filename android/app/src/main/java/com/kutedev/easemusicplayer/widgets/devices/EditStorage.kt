@@ -228,17 +228,19 @@ private fun WebdavConfig(
 
 /**
  * Hosts a plugin storage's view JS in a [TurView]. The plugin owns all
- * config UI (alias field, "Connect your account" button, …) and triggers
- * OAuth via `ease.oauth.start(provider, alias)`; the host fetches the
- * authorize URL, stashes the alias, and opens the browser.
+ * config UI (alias field, "Connect your account" button, edit-view
+ * disconnect, …) and triggers OAuth via `ease.oauth.start(provider, alias)`;
+ * the host fetches the authorize URL, stashes the alias, and opens the browser.
  *
  * [assetPath] is the absolute asset path to the plugin's view JS bundle
  * (e.g. `plugins/com.ease.onedrive/view.js`). [pluginId] is stamped into
  * the instance's per-instance data slot so `ease:*` bridge fns resolve the
- * calling plugin from Rust.
+ * calling plugin from Rust. [instance] is the storage's
+ * `plugin_storage_id` for edit views (non-null → `ease.context.storageId$`
+ * reports the id; null = create-mode setup view).
  */
 @Composable
-private fun PluginStorageView(assetPath: String, pluginId: String) {
+private fun PluginStorageView(assetPath: String, pluginId: String, instance: String?) {
     val context = LocalContext.current
     var jsSource by remember(assetPath) { mutableStateOf<String?>(null) }
     var loadError by remember(assetPath) { mutableStateOf<String?>(null) }
@@ -268,6 +270,7 @@ private fun PluginStorageView(assetPath: String, pluginId: String) {
             runtime = EasePluginBridge.runtime(context),
             js = jsSource!!,
             pluginId = pluginId,
+            instance = instance,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(360.dp),
@@ -284,6 +287,7 @@ fun EditStoragesPage(
     val isCreated by editStorageVM.isCreated.collectAsState()
     val pluginMode by editStorageVM.pluginMode.collectAsState()
     val providers by editStorageVM.storageProviders.collectAsState()
+    val editPluginView by editStorageVM.editPluginView.collectAsState()
     val title by editStorageVM.title.collectAsState()
     val testing by editStorageVM.testResult.collectAsState()
 
@@ -291,6 +295,11 @@ fun EditStoragesPage(
     // the `easem://oauth2redirect` callback), pop back from the setup form.
     LaunchedEffect(Unit) {
         editStorageVM.pluginConnectedEvent.collect { navController.popBackStack() }
+    }
+    // Pop back when the edited storage is removed (view-side disconnect via
+    // the plugin backend, or the top-bar trash).
+    LaunchedEffect(Unit) {
+        editStorageVM.removedEvent.collect { navController.popBackStack() }
     }
 
     // Create-mode chooser selection: `null` = WebDAV, else the selected
@@ -409,19 +418,34 @@ fun EditStoragesPage(
                     Box(modifier = Modifier.size(0.dp, 20.dp))
                 }
                 if (showPlugin) {
-                    val assetPath = activeProvider?.viewAssetPath
-                    val pid = activeProvider?.pluginId
-                    if (assetPath != null && pid != null) {
-                        PluginStorageView(assetPath, pid)
+                    if (isCreated) {
+                        // Create-mode chooser selection.
+                        val assetPath = activeProvider?.viewAssetPath
+                        val pid = activeProvider?.pluginId
+                        if (assetPath != null && pid != null) {
+                            PluginStorageView(assetPath, pid, instance = null)
+                        }
                     } else {
-                        // Edit mode for a plugin storage: already connected —
-                        // show its alias; removal is via the top-bar trash.
-                        FormWidget(label = stringResource(R.string.storage_edit_oauth)) {
-                            Text(
-                                text = title.ifBlank { "Plugin" },
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
+                        // Edit mode: render the storage's plugin view,
+                        // stamped with its plugin_storage_id so
+                        // `ease.context.storageId$` is non-null (edit branch).
+                        val epv = editPluginView
+                        if (epv != null) {
+                            PluginStorageView(
+                                assetPath = epv.viewAssetPath,
+                                pluginId = epv.pluginId,
+                                instance = epv.pluginStorageId,
                             )
+                        } else {
+                            // Provider not resolved yet (scanPlugins pending)
+                            // — show the alias as a static fallback.
+                            FormWidget(label = stringResource(R.string.storage_edit_oauth)) {
+                                Text(
+                                    text = title.ifBlank { "Plugin" },
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
                         }
                     }
                 } else {
