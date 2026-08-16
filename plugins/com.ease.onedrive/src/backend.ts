@@ -28,7 +28,7 @@
 
 import { request, requestStream } from "tur:net";
 import { registerHandler, pushChunk, endStream, errorStream } from "tur:rpc";
-import { db, secret } from "ease";
+import { db, secret, context } from "ease";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -354,7 +354,11 @@ async function exchangeCode(args: { code: string; alias?: string }): Promise<{ i
     return { instance };
 }
 
-/** Remove an instance: drop its config (kv) + its refresh-token secret. */
+/** Remove an instance: drop its config (kv) + its refresh-token secret, ask
+ *  the host to delete the storage row, and reload the dashboard. Called from
+ *  two paths — the view-side disconnect button (`onedrive:removeInstance`
+ *  via `ease.rpc.call`) and the host trash button (which also deletes the
+ *  row; `removeStorage` is idempotent so the overlap is harmless). */
 function removeInstance(args: { instance: string }): void {
     const st = instances.get(args.instance);
     let secretId: number | undefined = st?.secretId;
@@ -373,6 +377,10 @@ function removeInstance(args: { instance: string }): void {
     }
     db.singleDelete(kvKey(args.instance));
     instances.delete(args.instance);
+    // Complete the disconnect on the host side: drop the storage row, then
+    // reload so the dashboard + edit page reflect the removal.
+    context.removeStorage(args.instance);
+    context.notifyChange();
 }
 
 // ---------------------------------------------------------------------------

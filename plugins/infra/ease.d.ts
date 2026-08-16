@@ -1,13 +1,15 @@
 // Ambient type declaration for the unified host-provided `"ease"` module.
 //
 // Registered by the Rust plugin runtime (`plugin_runtime::plugin.rs`) as a
-// synthetic tur module with four grouped namespace consts:
+// synthetic tur module with grouped namespace consts:
 //
-//     import { db, secret, oauth, themes } from "ease";
+//     import { db, secret, oauth, themes, rpc, context } from "ease";
 //     db.singleGet("key");               // identity resolved in Rust
 //     secret.put("refresh-token");
 //     oauth.start("onedrive", alias);
 //     themes.color("primary");
+//     rpc.call("onedrive:list", { ... }); // view → its backend handler
+//     get(context.storageId$);            // null = create, id = edit
 //
 // Per-instance identity: the Kotlin host stamps a `PluginId` into each tur
 // instance at build time (via `TurAppBuilder::instance_data`). Bridge fns
@@ -17,6 +19,7 @@
 // a pluginId argument.
 
 declare module "ease" {
+    import type { Readable } from "tur:std";
     // ---- db entry types ----------------------------------------------------
 
     /** Single-value entry returned by `singleGetMulti`. */
@@ -108,5 +111,42 @@ declare module "ease" {
         color(name: string): string;
         /** Reports the resolved dark/light flag from the host theme. */
         isDark(): boolean;
+    };
+
+    // ---- rpc namespace ----------------------------------------------------
+
+    export const rpc: {
+        /**
+         * Invoke handler `op` on this plugin's headless backend (the instance
+         * wired via `wireServiceRpc`) with JSON-serializable `args`. Returns
+         * a promise of the handler's result (or rejection with its error).
+         * The backend's `RpcClient` is reused — no cross-bus relay. Used by
+         * view instances to reach plugin-owned domain logic (e.g.
+         * `onedrive:removeInstance`).
+         */
+        call(op: string, args?: unknown): Promise<any>;
+    };
+
+    // ---- context namespace ------------------------------------------------
+
+    export const context: {
+        /**
+         * The storage id this view instance represents: `null` for a
+         * create-mode setup view, or the storage's `plugin_storage_id`
+         * (e.g. `"onedrive:abc123"`) for an edit view. Read via `get(...)`.
+         * Seeded once per instance; never changes for the instance lifetime.
+         */
+        readonly storageId$: Readable<string | null>;
+        /**
+         * Ask the host to reload its storage list so kv-side changes (an
+         * alias rename) or a removal propagate to the dashboard + edit page.
+         */
+        notifyChange(): void;
+        /**
+         * Delete the host storage row for `(pluginId, pluginStorageId)`.
+         * Called by a plugin backend after it wipes its own kv + secret,
+         * completing the disconnect. No-op if no row matches.
+         */
+        removeStorage(pluginStorageId: string): void;
     };
 }

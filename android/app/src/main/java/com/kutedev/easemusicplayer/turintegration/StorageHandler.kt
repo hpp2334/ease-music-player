@@ -8,28 +8,20 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Handles `ease.context.disconnect()` upcalls fired by plugin edit views
- * through [EaseStorageHost]. Resolves the storage row by
- * `(pluginId, pluginStorageId)` and invokes
- * [StorageRepository.pluginRemoveInstance]; the resulting
- * `pluginDisconnectedEvent` lets the host-side UI (`EditStoragesPage`)
- * pop back from the edit form.
+ * Handles `ease.context.notifyChange()` upcalls fired by plugin instances
+ * (views + backends) through [EaseStorageHost]. Reloads the storage list so
+ * kv-side changes (an alias rename, or a removal done by the backend) are
+ * reflected in the dashboard + the edit page (which observes the list and
+ * pops back when its storage disappears).
  */
 @Singleton
 class StorageHandler @Inject constructor(
     private val storageRepository: StorageRepository,
     private val scope: CoroutineScope,
 ) {
-    fun disconnect(pluginId: String, pluginStorageId: String) {
+    fun notifyChange(pluginId: String, pluginStorageId: String) {
         scope.launch {
-            val id = storageRepository.findPluginStorage(pluginId, pluginStorageId) ?: run {
-                android.util.Log.w(
-                    "StorageHandler",
-                    "disconnect: no storage row for ($pluginId, $pluginStorageId)",
-                )
-                return@launch
-            }
-            storageRepository.pluginRemoveInstance(id)
+            storageRepository.reload()
         }
     }
 }

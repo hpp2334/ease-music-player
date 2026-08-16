@@ -4,26 +4,35 @@
 //! provider: the host calls `list(dir)`, opens a byte stream for
 //! `get(path)`, and awaits OAuth callbacks).
 //!
-//! tur's event bus (`EventBusHandle`) is a fire-and-forget `Vec<u8>` pub/sub
-//! channel. Since tur #181 the threaded backend wires both directions and
-//! **self-wakes**: `emit_to_js` enqueues onto the worker (which flushes + fires
-//! JS `on` callbacks), and JS→host bytes are shipped back to main (where
-//! `on_bus_event` handlers fire). No manual pump / `request_paint` / per-call
-//! wake is required — the host holds a [`RpcClient`] (`Send + Clone`) and calls
-//! it from any thread (e.g. a tokio playback task).
+//! tur's event bus (`EventBusHandle`) is a fire-and-forget byte pub/sub,
+//! multiplexed by `channel_id` since tur #190: a message targets exactly one
+//! channel, and a message to a channel with no handlers is silently dropped
+//! (no broadcast). Since tur #181 the threaded backend wires both directions
+//! and **self-wakes**: `emit_to_js` enqueues onto the worker (which flushes +
+//! fires the JS `on` callbacks registered on that channel), and JS→host bytes
+//! are shipped back to main (where the `on_bus_event` handlers registered on
+//! that channel fire). No manual pump / `request_paint` / per-call wake is
+//! required — the host holds a [`RpcClient`] (`Send + Clone`) and calls it
+//! from any thread (e.g. a tokio playback task).
 //!
-//! Two protocols ride the bus, distinguished by a leading magic byte (JSON
-//! never starts with `0x00`):
+//! Channel layout (each plugin instance owns its own bus, so channels never
+//! cross plugins):
 //!
-//! - **Control RPC (JSON):** [`RpcClient::call`] enqueues
-//!   `{id, op, args}` via `emit_to_js`. The JS dispatcher (`tur:rpc`) runs the
-//!   matching `registerHandler` and replies `{id, ok, result|error}`; the
-//!   host-side router (a `on_bus_event` handler) matches `id` → resolves the
-//!   caller's `oneshot`.
-//! - **Streaming (binary-framed):** [`RpcClient::open_stream`] opens a stream —
-//!   the JS opener pushes chunks via `pushChunk` / `endStream` / `errorStream`,
-//!   framed over the bus. The host router decodes the frame and forwards to a
-//!   per-stream `mpsc::Receiver<StreamChunk>`.
+//! - [`RPC_CHANNEL_ID`] (0) — the global RPC channel. Two protocols ride it,
+//!   distinguished by a leading magic byte (JSON never starts with `0x00`):
+//!   - **Control RPC (JSON):** [`RpcClient::call`] enqueues
+//!     `{id, op, args}` via `emit_to_js`. The JS dispatcher (`tur:rpc`) runs
+//!     the matching `registerHandler` and replies `{id, ok, result|error}`;
+//!     the host-side router (an `on_bus_event` handler) matches `id` →
+//!     resolves the caller's `oneshot`.
+//!   - **Streaming (binary-framed):** [`RpcClient::open_stream`] opens a
+//!     stream — the JS opener pushes chunks via `pushChunk` / `endStream` /
+//!     `errorStream`, framed over the bus. The host router decodes the frame
+//!     and forwards to a per-stream `mpsc::Receiver<StreamChunk>`.
+//! - [`EVENT_CHANNEL_ID`] (1) — plugin-only events, host → JS,
+//!   fire-and-forget: [`RpcClient::emit_event`] pushes `{type, payload}`;
+//!   the JS side dispatches it to the `onEvent(type, …)` registration. No
+//!   reply is sent, and a plugin with no registration simply never hears it.
 //!
 //! Wire-up is two steps:
 //! 1. Register [`TurRpcPlugin`] on the runtime (after `TurStdPlugin`, which
@@ -46,6 +55,20 @@ use tur_engine::core::event_bus::EventBusHandle;
 use tur_engine::core::plugin::{Plugin, PluginContext};
 use tur_engine::TurApp;
 use tur_engine::error::TurError;
+
+// ---------------------------------------------------------------------------
+// Bus channel ids (tur #190 multiplexing) — must match the JS constants in
+// RPC_JS below.
+// ---------------------------------------------------------------------------
+
+/// Global RPC channel: control RPC (JSON) + stream frames (binary). Shared
+/// by all RPC callers of one plugin instance's bus.
+pub const RPC_CHANNEL_ID: u64 = 0;
+
+/// Plugin-event channel: host → JS fire-and-forget `{type, payload}` JSON
+/// (see [`RpcClient::emit_event`]). One bus per plugin instance, so this
+/// channel is naturally plugin-private.
+pub const EVENT_CHANNEL_ID: u64 = 1;
 
 // ---------------------------------------------------------------------------
 // Error
@@ -176,11 +199,11 @@ impl RpcClient {
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let streams: StreamTable = Arc::new(Mutex::new(HashMap::new()));
 
-        // Route JS→host messages: stream frames → stream channels; otherwise →
-        // JSON control-RPC replies matched by id. Fires on the main thread
-        // (MainBackend dispatch of MainMsg::EventBusToHost).
+        // Route JS→host messages on the RPC channel: stream frames → stream
+        // channels; otherwise → JSON control-RPC replies matched by id. Fires
+        // on the main thread (MainBackend dispatch of MainMsg::EventBusToHost).
         let (p, s) = (pending.clone(), streams.clone());
-        eb.on_bus_event(move |bytes| route_incoming(bytes, &p, &s));
+        eb.on_bus_event(RPC_CHANNEL_ID, move |bytes| route_incoming(bytes, &p, &s));
 
         Ok(RpcClient {
             eb,
@@ -204,8 +227,19 @@ impl RpcClient {
         // Self-waking: emit_to_js enqueues a WorkerMsg → worker flushes → JS
         // dispatcher runs → reply ships back via MainMsg::EventBusToHost →
         // router resolves the oneshot.
-        self.eb.emit_to_js(payload);
+        self.eb.emit_to_js(RPC_CHANNEL_ID, payload);
         orx.await.map_err(|_| RpcError::ChannelClosed)?
+    }
+
+    /// Fire a plugin event at the JS realm on the dedicated event channel:
+    /// pushes `{type, payload}` JSON, delivered to the `onEvent(type, …)`
+    /// registration on the next flush. Fire-and-forget — no reply is sent,
+    /// and a plugin with no registration silently never hears it (standard
+    /// channel semantics since tur #190).
+    pub fn emit_event(&self, event_type: &str, payload: Value) {
+        let frame = serde_json::json!({ "type": event_type, "payload": payload });
+        let bytes = serde_json::to_vec(&frame).unwrap_or_default();
+        self.eb.emit_to_js(EVENT_CHANNEL_ID, bytes);
     }
 
     /// Open a byte stream: calls JS handler `op` with `{ streamId, ...args }`,
@@ -290,10 +324,16 @@ fn forward_stream(streams: &StreamTable, sid: u32, chunk: StreamChunk) {
 const RPC_JS: &str = r#"
 import { eventBus, encodeUtf8, decodeUtf8 } from "tur:std";
 
+// Bus channel ids — must match the Rust constants RPC_CHANNEL_ID (0) and
+// EVENT_CHANNEL_ID (1) in this crate.
+const RPC_CH = 0;
+const EVENT_CH = 1;
+
 const handlers = new Map();
+const eventHandlers = new Map();
 
 // --- control RPC --------------------------------------------------------
-eventBus.on((payload) => {
+eventBus.on(RPC_CH, (payload) => {
   let req;
   try {
     req = JSON.parse(decodeUtf8(payload));
@@ -303,7 +343,7 @@ eventBus.on((payload) => {
   if (!req || typeof req.id === "undefined" || typeof req.op !== "string") return;
   const fn = handlers.get(req.op);
   if (typeof fn !== "function") {
-    eventBus.send(encodeUtf8(JSON.stringify({
+    eventBus.send(RPC_CH, encodeUtf8(JSON.stringify({
       id: req.id, ok: false, error: "no handler for op: " + req.op,
     })));
     return;
@@ -311,10 +351,10 @@ eventBus.on((payload) => {
   Promise.resolve()
     .then(() => fn(req.args))
     .then(
-      (result) => eventBus.send(encodeUtf8(JSON.stringify({
+      (result) => eventBus.send(RPC_CH, encodeUtf8(JSON.stringify({
         id: req.id, ok: true, result,
       }))),
-      (err) => eventBus.send(encodeUtf8(JSON.stringify({
+      (err) => eventBus.send(RPC_CH, encodeUtf8(JSON.stringify({
         id: req.id, ok: false,
         error: String((err && err.message) || err),
       }))),
@@ -323,6 +363,23 @@ eventBus.on((payload) => {
 
 export function registerHandler(op, fn) {
   handlers.set(op, fn);
+}
+
+// --- plugin events (fire-and-forget, host → JS) --------------------------
+eventBus.on(EVENT_CH, (payload) => {
+  let ev;
+  try {
+    ev = JSON.parse(decodeUtf8(payload));
+  } catch (e) {
+    return;
+  }
+  if (!ev || typeof ev.type !== "string") return;
+  const fn = eventHandlers.get(ev.type);
+  if (typeof fn === "function") fn(ev.payload);
+});
+
+export function onEvent(type, fn) {
+  eventHandlers.set(type, fn);
 }
 
 // --- streaming ----------------------------------------------------------
@@ -339,12 +396,12 @@ function frameStream(kind, streamId, payload) {
 }
 
 export function pushChunk(streamId, bytes) {
-  eventBus.send(frameStream(0, streamId, bytes));
+  eventBus.send(RPC_CH, frameStream(0, streamId, bytes));
 }
 export function endStream(streamId) {
-  eventBus.send(frameStream(1, streamId, null));
+  eventBus.send(RPC_CH, frameStream(1, streamId, null));
 }
 export function errorStream(streamId, message) {
-  eventBus.send(frameStream(2, streamId, encodeUtf8(String(message))));
+  eventBus.send(RPC_CH, frameStream(2, streamId, encodeUtf8(String(message))));
 }
 "#;

@@ -16,11 +16,20 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class TurRuntime(
     handle: Long,
+    poolsHandle: Long = 0L,
 ) : Closeable {
 
     private val handleCell: AtomicLong = AtomicLong(handle)
     /** The opaque native handle (for advanced embedders / passing to [TurNative]). */
     val handle: Long get() = handleCell.get()
+
+    private val poolsCell: AtomicLong = AtomicLong(poolsHandle)
+    /**
+     * The opaque native worker-pools handle (from
+     * `EasePluginBridge.createPluginWorkerPools`), passed through to every
+     * spawned instance. `0` = engine default (one lane thread per instance).
+     */
+    val poolsHandle: Long get() = poolsCell.get()
 
     /**
      * Spawn an isolated rendering instance attached to [surface] and return it.
@@ -43,6 +52,7 @@ class TurRuntime(
         val frameLoop = FrameLoop()
         val h = TurNative.createInstance(
             handle,
+            poolsHandle,
             surface,
             width,
             height,
@@ -64,7 +74,7 @@ class TurRuntime(
     fun createHeadlessInstance(pluginId: String): TurInstance {
         check(handle != 0L) { "runtime destroyed" }
         val frameLoop = FrameLoop()
-        val h = TurNative.createHeadlessInstance(handle, frameLoop, pluginId)
+        val h = TurNative.createHeadlessInstance(handle, poolsHandle, frameLoop, pluginId)
         check(h != 0L) { "createHeadlessInstance returned 0 (see logcat)" }
         return TurInstance(h, frameLoop)
     }
@@ -72,8 +82,13 @@ class TurRuntime(
     /** Drop the runtime and free native resources. Destroy all instances first. Idempotent. */
     override fun close() {
         val h = handleCell.getAndSet(0L)
-        if (h == 0L) return
-        TurNative.destroyRuntime(h)
+        if (h != 0L) {
+            TurNative.destroyRuntime(h)
+        }
+        val p = poolsCell.getAndSet(0L)
+        if (p != 0L) {
+            EasePluginBridge.destroyPluginWorkerPools(p)
+        }
     }
 
     @Suppress("REM_ELLIPSIS")

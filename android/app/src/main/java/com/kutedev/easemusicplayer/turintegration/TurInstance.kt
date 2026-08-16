@@ -19,7 +19,8 @@ import java.util.concurrent.atomic.AtomicLong
  * @param handle the opaque native instance pointer. `0` is treated as
  *   "destroyed".
  * @param frameLoop the per-instance scheduler the native loop driver arms
- *   wake-ups against; [pump] is wired to its wake callback.
+ *   wake-ups against; [pump] / [pumpMessages] are wired to its wake
+ *   callbacks.
  */
 class TurInstance(
     handle: Long,
@@ -31,10 +32,14 @@ class TurInstance(
     private val handle: Long get() = handleCell.get()
 
     init {
-        // Wire the frame loop's wake callback to pump this instance. Done at
-        // construction (the instance already exists by the time the handle
+        // Wire the frame loop's wake callbacks to pump this instance. Done
+        // at construction (the instance already exists by the time the handle
         // reaches us) so the first Choreographer tick advances it.
-        frameLoop.onWake = { if (handle != 0L) TurNative.pump(handle) }
+        // `onVsync` = a display frame was requested (fires the engine's
+        // vsync event + polls the loop); `onPump` = messages/tasks need the
+        // loop polled WITHOUT a frame (keeps an idle instance at 0% CPU).
+        frameLoop.onVsync = { if (handle != 0L) TurNative.pump(handle) }
+        frameLoop.onPump = { if (handle != 0L) TurNative.pumpMessages(handle) }
     }
 
     /** Evaluate [js] (an ES module) and request a paint. */

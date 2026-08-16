@@ -203,3 +203,34 @@ fn open_stream_propagates_error() {
     let err = outcome.expect_err("stream should have errored");
     assert!(err.contains("boom"), "got: {err}");
 }
+
+// === Plugin events (fire-and-forget channel 1) ==============================
+
+const EVENT_JS: &str = r#"
+import { onEvent, registerHandler } from "tur:rpc";
+
+let got = null;
+onEvent("ping", (payload) => { got = payload.value; });
+registerHandler("got", () => ({ value: got }));
+"#;
+
+#[test]
+fn emit_event_reaches_on_event_registration() {
+    let mut app = build_app();
+    let client = RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(EVENT_JS).expect("load js");
+
+    // Fire-and-forget on the event channel; observe via an RPC round-trip.
+    // Delivery is asynchronous (worker flush), so poll until it lands.
+    client.emit_event("ping", serde_json::json!({ "value": 7 }));
+    let mut delivered = false;
+    for _ in 0..50 {
+        let v = call_with_pump(&mut app, client.clone(), "got", serde_json::json!(null))
+            .expect("probe call ok");
+        if v.get("value").and_then(|x| x.as_i64()) == Some(7) {
+            delivered = true;
+            break;
+        }
+    }
+    assert!(delivered, "event should have been delivered to onEvent");
+}

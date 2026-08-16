@@ -120,10 +120,11 @@ impl BackendContext {
         self.internal.service_rpcs.read().unwrap().get(plugin_id).cloned()
     }
 
-    /// Fire a `plugin.event` at one plugin's backend: invoke the JS handler
-    /// registered under `event_type` on that plugin's headless instance.
-    /// Fire-and-forget — the reply (which the JS dispatcher always sends)
-    /// resolves the RPC pending entry, and the result is discarded.
+    /// Fire a `plugin.event` at one plugin's backend: push `{type, payload}`
+    /// onto that plugin's dedicated event bus channel (tur #190 layout —
+    /// [`ease_tur_rpc::EVENT_CHANNEL_ID`]), delivered to the JS `onEvent`
+    /// registration. Fire-and-forget: no reply is sent, and a plugin with
+    /// no registration silently never hears it.
     pub fn dispatch_plugin_event(
         &self,
         plugin_id: &str,
@@ -137,13 +138,7 @@ impl BackendContext {
                 ),
             }
         })?;
-        let event_type = event_type.to_string();
-        let plugin_id = plugin_id.to_string();
-        let _ = self.tokio_handle().spawn(async move {
-            if let Err(e) = rpc.call(&event_type, payload).await {
-                tracing::warn!("plugin.event {event_type} -> {plugin_id}: {e}");
-            }
-        });
+        rpc.emit_event(event_type, payload);
         Ok(())
     }
 

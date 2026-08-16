@@ -24,7 +24,6 @@ class StorageRepository @Inject constructor(
     private val _preRemoveStorageEvent = MutableSharedFlow<StorageId>()
     private val _onRemoveStorageEvent = MutableSharedFlow<Unit>()
     private val _pluginConnectedEvent = MutableSharedFlow<StorageId>()
-    private val _pluginDisconnectedEvent = MutableSharedFlow<StorageId>()
 
     val storages = _storages.asStateFlow()
     val preRemoveStorageEvent = _preRemoveStorageEvent.asSharedFlow()
@@ -32,9 +31,6 @@ class StorageRepository @Inject constructor(
     /** Emitted when a JS plugin OAuth exchange mints a new storage row.
      *  `EditStoragesPage` collects this to pop back from the setup form. */
     val pluginConnectedEvent = _pluginConnectedEvent.asSharedFlow()
-    /** Emitted when a plugin instance is disconnected (via `ease.context.disconnect()`
-     *  from an edit view). `EditStoragesPage` collects this to pop back. */
-    val pluginDisconnectedEvent = _pluginDisconnectedEvent.asSharedFlow()
 
     suspend fun createStorage(arg: ArgUpsertWebdavStorage): Boolean {
         require(arg.id == null) { "createStorage: arg.id must be null" }
@@ -90,22 +86,7 @@ class StorageRepository @Inject constructor(
         _preRemoveStorageEvent.emit(id)
         bridge.call(BridgeMethods.StoragePlugin.REMOVE_INSTANCE, id).unwrapOrNull()
         _onRemoveStorageEvent.emit(Unit)
-        _pluginDisconnectedEvent.emit(id)
         reload()
-    }
-
-    /**
-     * Look up a plugin storage row by `(pluginId, pluginStorageId)`. Returns
-     * the storage id, or `null` if no such row exists. Drives
-     * `ease.context.disconnect()` resolution from the plugin edit view.
-     */
-    fun findPluginStorage(pluginId: String, pluginStorageId: String): StorageId? {
-        return _storages.value.firstOrNull { s ->
-            val h = s.handle
-            h is StorageHandle.Plugin &&
-                h.pluginId.id == pluginId &&
-                h.pluginStorageId.id == pluginStorageId
-        }?.id
     }
 
     suspend fun reload() {
