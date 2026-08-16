@@ -7,10 +7,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginOauthExchange
 import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginProvider
-import com.kutedev.easemusicplayer.singleton.types.ArgUpsertWebdavStorage
 import com.kutedev.easemusicplayer.singleton.types.PluginOauthExchangeResult
 import com.kutedev.easemusicplayer.singleton.types.Storage
-import com.kutedev.easemusicplayer.singleton.types.StorageHandle
 import com.kutedev.easemusicplayer.singleton.types.StorageId
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,31 +21,16 @@ class StorageRepository @Inject constructor(
     private val _storages = MutableStateFlow(listOf<Storage>())
     private val _preRemoveStorageEvent = MutableSharedFlow<StorageId>()
     private val _onRemoveStorageEvent = MutableSharedFlow<Unit>()
-    private val _pluginConnectedEvent = MutableSharedFlow<StorageId>()
+    private val _pluginConnectedEvent = MutableSharedFlow<Unit>()
 
     val storages = _storages.asStateFlow()
     val preRemoveStorageEvent = _preRemoveStorageEvent.asSharedFlow()
     val onRemoveStorageEvent = _onRemoveStorageEvent.asSharedFlow()
-    /** Emitted when a JS plugin OAuth exchange mints a new storage row.
+    /** Emitted when a JS plugin registers a new storage instance — either a
+     *  non-OAuth backend (`ease.context.createStorage`, e.g. WebDAV's
+     *  `webdav:connect`) or an OAuth exchange (`pluginOAuthExchange`).
      *  `EditStoragesPage` collects this to pop back from the setup form. */
     val pluginConnectedEvent = _pluginConnectedEvent.asSharedFlow()
-
-    suspend fun createStorage(arg: ArgUpsertWebdavStorage): Boolean {
-        require(arg.id == null) { "createStorage: arg.id must be null" }
-        if (bridge.call(BridgeMethods.StorageWebdav.UPSERT, arg).unwrapOrNull() == null) return false
-        reload()
-        return true
-    }
-
-    suspend fun updateStorage(arg: ArgUpsertWebdavStorage): Boolean {
-        require(arg.id != null) { "updateStorage: arg.id must be non-null" }
-        if (bridge.call(BridgeMethods.StorageWebdav.UPSERT, arg).unwrapOrNull() == null) return false
-        reload()
-        return true
-    }
-
-    suspend fun testStorage(arg: ArgUpsertWebdavStorage) =
-        bridge.call(BridgeMethods.StorageWebdav.TEST, arg).unwrapOrNull()?.payload
 
     suspend fun remove(id: StorageId) {
         _preRemoveStorageEvent.emit(id)
@@ -56,7 +39,7 @@ class StorageRepository @Inject constructor(
         reload()
     }
 
-    // === JS plugin storage providers (e.g. OneDrive) ========================
+    // === JS plugin storage providers (OneDrive, WebDAV, ...) ===============
 
     /** Ask the plugin for its OAuth authorization URL (`<provider>:oauth.url`). */
     suspend fun pluginOAuthUrl(provider: String): String? =
@@ -76,7 +59,7 @@ class StorageRepository @Inject constructor(
             ).unwrapOrNull()?.payload
         if (result != null) {
             reload()
-            _pluginConnectedEvent.emit(result.storageId)
+            _pluginConnectedEvent.emit(Unit)
         }
         return result?.storageId
     }
@@ -87,6 +70,16 @@ class StorageRepository @Inject constructor(
         bridge.call(BridgeMethods.StoragePlugin.REMOVE_INSTANCE, id).unwrapOrNull()
         _onRemoveStorageEvent.emit(Unit)
         reload()
+    }
+
+    /**
+     * A plugin backend registered a storage instance via
+     * `ease.context.createStorage` (the non-OAuth create path, e.g. the
+     * WebDAV plugin's `webdav:connect`). Reload + notify the create form.
+     */
+    suspend fun onPluginStorageCreated() {
+        reload()
+        _pluginConnectedEvent.emit(Unit)
     }
 
     suspend fun reload() {

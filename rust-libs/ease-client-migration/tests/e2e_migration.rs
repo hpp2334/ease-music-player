@@ -7,12 +7,13 @@
 
 use std::path::PathBuf;
 
-use ease_client_migration::{migrate, SCHEMA_VERSION};
+use ease_client_migration::{migrate, Migrator, SCHEMA_VERSION};
 use ease_client_schema::entities::{
-    blob, id_alloc, music, playlist, playlist_music, preference, schema_version, secret, storage,
-    webdav_storage,
+    blob, id_alloc, music, playlist, playlist_music, plugin_kv_key, plugin_kv_single, preference,
+    schema_version, secret, storage,
 };
-use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder};
+use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait, QueryOrder};
+use sea_orm_migration::MigratorTrait;
 
 async fn dump<C: sea_orm::ConnectionTrait>(db: &C) -> (
     u32,
@@ -113,43 +114,54 @@ async fn e2e_migration_preserves_all_data() {
     assert_eq!(allocs[2].next_id, 2, "id_alloc[2] next_id");
 
     // ---------- storage registry rows (new shape) ----------
-    // storage[0] = Local (id=1, type=Local=0, no detail ref).
+    // storage[0] = Local (id=1, type=Local=0).
     assert_eq!(storage_rows[0].id, 1);
     assert_eq!(storage_rows[0].r#type, 0, "storage[0] type (Local)");
-    assert_eq!(storage_rows[0].webdav_storage_id, None);
     assert_eq!(storage_rows[0].plugin_id, None);
     assert_eq!(storage_rows[0].plugin_storage_id, None);
 
-    // storage[1] = Webdav (id=2, type=Webdav=1, webdav_storage_id=2).
+    // storage[1] = the legacy WebDAV row, imported as a webdav plugin row
+    // (id=2, type=Plugin=2, plugin_id=com.ease.webdav,
+    // plugin_storage_id=webdav:2).
     assert_eq!(storage_rows[1].id, 2);
-    assert_eq!(storage_rows[1].r#type, 1, "storage[1] type (Webdav)");
-    assert_eq!(storage_rows[1].webdav_storage_id, Some(2));
-    assert_eq!(storage_rows[1].plugin_id, None);
-    assert_eq!(storage_rows[1].plugin_storage_id, None);
+    assert_eq!(storage_rows[1].r#type, 2, "storage[1] type (Plugin)");
+    assert_eq!(storage_rows[1].plugin_id.as_deref(), Some("com.ease.webdav"));
+    assert_eq!(
+        storage_rows[1].plugin_storage_id.as_deref(),
+        Some("webdav:2")
+    );
 
-    // ---------- webdav_storage detail row ----------
-    let webdav_rows = webdav_storage::Entity::find()
-        .order_by_asc(webdav_storage::Column::Id)
+    // ---------- plugin_kv instance record (webdav connection config) ------
+    let kv_key_rows = plugin_kv_key::Entity::find()
+        .order_by_asc(plugin_kv_key::Column::Id)
         .all(&db)
         .await
         .unwrap();
-    assert_eq!(webdav_rows.len(), 1, "webdav_storage count");
-    assert_eq!(webdav_rows[0].id, 2);
-    assert_eq!(webdav_rows[0].addr, "http://0.0.0.0:81");
-    assert_eq!(webdav_rows[0].alias, "A");
-    assert_eq!(webdav_rows[0].username, "admin");
-    assert_eq!(webdav_rows[0].is_anonymous, 0);
-    let webdav_secret_id = webdav_rows[0].secret_id.expect("webdav secret id");
+    assert_eq!(kv_key_rows.len(), 1, "plugin_kv_key count");
+    assert_eq!(kv_key_rows[0].plugin_id, "com.ease.webdav");
+    assert_eq!(kv_key_rows[0].key, "storage:webdav:2");
+    assert_eq!(kv_key_rows[0].kind, 0);
+    let kv_single = plugin_kv_single::Entity::find_by_id(kv_key_rows[0].id)
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("plugin_kv_single row");
+    let kv_value: serde_json::Value = serde_json::from_str(&kv_single.value).unwrap();
+    assert_eq!(kv_value["alias"], "A");
+    assert_eq!(kv_value["addr"], "http://0.0.0.0:81");
+    assert_eq!(kv_value["username"], "admin");
+    assert_eq!(kv_value["isAnonymous"], false);
+    let kv_secret_id = kv_value["secretId"].as_i64().expect("kv secretId");
 
-    // ---------- secret row (WebDAV password, scope=internal) ----------
+    // ---------- secret row (WebDAV password, plugin-scoped) ----------
     let secret_rows = secret::Entity::find()
         .order_by_asc(secret::Column::Id)
         .all(&db)
         .await
         .unwrap();
     assert_eq!(secret_rows.len(), 1, "secret count");
-    assert_eq!(secret_rows[0].id, webdav_secret_id);
-    assert_eq!(secret_rows[0].scope, "internal");
+    assert_eq!(secret_rows[0].id, kv_secret_id);
+    assert_eq!(secret_rows[0].scope, "plugin:com.ease.webdav");
     assert_eq!(secret_rows[0].secret, "123456");
 
     // ---------- playlist rows ----------
@@ -260,4 +272,97 @@ async fn fresh_install_stamps_schema_version() {
         0,
         "the single storage row is the Local seed"
     );
+}
+
+/// The v6 -> v7 upgrade path for an existing install: build a v6-shaped db
+/// (migrations up to and including the storage-registry split), insert a
+/// native WebDAV registry row + detail + internal secret, then run the
+/// remaining migrations and verify the row became a `com.ease.webdav` plugin
+/// row with its kv config + plugin-scoped secret, and that the WebDAV
+/// structures are gone.
+#[tokio::test]
+async fn v6_to_v7_rewrites_webdav_rows_to_plugin_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let document_dir = dir.path().to_str().unwrap().to_string();
+
+    // 1. Create a v6-shape database (first three migrations only).
+    let db = ease_client_migration::open_database(&document_dir).await.unwrap();
+    Migrator::up(&db, Some(3)).await.unwrap();
+
+    // 2. Seed a native WebDAV storage the way v6 stored it.
+    db.execute(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Sqlite,
+        "INSERT INTO secret (scope, secret) VALUES ('internal', 'hunter2')",
+        vec![],
+    ))
+    .await
+    .unwrap();
+    db.execute(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Sqlite,
+        "INSERT INTO webdav_storage (addr, alias, username, secret_id, is_anonymous) \
+         VALUES ('https://dav.example.com/dav/', 'HomeNAS', 'alice', 1, 0)",
+        vec![],
+    ))
+    .await
+    .unwrap();
+    db.execute(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Sqlite,
+        "INSERT INTO storage (type, webdav_storage_id) VALUES (1, 1)",
+        vec![],
+    ))
+    .await
+    .unwrap();
+
+    // 3. Run the remaining migrations (v4: webdav -> plugin).
+    Migrator::up(&db, None).await.unwrap();
+
+    // 4. Registry row rewritten to a plugin row (the seeded Local row took
+    //    id 1, so the WebDAV registry row is id 2 -> instance "webdav:2").
+    let rows = storage::Entity::find()
+        .order_by_asc(storage::Column::Id)
+        .all(&db)
+        .await
+        .unwrap();
+    let webdav = rows
+        .iter()
+        .find(|r| r.plugin_storage_id.as_deref() == Some("webdav:2"))
+        .expect("webdav plugin row");
+    assert_eq!(webdav.r#type, 2);
+    assert_eq!(webdav.plugin_id.as_deref(), Some("com.ease.webdav"));
+
+    // 5. kv config written with the connection fields.
+    let kv_key = plugin_kv_key::Entity::find()
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("plugin_kv_key row");
+    assert_eq!(kv_key.plugin_id, "com.ease.webdav");
+    assert_eq!(kv_key.key, "storage:webdav:2");
+    let kv_single = plugin_kv_single::Entity::find_by_id(kv_key.id)
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("plugin_kv_single row");
+    let v: serde_json::Value = serde_json::from_str(&kv_single.value).unwrap();
+    assert_eq!(v["alias"], "HomeNAS");
+    assert_eq!(v["addr"], "https://dav.example.com/dav/");
+    assert_eq!(v["username"], "alice");
+    assert_eq!(v["isAnonymous"], false);
+    assert_eq!(v["secretId"], 1);
+
+    // 6. Secret re-filed under the plugin scope (same id).
+    let s = secret::Entity::find_by_id(1).one(&db).await.unwrap().unwrap();
+    assert_eq!(s.scope, "plugin:com.ease.webdav");
+    assert_eq!(s.secret, "hunter2");
+
+    // 7. The WebDAV structures are dropped.
+    let table = db
+        .query_one(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webdav_storage'",
+            vec![],
+        ))
+        .await
+        .unwrap();
+    assert!(table.is_none(), "webdav_storage table should be dropped");
 }

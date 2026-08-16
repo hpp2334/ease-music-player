@@ -268,18 +268,12 @@ class VImportStorageEntry(private val storage: Storage) {
         get() = storage.handle is StorageHandle.Local
 
     val name: String
-        get() {
-            if (storage.alias != "") {
-                return storage.alias
-            }
-            return storage.addr ?: ""
-        }
+        get() = storage.alias
 
+    /** Provider name for plugin storages (e.g. "webdav" / "onedrive"). */
     val subtitle: String
-        get() {
-            if (storage.alias != "") {
-                return storage.addr ?: ""
-            }
-            return ""
+        get() = when (val handle = storage.handle) {
+            is StorageHandle.Plugin -> handle.pluginStorageId.id.substringBefore(':')
+            else -> ""
         }
 }

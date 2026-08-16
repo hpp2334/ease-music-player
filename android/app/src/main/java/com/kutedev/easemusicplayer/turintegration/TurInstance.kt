@@ -38,8 +38,14 @@ class TurInstance(
         // `onVsync` = a display frame was requested (fires the engine's
         // vsync event + polls the loop); `onPump` = messages/tasks need the
         // loop polled WITHOUT a frame (keeps an idle instance at 0% CPU).
-        frameLoop.onVsync = { if (handle != 0L) TurNative.pump(handle) }
-        frameLoop.onPump = { if (handle != 0L) TurNative.pumpMessages(handle) }
+        //
+        // NOTE: `this.handle` (the property reading the atomic cell) — NOT
+        // the constructor parameter. The parameter is captured by these
+        // closures and never changes; reading it would keep firing native
+        // pumps on a destroyed instance after `close()` (use-after-free in
+        // the engine's `pump_loop`).
+        frameLoop.onVsync = { if (this.handle != 0L) TurNative.pump(this.handle) }
+        frameLoop.onPump = { if (this.handle != 0L) TurNative.pumpMessages(this.handle) }
     }
 
     /** Evaluate [js] (an ES module) and request a paint. */

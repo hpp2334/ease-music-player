@@ -173,10 +173,11 @@ private fun ColumnScope.DevicesBlock(
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val title = item.alias.ifBlank {
-                    item.addr ?: ""
+                val title = item.alias.ifBlank { item.id.value.toString() }
+                val subTitle = when (val handle = item.handle) {
+                    is StorageHandle.Plugin -> handle.pluginStorageId.id.substringBefore(':')
+                    else -> ""
                 }
-                val subTitle = item.addr ?: ""
 
                 Box(modifier = Modifier.height(48.dp))
                 Icon(

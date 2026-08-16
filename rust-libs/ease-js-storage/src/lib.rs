@@ -12,12 +12,39 @@
 //! - `get({ streamId, path, offset })` → opens the stream at `offset`, pushes
 //!   chunks via `pushChunk(streamId, bytes)`, ends via `endStream(streamId)` or
 //!   `errorStream(streamId, msg)`, and returns `{ totalLength?, name?, contentType? }`.
+//!
+//! Error semantics: JS handler errors / stream errors whose message starts
+//! with `UNAUTHORIZED` or `TIMEOUT` are mapped to the corresponding
+//! [`StorageBackendError`] variants so the UI can distinguish auth failures
+//! and timeouts from other errors.
 
 use bytes::Bytes;
 use ease_remote_storage::{Entry, StorageBackend, StorageBackendError, StorageBackendResult, StreamFile};
 use ease_tur_rpc::{RpcClient, StreamChunk};
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
+
+/// Classify a JS-side error message into the typed variants the host UI
+/// reacts to (`is_unauthorized` / `is_timeout`).
+fn classify_error(message: String) -> StorageBackendError {
+    let trimmed = message.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("UNAUTHORIZED") {
+        StorageBackendError::Unauthorized(rest.trim_start_matches([':', ' ']).to_string())
+    } else if let Some(rest) = trimmed.strip_prefix("TIMEOUT") {
+        StorageBackendError::Timeout(rest.trim_start_matches([':', ' ']).to_string())
+    } else {
+        StorageBackendError::Other(message)
+    }
+}
+
+/// Map an RPC failure: a JS handler error keeps its (classified) message;
+/// transport errors stay opaque.
+fn map_rpc_error(context: &str, e: ease_tur_rpc::RpcError) -> StorageBackendError {
+    match e {
+        ease_tur_rpc::RpcError::Handler(msg) => classify_error(msg),
+        other => StorageBackendError::Other(format!("{context} rpc: {other}")),
+    }
+}
 
 /// A `StorageBackend` backed by a JS plugin via `ease-tur-rpc`.
 ///
@@ -94,7 +121,7 @@ impl StorageBackend for JsStorageBackend {
                 .rpc
                 .call(&op, serde_json::json!({ "instance": instance, "dir": dir }))
                 .await
-                .map_err(|e| StorageBackendError::Other(format!("list rpc: {e}")))?;
+                .map_err(|e| map_rpc_error("list", e))?;
             let entries: Vec<JsEntry> = serde_json::from_value(val)
                 .map_err(|e| StorageBackendError::Other(format!("list decode: {e}")))?;
             Ok(entries.into_iter().map(Entry::from).collect())
@@ -113,7 +140,7 @@ impl StorageBackend for JsStorageBackend {
                     serde_json::json!({ "instance": instance, "path": path, "offset": byte_offset }),
                 )
                 .await
-                .map_err(|e| StorageBackendError::Other(format!("get rpc: {e}")))?;
+                .map_err(|e| map_rpc_error("get", e))?;
             let meta: GetMeta = serde_json::from_value(meta)
                 .map_err(|e| StorageBackendError::Other(format!("get meta decode: {e}")))?;
 
@@ -132,9 +159,7 @@ impl StorageBackend for JsStorageBackend {
                         StreamChunk::End => break,
                         StreamChunk::Error(msg) => {
                             let _ = atx
-                                .send(Err(StorageBackendError::Other(format!(
-                                    "js stream: {msg}"
-                                ))))
+                                .send(Err(classify_error(msg)))
                                 .await;
                             break;
                         }

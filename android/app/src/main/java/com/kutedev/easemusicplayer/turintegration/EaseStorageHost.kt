@@ -1,12 +1,14 @@
 package com.kutedev.easemusicplayer.turintegration
 
 /**
- * JNI upcall target for the Rust `ease.context.notifyChange` host method.
+ * JNI upcall target for the Rust `ease.context.notifyChange` /
+ * `ease.context.createStorage` host methods.
  *
- * The `ease:context.notifyChange()` bridge (in
- * `rust-libs/.../plugin_runtime/context_bridge.rs`) resolves the process
- * `JavaVM` via `ndk_context` and calls
- * `EaseStorageHost.notifyChange(pluginId, instance)` as a static method from
+ * The `ease:context` bridges (in
+ * `rust-libs/.../plugin_runtime/context_bridge.rs`) resolve the process
+ * `JavaVM` via `ndk_context` and call
+ * `EaseStorageHost.notifyChange(pluginId, instance)` /
+ * `EaseStorageHost.storageCreated(pluginId, instance)` as static methods from
  * the engine thread. This object is a thin static shell — it delegates to
  * a [StorageHandler] installed once at startup
  * ([MainActivity.onCreate]), which owns the Hilt-injected dependencies
@@ -36,5 +38,20 @@ object EaseStorageHost {
             return
         }
         h.notifyChange(pluginId, instance)
+    }
+
+    /**
+     * `ease:context.createStorage(pluginId, instance)` upcall entry. Fired
+     * when a plugin backend registers a newly-persisted instance (e.g. the
+     * WebDAV plugin's `webdav:connect`) — the host reloads its storage list
+     * and notifies the create form so it can pop.
+     */
+    @JvmStatic
+    fun storageCreated(pluginId: String, instance: String) {
+        val h = handler ?: run {
+            android.util.Log.w("EaseStorageHost", "storageCreated ignored: handler not installed")
+            return
+        }
+        h.storageCreated(pluginId, instance)
     }
 }

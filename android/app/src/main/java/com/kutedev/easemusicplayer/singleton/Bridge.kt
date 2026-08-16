@@ -67,9 +67,8 @@ class Bridge @Inject constructor(
         ignoreUnknownKeys = true
         // Encode all fields, even those equal to their default. Without
         // this, Rust structs whose fields have defaults on the Kotlin
-        // side (e.g. ArgUpsertWebdavStorage.isAnonymous=false) would be
-        // omitted from the wire payload, causing "missing field" errors
-        // on the Rust deserializer.
+        // side would be omitted from the wire payload, causing
+        // "missing field" errors on the Rust deserializer.
         encodeDefaults = true
         // Discriminator for sealed classes — must match Rust's
         // `#[serde(tag = "kind")]` on enums that flow across the bridge

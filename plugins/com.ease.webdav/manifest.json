@@ -1,0 +1,14 @@
+{
+  "id": "com.ease.webdav",
+  "name": "WebDAV",
+  "version": "0.1.0",
+  "description": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless JS plugin.",
+  "author": "ease",
+  "backend": "backend.js",
+  "events": [],
+  "contributions": {
+    "storages": [
+      { "id": "webdav", "view": "view.js" }
+    ]
+  }
+}

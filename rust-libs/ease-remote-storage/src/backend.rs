@@ -1,10 +1,9 @@
-use std::{io::ErrorKind, process::Output};
+use std::io::ErrorKind;
 
 use bytes::Bytes;
 use ease_client_tokio::tokio_runtime;
 use futures_util::future::BoxFuture;
 use reqwest::StatusCode;
-use tokio::sync::oneshot::error;
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -35,18 +34,20 @@ pub struct StreamFile {
 pub enum StorageBackendError {
     #[error(transparent)]
     RequestFail(#[from] reqwest::Error),
-    #[error("Parse XML Fail")]
-    ParseXMLFail,
+    /// Auth rejected by the remote (JS storage-provider plugins signal this
+    /// with an `UNAUTHORIZED`-prefixed error message).
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+    /// Request timed out (JS storage-provider plugins signal this with a
+    /// `TIMEOUT`-prefixed error message).
+    #[error("timeout: {0}")]
+    Timeout(String),
     #[error(transparent)]
     TokioIO(#[from] tokio::io::Error),
     #[error(transparent)]
     TokioJoinError(#[from] tokio::task::JoinError),
-    #[error("Url Parse Error")]
-    UrlParseError(String),
     #[error("Serde Json Error: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
-    #[error("QuickXML De Error: {0}")]
-    QuickXMLDeError(#[from] quick_xml::DeError),
     #[error("{0}")]
     Other(String),
 }
@@ -63,17 +64,19 @@ pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
 
 impl StorageBackendError {
     pub fn is_timeout(&self) -> bool {
-        if let StorageBackendError::RequestFail(e) = self {
-            return e.is_timeout();
+        match self {
+            StorageBackendError::RequestFail(e) => e.is_timeout(),
+            StorageBackendError::Timeout(_) => true,
+            _ => false,
         }
-        false
     }
 
     pub fn is_unauthorized(&self) -> bool {
-        if let StorageBackendError::RequestFail(e) = self {
-            return e.status() == Some(StatusCode::UNAUTHORIZED);
+        match self {
+            StorageBackendError::RequestFail(e) => e.status() == Some(StatusCode::UNAUTHORIZED),
+            StorageBackendError::Unauthorized(_) => true,
+            _ => false,
         }
-        false
     }
 
     pub fn is_not_found(&self) -> bool {
