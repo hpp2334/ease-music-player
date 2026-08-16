@@ -29,12 +29,10 @@ use crate::{
             ArgReorderPlaylist,
         },
         storage::{ct_list_storage, ct_list_storage_entry_children, ct_remove_storage},
-        storage_webdav::{ct_test_webdav_storage, ct_upsert_webdav_storage},
     },
     error::{BError, BResult},
     objects::{
         music::{MetadataRecord, PlayerStateRecord},
-        storage::ArgUpsertWebdavStorage,
     },
     objects::player::{
         ct_player_context_new, ct_player_duration_ms, ct_player_load_music, ct_player_new,
@@ -250,23 +248,11 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let result = ct_list_storage(cx).await?;
             Ok((serde_json::to_value(result)?, vec![]))
         }
-        "storage_webdav.upsert" => {
-            let arg: ArgUpsertWebdavStorage = serde_json::from_value(req.args)?;
-            let cx = must_backend(handle)?;
-            ct_upsert_webdav_storage(cx, arg).await?;
-            Ok((Value::Null, vec![]))
-        }
         "storage.remove" => {
             let id: StorageId = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
             ct_remove_storage(cx, id).await?;
             Ok((Value::Null, vec![]))
-        }
-        "storage_webdav.test" => {
-            let arg: ArgUpsertWebdavStorage = serde_json::from_value(req.args)?;
-            let cx = must_backend(handle)?;
-            let result = ct_test_webdav_storage(cx, arg).await?;
-            Ok((serde_json::to_value(result)?, vec![]))
         }
         "storage.listEntryChildren" => {
             let loc: StorageEntryLoc = serde_json::from_value(req.args)?;

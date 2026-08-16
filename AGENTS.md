@@ -6,7 +6,7 @@ Guide for coding agents working in this repository. Read this first.
 
 Ease Music Player is a lightweight **Android** music player written in **Kotlin / Jetpack Compose** (UI) and **Rust** (backend). It targets Android `arm64-v8a` only.
 
-Features: WebDAV and OneDrive cloud storage, playlist-based playback, music cover art, lyrics.
+Features: WebDAV and OneDrive cloud storage (both JS plugin providers), playlist-based playback, music cover art, lyrics.
 
 > **History note (0.3 → 0.4):** version 0.4 briefly migrated the UI to Kotlin Multiplatform / Compose Multiplatform with a Desktop JVM target (JavaFX `MediaPlayer` + Skiko). The desktop build was dropped for 0.4.0-beta.0 — memory overhead (~half a GB at idle, mostly from loading two rendering stacks) and lack of user-facing benefit made the single-target Android app the better shape. The Rust-side improvements from that era are kept (`ease-client-schema` / `ease-client-migration` crate split, UniFFI tokio routing). See [`docs/motivation.md`](./docs/motivation.md).
 
@@ -76,7 +76,7 @@ Workspace root: [`rust-libs/Cargo.toml`](./rust-libs/Cargo.toml) (resolver = `"2
 | `ease-client-tokio` | Shared tokio multi-thread runtime accessor (`tokio_runtime()`). |
 | `ease-client-android-ffi-builder` | Binary wrapping `uniffi bindgen` to generate the Kotlin bindings used by `build-jni-libs.ts`. |
 | `ease-order-key` | Standalone orderable-key utility. **Dual MIT OR Apache-2.0 license** (different from the rest). |
-| `ease-remote-storage` (path dep, not a workspace member) | WebDAV / OneDrive remote storage client (`reqwest`, `quick-xml`). GPL-3.0. |
+| `ease-remote-storage` (path dep, not a workspace member) | Storage backend trait + `LocalBackend` (the native WebDAV client was removed when WebDAV became a JS plugin). GPL-3.0. |
 | [`cantode/`](./cantode/) (repo root, **not** in `rust-libs/` workspace) | Standalone cross-platform audio engine: symphonia decode + cpal/AAudio output behind a trait-based API. Exposes `PlayerHandle` over UniFFI to the Android app; linked into the same `.so` as `ease-client-backend`. Edition 2024, **dual MIT OR Apache-2.0 license** (matches `ease-order-key`, different from the GPL-3.0 main app). |
 
 Notable Rust constraints: UniFFI pinned to `=0.28.3` with the `tokio` feature; SQLite is force-bundled (`libsqlite3-sys` `bundled`) for cross-compilation; Sea-ORM 1.1 with sqlx-sqlite + runtime-tokio-rustls.

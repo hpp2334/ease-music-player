@@ -143,6 +143,16 @@ declare module "ease" {
          */
         notifyChange(): void;
         /**
+         * Find-or-create the host storage row for
+         * `(pluginId, pluginStorageId)` and notify the host so a create-mode
+         * form can pop. Called by a plugin backend after persisting a new
+         * instance's config + secret — the non-OAuth counterpart of the
+         * OAuth exchange flow (e.g. the WebDAV plugin's `webdav:connect`).
+         * Asynchronous (fire-and-forget): returns immediately; the host row
+         * is created + the host notified on a background task.
+         */
+        createStorage(pluginStorageId: string): void;
+        /**
          * Delete the host storage row for `(pluginId, pluginStorageId)`.
          * Called by a plugin backend after it wipes its own kv + secret,
          * completing the disconnect. No-op if no row matches.

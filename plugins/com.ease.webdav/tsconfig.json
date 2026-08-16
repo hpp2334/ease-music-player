@@ -1,0 +1,24 @@
+{
+    "compilerOptions": {
+        "target": "ES2020",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "lib": ["ES2020"],
+        "types": [],
+        "strict": true,
+        "noEmit": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "baseUrl": ".",
+        "paths": {
+            "tur:std": ["./node_modules/@tur-ng/std/src/index.d.ts"],
+            "tur:core": ["./node_modules/@tur-ng/core/src/index.d.ts"],
+            "tur:net": ["./node_modules/@tur-ng/net/src/index.d.ts"]
+        }
+    },
+    "include": ["src/**/*", "../infra/ease.d.ts", "../infra/tur-rpc.d.ts"],
+    "exclude": ["node_modules"]
+}

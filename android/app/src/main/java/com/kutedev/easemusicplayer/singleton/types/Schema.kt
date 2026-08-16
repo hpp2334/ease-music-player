@@ -37,13 +37,9 @@ value class PlaylistId(val value: Long)
 @JvmInline
 value class StorageId(val value: Long)
 
-// WebDAV detail-row id + plugin storage-contribution ids (mirror the Rust
-// `WebdavStorageId` / `PluginId` / `PluginStorageId` newtypes). Rust uses
-// `#[serde(transparent)]`, so these serialize as bare JSON numbers / strings.
-@Serializable
-@JvmInline
-value class WebdavStorageId(val value: Long)
-
+// Plugin storage-contribution ids (mirror the Rust `PluginId` /
+// `PluginStorageId` newtypes). Rust uses `#[serde(transparent)]`, so these
+// serialize as bare JSON strings.
 @Serializable
 @JvmInline
 value class PluginId(val id: String)
@@ -75,9 +71,6 @@ enum class LyricLoadState { LOADING, MISSING, FAILED, LOADED }
 enum class CreatePlaylistMode { FULL, EMPTY }
 
 @Serializable
-enum class StorageConnectionTestResult { NONE, TESTING, SUCCESS, UNAUTHORIZED, TIMEOUT, OTHER_ERROR }
-
-@Serializable
 enum class CurrentStorageStateType { LOADING, OK, NEED_PERMISSION, AUTHENTICATION_FAILED, TIMEOUT, UNKNOWN_ERROR }
 
 // ============================================================================
@@ -98,12 +91,6 @@ sealed class StorageHandle {
     @Serializable
     @SerialName("LOCAL")
     data object Local : StorageHandle()
-
-    @Serializable
-    @SerialName("WEBDAV")
-    data class Webdav(
-        @SerialName("webdavStorageId") val webdavStorageId: WebdavStorageId,
-    ) : StorageHandle()
 
     @Serializable
     @SerialName("PLUGIN")
@@ -213,9 +200,6 @@ data class Storage(
     val handle: StorageHandle,
     val alias: String,
     val musicCount: ULong,
-    val addr: String? = null,
-    val username: String? = null,
-    val isAnonymous: Boolean? = null,
 )
 
 @Serializable
@@ -298,16 +282,6 @@ data class ArgInitializeApp(
     val appDocumentDir: String,
     val appCacheDir: String,
     val storagePath: String,
-)
-
-@Serializable
-data class ArgUpsertWebdavStorage(
-    var id: StorageId? = null,
-    var addr: String = "",
-    var alias: String = "",
-    var username: String = "",
-    var password: String = "",
-    var isAnonymous: Boolean = false,
 )
 
 @Serializable

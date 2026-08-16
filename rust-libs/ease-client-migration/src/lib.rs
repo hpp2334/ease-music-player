@@ -13,7 +13,7 @@ pub use sea_orm::DatabaseConnection as DbConn;
 
 use ease_client_schema::entities::{
     blob, id_alloc, music, playlist, playlist_music, plugin_kv_key, plugin_kv_single, preference,
-    schema_version, secret, storage, webdav_storage,
+    schema_version, secret, storage,
 };
 use crate::legacy::redb_v3::TABLE_BLOB as V3_TABLE_BLOB;
 use crate::legacy::redb_v3::TABLE_ID_ALLOC as V3_TABLE_ID_ALLOC;
@@ -26,13 +26,14 @@ use crate::legacy::redb_v3::TABLE_SCHEMA_VERSION as V3_TABLE_SCHEMA_VERSION;
 use crate::legacy::{upgrade_v1_to_v2, upgrade_v2_to_v3};
 use redb::{ReadableMultimapTable, ReadableTable};
 
-/// Plugin id owning OneDrive storage instances (matches the OneDrive plugin
-/// manifest). Used when migrating legacy OneDrive rows into the secret table +
-/// plugin_kv.
+/// Plugin ids owning OneDrive / WebDAV storage instances (matching the
+/// plugins' manifests). Used when migrating legacy rows into the secret
+/// table + plugin_kv.
 const ONEDRIVE_PLUGIN_ID: &str = "com.ease.onedrive";
+const WEBDAV_PLUGIN_ID: &str = "com.ease.webdav";
 
 /// The schema version produced by this crate.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 pub struct Migrator;
 
@@ -42,6 +43,7 @@ impl MigratorTrait for Migrator {
             Box::new(migrations::InitMigration),
             Box::new(migrations::PluginKvMigration),
             Box::new(migrations::StorageRegistryMigration),
+            Box::new(migrations::WebdavPluginMigration),
         ]
     }
 }
@@ -106,7 +108,6 @@ pub async fn import_from_redb(
     // Local registry row seeded for fresh installs). redb is authoritative on
     // this path, so wipe the placeholder registry/detail rows before importing.
     storage::Entity::delete_many().exec(&txn).await?;
-    webdav_storage::Entity::delete_many().exec(&txn).await?;
     secret::Entity::delete_many().exec(&txn).await?;
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -302,10 +303,10 @@ fn _unused() {
     let _ = (playlist::Entity, music::Entity, storage::Entity, playlist_music::Entity, preference::Entity, id_alloc::Entity, blob::Entity);
 }
 
-/// Import one legacy (v3) storage row into the new-shape tables. Mirrors the
-/// `m20260801_000003` transform: Local -> registry row; Webdav -> webdav_storage
-/// + internal secret + registry; OneDrive -> plugin-scoped secret + plugin_kv
-/// instance record + registry. Explicit `id`s preserve music/playlist refs.
+/// Import one legacy (v3) storage row into the new-shape tables. Local ->
+/// registry row; Webdav / OneDrive -> plugin-scoped secret + plugin_kv
+/// instance record + plugin registry row (WebDAV's connection fields live in
+/// the kv value). Explicit `id`s preserve music/playlist refs.
 async fn import_legacy_storage_row<C: sea_orm::ConnectionTrait>(
     txn: &C,
     m: v3::StorageModel,
@@ -319,7 +320,6 @@ async fn import_legacy_storage_row<C: sea_orm::ConnectionTrait>(
             let am = storage::ActiveModel {
                 id: Set(id),
                 r#type: Set(0),
-                webdav_storage_id: Set(None),
                 plugin_id: Set(None),
                 plugin_storage_id: Set(None),
             };
@@ -331,26 +331,40 @@ async fn import_legacy_storage_row<C: sea_orm::ConnectionTrait>(
             } else {
                 let am = secret::ActiveModel {
                     id: sea_orm::ActiveValue::NotSet,
-                    scope: Set("internal".to_string()),
+                    scope: Set(format!("plugin:{}", WEBDAV_PLUGIN_ID)),
                     secret: Set(m.password.clone()),
                 };
                 Some(am.insert(txn).await?.id)
             };
-            let am = webdav_storage::ActiveModel {
-                id: Set(id),
-                addr: Set(m.addr.clone()),
-                alias: Set(m.alias.clone()),
-                username: Set(m.username.clone()),
-                secret_id: Set(secret_id),
-                is_anonymous: Set(if m.is_anonymous { 1 } else { 0 }),
+            let instance = format!("webdav:{}", id);
+            let instance_key = format!("storage:{}", instance);
+            let key_am = plugin_kv_key::ActiveModel {
+                id: sea_orm::ActiveValue::NotSet,
+                plugin_id: Set(WEBDAV_PLUGIN_ID.to_string()),
+                key: Set(instance_key),
+                kind: Set(0),
+                created_at: Set(now_ms),
             };
-            am.insert(txn).await?;
+            let key_model = key_am.insert(txn).await?;
+            let value = serde_json::json!({
+                "alias": m.alias,
+                "secretId": secret_id,
+                "addr": m.addr,
+                "username": m.username,
+                "isAnonymous": m.is_anonymous,
+            })
+            .to_string();
+            let single_am = plugin_kv_single::ActiveModel {
+                key_id: Set(key_model.id),
+                value: Set(value),
+                updated_at: Set(now_ms),
+            };
+            single_am.insert(txn).await?;
             let reg = storage::ActiveModel {
                 id: Set(id),
-                r#type: Set(1),
-                webdav_storage_id: Set(Some(id)),
-                plugin_id: Set(None),
-                plugin_storage_id: Set(None),
+                r#type: Set(2),
+                plugin_id: Set(Some(WEBDAV_PLUGIN_ID.to_string())),
+                plugin_storage_id: Set(Some(instance)),
             };
             reg.insert(txn).await?;
         }
@@ -385,7 +399,6 @@ async fn import_legacy_storage_row<C: sea_orm::ConnectionTrait>(
             let reg = storage::ActiveModel {
                 id: Set(id),
                 r#type: Set(2),
-                webdav_storage_id: Set(None),
                 plugin_id: Set(Some(ONEDRIVE_PLUGIN_ID.to_string())),
                 plugin_storage_id: Set(Some(format!("onedrive:{}", id))),
             };

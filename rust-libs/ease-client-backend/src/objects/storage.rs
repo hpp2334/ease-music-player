@@ -1,6 +1,7 @@
 use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc, StorageHandle, StorageId};
 use serde::{Deserialize, Serialize};
 
+/// One entry in a directory listing, storage-kind-agnostic.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageEntry {
@@ -9,34 +10,6 @@ pub struct StorageEntry {
     pub path: String,
     pub size: Option<u64>,
     pub is_dir: bool,
-}
-
-/// Create / update a WebDAV storage. WebDAV-only: OneDrive is no longer a core
-/// storage kind (it is a JS plugin provider); Local is always-present and not
-/// user-createable. `password` is write-only plaintext (blank on edit = keep
-/// the existing secret); it never appears on the returned [`Storage`].
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ArgUpsertWebdavStorage {
-    /// Registry `StorageId` to update; `None` to create.
-    pub id: Option<StorageId>,
-    pub addr: String,
-    pub alias: String,
-    pub username: String,
-    pub password: String,
-    pub is_anonymous: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum StorageConnectionTestResult {
-    #[default]
-    None,
-    Testing,
-    Success,
-    Unauthorized,
-    Timeout,
-    OtherError,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Deserialize)]
@@ -50,9 +23,9 @@ pub enum StorageEntryType {
 }
 
 /// A storage source surfaced to the UI. `handle` identifies the kind; the
-/// WebDAV-specific fields (`addr` / `username` / `is_anonymous`) are `Some`
-/// only for WebDAV and `None` for Local / Plugin. The password is never
-/// carried here.
+/// plugin-owned display `alias` comes from the plugin's kv config. Connection
+/// details (WebDAV addr / credentials, ...) live entirely in the plugin's
+/// kv + secret stores and never cross this boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Storage {
@@ -60,9 +33,6 @@ pub struct Storage {
     pub handle: StorageHandle,
     pub alias: String,
     pub music_count: u64,
-    pub addr: Option<String>,
-    pub username: Option<String>,
-    pub is_anonymous: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, Deserialize)]

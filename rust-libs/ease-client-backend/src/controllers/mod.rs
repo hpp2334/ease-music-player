@@ -4,4 +4,3 @@ pub(crate) mod music;
 pub(crate) mod playlist;
 pub(crate) mod preference;
 pub(crate) mod storage;
-pub(crate) mod storage_webdav;

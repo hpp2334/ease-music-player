@@ -1,21 +1,21 @@
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
-    time::Duration,
 };
 
 use ease_client_schema::entities::storage as storage_entity;
 use ease_client_schema::{
-    DataSourceKey, PluginId, PluginStorageId, SecretId, SecretScope, StorageEntryLoc, StorageHandle,
-    StorageId, StorageType, WebdavStorageId,
+    DataSourceKey, PluginId, PluginStorageId, StorageEntryLoc, StorageHandle, StorageId,
+    StorageType,
 };
-use ease_remote_storage::{BuildWebdavArg, LocalBackend, StorageBackend, StreamFile, Webdav};
+use ease_remote_storage::{LocalBackend, StorageBackend, StreamFile};
 use ease_js_storage::JsStorageBackend;
 use tracing::instrument;
 
-/// JSON shape the OneDrive plugin stores under
+/// JSON shape storage plugins store under
 /// `plugin_kv_single(plugin_id, "storage:<plugin_storage_id>")`:
-/// `{ alias, secretId }`. Only `alias` is read here (for the storage list).
+/// `{ alias, secretId, ...provider-specific fields }`. Only `alias` is read
+/// here (for the storage list).
 #[derive(serde::Deserialize)]
 struct PluginStorageMeta {
     #[serde(default)]
@@ -25,8 +25,7 @@ struct PluginStorageMeta {
 use crate::{
     ctx::BackendContext,
     error::{BError, BResult},
-    objects::{Storage, ArgUpsertWebdavStorage},
-    repositories::secret::SecretStore,
+    objects::Storage,
     services::{get_music, get_music_cover_bytes},
 };
 
@@ -46,9 +45,16 @@ pub(crate) async fn load_storage_entry_data(
         tracing::trace!("start load");
         let ret = match backend.get(loc.path, 0).await {
             Ok(data) => {
-                let data = data.bytes().await.unwrap();
-                let data = data.to_vec();
-                Ok(Some(data))
+                // A stream-level failure (e.g. a JS storage-plugin surfacing
+                // an HTTP error mid-stream, like a missing lyrics file) is a
+                // missing entry, not a host failure — return `None`.
+                match data.bytes().await {
+                    Ok(data) => Ok(Some(data.to_vec())),
+                    Err(e) => {
+                        tracing::debug!("load_storage_entry_data stream failed: {e:?}");
+                        Ok(None)
+                    }
+                }
             }
             Err(_) => Ok(None),
         };
@@ -59,34 +65,14 @@ pub(crate) async fn load_storage_entry_data(
     }
 }
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Build a WebDAV backend directly from connection params (no DB). Used by
-/// `ct_test_storage` to validate a connection before persisting.
-pub fn build_webdav_backend(
-    addr: String,
-    username: String,
-    password: String,
-    is_anonymous: bool,
-) -> Arc<dyn StorageBackend + Send + Sync + 'static> {
-    Arc::new(Webdav::new(BuildWebdavArg {
-        addr,
-        username,
-        password,
-        is_anonymous,
-        connect_timeout: CONNECT_TIMEOUT,
-    }))
-}
-
 pub(crate) fn evict_storage_backend_cache(cx: &BackendContext, storage_id: StorageId) {
     let mut w = cx.storage_state().cache.write().unwrap();
     w.remove(&storage_id);
 }
 
 /// Resolve a `StorageId` to a live backend, dispatching on the registry row's
-/// kind. Local -> `LocalBackend`; Webdav -> load detail + internal secret ->
-/// `Webdav`; Plugin -> `JsStorageBackend` (not yet wired — returns an error
-/// until the plugin service-runtime hosting lands).
+/// kind. Local -> `LocalBackend`; Plugin -> `JsStorageBackend` (WebDAV,
+/// OneDrive, ... are all JS plugin providers).
 pub async fn get_storage_backend(
     cx: &BackendContext,
     storage_id: StorageId,
@@ -107,25 +93,6 @@ pub async fn get_storage_backend(
         row.r#type,
     ) {
         Some(StorageType::Local) => Arc::new(LocalBackend::new()),
-        Some(StorageType::Webdav) => {
-            let wid = row.webdav_storage_id.ok_or_else(|| BError::CustomError {
-                message: "webdav storage row missing webdav_storage_id".into(),
-            })?;
-            let w = ds
-                .load_webdav_storage(WebdavStorageId::wrap(wid))
-                .await?
-                .ok_or_else(|| BError::CustomError {
-                    message: "webdav_storage row missing".into(),
-                })?;
-            let password = match w.secret_id {
-                Some(sid) => ds
-                    .secret_get(SecretScope::Internal, SecretId::wrap(sid))
-                    .await?
-                    .unwrap_or_default(),
-                None => String::new(),
-            };
-            build_webdav_backend(w.addr, w.username, password, w.is_anonymous != 0)
-        }
         Some(StorageType::Plugin) => {
             // A plugin storage references a JS service plugin instance. The
             // provider is the prefix of `plugin_storage_id` (e.g. `onedrive`
@@ -164,7 +131,7 @@ pub async fn get_storage_backend(
 }
 
 /// Build the UI-facing [`Storage`] from a registry row, joining the
-/// kind-specific detail (WebDAV addr/alias/etc. for WebDAV).
+/// kind-specific detail.
 async fn build_storage_from_row(
     cx: &BackendContext,
     row: storage_entity::Model,
@@ -178,37 +145,12 @@ async fn build_storage_from_row(
             handle: StorageHandle::Local,
             alias: "Local".to_string(),
             music_count,
-            addr: None,
-            username: None,
-            is_anonymous: None,
         }),
-        Some(StorageType::Webdav) => {
-            let wid = row.webdav_storage_id.ok_or_else(|| BError::CustomError {
-                message: "webdav storage row missing webdav_storage_id".into(),
-            })?;
-            let w = cx
-                .database_server()
-                .load_webdav_storage(WebdavStorageId::wrap(wid))
-                .await?
-                .ok_or_else(|| BError::CustomError {
-                    message: "webdav_storage row missing".into(),
-                })?;
-            Ok(Storage {
-                id,
-                handle: StorageHandle::Webdav {
-                    webdav_storage_id: WebdavStorageId::wrap(wid),
-                },
-                alias: w.alias,
-                music_count,
-                addr: Some(w.addr),
-                username: Some(w.username),
-                is_anonymous: Some(w.is_anonymous != 0),
-            })
-        }
         Some(StorageType::Plugin) => {
             // Display alias is stored by the plugin under
             // `plugin_kv_single(plugin_id, "storage:<plugin_storage_id>")` as
-            // JSON `{ alias, secretId }` (written during OAuth exchange).
+            // JSON `{ alias, secretId, ... }` (written when the instance is
+            // created).
             let plugin_id = row.plugin_id.unwrap_or_default();
             let plugin_storage_id = row.plugin_storage_id.unwrap_or_default();
             let kv_key = format!("storage:{plugin_storage_id}");
@@ -230,9 +172,6 @@ async fn build_storage_from_row(
                 },
                 alias,
                 music_count,
-                addr: None,
-                username: None,
-                is_anonymous: None,
             })
         }
         None => Err(BError::CustomError {
@@ -260,31 +199,11 @@ pub async fn list_storage(cx: &BackendContext) -> BResult<Vec<Storage>> {
     Ok(storages)
 }
 
-/// Create or update a WebDAV storage (delegates the secret + detail rows to
-/// the repository). Evicts the backend cache for the resulting id.
-pub async fn upsert_webdav_storage(
-    cx: &BackendContext,
-    arg: ArgUpsertWebdavStorage,
-) -> BResult<StorageId> {
-    let arg = normalize_arg_upsert_webdav(arg);
-    let id = cx.database_server().upsert_webdav_storage(arg).await?;
-    evict_storage_backend_cache(cx, id);
-    Ok(id)
-}
-
 /// Remove a storage registry row (+ cascade). Evicts the backend cache.
 pub async fn remove_storage(cx: &BackendContext, id: StorageId) -> BResult<()> {
     cx.database_server().remove_storage(id).await?;
     evict_storage_backend_cache(cx, id);
     Ok(())
-}
-
-fn normalize_arg_upsert_webdav(mut arg: ArgUpsertWebdavStorage) -> ArgUpsertWebdavStorage {
-    if arg.is_anonymous {
-        arg.username = String::new();
-        arg.password = String::new();
-    }
-    arg
 }
 
 async fn get_asset_file_by_loc(

@@ -80,11 +80,10 @@ macro_rules! define_string_id {
 // `StorageId` is the universal registry id (the `storage` table PK). Every
 // music / playlist storage reference (`loc_storage_id`, `lyric_storage_id`,
 // `picture_storage_id`) points at a `storage` row regardless of whether the
-// backing source is Local, a WebDAV connection, or a plugin provider. Resolve
-// the concrete backend through `obtain(StorageHandle) -> StorageId` /
-// `get_storage_backend(StorageId)`.
+// backing source is Local or a plugin provider (WebDAV included — it is a JS
+// plugin provider since schema v7). Resolve the concrete backend through
+// `obtain(StorageHandle) -> StorageId` / `get_storage_backend(StorageId)`.
 define_id!(StorageId);
-define_id!(WebdavStorageId);
 define_id!(SecretId);
 define_id!(BlobId);
 define_id!(MusicId);
@@ -111,13 +110,14 @@ pub struct StorageEntryLoc {
 }
 
 /// Discriminant stored in the `storage` registry table's `type` column.
+/// `1` was the legacy native-WebDAV kind; it is unused since WebDAV moved to
+/// a JS plugin provider (schema v7 rewrites surviving rows to `Plugin`).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
 )]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StorageType {
     Local,
-    Webdav,
     Plugin,
 }
 
@@ -125,7 +125,6 @@ impl StorageType {
     pub fn as_i32(self) -> i32 {
         match self {
             StorageType::Local => 0,
-            StorageType::Webdav => 1,
             StorageType::Plugin => 2,
         }
     }
@@ -133,7 +132,6 @@ impl StorageType {
     pub fn from_i32(v: i32) -> Option<Self> {
         match v {
             0 => Some(StorageType::Local),
-            1 => Some(StorageType::Webdav),
             2 => Some(StorageType::Plugin),
             _ => None,
         }
@@ -150,10 +148,6 @@ impl StorageType {
 pub enum StorageHandle {
     Local,
     #[serde(rename_all = "camelCase")]
-    Webdav {
-        webdav_storage_id: WebdavStorageId,
-    },
-    #[serde(rename_all = "camelCase")]
     Plugin {
         plugin_id: PluginId,
         plugin_storage_id: PluginStorageId,
@@ -164,16 +158,15 @@ impl StorageHandle {
     pub fn storage_type(&self) -> StorageType {
         match self {
             StorageHandle::Local => StorageType::Local,
-            StorageHandle::Webdav { .. } => StorageType::Webdav,
             StorageHandle::Plugin { .. } => StorageType::Plugin,
         }
     }
 }
 
 /// Ownership scope of a `secret` row. Persisted in the `secret.scope` TEXT
-/// column as `"internal"` (host-owned, e.g. a WebDAV password) or
-/// `"plugin:<plugin_id>"` (owned by that plugin). Enforcement: a caller may
-/// only `get` / `remove` a secret whose scope matches its own.
+/// column as `"internal"` (host-owned) or `"plugin:<plugin_id>"` (owned by
+/// that plugin). Enforcement: a caller may only `get` / `remove` a secret
+/// whose scope matches its own.
 #[derive(
     Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize,
 )]

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ease_client_schema::entities::{music, playlist_music, storage};
-use ease_client_schema::{BlobId, StorageHandle, StorageId, StorageType};
+use ease_client_schema::{BlobId, StorageHandle, StorageId};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
 use crate::error::BResult;
@@ -31,8 +31,8 @@ impl DatabaseServer {
     }
 
     /// Find-or-create the registry row for a handle. Idempotent — the
-    /// uniqueness indexes (`idx_storage_webdav`, `idx_storage_plugin`) make the
-    /// find authoritative for WebDAV / Plugin.
+    /// uniqueness index (`idx_storage_plugin`) makes the find authoritative
+    /// for Plugin.
     pub async fn obtain_storage(&self, handle: &StorageHandle) -> BResult<StorageId> {
         let db = self.db();
         let typ_i = handle.storage_type().as_i32();
@@ -41,13 +41,6 @@ impl DatabaseServer {
             StorageHandle::Local => {
                 storage::Entity::find()
                     .filter(storage::Column::Type.eq(typ_i))
-                    .one(&db)
-                    .await?
-            }
-            StorageHandle::Webdav { webdav_storage_id } => {
-                storage::Entity::find()
-                    .filter(storage::Column::Type.eq(typ_i))
-                    .filter(storage::Column::WebdavStorageId.eq(*webdav_storage_id.as_ref()))
                     .one(&db)
                     .await?
             }
@@ -70,12 +63,6 @@ impl DatabaseServer {
         let am = storage::ActiveModel {
             id: ActiveValue::NotSet,
             r#type: ActiveValue::Set(typ_i),
-            webdav_storage_id: ActiveValue::Set(match handle {
-                StorageHandle::Webdav { webdav_storage_id } => {
-                    Some(*webdav_storage_id.as_ref())
-                }
-                _ => None,
-            }),
             plugin_id: ActiveValue::Set(match handle {
                 StorageHandle::Plugin { plugin_id, .. } => Some(plugin_id.id.clone()),
                 _ => None,
@@ -92,18 +79,16 @@ impl DatabaseServer {
     }
 
     /// Remove a registry row and cascade: detach + delete every music whose
-    /// `loc_storage_id` points here (and its cover blob), then drop the
-    /// kind-specific detail rows. WebDAV detail (`webdav_storage` + its
-    /// internal-scoped secret) is handled here; plugin detail (kv + secret) is
-    /// the plugin's responsibility.
+    /// `loc_storage_id` points here (and its cover blob), then drop the row.
+    /// Plugin detail (kv + secret) is the plugin's responsibility.
     pub async fn remove_storage(self: &Arc<Self>, id: StorageId) -> BResult<()> {
         let db = self.db();
         let reg = storage::Entity::find_by_id(*id.as_ref())
             .one(&db)
             .await?;
-        let Some(reg) = reg else {
+        if reg.is_none() {
             return Ok(());
-        };
+        }
 
         let musics = music::Entity::find()
             .filter(music::Column::LocStorageId.eq(*id.as_ref()))
@@ -119,12 +104,6 @@ impl DatabaseServer {
                 to_remove_blobs.push(BlobId::wrap(cover));
             }
             music::Entity::delete_by_id(m.id).exec(&db).await?;
-        }
-
-        if matches!(StorageType::from_i32(reg.r#type), Some(StorageType::Webdav)) {
-            if let Some(wid) = reg.webdav_storage_id {
-                self.remove_webdav_storage_detail(wid).await?;
-            }
         }
 
         storage::Entity::delete_by_id(*id.as_ref()).exec(&db).await?;
