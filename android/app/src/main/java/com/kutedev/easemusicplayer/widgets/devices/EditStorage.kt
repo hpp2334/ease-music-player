@@ -284,21 +284,26 @@ fun EditStoragesPage(
                     .imePadding()
                     .padding(30.dp, 12.dp)
             ) {
-                if (isCreated) {
-                    // Storage-type chooser: one card per discovered plugin
-                    // storage provider. All config UI + actions live in the
-                    // provider's setup view.
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (p in providers) {
-                            StorageBlock(
-                                title = p.displayName,
-                                isActive = selectedProvider?.storageId == p.storageId,
-                                onSelect = { selectedProvider = p }
-                            )
+                // Storage-type chooser: one card per discovered plugin
+                // storage provider (WebDAV, OneDrive, ...). Shown in both
+                // modes — create picks the provider to set up; edit marks
+                // the storage's own provider (fixed — a storage can't
+                // change its type).
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (p in providers) {
+                        val active = if (isCreated) {
+                            selectedProvider?.storageId == p.storageId
+                        } else {
+                            editPluginView?.pluginId == p.pluginId
                         }
+                        StorageBlock(
+                            title = p.displayName,
+                            isActive = active,
+                            onSelect = { if (isCreated) selectedProvider = p }
+                        )
                     }
-                    Box(modifier = Modifier.size(0.dp, 20.dp))
                 }
+                Box(modifier = Modifier.size(0.dp, 20.dp))
                 if (showPlugin) {
                     if (isCreated) {
                         // Create-mode chooser selection.
