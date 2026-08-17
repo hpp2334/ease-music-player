@@ -40,15 +40,17 @@ import com.kutedev.easemusicplayer.viewmodels.DashboardVM
 
 /**
  * Standalone plugin-view page (pushed from a Dashboard entry card). Resolves
- * the contribution's JS source from the plugin manifest
- * (`contributions.dashboard[*].view`) via [DashboardVM] and renders it in a
- * full-screen [TurView]. The plugin JS owns all view logic and data access
- * via the `ease` and `tur:std` modules — the host stays decoupled.
+ * the contribution's **module-source handle** from the plugin scan
+ * (`plugin.list` — the Rust side read the file and registered it on the
+ * runtime) via [DashboardVM] and renders it in a full-screen [TurView].
+ * The plugin JS owns all view logic and data access via the `ease` and
+ * `tur:std` modules — the host stays decoupled, and the JS bytes never
+ * cross the Kotlin↔Rust boundary.
  *
  * `pluginId` selects the installed plugin dir AND is stamped into the
  * instance's per-instance data slot so `ease:*` bridge fns resolve the
  * calling plugin from Rust; `viewId` selects the contribution entry whose
- * view file is loaded.
+ * view is loaded.
  */
 @Composable
 fun PluginViewPage(
@@ -61,22 +63,6 @@ fun PluginViewPage(
     val navController = LocalNavController.current
     val items by dashboardVM.dashboardItems.collectAsState()
     val item = items.find { it.pluginId == pluginId && it.contributionId == viewId }
-    var jsSource by remember(pluginId, viewId) { mutableStateOf<String?>(null) }
-    var loadError by remember(pluginId, viewId) { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(item?.viewFile) {
-        loadError = null
-        jsSource = null
-        val file = item?.viewFile
-        if (file != null) {
-            val js = dashboardVM.openPluginFile(pluginId, file)
-            if (js == null) {
-                loadError = "file missing"
-            } else {
-                jsSource = js
-            }
-        }
-    }
 
     Column(
         modifier = Modifier
@@ -121,29 +107,19 @@ fun PluginViewPage(
                     fontSize = 14.sp,
                 )
             }
-            loadError != null -> Box(
+            item.viewSourceHandle == 0L -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Plugin view load failed: $loadError",
+                    text = "Plugin view load failed: no source handle",
                     color = MaterialTheme.colorScheme.error,
-                    fontSize = 14.sp,
-                )
-            }
-            jsSource == null -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "Loading…",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 14.sp,
                 )
             }
             else -> TurView(
                 runtime = EasePluginBridge.runtime(context),
-                js = jsSource!!,
+                sourceHandle = item.viewSourceHandle,
                 pluginId = pluginId,
                 modifier = Modifier.fillMaxSize(),
             )

@@ -6,6 +6,16 @@ import com.kutedev.easemusicplayer.singleton.types.AddedMusic
 import com.kutedev.easemusicplayer.singleton.types.ArgAddMusicsToPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgCreatePlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginEvent
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginBaseUrl
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginId
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallFromRegistry
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallZipPath
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetEnable
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginSourceAddCustom
+import com.kutedev.easemusicplayer.singleton.types.PluginListResult
+import com.kutedev.easemusicplayer.singleton.types.PluginMutationResult
+import com.kutedev.easemusicplayer.singleton.types.PluginSourcesResult
+import com.kutedev.easemusicplayer.singleton.types.RegistryEntriesResult
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderMusic
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
@@ -140,9 +150,22 @@ object BridgeMethods {
         val POLL_STATE = bridgeSpecNoArg<PlayerPollState>("player.pollState", HandleKind.PLAYER)
     }
 
-    /** `plugin.*` — plugin event dispatch to JS backends. */
+    /** `plugin.*` — plugin event dispatch + the Rust-side install layer. */
     object Plugin {
         val EVENT = bridgeSpecArg<ArgPluginEvent, Unit>("plugin.event")
+        val LIST = bridgeSpecNoArg<PluginListResult>("plugin.list")
+        val INSTALL_ZIP_PATH = bridgeSpecArg<ArgPluginInstallZipPath, PluginMutationResult>("plugin.installZipPath")
+        val INSTALL_FROM_REGISTRY =
+            bridgeSpecArg<ArgPluginInstallFromRegistry, PluginMutationResult>("plugin.installFromRegistry")
+        val SET_ENABLE = bridgeSpecArg<ArgPluginSetEnable, PluginMutationResult>("plugin.setEnable")
+        val UNINSTALL = bridgeSpecArg<ArgPluginId, PluginMutationResult>("plugin.uninstall")
+        val BOOTSTRAP = bridgeSpecNoArg<PluginMutationResult>("plugin.bootstrap")
+        val REGISTRY_FETCH = bridgeSpecArg<ArgPluginBaseUrl, RegistryEntriesResult>("plugin.registryFetch")
+        val REGISTRY_CACHED = bridgeSpecArg<ArgPluginBaseUrl, RegistryEntriesResult>("plugin.registryCached")
+        val SOURCES_LIST = bridgeSpecNoArg<PluginSourcesResult>("plugin.sourcesList")
+        val SOURCE_REMEMBER = bridgeSpecArg<ArgPluginBaseUrl, Unit>("plugin.sourceRemember")
+        val SOURCE_ADD_CUSTOM = bridgeSpecArg<ArgPluginSourceAddCustom, RegistryEntriesResult>("plugin.sourceAddCustom")
+        val SOURCE_REMOVE_CUSTOM = bridgeSpecArg<ArgPluginBaseUrl, Unit>("plugin.sourceRemoveCustom")
     }
 
     /** `debug.*` — diagnostic helpers. */

@@ -53,8 +53,8 @@ object EasePluginBridge {
      * Connect a headless backend instance's event bus to ease-tur-rpc and
      * stash the resulting `Send` `RpcClient` into the global backend context
      * under [pluginId]. Call once per plugin, on the instance's own (JNI)
-     * thread, after `createHeadlessInstance` + `loadModule(backend.js)` so
-     * the JS dispatcher + backend handlers are registered. Returns `true` on
+     * thread, after `createHeadlessInstance` + `loadModule` (by source
+     * handle) so the JS dispatcher + backend handlers are registered. Returns `true` on
      * success.
      */
     @JvmStatic
@@ -69,12 +69,24 @@ object EasePluginBridge {
     @JvmStatic
     external fun unwireServiceRpc(pluginId: String)
 
+    /**
+     * Hand the (already-created) tur runtime handle + the app
+     * `AssetManager` to the backend context, so the Rust-side plugin
+     * manager can register module sources on the runtime (`plugin.list`)
+     * and read bundled plugin zips natively (`plugin.bootstrap`). Only the
+     * handles cross JNI — never the JS or zip bytes. Idempotent.
+     */
+    @JvmStatic
+    external fun bindPluginRuntime(runtimeHandle: Long, assetManager: android.content.res.AssetManager)
+
     private var cached: TurRuntime? = null
 
     /**
      * The app-lifetime [TurRuntime], created lazily on first call (using the
      * application context so it is configuration-stable). Subsequent calls
-     * return the same instance.
+     * return the same instance. Creating the runtime also binds it to the
+     * backend context ([bindPluginRuntime]) — the Rust-side plugin scan
+     * depends on that registration for its module-source handles.
      */
     @Synchronized
     fun runtime(context: Context): TurRuntime {
@@ -83,6 +95,7 @@ object EasePluginBridge {
         check(pools != 0L) { "createPluginWorkerPools returned 0 (see logcat)" }
         val handle = createRuntime(context.applicationContext, pools)
         check(handle != 0L) { "createRuntime returned 0 (see logcat)" }
+        bindPluginRuntime(handle, context.applicationContext.assets)
         return TurRuntime(handle, pools).also { cached = it }
     }
 }

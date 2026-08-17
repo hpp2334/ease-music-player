@@ -2,6 +2,7 @@ pub(crate) mod app;
 pub(crate) mod lyrics;
 pub(crate) mod music;
 pub(crate) mod playlist;
+pub(crate) mod plugin_manager;
 pub(crate) mod preference;
 pub(crate) mod storage;
 

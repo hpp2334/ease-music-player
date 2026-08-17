@@ -56,8 +56,27 @@ object TurNative {
         pluginId: String,
     ): Long
 
-    /** Evaluate [js] as an ES module (`import … from "tur:*"` resolved by the engine). */
-    external fun loadModule(handle: Long, js: String)
+    /** Register a JS module source on the runtime's shared registry and
+     *  return its opaque handle (`0` on failure). The source crosses JNI
+     *  exactly once, here; [loadModule] then loads it into any instance of
+     *  the runtime by handle — no per-load string copies. Sources created
+     *  on the Rust side (the plugin scan's `plugin.list`) never cross at
+     *  all — Kotlin only ever sees the opaque [Long]. */
+    external fun registerModuleSource(runtimeHandle: Long, js: String): Long
+
+    /** Drop a registered module source. Idempotent — a stale/unknown
+     *  handle is a no-op. Everything left registered is freed when the
+     *  runtime is destroyed. */
+    external fun releaseModuleSource(runtimeHandle: Long, sourceHandle: Long)
+
+    /**
+     * Evaluate the registered module source ([registerModuleSource]'s
+     *  return value, or a Rust-side `plugin.list` handle) as an ES module
+     *  (`import … from "tur:*"` resolved by the engine) and request a
+     *  paint. The shared source flows to the engine by refcount — zero
+     *  JNI string traffic.
+     */
+    external fun loadModule(handle: Long, sourceHandle: Long)
 
     /** Fire one engine wake (the Choreographer / Handler callback). */
     external fun pump(handle: Long): Int

@@ -159,48 +159,30 @@ private fun StorageBlock(
  * `ease.context.createStorage`.
  *
  * [pluginId] is stamped into the instance's per-instance data slot so
- * `ease:*` bridge fns resolve the calling plugin from Rust. [viewFile] is
- * the view JS filename inside the plugin's install dir (read via
- * [EditStorageVM.openPluginFile]). [instance] is the storage's
- * `plugin_storage_id` for edit views (non-null → `ease.context.storageId$`
- * reports the id; null = create-mode setup view).
+ * `ease:*` bridge fns resolve the calling plugin from Rust. [sourceHandle]
+ * is the view's module-source handle (registered Rust-side by the
+ * `plugin.list` scan — the JS bytes never cross JNI). [instance] is the
+ * storage's `plugin_storage_id` for edit views (non-null →
+ * `ease.context.storageId$` reports the id; null = create-mode setup
+ * view).
  */
 @Composable
 private fun PluginStorageView(
-    editStorageVM: EditStorageVM,
     pluginId: String,
-    viewFile: String,
+    sourceHandle: Long,
     instance: String?,
 ) {
     val context = LocalContext.current
-    var jsSource by remember(pluginId, viewFile) { mutableStateOf<String?>(null) }
-    var loadError by remember(pluginId, viewFile) { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(pluginId, viewFile) {
-        loadError = null
-        jsSource = null
-        val js = editStorageVM.openPluginFile(pluginId, viewFile)
-        if (js == null) {
-            loadError = "file missing"
-        } else {
-            jsSource = js
-        }
-    }
 
     when {
-        loadError != null -> Text(
-            text = "Plugin view load failed: $loadError",
+        sourceHandle == 0L -> Text(
+            text = "Plugin view load failed: no source handle",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.error,
         )
-        jsSource == null -> Text(
-            text = "Loading…",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         else -> TurView(
             runtime = EasePluginBridge.runtime(context),
-            js = jsSource!!,
+            sourceHandle = sourceHandle,
             pluginId = pluginId,
             instance = instance,
             modifier = Modifier
@@ -317,10 +299,10 @@ fun EditStoragesPage(
                 if (showPlugin) {
                     if (isCreated) {
                         // Create-mode chooser selection.
-                        val viewFile = activeProvider?.viewFile
+                        val handle = activeProvider?.viewSourceHandle ?: 0L
                         val pid = activeProvider?.pluginId
-                        if (viewFile != null && pid != null) {
-                            PluginStorageView(editStorageVM, pid, viewFile, instance = null)
+                        if (pid != null) {
+                            PluginStorageView(pid, handle, instance = null)
                         }
                     } else {
                         // Edit mode: render the storage's plugin view,
@@ -329,9 +311,8 @@ fun EditStoragesPage(
                         val epv = editPluginView
                         if (epv != null) {
                             PluginStorageView(
-                                editStorageVM = editStorageVM,
                                 pluginId = epv.pluginId,
-                                viewFile = epv.viewFile,
+                                sourceHandle = epv.viewSourceHandle,
                                 instance = epv.pluginStorageId,
                             )
                         } else {

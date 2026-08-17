@@ -34,6 +34,9 @@ pub mod themes_bridge;
 
 pub use plugin::EaseMusicPlugin;
 
+#[cfg(target_os = "android")]
+pub(crate) use plugin_jni::read_asset_bytes;
+
 /// Per-instance plugin identity, stamped into the tur engine's
 /// `instance_data` slot at build time (via `TurAppBuilder::instance_data`)
 /// and read back by `ease:*` bridge fns to resolve the calling plugin.
