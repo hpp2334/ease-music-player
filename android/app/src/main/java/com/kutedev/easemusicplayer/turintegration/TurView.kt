@@ -19,23 +19,28 @@ import androidx.compose.ui.viewinterop.AndroidView
 
 /**
  * A Compose surface that spawns an isolated tur instance from [runtime] and
- * renders the given JS into it.
+ * renders the given module source into it.
  *
  * Drop this composable into any Compose UI, pass the shared [TurRuntime],
- * a JS bundle string (an ES module importing from `tur:std` / `ease`), the
- * `pluginId` this instance is being created for, and (for edit views) the
- * storage's `plugin_storage_id`. The plugin id is stamped into the
- * instance's per-instance data slot so `ease:*` bridge fns resolve the
- * calling plugin from Rust, not from a JS argument; the instance id is
- * exposed to JS as `ease.context.instance()`. When the surface becomes
- * ready the view spawns an instance via [TurRuntime.createInstance]; when
- * the surface is destroyed the instance is torn down (the runtime
- * survives, shared across views). Pointer (touch), resize, soft keyboard
- * (IME), and basic hardware-key dispatch are wired automatically.
+ * a module **source handle** (an ES module source registered on the
+ * runtime via [TurRuntime.registerModuleSource] or created on the Rust
+ * side — the `plugin.list` scan), the `pluginId` this instance is being
+ * created for, and (for edit views) the storage's `plugin_storage_id`.
+ * The plugin id is stamped into the instance's per-instance data slot so
+ * `ease:*` bridge fns resolve the calling plugin from Rust, not from a JS
+ * argument; the instance id is exposed to JS as `ease.context.instance()`.
+ * When the surface becomes ready the view spawns an instance via
+ * [TurRuntime.createInstance]; when the surface is destroyed the instance
+ * is torn down (the runtime survives, shared across views). Pointer
+ * (touch), resize, soft keyboard (IME), and basic hardware-key dispatch
+ * are wired automatically.
  *
  * @param runtime the shared [TurRuntime] to spawn the instance from.
- * @param js an ES module source. Imports of `tur:*` / `ease` are resolved
- *   by the engine's module loader.
+ * @param sourceHandle a registered module-source handle (from
+ *   [TurRuntime.registerModuleSource] or the Rust-side `plugin.list`).
+ *   The source is an ES module importing from `tur:std` / `ease`,
+ *   resolved by the engine's module loader. Loading by handle means the
+ *   bundle never crosses the Kotlin↔Rust boundary as a string.
  * @param pluginId the plugin this instance is being created for. Stamped
  *   into the per-instance data slot; bridge fns in `ease:*` read it via
  *   `extract_js_ctx` + `data::<PluginId>()`.
@@ -47,7 +52,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 @Composable
 fun TurView(
     runtime: TurRuntime,
-    js: String,
+    sourceHandle: Long,
     pluginId: String,
     modifier: Modifier = Modifier,
     instance: String? = null,
@@ -64,7 +69,7 @@ fun TurView(
     )
 
     DisposableEffect(surfaceView) {
-        surfaceView.bind(runtime, js, pluginId, instance, resolvedDpr)
+        surfaceView.bind(runtime, sourceHandle, pluginId, instance, resolvedDpr)
         onDispose { surfaceView.unbind() }
     }
 }
@@ -78,7 +83,7 @@ fun TurView(
  */
 private class TurSurfaceView(context: Context) : SurfaceView(context) {
     private var instance: TurInstance? = null
-    private var pendingJs: String? = null
+    private var pendingSourceHandle: Long = 0L
     private var pendingPluginId: String = ""
     private var pendingInstance: String? = null
     private var dprValue: Double = 0.0
@@ -101,10 +106,11 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
         holder.setFormat(PixelFormat.RGBA_8888)
     }
 
-    /** Stash the JS + pluginId + instance + dpr + runtime and register the surface callback; spawn the
-     *  instance when the surface is ready. */
-    fun bind(runtime: TurRuntime, js: String, pluginId: String, instanceId: String?, dpr: Double) {
-        pendingJs = js
+    /** Stash the source handle + pluginId + instance + dpr + runtime and
+     *  register the surface callback; spawn the instance when the surface
+     *  is ready. */
+    fun bind(runtime: TurRuntime, sourceHandle: Long, pluginId: String, instanceId: String?, dpr: Double) {
+        pendingSourceHandle = sourceHandle
         pendingPluginId = pluginId
         pendingInstance = instanceId
         dprValue = dpr
@@ -142,7 +148,8 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
     private val surfaceCallback = object : SurfaceHolder.Callback {
         override fun surfaceCreated(holder: SurfaceHolder) {
             if (instance != null) return
-            val js = pendingJs ?: return
+            val sourceHandle = pendingSourceHandle
+            if (sourceHandle == 0L) return
             val rt = runtime ?: return
             // SurfaceHolder.surfaceFrame reports *physical* pixels; the
             // engine's viewport is in *logical* px, so divide by dpr.
@@ -151,7 +158,7 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
             val h = (holder.surfaceFrame.height() / d).toInt().coerceAtLeast(1)
             instance = try {
                 rt.createInstance(holder.surface, w, h, dprValue, pendingPluginId, pendingInstance).also {
-                    it.loadModule(js)
+                    it.loadModule(sourceHandle)
                     // After each frame, sync the soft keyboard with the
                     // engine's focused-element state (reads the value native
                     // pushed into the FrameLoop via onFocusChanged).

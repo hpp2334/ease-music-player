@@ -19,9 +19,6 @@ class DashboardVM @Inject constructor(
     val dashboardItems: StateFlow<List<DashboardItem>> = pluginRepository.dashboardItems
     val enabledPlugins: StateFlow<List<PluginManifest>> = pluginRepository.enabledPlugins
 
-    suspend fun openPluginFile(pluginId: String, fileName: String): String? =
-        pluginRepository.openPluginFile(pluginId, fileName)
-
     init {
         // Ensure the manifest scan has run (the backend service also calls
         // scanPlugins at startup; this covers the Dashboard being opened

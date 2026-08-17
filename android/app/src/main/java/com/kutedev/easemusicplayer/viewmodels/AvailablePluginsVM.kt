@@ -6,8 +6,8 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.singleton.PluginManager
 import com.kutedev.easemusicplayer.singleton.PluginRegistryRepository
 import com.kutedev.easemusicplayer.singleton.PluginRepository
-import com.kutedev.easemusicplayer.singleton.PluginSource
-import com.kutedev.easemusicplayer.singleton.RegistryPluginEntry
+import com.kutedev.easemusicplayer.singleton.types.PluginSource
+import com.kutedev.easemusicplayer.singleton.types.RegistryPluginEntry
 import com.kutedev.easemusicplayer.singleton.ToastRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,11 +16,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** One row of the Available page's plugin list. */
+/** One row of the Available page's plugin list. `installedVersion` +
+ *  `updateAvailable` arrive pre-stamped from Rust (`plugin.registryFetch`)
+ *  — Kotlin never compares versions. */
 data class AvailablePluginRow(
     val entry: RegistryPluginEntry,
-    /** Installed version, or null when not installed. */
-    val installedVersion: String?,
 )
 
 /** List load state for the selected source. */
@@ -40,10 +40,10 @@ class AvailablePluginsVM @Inject constructor(
     private val toastRepository: ToastRepository,
 ) : ViewModel() {
     /** All selectable sources (presets + saved customs), refreshable. */
-    private val _sources = MutableStateFlow<List<PluginSource>>(PluginRegistryRepository.PRESETS)
+    private val _sources = MutableStateFlow<List<PluginSource>>(emptyList())
     val sources = _sources.asStateFlow()
 
-    private val _selectedSourceUrl = MutableStateFlow(PluginRegistryRepository.PRESETS.first().url)
+    private val _selectedSourceUrl = MutableStateFlow("")
     val selectedSourceUrl = _selectedSourceUrl.asStateFlow()
 
     private val _listState = MutableStateFlow<AvailableListState>(AvailableListState.Loading)
@@ -55,13 +55,19 @@ class AvailablePluginsVM @Inject constructor(
 
     init {
         viewModelScope.launch { pluginRepository.scanPlugins() }
-        refreshSources()
-        _selectedSourceUrl.value = registryRepository.lastSourceUrl() ?: PluginRegistryRepository.PRESETS.first().url
-        load(tryCacheFirst = false)
+        viewModelScope.launch {
+            val sources = registryRepository.sources()
+            _sources.value = sources.all
+            // Rust drops a stale lastSourceUrl (matches no preset/custom);
+            // fall back to the first preset.
+            _selectedSourceUrl.value = sources.lastSourceUrl
+                ?: sources.presets.firstOrNull()?.url.orEmpty()
+            load(tryCacheFirst = false)
+        }
     }
 
     fun refreshSources() {
-        viewModelScope.launch { _sources.value = registryRepository.sources() }
+        viewModelScope.launch { _sources.value = registryRepository.sources().all }
     }
 
     fun selectSource(url: String) {
@@ -77,6 +83,7 @@ class AvailablePluginsVM @Inject constructor(
      *  failure fall back to the per-source cache. */
     fun load(tryCacheFirst: Boolean) {
         val url = _selectedSourceUrl.value
+        if (url.isEmpty()) return
         _listState.value = AvailableListState.Loading
         viewModelScope.launch {
             val cached = registryRepository.cachedRegistry(url)
@@ -122,7 +129,7 @@ class AvailablePluginsVM @Inject constructor(
             registryRepository.removeCustomSource(url)
             refreshSources()
             if (_selectedSourceUrl.value == url) {
-                selectSource(PluginRegistryRepository.PRESETS.first().url)
+                selectSource(registryRepository.defaultSourceUrl())
             }
         }
     }
@@ -147,12 +154,6 @@ class AvailablePluginsVM @Inject constructor(
         }
     }
 
-    fun compareVersions(a: String, b: String): Int = pluginManager.compareVersions(a, b)
-
-    private fun buildRows(entries: List<RegistryPluginEntry>): List<AvailablePluginRow> {
-        val installed = pluginRepository.installedPlugins.value.associateBy { it.id }
-        return entries.map { e ->
-            AvailablePluginRow(entry = e, installedVersion = installed[e.id]?.version)
-        }
-    }
+    private fun buildRows(entries: List<RegistryPluginEntry>): List<AvailablePluginRow> =
+        entries.map { AvailablePluginRow(entry = it) }
 }

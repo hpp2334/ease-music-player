@@ -35,7 +35,7 @@ use crate::{
 pub(crate) static BACKEND_CONTEXT: std::sync::OnceLock<Arc<BackendContext>> = std::sync::OnceLock::new();
 
 pub struct Backend {
-    arg: ArgInitializeApp,
+    pub(crate) arg: ArgInitializeApp,
     cx: Arc<BackendContext>,
 }
 

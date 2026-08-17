@@ -46,6 +46,7 @@ use crate::{
             ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, ArgUpdatePlaylist,
             get_music_abstract, update_music_cover, update_music_duration,
         },
+        plugin_manager,
         preference::{get_preference_playmode, save_preference_playmode},
     },
     Backend, PlayerContextHandle, PlayerHandle,
@@ -490,6 +491,177 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx = must_backend(handle)?;
             cx.get_context()
                 .dispatch_plugin_event(&args.pluginId, &args.event_type, args.payload)?;
+            Ok((Value::Null, vec![]))
+        }
+
+        // plugin.* — the Rust-side plugin install layer (see
+        // `services/plugin_manager.rs`). All file/registry/state IO happens
+        // here; Kotlin keeps only the SAF picker, VMs, and the tur instance
+        // lifecycle. `plugin.list` returns opaque module-source handles
+        // (tur #198) so plugin JS never crosses the boundary as a string.
+        "plugin.list" => {
+            let cx = must_backend(handle)?;
+            let out = plugin_manager::scan(cx.get_context(), &cx.arg.app_document_dir).await?;
+            Ok((serde_json::to_value(out)?, vec![]))
+        }
+        "plugin.installZipPath" => {
+            #[derive(Deserialize)]
+            struct Args {
+                path: String,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let (id, generation) =
+                plugin_manager::install_from_zip_path(cx.get_context(), &cx.arg.app_document_dir, &args.path)
+                    .await?;
+            Ok((json!({ "id": id, "generation": generation }), vec![]))
+        }
+        "plugin.installFromRegistry" => {
+            #[derive(Deserialize)]
+            struct Args {
+                entry: plugin_manager::RegistryEntry,
+                baseUrl: String,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let (id, generation) = plugin_manager::install_from_registry(
+                cx.get_context(),
+                &cx.arg.app_document_dir,
+                &args.entry,
+                &args.baseUrl,
+            )
+            .await?;
+            Ok((json!({ "id": id, "generation": generation }), vec![]))
+        }
+        "plugin.setEnable" => {
+            #[derive(Deserialize)]
+            struct Args {
+                pluginId: String,
+                enabled: bool,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let generation = plugin_manager::set_enabled(
+                cx.get_context(),
+                &cx.arg.app_document_dir,
+                &args.pluginId,
+                args.enabled,
+            )
+            .await?;
+            Ok((json!({ "generation": generation }), vec![]))
+        }
+        "plugin.uninstall" => {
+            #[derive(Deserialize)]
+            struct Args {
+                pluginId: String,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let generation =
+                plugin_manager::uninstall(cx.get_context(), &cx.arg.app_document_dir, &args.pluginId)
+                    .await?;
+            Ok((json!({ "generation": generation }), vec![]))
+        }
+        "plugin.bootstrap" => {
+            let cx = must_backend(handle)?;
+            let generation =
+                plugin_manager::bootstrap(cx.get_context(), &cx.arg.app_document_dir).await?;
+            Ok((json!({ "generation": generation }), vec![]))
+        }
+        "plugin.registryFetch" => {
+            #[derive(Deserialize)]
+            struct Args {
+                baseUrl: String,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let dir = cx.arg.app_document_dir.clone();
+            let base = args.baseUrl;
+            let entries = plugin_manager::fetch_registry(&dir, &base).await?;
+            let root = plugin_manager::plugins_root(&dir);
+            let entries =
+                tokio::task::spawn_blocking(move || plugin_manager::stamp_entries(entries, &root))
+                    .await
+                    .map_err(|e| BError::CustomError { message: format!("stamp task: {e}") })?;
+            Ok((json!({ "entries": entries }), vec![]))
+        }
+        "plugin.registryCached" => {
+            #[derive(Deserialize)]
+            struct Args {
+                baseUrl: String,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let dir = cx.arg.app_document_dir.clone();
+            let root = plugin_manager::plugins_root(&dir);
+            let entries = tokio::task::spawn_blocking(move || {
+                plugin_manager::cached_registry(&dir, &args.baseUrl)
+                    .map(|e| plugin_manager::stamp_entries(e, &root))
+                    .unwrap_or_default()
+            })
+            .await
+            .map_err(|e| BError::CustomError { message: format!("cache task: {e}") })?;
+            Ok((json!({ "entries": entries }), vec![]))
+        }
+        "plugin.sourcesList" => {
+            let cx = must_backend(handle)?;
+            let dir = cx.arg.app_document_dir.clone();
+            let out = tokio::task::spawn_blocking(move || {
+                let state = plugin_manager::read_state(&dir);
+                json!({
+                    "presets": plugin_manager::preset_sources()
+                        .into_iter()
+                        .map(|(url, label)| json!({ "url": url, "label": label, "preset": true }))
+                        .collect::<Vec<_>>(),
+                    "customSources": state
+                        .custom_sources
+                        .iter()
+                        .map(|c| json!({ "url": c.url, "label": c.label, "preset": false }))
+                        .collect::<Vec<_>>(),
+                    "lastSourceUrl": plugin_manager::effective_last_source(&state),
+                })
+            })
+            .await
+            .map_err(|e| BError::CustomError { message: format!("sources task: {e}") })?;
+            Ok((out, vec![]))
+        }
+        "plugin.sourceRemember" => {
+            #[derive(Deserialize)]
+            struct Args {
+                url: String,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            plugin_manager::remember_source(&cx.arg.app_document_dir, &args.url)?;
+            Ok((Value::Null, vec![]))
+        }
+        "plugin.sourceAddCustom" => {
+            #[derive(Deserialize)]
+            struct Args {
+                url: String,
+                #[serde(default)]
+                label: Option<String>,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let dir = cx.arg.app_document_dir.clone();
+            let entries =
+                plugin_manager::add_custom_source(&dir, &args.url, args.label.as_deref()).await?;
+            let root = plugin_manager::plugins_root(&dir);
+            let entries =
+                tokio::task::spawn_blocking(move || plugin_manager::stamp_entries(entries, &root))
+                    .await
+                    .map_err(|e| BError::CustomError { message: format!("stamp task: {e}") })?;
+            Ok((json!({ "entries": entries }), vec![]))
+        }
+        "plugin.sourceRemoveCustom" => {
+            #[derive(Deserialize)]
+            struct Args {
+                url: String,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            plugin_manager::remove_custom_source(&cx.arg.app_document_dir, &args.url)?;
             Ok((Value::Null, vec![]))
         }
 

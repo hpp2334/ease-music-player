@@ -53,9 +53,36 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     handle: tur_android::jlong,
-    js: tur_android::JString,
+    source_handle: tur_android::jlong,
 ) {
-    tur_android::ops::load_module(&mut env, handle, js)
+    tur_android::ops::load_module(&mut env, handle, source_handle)
+}
+
+/// `TurNative.registerModuleSource(runtimeHandle, js): long` — register a
+/// module source on the runtime's shared `ModuleSourceRegistry` and return
+/// its opaque handle (`0` on failure). The source crosses JNI exactly once,
+/// here; `loadModule` then loads it into any instance of the runtime by
+/// handle — no per-load string copies.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_registerModuleSource(
+    mut env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    runtime_handle: tur_android::jlong,
+    js: tur_android::JString,
+) -> tur_android::jlong {
+    tur_android::ops::register_module_source(&mut env, runtime_handle, js)
+}
+
+/// `TurNative.releaseModuleSource(runtimeHandle, sourceHandle)` — drop a
+/// registered module source. Idempotent; a stale/unknown handle is a no-op.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_releaseModuleSource(
+    mut env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    runtime_handle: tur_android::jlong,
+    source_handle: tur_android::jlong,
+) {
+    tur_android::ops::release_module_source(&mut env, runtime_handle, source_handle)
 }
 
 #[unsafe(no_mangle)]
@@ -423,4 +450,100 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     } else {
         tracing::error!("unwireServiceRpc: BACKEND_CONTEXT not set");
     }
+}
+
+// ============================================================================
+// Minimal NDK asset FFI (libandroid.so) — reading the bundled plugin zip
+// natively so its bytes never cross the JNI boundary. Pattern lifted from
+// tur's compose demo (`createAssetModuleSource`).
+// ============================================================================
+
+#[repr(C)]
+struct AAssetManager {
+    _unused: [u8; 0],
+}
+
+#[repr(C)]
+struct AAsset {
+    _unused: [u8; 0],
+}
+
+#[link(name = "android")]
+unsafe extern "C" {
+    fn AAssetManager_fromJava(env: *mut std::ffi::c_void, asset_manager: *mut std::ffi::c_void)
+        -> *mut AAssetManager;
+    fn AAssetManager_open(mgr: *mut AAssetManager, filename: *const std::ffi::c_char, mode: i32)
+        -> *mut AAsset;
+    fn AAsset_getLength(asset: *mut AAsset) -> u64;
+    fn AAsset_read(asset: *mut AAsset, buf: *mut std::ffi::c_void, count: usize) -> i32;
+    fn AAsset_close(asset: *mut AAsset);
+}
+
+/// Read an APK asset fully, given the raw `*mut AAssetManager` stashed by
+/// [`Java_..._EasePluginBridge_bindPluginRuntime`]. Thread-safe
+/// (`AAssetManager_open` is); called from the bridge dispatcher's IO
+/// thread during `plugin.bootstrap`.
+pub(crate) fn read_asset_bytes(mgr: usize, path: &str) -> Option<Vec<u8>> {
+    let mgr = mgr as *mut AAssetManager;
+    if mgr.is_null() {
+        return None;
+    }
+    let c_path = std::ffi::CString::new(path).ok()?;
+    // 3 == AASSET_MODE_BUFFER: read the whole asset up front.
+    let asset = unsafe { AAssetManager_open(mgr, c_path.as_ptr(), 3) };
+    if asset.is_null() {
+        return None;
+    }
+    let len = unsafe { AAsset_getLength(asset) } as usize;
+    let mut buf = vec![0u8; len];
+    // `AAsset_read` may return short reads — loop until full or EOF.
+    let mut filled = 0usize;
+    while filled < len {
+        let n = unsafe {
+            AAsset_read(asset, buf[filled..].as_mut_ptr() as *mut std::ffi::c_void, len - filled)
+        };
+        if n <= 0 {
+            break;
+        }
+        filled += n as usize;
+    }
+    unsafe { AAsset_close(asset) };
+    buf.truncate(filled);
+    Some(buf)
+}
+
+/// `EasePluginBridge.bindPluginRuntime(runtimeHandle, assetManager)` — hand
+/// the (already-created) tur runtime handle to the backend so
+/// `plugin.list` can register module sources on it (tur #198), and stash
+/// the raw `AAssetManager` pointer for reading bundled plugin zips during
+/// `plugin.bootstrap`. The AssetManager object is owned by the application
+/// Context for the app lifetime, so the raw pointer stays valid. Call once
+/// after `EasePluginBridge.runtime(context)` (which does it automatically).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_bindPluginRuntime(
+    mut env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    runtime_handle: tur_android::jlong,
+    asset_manager: tur_android::JObject,
+) {
+    let Some(cx) = crate::BACKEND_CONTEXT.get() else {
+        tracing::error!("bindPluginRuntime: BACKEND_CONTEXT not set (bridge.initialize first)");
+        return;
+    };
+    let mgr = unsafe {
+        AAssetManager_fromJava(
+            env.get_raw() as *mut std::ffi::c_void,
+            asset_manager.as_raw() as *mut std::ffi::c_void,
+        )
+    };
+    if mgr.is_null() {
+        tracing::error!("bindPluginRuntime: AAssetManager_fromJava returned null");
+        return;
+    }
+    let shared = cx.plugin_manager();
+    shared.set_runtime_handle(runtime_handle);
+    shared.set_asset_manager(mgr as usize);
+    tracing::info!(
+        "bindPluginRuntime: runtime handle {runtime_handle} + asset manager bound"
+    );
 }

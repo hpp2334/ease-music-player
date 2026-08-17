@@ -45,7 +45,7 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ 97d005a).
+# tur engine integration (https://github.com/hpp2334/tur @ 4119a7f).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
 # main↔worker threaded runtime (#178), the fully-wired bidirectional event
 # bus (#181 — host↔JS byte transport for the OneDrive service plugin), the
@@ -58,10 +58,20 @@ anyhow = { workspace = true }
 # (registered on the runtime builder) and for timer/sleep.
 # All crates live in the same repo; cargo clones once and resolves their
 # internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "97d005a9981b321f991639bff89ec211bf9ee5ea" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "97d005a9981b321f991639bff89ec211bf9ee5ea" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "97d005a9981b321f991639bff89ec211bf9ee5ea" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "97d005a9981b321f991639bff89ec211bf9ee5ea" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
+
+# Plugin install layer (`services/plugin_manager.rs`): zip extraction
+# (SAF/registry installs), sha256 registry verification, md5 registry-cache
+# filenames, and reqwest for registry fetches + plugin zip downloads.
+# reqwest pins the exact version/feature set already compiled into the `.so`
+# via tur-net-native, so it dedups to a single copy.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+md-5 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
 # compiles against.

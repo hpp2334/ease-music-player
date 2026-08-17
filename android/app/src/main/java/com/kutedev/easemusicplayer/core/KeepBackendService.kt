@@ -107,7 +107,10 @@ class KeepBackendService : Service() {
     /** (Re)load the headless backend instances for all enabled plugins.
      *  Tears down any live instances first — closing each instance and
      *  unwiring its service RPC entry so storage dispatch + events for a
-     *  disabled/uninstalled plugin stop at the source. */
+     *  disabled/uninstalled plugin stop at the source. Backend modules
+     *  load by **source handle** (registered on the runtime by the
+     *  Rust-side `plugin.list` scan — tur #198); no JS string crosses
+     *  JNI. */
     private suspend fun loadPluginBackends() {
         loadMutex.withLock {
             pluginRepository.scanPlugins()
@@ -120,21 +123,18 @@ class KeepBackendService : Service() {
             }
             loadedPluginIds.clear()
             for (plugin in pluginRepository.enabledPlugins.value) {
-                val backendFile = plugin.backend ?: continue
+                val sourceHandle = plugin.backendSourceHandle
+                if (plugin.backend == null || sourceHandle == 0L) continue
                 try {
-                    val js = withContext(Dispatchers.IO) {
-                        val text = pluginRepository.openPluginFile(plugin.id, backendFile)
-                        checkNotNull(text) { "backend file missing: $backendFile" }
-                    }
                     val instance = serviceRuntime?.createHeadlessInstance(plugin.id) ?: continue
                     serviceInstances += instance
                     loadedPluginIds += plugin.id
-                    instance.loadModule(js)
+                    instance.loadModule(sourceHandle)
                     val ok = EasePluginBridge.wireServiceRpc(instance.nativeHandle(), plugin.id)
                     if (!ok) {
                         bridge.logRaw("error", "wireServiceRpc failed for ${plugin.id} (see logcat)")
                     } else {
-                        bridge.logRaw("info", "plugin backend loaded: ${plugin.id}/$backendFile")
+                        bridge.logRaw("info", "plugin backend loaded: ${plugin.id}/${plugin.backend}")
                     }
                 } catch (e: Throwable) {
                     bridge.logRaw("error", "plugin backend load failed: ${plugin.id} (${e.message})")

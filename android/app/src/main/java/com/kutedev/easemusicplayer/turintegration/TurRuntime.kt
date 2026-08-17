@@ -32,6 +32,25 @@ class TurRuntime(
     val poolsHandle: Long get() = poolsCell.get()
 
     /**
+     * Register a JS module source on the runtime's shared registry and
+     * return its opaque handle. Load it into any instance of this runtime
+     * via [TurInstance.loadModule]. Pair with [releaseModuleSource].
+     *
+     * Sources created on the Rust side (the plugin scan's `plugin.list`)
+     * can be passed around as raw handles — no JNI string crossing at all.
+     */
+    fun registerModuleSource(js: String): Long {
+        check(handle != 0L) { "runtime destroyed" }
+        return TurNative.registerModuleSource(handle, js)
+    }
+
+    /** Drop a registered module source. Idempotent; safe after [close]. */
+    fun releaseModuleSource(sourceHandle: Long) {
+        if (handle == 0L || sourceHandle == 0L) return
+        TurNative.releaseModuleSource(handle, sourceHandle)
+    }
+
+    /**
      * Spawn an isolated rendering instance attached to [surface] and return it.
      * Shares this runtime's fonts/clock/capabilities/plugins; gets its own JS
      * realm, element tree, and renderer. [pluginId] is stamped into the

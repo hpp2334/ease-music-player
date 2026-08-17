@@ -12,7 +12,7 @@ use ease_tur_rpc::RpcClient;
 use ease_client_tokio::tokio_runtime;
 use serde_json::Value;
 
-use crate::{error::BResult, repositories::core::DatabaseServer, services::StorageState};
+use crate::{error::BResult, repositories::core::DatabaseServer, services::plugin_manager::PluginManagerShared, services::StorageState};
 
 struct BackendContextInternal {
     storage_path: RwLock<String>,
@@ -25,6 +25,9 @@ struct BackendContextInternal {
     /// the `wireServiceRpc` JNI trampoline after
     /// `createHeadlessInstance` + `loadModule` per plugin.
     service_rpcs: RwLock<HashMap<String, RpcClient>>,
+    /// Rust-side plugin-install layer state (generation counter, install
+    /// lock, bound tur runtime handle + raw AAssetManager pointer).
+    plugin_manager: PluginManagerShared,
 }
 
 impl Drop for BackendContextInternal {
@@ -75,6 +78,7 @@ impl BackendContext {
                 storage_state: Default::default(),
                 database_server: DatabaseServer::new(),
                 service_rpcs: RwLock::new(HashMap::new()),
+                plugin_manager: PluginManagerShared::default(),
             }),
         }
     }
@@ -155,5 +159,11 @@ impl BackendContext {
     /// to spawn its chunk-bridging task).
     pub fn tokio_handle(&self) -> tokio::runtime::Handle {
         tokio_runtime().handle().clone()
+    }
+
+    /// The Rust-side plugin-install layer's per-process shared state
+    /// (generation, install lock, bound runtime/asset-manager handles).
+    pub fn plugin_manager(&self) -> &PluginManagerShared {
+        &self.internal.plugin_manager
     }
 }

@@ -23,7 +23,9 @@ import javax.inject.Inject
 
 /** Resolved view descriptor for an edited plugin storage (edit mode only). */
 data class EditPluginView(
-    val viewFile: String,
+    /** Module-source handle of the view JS (registered Rust-side by the
+     *  `plugin.list` scan); `0` until the scan resolves. */
+    val viewSourceHandle: Long,
     val pluginId: String,
     val pluginStorageId: String,
 )
@@ -71,8 +73,10 @@ class EditStorageVM @Inject constructor(
             } else {
                 providers
                     .firstOrNull { it.pluginId == handle.pluginId }
-                    ?.viewFile
-                    ?.let { file -> EditPluginView(file, handle.pluginId, handle.pluginStorageId) }
+                    ?.takeIf { it.viewSourceHandle != 0L }
+                    ?.let {
+                        EditPluginView(it.viewSourceHandle, handle.pluginId, handle.pluginStorageId)
+                    }
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     /** Fires when the edited storage disappears from the list (the plugin
@@ -168,8 +172,4 @@ class EditStorageVM @Inject constructor(
             }
         }
     }
-
-    /** Read one file from an installed plugin's dir (view JS bundles). */
-    suspend fun openPluginFile(pluginId: String, fileName: String): String? =
-        pluginRepository.openPluginFile(pluginId, fileName)
 }
