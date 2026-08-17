@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.widgets.plugins
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -19,10 +20,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -34,6 +36,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,9 +50,6 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
-import com.kutedev.easemusicplayer.components.EaseIconButton
-import com.kutedev.easemusicplayer.components.EaseIconButtonSize
-import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RoutePluginAvailable
 import com.kutedev.easemusicplayer.singleton.PluginManifest
@@ -98,17 +102,18 @@ fun PluginManagementPage(
                 .padding(pluginsPaddingX, 0.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable { navController.popBackStack() }
-                    .padding(2.dp),
-                painter = painterResource(id = R.drawable.icon_back),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface,
-            )
-            Box(modifier = Modifier.width(16.dp))
+            IconButton(
+                modifier = Modifier.size(40.dp),
+                onClick = { navController.popBackStack() },
+            ) {
+                Icon(
+                    modifier = Modifier.size(24.dp),
+                    painter = painterResource(id = R.drawable.icon_back),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Box(modifier = Modifier.width(12.dp))
             Text(
                 text = stringResource(id = R.string.plugin_management_title),
                 fontSize = 18.sp,
@@ -116,14 +121,19 @@ fun PluginManagementPage(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Box(modifier = Modifier.weight(1f))
-            EaseIconButton(
-                sizeType = EaseIconButtonSize.Small,
-                buttonType = EaseIconButtonType.Default,
-                painter = painterResource(id = R.drawable.icon_download),
+            IconButton(
+                modifier = Modifier.size(40.dp),
                 onClick = {
                     navController.navigate(RoutePluginAvailable())
                 }
-            )
+            ) {
+                Icon(
+                    modifier = Modifier.size(24.dp),
+                    painter = painterResource(id = R.drawable.icon_download),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
 
         Column(
@@ -132,12 +142,21 @@ fun PluginManagementPage(
                 .verticalScroll(rememberScrollState())
                 .padding(pluginsPaddingX, 4.dp),
         ) {
-            Text(
-                text = stringResource(id = R.string.plugin_installed_section),
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 14.sp,
-            )
-            Box(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(3.dp, 16.dp)
+                        .clip(RoundedCornerShape(1.5.dp))
+                        .background(BadgeGreen)
+                )
+                Box(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(id = R.string.plugin_installed_section),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                )
+            }
+            Box(modifier = Modifier.height(12.dp))
             if (plugins.isEmpty()) {
                 Text(
                     text = stringResource(id = R.string.plugin_installed_empty),
@@ -145,28 +164,42 @@ fun PluginManagementPage(
                     fontSize = 14.sp,
                 )
             }
-            for (plugin in plugins) {
-                InstalledPluginRow(
-                    plugin = plugin,
-                    busy = plugin.id in busyIds,
-                    storageCount = pluginsVM.storageCountFor(plugin.id, storages),
-                    onToggle = { pluginsVM.setEnabled(plugin.id, it) },
-                    onUninstall = {
-                        pendingUninstall = PendingUninstall(
-                            plugin,
-                            pluginsVM.storageCountFor(plugin.id, storages),
-                        )
-                    },
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (plugin in plugins) {
+                    InstalledPluginRow(
+                        plugin = plugin,
+                        busy = plugin.id in busyIds,
+                        storageCount = pluginsVM.storageCountFor(plugin.id, storages),
+                        onToggle = { pluginsVM.setEnabled(plugin.id, it) },
+                        onUninstall = {
+                            pendingUninstall = PendingUninstall(
+                                plugin,
+                                pluginsVM.storageCountFor(plugin.id, storages),
+                            )
+                        },
+                    )
+                }
             }
             Box(modifier = Modifier.height(16.dp))
+            val dashColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .drawBehind {
+                        drawRoundRect(
+                            color = dashColor,
+                            cornerRadius = CornerRadius(16.dp.toPx()),
+                            style = Stroke(
+                                width = 1.5.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(
+                                    floatArrayOf(8.dp.toPx(), 6.dp.toPx())
+                                ),
+                            ),
+                        )
+                    }
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable { zipPicker.launch(arrayOf("application/zip", "application/octet-stream")) }
-                    .padding(20.dp, 14.dp),
+                    .padding(16.dp, 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
@@ -174,13 +207,13 @@ fun PluginManagementPage(
                     modifier = Modifier.size(16.dp),
                     painter = painterResource(id = R.drawable.icon_file),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Box(modifier = Modifier.width(8.dp))
                 Text(
                     text = stringResource(id = R.string.plugin_install_from_zip),
                     fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Box(modifier = Modifier.height(24.dp))
@@ -221,76 +254,140 @@ private fun InstalledPluginRow(
     onToggle: (Boolean) -> Unit,
     onUninstall: () -> Unit,
 ) {
-    val dim = if (plugin.enabled) 1f else 0.4f
-    Row(
+    val dim = if (plugin.enabled) 1f else 0.45f
+    val accent = pluginAccent(plugin.id)
+    var expanded by remember { mutableStateOf(false) }
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .alpha(dim)
-            .padding(0.dp, 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { expanded = !expanded }
+            .padding(14.dp, 12.dp),
     ) {
-        if (busy) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(24.dp),
-                strokeWidth = 2.dp,
-            )
-        } else {
-            Icon(
-                modifier = Modifier.size(32.dp),
-                painter = painterResource(id = R.drawable.icon_extension),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        }
-        Box(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = plugin.name,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Box(modifier = Modifier.width(8.dp))
-                if (plugin.id == PluginManager.BUNDLED_PLUGIN_ID) {
-                    Text(
-                        text = stringResource(id = R.string.plugin_bundled_tag),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .alpha(dim)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accent.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        modifier = Modifier.size(24.dp),
+                        painter = painterResource(id = R.drawable.icon_extension),
+                        contentDescription = null,
+                        tint = accent,
                     )
                 }
             }
-            if (plugin.description.isNotBlank()) {
-                Text(
-                    text = plugin.description,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Box(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = plugin.name,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.alpha(dim),
+                    )
+                    Box(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = plugin.version,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.alpha(dim),
+                    )
+                    if (!plugin.enabled) {
+                        Box(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(id = R.string.plugin_disabled_tag),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (plugin.description.isNotBlank()) {
+                    Box(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = plugin.description,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.alpha(dim),
+                    )
+                }
             }
-            Text(
-                text = "${plugin.id} · ${plugin.version}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            Icon(
+                modifier = Modifier.size(16.dp),
+                painter = painterResource(id = if (expanded) R.drawable.icon_collapse else R.drawable.icon_forward),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(
-            checked = plugin.enabled,
-            onCheckedChange = onToggle,
-            colors = SwitchDefaults.colors(
-                checkedTrackColor = MaterialTheme.colorScheme.primary,
-            ),
-        )
-        Box(modifier = Modifier.width(4.dp))
-        EaseIconButton(
-            sizeType = EaseIconButtonSize.Small,
-            buttonType = EaseIconButtonType.Error,
-            painter = painterResource(id = R.drawable.icon_deleteseep),
-            onClick = onUninstall,
-        )
+        AnimatedVisibility(visible = expanded) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(
+                        id = if (plugin.enabled) R.string.plugin_disable_action else R.string.plugin_enable_action
+                    ),
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(modifier = Modifier.width(8.dp))
+                IconButton(
+                    modifier = Modifier.size(40.dp),
+                    onClick = { onToggle(!plugin.enabled) },
+                ) {
+                    Icon(
+                        modifier = Modifier.size(20.dp),
+                        painter = painterResource(id = if (plugin.enabled) R.drawable.icon_stop else R.drawable.icon_play),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Box(modifier = Modifier.width(12.dp))
+                Text(
+                    text = stringResource(id = R.string.plugin_uninstall_action),
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Box(modifier = Modifier.width(8.dp))
+                IconButton(
+                    modifier = Modifier.size(40.dp),
+                    onClick = onUninstall,
+                ) {
+                    Icon(
+                        modifier = Modifier.size(20.dp),
+                        painter = painterResource(id = R.drawable.icon_deleteseep),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
     }
+}
+
+private val BadgeGreen = Color(0xFF34C759)
+
+internal fun pluginAccent(id: String): Color {
+    val mixed = id.hashCode() * -0x61C88647 // golden-ratio scramble for hue spread
+    val hue = ((mixed.toLong() and 0xFFFFFFFFL) % 360L).toFloat()
+    return Color.hsl(hue = hue, saturation = 0.45f, lightness = 0.55f)
 }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -46,7 +47,7 @@ import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.core.LocalNavController
-import com.kutedev.easemusicplayer.singleton.PluginSource
+import com.kutedev.easemusicplayer.singleton.types.PluginSource
 import com.kutedev.easemusicplayer.viewmodels.AvailableListState
 import com.kutedev.easemusicplayer.viewmodels.AvailablePluginRow
 import com.kutedev.easemusicplayer.viewmodels.AvailablePluginsVM
@@ -87,17 +88,18 @@ fun AvailablePluginsPage(
                 .padding(pluginsPaddingX, 0.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable { navController.popBackStack() }
-                    .padding(2.dp),
-                painter = painterResource(id = R.drawable.icon_back),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface,
-            )
-            Box(modifier = Modifier.width(16.dp))
+            IconButton(
+                modifier = Modifier.size(40.dp),
+                onClick = { navController.popBackStack() },
+            ) {
+                Icon(
+                    modifier = Modifier.size(24.dp),
+                    painter = painterResource(id = R.drawable.icon_back),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Box(modifier = Modifier.width(12.dp))
             Text(
                 text = stringResource(id = R.string.plugin_available_title),
                 fontSize = 18.sp,
@@ -105,50 +107,56 @@ fun AvailablePluginsPage(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Box(modifier = Modifier.weight(1f))
-            EaseIconButton(
-                sizeType = EaseIconButtonSize.Small,
-                buttonType = EaseIconButtonType.Default,
-                painter = painterResource(id = R.drawable.icon_vertialcal_more),
-                onClick = { vm.retry() }
-            )
+            IconButton(
+                modifier = Modifier.size(40.dp),
+                onClick = { vm.retry() },
+            ) {
+                Icon(
+                    modifier = Modifier.size(22.dp),
+                    painter = painterResource(id = R.drawable.icon_circular_arrows),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
 
-        // Source selector chip
+        // Source selector pill (label folded into the pill itself)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(pluginsPaddingX, 4.dp),
+                .padding(pluginsPaddingX, 4.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clickable { sourceDialogOpen = true }
+                .padding(14.dp, 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                modifier = Modifier.size(18.dp),
+                painter = painterResource(id = R.drawable.icon_cloud),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Box(modifier = Modifier.width(10.dp))
             Text(
                 text = stringResource(id = R.string.plugin_source_label),
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Box(modifier = Modifier.width(8.dp))
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { sourceDialogOpen = true }
-                    .padding(12.dp, 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = selectedSource?.label ?: selectedSourceUrl,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Box(modifier = Modifier.weight(1f))
-                Text(
-                    text = "▾",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                text = selectedSource?.label ?: selectedSourceUrl,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "▾",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         // List
@@ -191,6 +199,12 @@ fun AvailablePluginsPage(
                             text = stringResource(id = R.string.plugin_registry_cached),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp,
+                            modifier = Modifier
+                                .background(
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f),
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .padding(8.dp, 3.dp),
                         )
                         Box(modifier = Modifier.height(8.dp))
                     }
@@ -201,12 +215,14 @@ fun AvailablePluginsPage(
                             fontSize = 14.sp,
                         )
                     }
-                    for (row in state.rows) {
-                        AvailablePluginRowItem(
-                            row = row,
-                            busy = row.entry.id in busyIds,
-                            vm = vm,
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (row in state.rows) {
+                            AvailablePluginRowItem(
+                                row = row,
+                                busy = row.entry.id in busyIds,
+                                vm = vm,
+                            )
+                        }
                     }
                 }
             }
@@ -381,27 +397,40 @@ private fun AvailablePluginRowItem(
     busy: Boolean,
     vm: AvailablePluginsVM,
 ) {
-    val hasUpdate = row.installedVersion != null &&
-        vm.compareVersions(row.entry.version, row.installedVersion) > 0
+    // `updateAvailable` / `installedVersion` are stamped Rust-side at fetch
+    // time — no version comparison happens in Kotlin.
+    val hasUpdate = row.entry.updateAvailable
+    val installed = row.entry.installedVersion != null
+    val accent = pluginAccent(row.entry.id)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(0.dp, 10.dp),
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(14.dp, 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            modifier = Modifier.size(32.dp),
-            painter = painterResource(id = R.drawable.icon_extension),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Box(modifier = Modifier.width(16.dp))
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(accent.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                modifier = Modifier.size(24.dp),
+                painter = painterResource(id = R.drawable.icon_extension),
+                contentDescription = null,
+                tint = accent,
+            )
+        }
+        Box(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = row.entry.name,
                     fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -411,16 +440,9 @@ private fun AvailablePluginRowItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                 )
-                if (hasUpdate) {
-                    Box(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(id = R.string.plugin_update_available),
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 11.sp,
-                    )
-                }
             }
             if (row.entry.description.isNotBlank()) {
+                Box(modifier = Modifier.height(2.dp))
                 Text(
                     text = row.entry.description,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -433,7 +455,7 @@ private fun AvailablePluginRowItem(
         Box(modifier = Modifier.width(8.dp))
         if (busy) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-        } else if (row.installedVersion == null) {
+        } else if (!installed) {
             EaseTextButton(
                 text = stringResource(id = R.string.plugin_install),
                 type = EaseTextButtonType.PrimaryVariant,
@@ -450,8 +472,11 @@ private fun AvailablePluginRowItem(
         } else {
             Text(
                 text = stringResource(id = R.string.plugin_installed_tag),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary,
                 fontSize = 12.sp,
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                    .padding(8.dp, 3.dp),
             )
         }
     }

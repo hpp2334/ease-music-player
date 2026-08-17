@@ -5,7 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -130,7 +129,7 @@ private fun SleepModeBlock(vm: SleepModeVM = hiltViewModel()) {
 }
 
 @Composable
-private fun ColumnScope.DevicesBlock(
+private fun DevicesBlock(
     storageItems: List<Storage>,
     enabledPluginIds: Set<String>,
     editStoragesVM: EditStorageVM = hiltViewModel()
@@ -139,8 +138,6 @@ private fun ColumnScope.DevicesBlock(
 
     Column(
         modifier = Modifier
-            .verticalScroll(rememberScrollState())
-            .weight(1f)
             .padding(paddingX, paddingY)
     ) {
         if (storageItems.isEmpty()) {
@@ -245,12 +242,20 @@ private fun DashboardCard(
             .padding(20.dp, 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            modifier = Modifier.size(32.dp),
-            painter = painterResource(id = R.drawable.icon_extension),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                modifier = Modifier.size(28.dp),
+                painter = painterResource(id = R.drawable.icon_extension),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
         Box(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -267,9 +272,9 @@ private fun DashboardCard(
         }
         Icon(
             modifier = Modifier.size(16.dp),
-            painter = painterResource(id = R.drawable.icon_collapse),
+            painter = painterResource(id = R.drawable.icon_forward),
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = MaterialTheme.colorScheme.onSurface,
         )
     }
 }
@@ -296,7 +301,7 @@ fun DashboardSubpage(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
-        Box(modifier = Modifier.height(48.dp))
+        Box(modifier = Modifier.height(32.dp))
         Row(
             modifier = Modifier
                 .padding(paddingX, 4.dp)
@@ -305,7 +310,7 @@ fun DashboardSubpage(
             Title(title = stringResource(id = R.string.dashboard_sleep_mode))
         }
         SleepModeBlock()
-        Box(modifier = Modifier.height(48.dp))
+        Box(modifier = Modifier.height(32.dp))
         Row(
             modifier = Modifier
                 .padding(paddingX, 4.dp)
@@ -328,7 +333,7 @@ fun DashboardSubpage(
         }
         DevicesBlock(storageItems, enabledPluginIds)
         if (dashboardItems.isNotEmpty()) {
-            Box(modifier = Modifier.height(48.dp))
+            Box(modifier = Modifier.height(32.dp))
             Row(
                 modifier = Modifier
                     .padding(paddingX, 4.dp)

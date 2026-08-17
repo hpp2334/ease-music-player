@@ -73,10 +73,13 @@
     <string name="plugin_installed_section">已安装</string>
     <string name="plugin_installed_empty">暂无已安装插件。</string>
     <string name="plugin_installed_tag">已安装</string>
-    <string name="plugin_bundled_tag">内置</string>
     <string name="plugin_install_from_zip">从 ZIP 安装…</string>
     <string name="plugin_install_ok">插件安装成功。</string>
     <string name="plugin_install_fail">插件安装失败。</string>
+    <string name="plugin_disabled_tag">已停用</string>
+    <string name="plugin_enable_action">启用</string>
+    <string name="plugin_disable_action">停用</string>
+    <string name="plugin_uninstall_action">卸载</string>
     <string name="plugin_uninstall_confirm">卸载插件 “E_NAME”？其数据会保留，重新安装后恢复。</string>
     <string name="plugin_uninstall_storage_warning">有 E_COUNT 个存储依赖它，卸载后将无法访问。</string>
     <string name="plugin_storage_removed">存储已移除</string>
@@ -92,5 +95,4 @@
     <string name="plugin_retry">重试</string>
     <string name="plugin_install">安装</string>
     <string name="plugin_update">更新</string>
-    <string name="plugin_update_available">新版本</string>
 </resources>
