@@ -74,10 +74,13 @@
     <string name="plugin_installed_section">INSTALLED</string>
     <string name="plugin_installed_empty">No plugins installed.</string>
     <string name="plugin_installed_tag">Installed</string>
-    <string name="plugin_bundled_tag">bundled</string>
     <string name="plugin_install_from_zip">Install from ZIP…</string>
     <string name="plugin_install_ok">Plugin installed.</string>
     <string name="plugin_install_fail">Plugin install failed.</string>
+    <string name="plugin_disabled_tag">Disabled</string>
+    <string name="plugin_enable_action">Enable</string>
+    <string name="plugin_disable_action">Disable</string>
+    <string name="plugin_uninstall_action">Uninstall</string>
     <string name="plugin_uninstall_confirm">Uninstall plugin “E_NAME”? Its data is kept and restored if reinstalled.</string>
     <string name="plugin_uninstall_storage_warning">E_COUNT storages depend on it and will stop working.</string>
     <string name="plugin_storage_removed">storage removed</string>
@@ -93,7 +96,6 @@
     <string name="plugin_retry">Retry</string>
     <string name="plugin_install">Install</string>
     <string name="plugin_update">Update</string>
-    <string name="plugin_update_available">new version</string>
     <string name="playcount_title">Play Counts</string>
     <string name="playcount_range_today">Today</string>
     <string name="playcount_range_yesterday">Yesterday</string>
