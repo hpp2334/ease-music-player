@@ -62,8 +62,8 @@ fn make_source() -> Box<dyn AudioSource> {
 }
 
 # fn main() -> cantode::Result<()> {
-let mut cx = PlayerContext::new()?;
-let player = Player::new(&mut cx)?;
+let cx = PlayerContext::new()?;
+let player = Player::new(&cx)?;
 
 let metadata = player.load(make_source())?;
 println!("duration: {:?}", metadata.duration);
@@ -74,6 +74,26 @@ player.pause()?;
 # Ok(())
 # }
 ```
+
+## Examples
+
+Runnable, end-to-end examples live in [`examples/`](./examples):
+
+| Example | What it shows | Output device |
+|---|---|---|
+| `probe_metadata` | Headless probing: tags, duration, cover art via `probe_metadata` + `MemoryAudioSource` | not needed |
+| `play_file` | Event-driven playback: a custom file-backed `AudioSource`, `ChannelEventSink` events, progress line | required |
+| `transport_controls` | Poll-driven scripting: 10 Hz `state()`/`position()` polling, seek / pause / resume / stop | required |
+
+```sh
+cargo run --example probe_metadata -- path/to/track.mp3
+cargo run --example play_file -- path/to/track.mp3          # plays out loud
+cargo run --example play_file -- path/to/track.mp3 0.1      # quiet
+cargo run --example transport_controls -- path/to/track.mp3
+```
+
+The two playback examples drive the **real** default output device —
+same philosophy as the test suite (see [Testing requirements](#testing-requirements)).
 
 ## Feature flags
 

@@ -52,6 +52,10 @@
 //! # Ok::<(), cantode::CantodeError>(())
 //! ```
 //!
+//! Runnable, end-to-end versions of this — plus metadata probing,
+//! event-driven playback, and transport-control scripting — live in the
+//! `examples/` directory.
+//!
 //! [ease]: https://github.com/hpp2334/ease-music-player
 
 #![warn(missing_docs)]
