@@ -97,19 +97,10 @@ same philosophy as the test suite (see [Testing requirements](#testing-requireme
 
 ## Feature flags
 
-| Feature | Default | Effect |
-|---|---|---|
-| `sink-cpal` | yes | Drive the system audio device via cpal (always uses the default output device) |
-
-That's the only feature flag. The symphonia decoder is unconditional —
-it's the built-in decoder and always available. To substitute a
-different decoder, implement `Decoder` + `DecoderFactory` and pass your
-factory to `PlayerContextConfig::decoder_factory`; no feature flag needed.
-
-Disabling `sink-cpal` yields a headless build that can still decode and
-probe metadata, but `Player::load` will return
-`CantodeError::Sink("no sink backend enabled...")`. There is no
-`NullSink` — tests run against the real cpal device.
+There are none — the symphonia decoder and the cpal sink are both
+unconditional. To substitute a different decoder, implement `Decoder` +
+`DecoderFactory` and pass your factory to
+`PlayerContextConfig::decoder_factory`; no feature flag needed.
 
 ## Testing requirements
 

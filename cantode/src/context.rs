@@ -21,14 +21,12 @@ use crate::{
     decoder::DecoderFactory, events::EventSink, CantodeError,
 };
 
-#[cfg(feature = "sink-cpal")]
 use cpal::Host;
 
 /// Configuration for a [`PlayerContext`].
 #[derive(Default)]
 pub struct PlayerContextConfig {
     /// cpal host to use. Defaults to [`cpal::default_host`] when `None`.
-    #[cfg(feature = "sink-cpal")]
     pub host: Option<Host>,
     /// Decoder factory used by both `Player::new` and `probe_metadata`.
     /// Defaults to [`crate::SymphoniaDecoderFactory`] (the built-in
@@ -46,7 +44,6 @@ pub struct PlayerContextConfig {
 /// single owned context on the audio thread, with `&PlayerContext`
 /// borrowed for `Player::new`.
 pub struct PlayerContext {
-    #[cfg(feature = "sink-cpal")]
     host: Host,
     decoder_factory: Arc<dyn DecoderFactory>,
     event_sink: Option<Arc<dyn EventSink>>,
@@ -73,7 +70,6 @@ impl PlayerContext {
 
     /// Create a context with explicit configuration.
     pub fn with_config(config: PlayerContextConfig) -> Result<Self, CantodeError> {
-        #[cfg(feature = "sink-cpal")]
         let host = config.host.unwrap_or_else(cpal::default_host);
 
         let decoder_factory: Arc<dyn DecoderFactory> = config
@@ -81,7 +77,6 @@ impl PlayerContext {
             .unwrap_or_else(default_decoder_factory);
 
         Ok(Self {
-            #[cfg(feature = "sink-cpal")]
             host,
             decoder_factory,
             event_sink: config.event_sink,
@@ -91,7 +86,6 @@ impl PlayerContext {
     }
 
     /// The cpal host backing this context.
-    #[cfg(feature = "sink-cpal")]
     pub fn host(&self) -> &Host {
         &self.host
     }

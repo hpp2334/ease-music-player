@@ -57,7 +57,6 @@ pub(crate) enum WorkerEvent {
     /// `Player::load` was called.
     LoadRequested,
     /// Source opened, decoder ready, sink primed.
-    #[allow(dead_code)] // only fired when sink-cpal is enabled
     LoadCompleted,
     /// `Player::play` was called.
     PlayRequested,

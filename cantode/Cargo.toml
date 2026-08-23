@@ -9,13 +9,6 @@ keywords = ["audio", "player", "decoder", "symphonia", "cpal"]
 categories = ["multimedia::audio"]
 publish = false
 
-[features]
-default = ["sink-cpal"]
-# `sink-cpal` is the only feature flag. Disabling it yields a headless
-# build that can still decode and probe metadata but cannot drive audio
-# hardware (`Player::load` returns a `Sink` error).
-sink-cpal = ["dep:cpal", "dep:ringbuf"]
-
 [dependencies]
 thiserror = "1.0.57"
 tracing = "0.1"
@@ -32,7 +25,7 @@ symphonia = { version = "0.5", features = [
     "aac",
     "isomp4",
 ] }
-cpal = { version = "0.17", optional = true }
-ringbuf = { version = "0.4", optional = true }
+cpal = "0.17"
+ringbuf = "0.4"
 
 [dev-dependencies]
