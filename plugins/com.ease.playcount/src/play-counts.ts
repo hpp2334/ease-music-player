@@ -44,10 +44,9 @@ import {
     view,
     source,
     derive,
-    set,
-    get,
+    mutate,
 } from "tur:std";
-import type { Source, Readable, Element } from "tur:core";
+import type { Source, Readable, Element, StoreCtx } from "tur:core";
 import { db as Storage } from "ease";
 import { createSelector } from "./ui/selector";
 
@@ -91,16 +90,16 @@ const selectedRange$: Source<number> = source(0);
 const entries$: Source<PlayCountEntry[]> = source<PlayCountEntry[]>([]);
 const loading$: Source<boolean> = source(false);
 
-const status$: Readable<Status> = derive<Status>(() => {
-    if (get(loading$)) return "loading";
-    return get(entries$).length === 0 ? "empty" : "ready";
+const status$: Readable<Status> = derive<Status>((ctx) => {
+    if (ctx.get(loading$)) return "loading";
+    return ctx.get(entries$).length === 0 ? "empty" : "ready";
 });
 
 // Max play count across the current range — drives every bar's fill ratio.
 // Reactive so all mounted bars rescale together when `entries$` changes.
-const maxCount$: Readable<number> = derive(() => {
+const maxCount$: Readable<number> = derive((ctx) => {
     let m = 0;
-    for (const e of get(entries$)) if (e.count > m) m = e.count;
+    for (const e of ctx.get(entries$)) if (e.count > m) m = e.count;
     return m;
 });
 
@@ -146,10 +145,12 @@ interface PlayEventRow {
     ts?: unknown;
 }
 
-function refresh(): void {
-    set(loading$, true);
+// A mutation (dispatched from `start({ store })` / the range selector) so it
+// can write through the instance store's ctx — there is no module-level store.
+export const refresh = mutate((ctx: StoreCtx): void => {
+    ctx.set(loading$, true);
     try {
-        const range = RANGES[get(selectedRange$)];
+        const range = RANGES[ctx.get(selectedRange$)];
         const keys = dateKeysForRange(range);
         const grouped = Storage.multiGetAllMulti(keys);
 
@@ -183,13 +184,13 @@ function refresh(): void {
         const sorted = Array.from(counts.values()).sort(
             (a, b) => b.count - a.count,
         );
-        set(entries$, sorted);
+        ctx.set(entries$, sorted);
     } catch {
-        set(entries$, []);
+        ctx.set(entries$, []);
     } finally {
-        set(loading$, false);
+        ctx.set(loading$, false);
     }
-}
+});
 
 // ---------------------------------------------------------------------------
 // Palette — design rule: ONE tier accent per card, expressed ONLY by the
@@ -238,18 +239,22 @@ const CHIP_RADIUS = 999;
 // anchored to the trigger; the menu floats over the list, no absolute coords).
 // ---------------------------------------------------------------------------
 
+// Range change: update the selection + re-aggregate, composed as one
+// mutation dispatched through the click ctx.
+const selectRange = mutate((ctx: StoreCtx, id: string): void => {
+    const i = RANGES.findIndex((r) => r.id === id);
+    if (i >= 0 && i !== ctx.get(selectedRange$)) {
+        ctx.set(selectedRange$, i);
+        ctx.set(refresh);
+    }
+});
+
 const rangeSel = createSelector<string>({
     options: RANGES.map((r) => ({ value: r.id, label: r.label })),
     selectedValue$: derive(
-        () => RANGES[get(selectedRange$)]?.id ?? RANGES[0].id,
+        (ctx) => RANGES[ctx.get(selectedRange$)]?.id ?? RANGES[0].id,
     ),
-    onSelect: (id) => {
-        const i = RANGES.findIndex((r) => r.id === id);
-        if (i >= 0 && i !== get(selectedRange$)) {
-            set(selectedRange$, i);
-            refresh();
-        }
-    },
+    onSelect: (ctx, id) => ctx.set(selectRange, id),
     style: {
         primary: COLOR_PRIMARY,
         primarySoft: COLOR_PRIMARY_SOFT,
@@ -277,9 +282,9 @@ function HeaderSummary() {
             }),
             SizedBox({ height: 4 }),
             Text({
-                text: derive(() => {
-                    const range = RANGES[get(selectedRange$)];
-                    const total = get(entries$).reduce(
+                text: derive((ctx) => {
+                    const range = RANGES[ctx.get(selectedRange$)];
+                    const total = ctx.get(entries$).reduce(
                         (n, e) => n + e.count,
                         0,
                     );
@@ -370,11 +375,11 @@ function RankedRow(props: RankedRowProps): Element {
     const barHeight = tierA ? 8 : 6;
     const pad = tierA ? 16 : 12;
 
-    const entry$ = derive(() => get(entries$)[index]);
-    const title$ = derive(() => get(entry$)?.title ?? "");
-    const count$ = derive(() => get(entry$)?.count ?? 0);
-    const fillFlex$ = derive(() => get(count$));
-    const trackFlex$ = derive(() => Math.max(0, get(maxCount$) - get(count$)));
+    const entry$ = derive((ctx) => ctx.get(entries$)[index]);
+    const title$ = derive((ctx) => ctx.get(entry$)?.title ?? "");
+    const count$ = derive((ctx) => ctx.get(entry$)?.count ?? 0);
+    const fillFlex$ = derive((ctx) => ctx.get(count$));
+    const trackFlex$ = derive((ctx) => Math.max(0, ctx.get(maxCount$) - ctx.get(count$)));
 
     const barChildren: Element[] = [
         Expanded({
@@ -407,7 +412,7 @@ function RankedRow(props: RankedRowProps): Element {
         padding: tierA ? 6 : 5,
         children: [
             Text({
-                text: derive(() => String(get(count$))),
+                text: derive((ctx) => String(ctx.get(count$))),
                 fontSize: tierA ? 13 : 12,
                 color: COLOR_PRIMARY,
             }),
@@ -465,11 +470,10 @@ function ReadyBody() {
     // range switch updates mounted rows in place (no remount needed).
     return LazyList({
         axis: Axis.Vertical,
-        itemCount: derive(() => get(entries$).length),
+        itemCount: derive((ctx) => ctx.get(entries$).length),
         overscan: 6,
         builder: (index: number) => {
             const rank = index + 1;
-            const tierA = rank <= 3;
             const children: Element[] = [];
             if (index > 0) {
                 if (index <= 2) {
@@ -485,9 +489,17 @@ function ReadyBody() {
                 }
             }
             children.push(RankedRow({ rank, index }));
-            if (index === get(entries$).length - 1) {
-                children.push(SizedBox({ height: 24 }));
-            }
+            // Trailing bottom inset on the last item. The builder runs only
+            // at mount, so the last-ness is a `derive` — a height-0 SizedBox
+            // is invisible, and this also tracks list-length changes.
+            children.push(
+                SizedBox({
+                    height: derive(
+                        (ctx) =>
+                            ctx.get(entries$).length - 1 === index ? 24 : 0,
+                    ),
+                }),
+            );
             return Column({
                 crossAlignment: CrossAxisAlignment.Stretch,
                 mainAxisSize: MainAxisSize.Min,
@@ -580,5 +592,3 @@ export const rootView = view(() =>
         ],
     }),
 );
-
-export { refresh };

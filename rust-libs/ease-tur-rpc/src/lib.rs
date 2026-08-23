@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 use tur_engine::core::event_bus::EventBusHandle;
-use tur_engine::core::plugin::{Plugin, PluginContext};
+use tur_engine::core::plugin::{Plugin, PluginRegisterContext};
 use tur_engine::TurApp;
 use tur_engine::error::TurError;
 
@@ -166,7 +166,7 @@ type StreamTable = Arc<Mutex<HashMap<u32, mpsc::Sender<StreamChunk>>>>;
 pub struct TurRpcPlugin;
 
 impl Plugin for TurRpcPlugin {
-    fn register(&self, ctx: &mut PluginContext<'_>) -> Result<(), TurError> {
+    fn register(&self, ctx: &mut PluginRegisterContext<'_>) -> Result<(), TurError> {
         ctx.register_js_module("tur:rpc", RPC_JS, Path::new("tur-rpc.mjs"))?;
         tracing::info!("TurRpcPlugin registered tur:rpc");
         Ok(())

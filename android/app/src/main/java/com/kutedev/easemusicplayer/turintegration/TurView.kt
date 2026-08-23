@@ -156,13 +156,24 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
             val d = dprValue.coerceAtLeast(1.0)
             val w = (holder.surfaceFrame.width() / d).toInt().coerceAtLeast(1)
             val h = (holder.surfaceFrame.height() / d).toInt().coerceAtLeast(1)
+            val t0 = android.os.SystemClock.elapsedRealtime()
             instance = try {
                 rt.createInstance(holder.surface, w, h, dprValue, pendingPluginId, pendingInstance).also {
+                    val t1 = android.os.SystemClock.elapsedRealtime()
                     it.loadModule(sourceHandle)
+                    val t2 = android.os.SystemClock.elapsedRealtime()
+                    android.util.Log.d(
+                        "TurPerf",
+                        "surfaceCreated: createInstance=${t1 - t0}ms loadModule=${t2 - t1}ms",
+                    )
+                    it.markBoot()
                     // After each frame, sync the soft keyboard with the
-                    // engine's focused-element state (reads the value native
-                    // pushed into the FrameLoop via onFocusChanged).
-                    it.setAfterPump { syncIme() }
+                    // engine's text-input state (reads the value native
+                    // pushed into the FrameLoop via onTextInputChanged).
+                    it.setAfterPump {
+                        it.markFirstPump()
+                        syncIme()
+                    }
                 }
             } catch (e: Throwable) {
                 android.util.Log.e("TurView", "instance create failed", e)
@@ -221,8 +232,8 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
     // without any platform IME. The missing piece is raising the soft
     // keyboard and routing its text back. We declare the surface a text editor
     // and supply a minimal `InputConnection` that turns IME commits into
-    // engine events. The engine pushes its focused-element state into the
-    // FrameLoop (via `onFocusChanged`); the per-frame `syncIme` reads that
+    // engine events. The engine pushes its text-input state into the
+    // FrameLoop (via `onTextInputChanged`); the per-frame `syncIme` reads that
     // retained value and drives `showSoftInput` / `hideSoftInput`.
 
     override fun onCheckIsTextEditor(): Boolean = true
@@ -266,9 +277,9 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
     }
 
     /**
-     * Raise/lower the soft keyboard to match the engine's focused-element
-     * state. The focused editable flag is pushed from native into the
-     * [FrameLoop] ([onFocusChanged]); this reads the retained value and
+     * Raise/lower the soft keyboard to match the engine's text-input state.
+     * The editable-focused flag is pushed from native into the
+     * [FrameLoop] ([onTextInputChanged]); this reads the retained value and
      * reconciles the IMM. State-gated so the IMM is only touched on
      * show↔hide transitions, not every frame. Suppressed until the user has
      * actually touched the surface ([userInteracted]) so a launch-time
@@ -278,7 +289,7 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
         val inst = instance ?: return
         val imm = context
             .getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        if (inst.focusedIsEditable() && userInteracted) {
+        if (inst.textInputActive() && userInteracted) {
             if (!hasFocus()) requestFocus()
             if (!imeActive) {
                 imm.showSoftInput(this, 0)

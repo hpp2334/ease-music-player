@@ -383,7 +383,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 dependencies = [
  "bitflags 2.13.1",
  "boa_interner",
@@ -398,7 +398,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 dependencies = [
  "aligned-vec",
  "arrayvec",
@@ -453,7 +453,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 dependencies = [
  "arrayvec",
  "boa_macros",
@@ -465,7 +465,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -480,7 +480,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -493,7 +493,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 dependencies = [
  "bitflags 2.13.1",
  "boa_ast",
@@ -510,7 +510,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -4777,7 +4777,7 @@ dependencies = [
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 dependencies = [
  "arrayvec",
 ]
@@ -5395,7 +5395,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa.git?rev=6ef5370c1cff770c51f3e4f8600590f11d66eeaf#6ef5370c1cff770c51f3e4f8600590f11d66eeaf"
+source = "git+https://github.com/boa-dev/boa.git?rev=93a9e31a83bbaa15bbd8b687e61639ffc53bbef1#93a9e31a83bbaa15bbd8b687e61639ffc53bbef1"
 
 [[package]]
 name = "tap"
@@ -5830,7 +5830,7 @@ dependencies = [
 [[package]]
 name = "tur-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "android_logger",
  "boa_engine",
@@ -5855,7 +5855,7 @@ dependencies = [
 [[package]]
 name = "tur-animation"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5867,7 +5867,7 @@ dependencies = [
 [[package]]
 name = "tur-clipboard-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "jni",
  "tracing",
@@ -5877,7 +5877,7 @@ dependencies = [
 [[package]]
 name = "tur-engine"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5900,7 +5900,7 @@ dependencies = [
 [[package]]
 name = "tur-filepicker-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "boa_engine",
  "tracing",
@@ -5910,7 +5910,7 @@ dependencies = [
 [[package]]
 name = "tur-integration-tests"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "boa_engine",
  "futures",
@@ -5926,7 +5926,7 @@ dependencies = [
 [[package]]
 name = "tur-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "futures",
  "parley",
@@ -5937,7 +5937,7 @@ dependencies = [
 [[package]]
 name = "tur-net-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5949,7 +5949,7 @@ dependencies = [
 [[package]]
 name = "tur-net-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=4119a7fadccfb40a79b15250ad2e0cfb158725f8#4119a7fadccfb40a79b15250ad2e0cfb158725f8"
+source = "git+https://github.com/hpp2334/tur?rev=5982740a98f47e15e5b82b1c6cd54702a86b4344#5982740a98f47e15e5b82b1c6cd54702a86b4344"
 dependencies = [
  "futures",
  "reqwest 0.12.28",

@@ -9,7 +9,7 @@
 //     oauth.start("onedrive", alias);
 //     themes.color("primary");
 //     rpc.call("onedrive:list", { ... }); // view → its backend handler
-//     get(context.storageId$);            // null = create, id = edit
+//     store.get(context.storageId$);      // null = create, id = edit
 //
 // Per-instance identity: the Kotlin host stamps a `PluginId` into each tur
 // instance at build time (via `TurAppBuilder::instance_data`). Bridge fns

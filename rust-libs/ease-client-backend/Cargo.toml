@@ -45,23 +45,37 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ 4119a7f).
+# tur engine integration (https://github.com/hpp2334/tur @ 5982740).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
 # main↔worker threaded runtime (#178), the fully-wired bidirectional event
 # bus (#181 — host↔JS byte transport for the OneDrive service plugin), the
 # `with_app` escape hatch (#176), streaming HTTP (requestStream), the
-# plugin-facing reactive bridge (#189 — `PluginContext::reactive()` lets a
-# plugin mint `Source`/`Derived`/`Mutation` atoms from Rust), and the
+# plugin-facing reactive bridge (#189 — `PluginRegisterContext::reactive()`
+# lets a plugin mint `Source`/`Derived`/`Mutation` atoms from Rust), and the
 # scheduling/rendering type renames (#193 — WorkerHost→WorkerSpawner,
-# MainLoop→HostLoop; `WorkerPoolHandle` is unchanged). The engine core is
-# tokio-free; the embedder provides a tokio Handle to NativeHttp
-# (registered on the runtime builder) and for timer/sleep.
+# MainLoop→HostLoop; `WorkerPoolHandle` is unchanged). Since 4119a7f: the
+# multi-store reactive model (#201 — free JS module-level `get`/`set` are
+# GONE; JS reads/writes via `store.get/set` or the `derive`/`mutate` closure
+# ctx — our plugins migrated), the `watch()` subscription primitive (#202),
+# the `core::shell` module (#204 — text-input egress now pushes
+# `FrameLoop.onTextInputChanged` through JNI), the TurApp handle + looper
+# split (#205), and derive cycle detection with subscriber teardown on
+# destroy (#206). Since b1aba7a: the one-instance-one-store model (#207 —
+# `createStore` is GONE; the engine creates the single instance store and
+# hands it to `start({ store })`, `mount(view)` binds the instance-owned
+# tree, Rust mints via `decl_source`/`decl_derive`/`decl_mutate` + the
+# `viewportSize$` engine-atom recipe), the frozen subsystem registry with
+# the register-phase-only `PluginRegisterContext` (#208), and the
+# engine-internal `HostBackend` — embedders talk to instances exclusively
+# via `TurApp`/`TurAppLooper` (#209). The engine core is tokio-free; the
+# embedder provides a tokio Handle to NativeHttp (registered on the runtime
+# builder) and for timer/sleep.
 # All crates live in the same repo; cargo clones once and resolves their
 # internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "5982740a98f47e15e5b82b1c6cd54702a86b4344" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "5982740a98f47e15e5b82b1c6cd54702a86b4344" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "5982740a98f47e15e5b82b1c6cd54702a86b4344" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "5982740a98f47e15e5b82b1c6cd54702a86b4344" }
 
 # Plugin install layer (`services/plugin_manager.rs`): zip extraction
 # (SAF/registry installs), sha256 registry verification, md5 registry-cache
@@ -75,4 +89,4 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
 # compiles against.
-boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "6ef5370c1cff770c51f3e4f8600590f11d66eeaf" }
+boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "93a9e31a83bbaa15bbd8b687e61639ffc53bbef1" }
