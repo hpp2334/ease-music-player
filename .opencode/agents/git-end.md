@@ -1,7 +1,7 @@
 ---
 description: Commit all changes, push, create/update PR, run local CI. Use when finishing work on a feature branch.
 mode: subagent
-model: xiaomi-token-plan-sgp/mimo-v2.5
+model: deepseek/deepseek-v4-flash
 permission:
   edit: deny
 ---

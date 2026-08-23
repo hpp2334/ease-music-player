@@ -1,7 +1,7 @@
 ---
 description: Reads and describes image files. Use when you need to understand what's in a screenshot or image.
 mode: subagent
-model: xiaomi-token-plan-sgp/mimo-v2.5
+model: deepseek/deepseek-v4-flash
 permission:
   edit: deny
   bash: deny
