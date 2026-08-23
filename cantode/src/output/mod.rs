@@ -2,7 +2,6 @@
 //!
 //! [`AudioSink`] is an internal abstraction that consumes interleaved `f32`
 //! PCM and pushes it to a destination. The only implementation shipped is
-//! [`CpalSink`] (behind the `sink-cpal` feature), which bridges cantode's
 //! push-based API to cpal's callback-based output via a lock-free ring
 //! buffer.
 //!
@@ -13,10 +12,8 @@
 //! host has no output device, `Player::load` fails with
 //! [`CantodeError::NoOutputDevice`](crate::CantodeError::NoOutputDevice).
 
-#[cfg(feature = "sink-cpal")]
 pub(crate) mod cpal;
 
-#[cfg(feature = "sink-cpal")]
 pub(crate) use self::cpal::CpalSink;
 
 use std::time::Duration;
@@ -44,7 +41,6 @@ pub(crate) trait AudioSink: Send {
     /// paused — `resume()` will start output. Returns the **actual**
     /// format the device is using (which may differ from `fmt` after
     /// device negotiation).
-    #[allow(dead_code)] // unused when built without sink-cpal
     fn start(&mut self, fmt: AudioFormat) -> crate::Result<AudioFormat>;
 
     /// Close the underlying stream and release device resources.

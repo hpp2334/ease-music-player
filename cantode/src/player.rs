@@ -403,51 +403,37 @@ impl Worker {
         match opened {
             Ok(dec) => {
                 let meta = dec.metadata().clone();
-                #[allow(unused_variables)] // only used in the sink-cpal branch
                 let fmt = dec.format();
                 *self.shared_duration.lock().unwrap() = meta.duration;
                 self.decoder = Some(dec);
 
-                // Open the cpal output device. If `sink-cpal` is disabled
-                // at compile time there is no output backend — load fails
-                // here with a clear error rather than panicking.
-                #[cfg(not(feature = "sink-cpal"))]
-                {
-                    self.apply_worker_event(WorkerEvent::Failed);
-                    return Err(CantodeError::Sink(
-                        "no sink backend enabled; enable `sink-cpal` to drive output".into(),
-                    ));
-                }
-
-                #[cfg(feature = "sink-cpal")]
-                {
-                    let mut sink: Box<dyn crate::output::AudioSink> =
-                        Box::new(crate::output::CpalSink::new());
-                    match sink.start(fmt) {
-                        Ok(actual_fmt) => {
-                            // Capture the channel counts so `pump_once` can
-                            // convert when the device insisted on a channel
-                            // count other than the source's.
-                            self.src_channels = fmt.channels;
-                            self.device_channels = actual_fmt.channels;
-                            if self.src_channels != self.device_channels {
-                                tracing::info!(
-                                    src = self.src_channels,
-                                    device = self.device_channels,
-                                    "device channel count differs from source; \
-                                     enabling channel conversion in worker"
-                                );
-                                self.remix_buf = Vec::new();
-                            }
-                            self.sink = Some(sink);
-                            self.sinks.emit(PlayerEvent::MetadataReady(meta.clone()));
-                            self.apply_worker_event(WorkerEvent::LoadCompleted);
-                            Ok(meta)
+                // Open the cpal output device (default host device).
+                let mut sink: Box<dyn crate::output::AudioSink> =
+                    Box::new(crate::output::CpalSink::new());
+                match sink.start(fmt) {
+                    Ok(actual_fmt) => {
+                        // Capture the channel counts so `pump_once` can
+                        // convert when the device insisted on a channel
+                        // count other than the source's.
+                        self.src_channels = fmt.channels;
+                        self.device_channels = actual_fmt.channels;
+                        if self.src_channels != self.device_channels {
+                            tracing::info!(
+                                src = self.src_channels,
+                                device = self.device_channels,
+                                "device channel count differs from source; \
+                                 enabling channel conversion in worker"
+                            );
+                            self.remix_buf = Vec::new();
                         }
-                        Err(e) => {
-                            self.apply_worker_event(WorkerEvent::Failed);
-                            Err(e)
-                        }
+                        self.sink = Some(sink);
+                        self.sinks.emit(PlayerEvent::MetadataReady(meta.clone()));
+                        self.apply_worker_event(WorkerEvent::LoadCompleted);
+                        Ok(meta)
+                    }
+                    Err(e) => {
+                        self.apply_worker_event(WorkerEvent::Failed);
+                        Err(e)
                     }
                 }
             }

@@ -12,15 +12,15 @@
 //!   │  Player (orchestrator: state machine + worker)      │
 //!   ├─────────────────────────────────────────────────────┤
 //!   │  Decoder (trait)         AudioSink (trait)          │
-//!   │   └─ SymphoniaDecoder      └─ CpalSink / NullSink   │
+//!   │   └─ SymphoniaDecoder      └─ CpalSink              │
 //!   ├─────────────────────────────────────────────────────┤
 //!   │  AudioSource (trait: Read + Seek + Send + Sync)     │
 //!   │   └─ MemoryAudioSource (tests)                      │
 //!   └─────────────────────────────────────────────────────┘
 //! ```
 //!
-//! Every layer is a trait; default implementations ship behind feature
-//! flags. Embedders substitute their own `AudioSource` (HTTP range
+//! Every layer is a trait; default implementations ship in the box.
+//! Embedders substitute their own `AudioSource` (HTTP range
 //! reader, WebDAV client, ...), `Decoder` (platform `MediaCodec`), or
 //! `AudioSink` without forking.
 //!
