@@ -6,7 +6,7 @@ publish = false
 description = "Private tur plugin wrapping the event bus into a typed request/response RPC (host↔JS), for JS storage-provider plugins."
 
 [dependencies]
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "5982740a98f47e15e5b82b1c6cd54702a86b4344" }
 tokio = { version = "1", features = ["sync"] }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
@@ -15,7 +15,7 @@ thiserror = "1"
 tracing = "0.1"
 
 [dev-dependencies]
-tur-native = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
-tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "4119a7fadccfb40a79b15250ad2e0cfb158725f8" }
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "5982740a98f47e15e5b82b1c6cd54702a86b4344" }
+tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "5982740a98f47e15e5b82b1c6cd54702a86b4344" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "6ef5370c1cff770c51f3e4f8600590f11d66eeaf" }
+boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "93a9e31a83bbaa15bbd8b687e61639ffc53bbef1" }

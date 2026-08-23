@@ -1,6 +1,6 @@
 {
     "name": "com.ease.playcount",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "private": true,
     "type": "module",
     "scripts": {
@@ -10,8 +10,8 @@
     "devDependencies": {
         "@rspack/cli": "^1.2.0",
         "@rspack/core": "^1.2.0",
-        "@tur-ng/core": "^0.0.4",
-        "@tur-ng/std": "^0.0.7",
+        "@tur-ng/core": "^0.0.7",
+        "@tur-ng/std": "^0.0.8",
         "typescript": "^5.7.0"
     }
 }

@@ -15,13 +15,13 @@
 //! oauth.start("onedrive", alias);
 //! themes.color("primary");
 //! rpc.call("onedrive:list", { ... });   // view → its backend
-//! get(context.storageId$);              // null = create, id = edit
+//! store.get(context.storageId$);        // null = create, id = edit
 //! ```
 //!
 //! The `context` namespace additionally carries `storageId$` — a
 //! `Readable<string|null>` source minted per-instance from
-//! [`PluginInstance`] via [`PluginContext::reactive`] (tur #189), seeded
-//! before this `register` runs (instance_data is populated first).
+//! [`PluginInstance`] via [`PluginRegisterContext::reactive`] (tur #189),
+//! seeded before this `register` runs (instance_data is populated first).
 //!
 //! Installed alongside `TurStdPlugin` / `TurAnimationPlugin` /
 //! `TurClipboardPlugin` / `TurNetPlugin` (the standard tur set) by
@@ -35,7 +35,7 @@ use tur_engine::core::edgy::reactive::ReactiveBridgeStore;
 use tur_engine::core::js_runtime::helpers::ConstEntry;
 use tur_engine::core::js_runtime::js_value::IntoJs;
 use tur_engine::core::js_runtime::module_loader::bound_native;
-use tur_engine::core::plugin::{Plugin, PluginContext};
+use tur_engine::core::plugin::{Plugin, PluginRegisterContext};
 use tur_engine::error::TurError;
 
 use super::{context_bridge, db_bridge, oauth_bridge, rpc_bridge, secret_bridge, themes_bridge};
@@ -50,7 +50,7 @@ impl Default for EaseMusicPlugin {
 }
 
 impl Plugin for EaseMusicPlugin {
-    fn register(&self, ctx: &mut PluginContext<'_>) -> Result<(), TurError> {
+    fn register(&self, ctx: &mut PluginRegisterContext<'_>) -> Result<(), TurError> {
         // Read the per-instance storage identity + mint the `storageId$`
         // source BEFORE borrowing `boa_mut()` — `ctx.reactive()` and
         // `ctx.js_ctx.data::<PluginInstance>()` are shared borrows, while
@@ -58,8 +58,9 @@ impl Plugin for EaseMusicPlugin {
         // with the instance's `plugin_storage_id` (null for create-mode
         // views + headless backends); it never changes for the instance
         // lifetime, so a `source` (not `derived`) is correct. Per-instance
-        // isolation is automatic: `register` re-runs in each instance's own
-        // store, seeded from its own `PluginInstance`.
+        // isolation is automatic: `register` re-runs in each instance, whose
+        // values materialize into that instance's single engine-created
+        // store (tur #207), seeded from its own `PluginInstance`.
         let instance_id = ctx
             .js_ctx()
             .data::<PluginInstance>()
@@ -69,7 +70,7 @@ impl Plugin for EaseMusicPlugin {
             Some(s) => JsValue::from(js_string!(s.as_str())),
             None => JsValue::null(),
         };
-        let storage_id_src = bridge.source::<JsValue>(id_value);
+        let storage_id_src = bridge.decl_source::<JsValue>(id_value);
 
         // Clone the ctx value BEFORE mutably borrowing `boa` — the build
         // loop below needs both simultaneously.

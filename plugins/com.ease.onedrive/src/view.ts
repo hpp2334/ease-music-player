@@ -28,8 +28,8 @@ import {
     Color, Column, Container, CrossAxisAlignment,
     HitTestBehavior, Input, MainAxisAlignment, MainAxisSize,
     PointerInteract, Row, SizedBox, Text, createTextEditingController,
-    get, mutate, mount, view, viewportSize$,
-    type Readable,
+    derive, mutate, mount, view, viewportSize$,
+    type Readable, type Store,
 } from "tur:std";
 import { db, oauth, context, themes } from "ease";
 
@@ -51,29 +51,43 @@ const COLOR_DIVIDER = themed("outlineVariant", "#E2E8F0");
 const COLOR_WHITE = Color.hex("#FFFFFF");
 
 // --- mode + prefilled config ---------------------------------------------
+//
+// Hydration happens in `start({ store })` (before mount): reactive reads
+// need a store since the multi-store model removed the free module-level
+// `get`. These module-level `let`s are consumed only from inside the
+// `view()` thunk and the button factories, which run at mount time — after
+// hydration.
 
-const storageId = get(context.storageId$);
-const isEdit = storageId !== null;
-
-// In edit mode, hydrate the alias + secretId from the plugin's kv config so
-// the field is prefilled and Save preserves the existing secret reference.
-let initialAlias = "";
+let storageId: string | null = null;
+let isEdit = false;
 let existingSecretId: number | null = null;
-if (isEdit) {
-    const raw = db.singleGet(`storage:${storageId}`);
-    if (raw != null) {
-        try {
-            const cfg = JSON.parse(raw);
-            initialAlias = cfg.alias ?? "";
-            existingSecretId = cfg.secretId ?? null;
-        } catch {
-            /* corrupt config — start blank */
+
+// Placeholder replaced by `hydrate()` once the alias is known; the
+// placeholder controller is never attached to any Input.
+let aliasController = createTextEditingController({ initialText: "" });
+
+function hydrate(store: Store): void {
+    storageId = store.get(context.storageId$);
+    isEdit = storageId !== null;
+
+    // In edit mode, hydrate the alias + secretId from the plugin's kv config
+    // so the field is prefilled and Save preserves the existing secret
+    // reference.
+    let initialAlias = "";
+    if (isEdit) {
+        const raw = db.singleGet(`storage:${storageId}`);
+        if (raw != null) {
+            try {
+                const cfg = JSON.parse(raw);
+                initialAlias = cfg.alias ?? "";
+                existingSecretId = cfg.secretId ?? null;
+            } catch {
+                /* corrupt config — start blank */
+            }
         }
     }
+    aliasController = createTextEditingController({ initialText: initialAlias });
 }
-
-// Single controller for the alias field. Read via `.text` at button-tap time.
-const aliasController = createTextEditingController({ initialText: initialAlias });
 
 function FieldLabel({ text }: { text: string }) {
     return Text({
@@ -157,8 +171,9 @@ function SaveButton() {
 const rootView = view(() => {
     // NOTE: `@tur-ng/std`'s d.ts references `Derived` without importing it, so
     // `viewportSize$` degrades to `any`/`unknown` at the call site; cast to the
-    // documented `{ width, height }` shape.
-    const vp = get(viewportSize$ as unknown as Readable<{ width: number; height: number }>);
+    // documented `{ width, height }` shape. The reads are `derive` closures so
+    // the page tracks viewport changes (the thunk itself runs once at mount).
+    const vp$ = viewportSize$ as unknown as Readable<{ width: number; height: number }>;
     const actionRow = Row({
         mainAlignment: MainAxisAlignment.Start,
         crossAlignment: CrossAxisAlignment.Center,
@@ -167,8 +182,8 @@ const rootView = view(() => {
     });
     return Container({
         color: COLOR_CARD,
-        width: vp.width,
-        height: vp.height,
+        width: derive((ctx) => ctx.get(vp$).width),
+        height: derive((ctx) => ctx.get(vp$).height),
         padding: 4,
         children: [
             Column({
@@ -186,10 +201,13 @@ const rootView = view(() => {
     });
 });
 
-// Module lifecycle contract: mount inside `start()` (the engine runs the
-// returned cleanup before the next load / at destroy). The root-tree
-// lifecycle is engine-owned — `mount` replaces any existing root and module
-// teardown clears it — so no cleanup is returned.
-export function start(): void {
+// Module lifecycle contract: mount inside `start({ store })` (the engine
+// runs the returned cleanup before the next load / at destroy; it hands us
+// the instance-owned store — one per instance since tur #207, no
+// `createStore`). The root-tree lifecycle is engine-owned — `mount`
+// replaces any existing root and module teardown clears it — so no cleanup
+// is returned.
+export function start({ store }: { store: Store }): void {
+    hydrate(store);
     mount(rootView);
 }

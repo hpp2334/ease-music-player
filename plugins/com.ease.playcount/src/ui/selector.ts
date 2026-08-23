@@ -23,12 +23,10 @@ import {
     CrossAxisAlignment,
     MainAxisSize,
     derive,
-    get,
-    set,
     mutate,
     source,
 } from "tur:std";
-import type { Source, Readable, Element } from "tur:core";
+import type { Source, Readable, Element, StoreCtx } from "tur:core";
 
 export interface SelectorOption<T> {
     value: T;
@@ -66,7 +64,9 @@ export interface SelectorHandle<T> {
 export interface CreateSelectorOptions<T> {
     options: SelectorOption<T>[];
     selectedValue$: Readable<T>;
-    onSelect: (value: T) => void;
+    /** Invoked with the click's store ctx — dispatch a mutation via
+     *  `ctx.set(...)`; there is no module-level store to write through. */
+    onSelect: (ctx: StoreCtx, value: T) => void;
     label$?: Readable<string>;
     gap?: number;
     menuWidth?: number;
@@ -89,8 +89,8 @@ export function createSelector<T>(
 
     const label$: Readable<string> =
         opts.label$ ??
-        derive(() => {
-            const v = get(opts.selectedValue$);
+        derive((ctx) => {
+            const v = ctx.get(opts.selectedValue$);
             const o = opts.options.find((x) => x.value === v);
             return o ? o.label : "";
         });
@@ -137,19 +137,19 @@ export function createSelector<T>(
 
     function OptionRow(option: SelectorOption<T>): Element {
         const selected$ = derive(
-            () => get(opts.selectedValue$) === option.value,
+            (ctx) => ctx.get(opts.selectedValue$) === option.value,
         );
         return PointerInteract({
             behavior: HitTestBehavior.Opaque,
             onClick: mutate((ctx) => {
                 ctx.set(open$, false);
                 if (ctx.get(opts.selectedValue$) !== option.value) {
-                    opts.onSelect(option.value);
+                    opts.onSelect(ctx, option.value);
                 }
             }),
             child: Container({
-                color: derive(() =>
-                    get(selected$) ? style.primarySoft : style.surface,
+                color: derive((ctx) =>
+                    ctx.get(selected$) ? style.primarySoft : style.surface,
                 ),
                 borderRadius: 10,
                 padding: 10,
@@ -161,8 +161,8 @@ export function createSelector<T>(
                             Text({
                                 text: option.label,
                                 fontSize: 13,
-                                color: derive(() =>
-                                    get(selected$)
+                                color: derive((ctx) =>
+                                    ctx.get(selected$)
                                         ? style.primary
                                         : style.text,
                                 ),

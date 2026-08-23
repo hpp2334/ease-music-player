@@ -31,6 +31,24 @@ class TurInstance(
     private val handleCell: AtomicLong = AtomicLong(handle)
     private val handle: Long get() = handleCell.get()
 
+    private var bootAt = 0L
+    private var firstPumpLogged = false
+
+    /** Perf instrumentation: stamp instance-spawn completion (TurPerf). */
+    fun markBoot() {
+        bootAt = android.os.SystemClock.elapsedRealtime()
+    }
+
+    /** Perf instrumentation: log time from boot stamp to the first engine pump (TurPerf). */
+    fun markFirstPump() {
+        if (firstPumpLogged || bootAt == 0L) return
+        firstPumpLogged = true
+        android.util.Log.d(
+            "TurPerf",
+            "first pump: ${android.os.SystemClock.elapsedRealtime() - bootAt}ms after loadModule (module eval + mount + render)",
+        )
+    }
+
     init {
         // Wire the frame loop's wake callbacks to pump this instance. Done
         // at construction (the instance already exists by the time the handle
@@ -93,13 +111,13 @@ class TurInstance(
     }
 
     /**
-     * Whether the focused element is an editable text field. Read from the
-     * [FrameLoop]'s retained value (pushed from native via
-     * `FrameLoop.onFocusChanged`), so this is a cheap Kotlin field read — no
-     * JNI round-trip.
+     * Whether an editable text field is focused (an active text-input / IME
+     * session). Read from the [FrameLoop]'s retained value (pushed from
+     * native via `FrameLoop.onTextInputChanged`), so this is a cheap Kotlin
+     * field read — no JNI round-trip.
      */
-    fun focusedIsEditable(): Boolean =
-        handle != 0L && frameLoop.focusedIsEditable
+    fun textInputActive(): Boolean =
+        handle != 0L && frameLoop.textInputActive
 
     /**
      * Push an IME composition event. [kind]: `0=Start`, `1=Update`, `2=End`.

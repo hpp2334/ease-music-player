@@ -26,10 +26,9 @@ import {
     Color, Condition, Column, Container, CrossAxisAlignment,
     HitTestBehavior, Input, MainAxisAlignment, MainAxisSize,
     PointerInteract, Row, SizedBox, Text, createTextEditingController,
-    derive, get, launch, mutate, mount, source, view, viewportSize$,
-    type Readable,
+    derive, launch, mutate, mount, source, view, viewportSize$,
+    type Readable, type Store, type StoreCtx,
 } from "tur:std";
-import type { StoreCtx } from "tur:core";
 import { db, rpc, context, themes } from "ease";
 
 const PROVIDER = "webdav";
@@ -51,37 +50,57 @@ const COLOR_ERROR = themed("error", "#B3261E");
 const COLOR_WHITE = Color.hex("#FFFFFF");
 
 // --- mode + prefilled config ---------------------------------------------
+//
+// Hydration happens in `start({ store })` (before mount): reactive reads
+// need a store since the multi-store model removed the free module-level
+// `get`. These module-level `let`s are consumed only from inside the
+// `view()` thunk and factories, which run at mount time — after hydration.
 
-const storageId = get(context.storageId$);
-const isEdit = storageId !== null;
+let storageId: string | null = null;
+let isEdit = false;
+let initialAnon = false;
 
-let initialAlias = "";
-let initialAddr = "";
-let initialUsername = "";
-let initialAnonymous = false;
-if (isEdit) {
-    const raw = db.singleGet(`storage:${storageId}`);
-    if (raw != null) {
-        try {
-            const cfg = JSON.parse(raw);
-            initialAlias = cfg.alias ?? "";
-            initialAddr = cfg.addr ?? "";
-            initialUsername = cfg.username ?? "";
-            initialAnonymous = !!cfg.isAnonymous;
-        } catch {
-            /* corrupt config — start blank */
-        }
-    }
-}
-
-// Controllers (read via `.text` at button-tap time).
-const aliasController = createTextEditingController({ initialText: initialAlias });
-const addrController = createTextEditingController({ initialText: initialAddr });
-const usernameController = createTextEditingController({ initialText: initialUsername });
+// Placeholders replaced by `hydrate()` once the config is known; the
+// placeholder controllers are never attached to any Input.
+let aliasController = createTextEditingController({ initialText: "" });
+let addrController = createTextEditingController({ initialText: "" });
+let usernameController = createTextEditingController({ initialText: "" });
 const passwordController = createTextEditingController({ initialText: "" });
 
-// Local reactive state.
-const anonymous = source(initialAnonymous);
+function hydrate(store: Store): void {
+    storageId = store.get(context.storageId$);
+    isEdit = storageId !== null;
+
+    let initialAlias = "";
+    let initialAddr = "";
+    let initialUsername = "";
+    initialAnon = false;
+    if (isEdit) {
+        const raw = db.singleGet(`storage:${storageId}`);
+        if (raw != null) {
+            try {
+                const cfg = JSON.parse(raw);
+                initialAlias = cfg.alias ?? "";
+                initialAddr = cfg.addr ?? "";
+                initialUsername = cfg.username ?? "";
+                initialAnon = !!cfg.isAnonymous;
+            } catch {
+                /* corrupt config — start blank */
+            }
+        }
+    }
+    aliasController = createTextEditingController({ initialText: initialAlias });
+    addrController = createTextEditingController({ initialText: initialAddr });
+    usernameController = createTextEditingController({ initialText: initialUsername });
+    // The `anonymous` source declaration is seeded `false` at eval time;
+    // write the hydrated value into the store (before mount, so the first
+    // render sees it). Writes are equality-gated, so false→false is a no-op.
+    store.set(anonymous, initialAnon);
+}
+
+// Local reactive state (declarations — materialized into the instance store
+// that `start({ store })` received).
+const anonymous = source(false);
 const busy = source(false);
 const statusText = source("");
 const statusIsError = source(false);
@@ -206,8 +225,8 @@ interface ConnectArgs {
     isAnonymous?: boolean;
 }
 
-function collectArgs(): ConnectArgs {
-    const isAnon = get(anonymous);
+function collectArgs(ctx: StoreCtx): ConnectArgs {
+    const isAnon = ctx.get(anonymous);
     return {
         ...(isEdit && storageId != null ? { instance: storageId } : {}),
         addr: (addrController.text ?? "").trim(),
@@ -227,7 +246,7 @@ function validate(args: ConnectArgs): string | null {
 }
 
 function runTest(ctx: StoreCtx): void {
-    const args = collectArgs();
+    const args = collectArgs(ctx);
     const invalid = validate(args);
     if (invalid != null) {
         setStatus(ctx, invalid, true);
@@ -256,7 +275,7 @@ function runTest(ctx: StoreCtx): void {
 }
 
 function save(ctx: StoreCtx): void {
-    const args = collectArgs();
+    const args = collectArgs(ctx);
     const invalid = validate(args);
     if (invalid != null) {
         setStatus(ctx, invalid, true);
@@ -285,27 +304,28 @@ function save(ctx: StoreCtx): void {
 // NOTE: `view(fn)` builds ONCE — the thunk is not reactive. All dynamic UI
 // therefore goes through reactive props: `Val<T>` positions accept Readables
 // (`Source` / `Derived`) and re-render when they change; `Condition` swaps
-// its child. Closure `get()`s here run exactly once at build time.
+// its child. Reads inside `derive` closures go through the store ctx.
 
-const anonChecked$ = derive(() => get(anonymous));
-const showCreds$ = derive(() => !get(anonymous));
-const statusVisible$ = derive(() => get(statusText) !== "");
-const statusIsError$ = derive(() => get(statusIsError));
-const checkFill$ = derive(() => (get(anonymous) ? COLOR_PRIMARY : COLOR_CARD));
-const checkBorder$ = derive(() => (get(anonymous) ? COLOR_PRIMARY : COLOR_DIVIDER));
-const checkText$ = derive(() => (get(anonymous) ? COLOR_TEXT : COLOR_TEXT_MUTED));
-const statusColor$ = derive(() => (get(statusIsError) ? COLOR_ERROR : COLOR_TEXT_MUTED));
+const anonChecked$ = derive((ctx) => ctx.get(anonymous));
+const showCreds$ = derive((ctx) => !ctx.get(anonymous));
+const statusVisible$ = derive((ctx) => ctx.get(statusText) !== "");
+const statusIsError$ = derive((ctx) => ctx.get(statusIsError));
+const checkFill$ = derive((ctx) => (ctx.get(anonymous) ? COLOR_PRIMARY : COLOR_CARD));
+const checkBorder$ = derive((ctx) => (ctx.get(anonymous) ? COLOR_PRIMARY : COLOR_DIVIDER));
+const checkText$ = derive((ctx) => (ctx.get(anonymous) ? COLOR_TEXT : COLOR_TEXT_MUTED));
+const statusColor$ = derive((ctx) => (ctx.get(statusIsError) ? COLOR_ERROR : COLOR_TEXT_MUTED));
 
 const rootView = view(() => {
     // NOTE: `@tur-ng/std`'s d.ts references `Derived` without importing it, so
     // `viewportSize$` degrades to `any`/`unknown` at the call site; cast to the
-    // documented `{ width, height }` shape.
-    const vp = get(viewportSize$ as unknown as Readable<{ width: number; height: number }>);
+    // documented `{ width, height }` shape. The reads are `derive` closures so
+    // the page tracks viewport changes (the thunk itself runs once at mount).
+    const vp$ = viewportSize$ as unknown as Readable<{ width: number; height: number }>;
 
     return Container({
         color: COLOR_CARD,
-        width: vp.width,
-        height: vp.height,
+        width: derive((ctx) => ctx.get(vp$).width),
+        height: derive((ctx) => ctx.get(vp$).height),
         padding: 4,
         children: [
             Column({
@@ -369,10 +389,13 @@ const rootView = view(() => {
     });
 });
 
-// Module lifecycle contract: mount inside `start()` (the engine runs the
-// returned cleanup before the next load / at destroy). The root-tree
-// lifecycle is engine-owned — `mount` replaces any existing root and module
-// teardown clears it — so no cleanup is returned.
-export function start(): void {
+// Module lifecycle contract: mount inside `start({ store })` (the engine
+// runs the returned cleanup before the next load / at destroy; it hands us
+// the instance-owned store — one per instance since tur #207, no
+// `createStore`). The root-tree lifecycle is engine-owned — `mount`
+// replaces any existing root and module teardown clears it — so no cleanup
+// is returned.
+export function start({ store }: { store: Store }): void {
+    hydrate(store);
     mount(rootView);
 }
