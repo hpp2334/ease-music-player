@@ -94,8 +94,11 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         (Idle, LoadRequested) => Loading,
         (Idle, StopRequested) => Idle, // no-op
         // Load/Play/Pause are illegal before any source is loaded.
-        (Idle, LoadCompleted | PlayRequested | PauseRequested | BufferUnderrun |
-         BufferRefilled | EndOfStream) => {
+        (
+            Idle,
+            LoadCompleted | PlayRequested | PauseRequested | BufferUnderrun | BufferRefilled
+            | EndOfStream,
+        ) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Idle"
             )));
@@ -211,8 +214,16 @@ mod tests {
 
     #[test]
     fn idle_legal() {
-        legal(PlayerState::Idle, WorkerEvent::LoadRequested, PlayerState::Loading);
-        legal(PlayerState::Idle, WorkerEvent::StopRequested, PlayerState::Idle);
+        legal(
+            PlayerState::Idle,
+            WorkerEvent::LoadRequested,
+            PlayerState::Loading,
+        );
+        legal(
+            PlayerState::Idle,
+            WorkerEvent::StopRequested,
+            PlayerState::Idle,
+        );
         legal(PlayerState::Idle, WorkerEvent::Failed, PlayerState::Error);
     }
 
@@ -232,13 +243,37 @@ mod tests {
 
     #[test]
     fn loading_legal() {
-        legal(PlayerState::Loading, WorkerEvent::LoadCompleted, PlayerState::Paused);
-        legal(PlayerState::Loading, WorkerEvent::StopRequested, PlayerState::Idle);
-        legal(PlayerState::Loading, WorkerEvent::Failed, PlayerState::Error);
+        legal(
+            PlayerState::Loading,
+            WorkerEvent::LoadCompleted,
+            PlayerState::Paused,
+        );
+        legal(
+            PlayerState::Loading,
+            WorkerEvent::StopRequested,
+            PlayerState::Idle,
+        );
+        legal(
+            PlayerState::Loading,
+            WorkerEvent::Failed,
+            PlayerState::Error,
+        );
         // Pre-emptive play/pause during load: stay in Loading.
-        legal(PlayerState::Loading, WorkerEvent::PlayRequested, PlayerState::Loading);
-        legal(PlayerState::Loading, WorkerEvent::PauseRequested, PlayerState::Loading);
-        legal(PlayerState::Loading, WorkerEvent::LoadRequested, PlayerState::Loading);
+        legal(
+            PlayerState::Loading,
+            WorkerEvent::PlayRequested,
+            PlayerState::Loading,
+        );
+        legal(
+            PlayerState::Loading,
+            WorkerEvent::PauseRequested,
+            PlayerState::Loading,
+        );
+        legal(
+            PlayerState::Loading,
+            WorkerEvent::LoadRequested,
+            PlayerState::Loading,
+        );
     }
 
     #[test]
@@ -254,49 +289,149 @@ mod tests {
 
     #[test]
     fn paused_legal() {
-        legal(PlayerState::Paused, WorkerEvent::PlayRequested, PlayerState::Playing);
-        legal(PlayerState::Paused, WorkerEvent::PauseRequested, PlayerState::Paused);
-        legal(PlayerState::Paused, WorkerEvent::StopRequested, PlayerState::Idle);
-        legal(PlayerState::Paused, WorkerEvent::EndOfStream, PlayerState::Ended);
+        legal(
+            PlayerState::Paused,
+            WorkerEvent::PlayRequested,
+            PlayerState::Playing,
+        );
+        legal(
+            PlayerState::Paused,
+            WorkerEvent::PauseRequested,
+            PlayerState::Paused,
+        );
+        legal(
+            PlayerState::Paused,
+            WorkerEvent::StopRequested,
+            PlayerState::Idle,
+        );
+        legal(
+            PlayerState::Paused,
+            WorkerEvent::EndOfStream,
+            PlayerState::Ended,
+        );
         legal(PlayerState::Paused, WorkerEvent::Failed, PlayerState::Error);
-        legal(PlayerState::Paused, WorkerEvent::LoadRequested, PlayerState::Loading);
+        legal(
+            PlayerState::Paused,
+            WorkerEvent::LoadRequested,
+            PlayerState::Loading,
+        );
     }
 
     #[test]
     fn playing_legal() {
-        legal(PlayerState::Playing, WorkerEvent::PauseRequested, PlayerState::Paused);
-        legal(PlayerState::Playing, WorkerEvent::StopRequested, PlayerState::Idle);
-        legal(PlayerState::Playing, WorkerEvent::BufferUnderrun, PlayerState::Buffering);
-        legal(PlayerState::Playing, WorkerEvent::EndOfStream, PlayerState::Ended);
-        legal(PlayerState::Playing, WorkerEvent::Failed, PlayerState::Error);
-        legal(PlayerState::Playing, WorkerEvent::LoadRequested, PlayerState::Loading);
-        legal(PlayerState::Playing, WorkerEvent::PlayRequested, PlayerState::Playing);
+        legal(
+            PlayerState::Playing,
+            WorkerEvent::PauseRequested,
+            PlayerState::Paused,
+        );
+        legal(
+            PlayerState::Playing,
+            WorkerEvent::StopRequested,
+            PlayerState::Idle,
+        );
+        legal(
+            PlayerState::Playing,
+            WorkerEvent::BufferUnderrun,
+            PlayerState::Buffering,
+        );
+        legal(
+            PlayerState::Playing,
+            WorkerEvent::EndOfStream,
+            PlayerState::Ended,
+        );
+        legal(
+            PlayerState::Playing,
+            WorkerEvent::Failed,
+            PlayerState::Error,
+        );
+        legal(
+            PlayerState::Playing,
+            WorkerEvent::LoadRequested,
+            PlayerState::Loading,
+        );
+        legal(
+            PlayerState::Playing,
+            WorkerEvent::PlayRequested,
+            PlayerState::Playing,
+        );
     }
 
     #[test]
     fn buffering_legal() {
-        legal(PlayerState::Buffering, WorkerEvent::BufferRefilled, PlayerState::Playing);
-        legal(PlayerState::Buffering, WorkerEvent::PauseRequested, PlayerState::Paused);
-        legal(PlayerState::Buffering, WorkerEvent::StopRequested, PlayerState::Idle);
-        legal(PlayerState::Buffering, WorkerEvent::EndOfStream, PlayerState::Ended);
-        legal(PlayerState::Buffering, WorkerEvent::Failed, PlayerState::Error);
-        legal(PlayerState::Buffering, WorkerEvent::LoadRequested, PlayerState::Loading);
-        legal(PlayerState::Buffering, WorkerEvent::BufferUnderrun, PlayerState::Buffering);
+        legal(
+            PlayerState::Buffering,
+            WorkerEvent::BufferRefilled,
+            PlayerState::Playing,
+        );
+        legal(
+            PlayerState::Buffering,
+            WorkerEvent::PauseRequested,
+            PlayerState::Paused,
+        );
+        legal(
+            PlayerState::Buffering,
+            WorkerEvent::StopRequested,
+            PlayerState::Idle,
+        );
+        legal(
+            PlayerState::Buffering,
+            WorkerEvent::EndOfStream,
+            PlayerState::Ended,
+        );
+        legal(
+            PlayerState::Buffering,
+            WorkerEvent::Failed,
+            PlayerState::Error,
+        );
+        legal(
+            PlayerState::Buffering,
+            WorkerEvent::LoadRequested,
+            PlayerState::Loading,
+        );
+        legal(
+            PlayerState::Buffering,
+            WorkerEvent::BufferUnderrun,
+            PlayerState::Buffering,
+        );
     }
 
     #[test]
     fn ended_legal() {
-        legal(PlayerState::Ended, WorkerEvent::LoadRequested, PlayerState::Loading);
-        legal(PlayerState::Ended, WorkerEvent::StopRequested, PlayerState::Idle);
+        legal(
+            PlayerState::Ended,
+            WorkerEvent::LoadRequested,
+            PlayerState::Loading,
+        );
+        legal(
+            PlayerState::Ended,
+            WorkerEvent::StopRequested,
+            PlayerState::Idle,
+        );
         legal(PlayerState::Ended, WorkerEvent::Failed, PlayerState::Error);
-        legal(PlayerState::Ended, WorkerEvent::PlayRequested, PlayerState::Ended);
-        legal(PlayerState::Ended, WorkerEvent::PauseRequested, PlayerState::Ended);
+        legal(
+            PlayerState::Ended,
+            WorkerEvent::PlayRequested,
+            PlayerState::Ended,
+        );
+        legal(
+            PlayerState::Ended,
+            WorkerEvent::PauseRequested,
+            PlayerState::Ended,
+        );
     }
 
     #[test]
     fn error_legal() {
-        legal(PlayerState::Error, WorkerEvent::LoadRequested, PlayerState::Loading);
-        legal(PlayerState::Error, WorkerEvent::StopRequested, PlayerState::Idle);
+        legal(
+            PlayerState::Error,
+            WorkerEvent::LoadRequested,
+            PlayerState::Loading,
+        );
+        legal(
+            PlayerState::Error,
+            WorkerEvent::StopRequested,
+            PlayerState::Idle,
+        );
     }
 
     #[test]

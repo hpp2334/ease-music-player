@@ -1,19 +1,20 @@
 //! Tests for `cantode::probe_metadata`.
 
-use cantode::{probe_metadata, AudioSource, MemoryAudioSource, PlayerContext};
+use cantode::{AudioSource, MemoryAudioSource, PlayerContext, probe_metadata};
 
 mod common;
 
 #[test]
 fn probe_wav_reports_format_and_duration() {
     let cx = PlayerContext::new().unwrap();
-    let probe_src: Box<dyn AudioSource> =
-        Box::new(MemoryAudioSource::new(common::make_sine_wav(common::WavSpec {
+    let probe_src: Box<dyn AudioSource> = Box::new(MemoryAudioSource::new(common::make_sine_wav(
+        common::WavSpec {
             sample_rate: 44_100,
             channels: 1,
             seconds: 1.0,
             freq: 440.0,
-        })));
+        },
+    )));
 
     let meta = probe_metadata(&cx, probe_src).unwrap();
     assert_eq!(meta.format.sample_rate, 44_100);

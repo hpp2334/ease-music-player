@@ -8,9 +8,9 @@
 //! [`ChannelEventSink`] is a ready-made implementation that fans events
 //! out to multiple receivers via bounded mpsc channels.
 
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
-use crate::{state::PlayerState, CantodeError, Metadata};
+use crate::{CantodeError, Metadata, state::PlayerState};
 
 /// Something that happened inside a player.
 ///

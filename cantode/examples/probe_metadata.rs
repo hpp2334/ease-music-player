@@ -11,7 +11,7 @@
 
 use std::{env, error::Error, fs, process::ExitCode, time::Duration};
 
-use cantode::{probe_metadata, AudioSource, MemoryAudioSource, PlayerContext};
+use cantode::{AudioSource, MemoryAudioSource, PlayerContext, probe_metadata};
 
 fn main() -> ExitCode {
     let paths: Vec<String> = env::args().skip(1).collect();

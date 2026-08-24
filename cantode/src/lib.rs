@@ -74,10 +74,10 @@ pub mod state;
 // ----- public re-exports -----
 
 pub use context::{PlayerContext, PlayerContextConfig};
-pub use decoder::{AudioFormat, Decoder, DecoderFactory, DecodedFrame};
+pub use decoder::{AudioFormat, DecodedFrame, Decoder, DecoderFactory};
 pub use error::{CantodeError, Result};
 pub use events::{ChannelEventSink, EventSink, NullEventSink, PlayerEvent};
-pub use metadata::{probe_metadata, CoverArt, Metadata, Tag};
+pub use metadata::{CoverArt, Metadata, Tag, probe_metadata};
 pub use player::{Player, PlayerConfig};
 pub use source::{AudioSource, MemoryAudioSource};
 pub use state::PlayerState;

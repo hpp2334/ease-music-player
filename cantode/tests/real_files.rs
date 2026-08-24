@@ -21,16 +21,10 @@
 
 #![allow(clippy::needless_pass_by_value)]
 
-use std::{
-    fs,
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{fs, path::PathBuf, sync::Arc, time::Duration};
 
 use cantode::{
-    AudioSource, MemoryAudioSource, Player, PlayerConfig, PlayerContext, PlayerEvent,
-    PlayerState,
+    AudioSource, MemoryAudioSource, Player, PlayerConfig, PlayerContext, PlayerEvent, PlayerState,
 };
 
 mod common;
@@ -152,8 +146,7 @@ fn exercise_file(case: Case) {
         .load(src)
         .unwrap_or_else(|e| panic!("Player::load({}) failed: {e:?}", case.file));
     assert_eq!(
-        load_meta.duration,
-        meta.duration,
+        load_meta.duration, meta.duration,
         "{}: load duration disagrees with probe duration",
         case.file
     );
@@ -183,11 +176,7 @@ fn exercise_file(case: Case) {
             break;
         }
     }
-    assert!(
-        saw_playing,
-        "{}: never observed Playing state",
-        case.file
-    );
+    assert!(saw_playing, "{}: never observed Playing state", case.file);
     assert!(
         player.position() >= target,
         "{}: position only reached {:?} in 3s; cpal callback may not be draining",

@@ -13,22 +13,22 @@
 
 use std::{
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
     time::Duration,
 };
 
 use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait},
     Sample, SizedSample, Stream, StreamConfig, SupportedStreamConfig,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use ringbuf::{
-    traits::{Consumer, Observer, Producer, Split},
     HeapCons, HeapProd, HeapRb,
+    traits::{Consumer, Observer, Producer, Split},
 };
 
-use crate::{decoder::AudioFormat, output::AudioSink, CantodeError};
+use crate::{CantodeError, decoder::AudioFormat, output::AudioSink};
 
 /// Default ring-buffer capacity, expressed as seconds of audio at the
 /// target sample rate. Two seconds gives the worker plenty of slack to
@@ -107,37 +107,54 @@ impl AudioSink for CpalSink {
         let desired_channels = fmt.channels;
         let supported = pick_supported_config(&device, desired_rate, desired_channels)?;
         let stream_config = supported.config();
-        let actual = AudioFormat::new(
-            stream_config.channels as u16,
-            stream_config.sample_rate,
-        );
+        let actual = AudioFormat::new(stream_config.channels as u16, stream_config.sample_rate);
 
         // Size the ring buffer for `DEFAULT_BUFFER_SECS` of audio.
         let buf_secs = DEFAULT_BUFFER_SECS;
         let cap_samples = (((buf_secs * actual.sample_rate as f32) as usize)
             * actual.channels as usize)
-        .next_power_of_two()
-        .max(1024);
+            .next_power_of_two()
+            .max(1024);
         let rb = HeapRb::<f32>::new(cap_samples);
         let (producer, consumer) = rb.split();
 
         let volume = self.volume.clone();
         let flush_gen = self.flush_gen.clone();
         let stream = match supported.sample_format() {
-            cpal::SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::U16 => build_stream::<u16>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::F64 => build_stream::<f64>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::I32 => build_stream::<i32>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::U32 => build_stream::<u32>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::I8 => build_stream::<i8>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::U8 => build_stream::<u8>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::I64 => build_stream::<i64>(&device, &stream_config, consumer, volume, flush_gen)?,
-            cpal::SampleFormat::U64 => build_stream::<u64>(&device, &stream_config, consumer, volume, flush_gen)?,
+            cpal::SampleFormat::F32 => {
+                build_stream::<f32>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::I16 => {
+                build_stream::<i16>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::U16 => {
+                build_stream::<u16>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::F64 => {
+                build_stream::<f64>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::I32 => {
+                build_stream::<i32>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::U32 => {
+                build_stream::<u32>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::I8 => {
+                build_stream::<i8>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::U8 => {
+                build_stream::<u8>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::I64 => {
+                build_stream::<i64>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
+            cpal::SampleFormat::U64 => {
+                build_stream::<u64>(&device, &stream_config, consumer, volume, flush_gen)?
+            }
             other => {
                 return Err(CantodeError::StreamConfig(format!(
                     "unsupported sample format: {other:?}"
-                )))
+                )));
             }
         };
 
@@ -326,9 +343,8 @@ fn pick_supported_config(
     }
     // (4) Rate match, any channels/format.
     if let Ok(mut configs) = device.supported_output_configs()
-        && let Some(c) = configs.find(|c| {
-            c.min_sample_rate() <= desired_rate && desired_rate <= c.max_sample_rate()
-        })
+        && let Some(c) = configs
+            .find(|c| c.min_sample_rate() <= desired_rate && desired_rate <= c.max_sample_rate())
     {
         return Ok(c.with_sample_rate(desired_rate));
     }
