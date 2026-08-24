@@ -17,9 +17,7 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use crate::{
-    decoder::DecoderFactory, events::EventSink, CantodeError,
-};
+use crate::{CantodeError, decoder::DecoderFactory, events::EventSink};
 
 use cpal::Host;
 
@@ -114,7 +112,9 @@ impl PlayerContext {
 
     /// Allocate the next worker-thread id/name.
     pub(crate) fn next_worker_name(&self) -> String {
-        let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         format!("cantode-player-{id}")
     }
 

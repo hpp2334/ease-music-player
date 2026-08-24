@@ -22,10 +22,7 @@ mod common;
 /// Build a player wired to the context's global event sink. The cpal sink
 /// is constructed internally by `Player` — no override is possible or
 /// needed.
-fn player_with_events(
-    cx: &PlayerContext,
-    event_sink: Arc<dyn cantode::EventSink>,
-) -> Player {
+fn player_with_events(cx: &PlayerContext, event_sink: Arc<dyn cantode::EventSink>) -> Player {
     let cfg = PlayerConfig {
         event_sink: Some(event_sink),
     };

@@ -18,7 +18,7 @@ use std::time::Duration;
 use symphonia::{
     core::{
         audio::{AudioBufferRef, Channels, SampleBuffer, SignalSpec},
-        codecs::{CodecParameters, Decoder as SymDecoder, DecoderOptions, CODEC_TYPE_NULL},
+        codecs::{CODEC_TYPE_NULL, CodecParameters, Decoder as SymDecoder, DecoderOptions},
         errors::Error as SymError,
         formats::{FormatOptions, FormatReader, SeekMode, SeekTo},
         io::{MediaSource, MediaSourceStream},
@@ -30,8 +30,8 @@ use symphonia::{
 };
 
 use crate::{
-    decoder::{AudioFormat, Decoder, DecoderFactory, DecodedFrame},
     AudioSource, CantodeError, CoverArt, Metadata,
+    decoder::{AudioFormat, DecodedFrame, Decoder, DecoderFactory},
 };
 
 /// A [`DecoderFactory`] that opens sources via symphonia's default probe
@@ -176,11 +176,7 @@ impl SymphoniaDecoder {
         let spec = SignalSpec::new(sample_rate, chans);
         let sample_buf = SampleBuffer::<f32>::new(initial_capacity_frames, spec);
 
-        let metadata = build_metadata(
-            metadata_rev.as_ref(),
-            &codec_params,
-            &format,
-        );
+        let metadata = build_metadata(metadata_rev.as_ref(), &codec_params, &format);
 
         Ok(Self {
             reader,
@@ -200,9 +196,7 @@ impl Decoder for SymphoniaDecoder {
         loop {
             let packet = match self.reader.next_packet() {
                 Ok(p) => p,
-                Err(SymError::IoError(ref e))
-                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-                {
+                Err(SymError::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     return Ok(None);
                 }
                 Err(SymError::ResetRequired) => continue,
@@ -328,10 +322,7 @@ fn build_metadata(
 }
 
 fn tag_to_pair(t: &Tag) -> crate::Tag {
-    let key = t
-        .std_key
-        .map(std_key_name)
-        .unwrap_or_else(|| t.key.clone());
+    let key = t.std_key.map(std_key_name).unwrap_or_else(|| t.key.clone());
     crate::Tag {
         key,
         value: t.value.to_string(),

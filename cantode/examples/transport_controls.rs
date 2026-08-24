@@ -23,9 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use cantode::{
-    AudioSource, CantodeError, MemoryAudioSource, Player, PlayerContext, PlayerState,
-};
+use cantode::{AudioSource, CantodeError, MemoryAudioSource, Player, PlayerContext, PlayerState};
 
 /// Poll cadence for the progress line.
 const POLL: Duration = Duration::from_millis(100);
@@ -56,9 +54,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     let meta = match player.load(source) {
         Ok(meta) => meta,
         Err(CantodeError::NoOutputDevice) => {
-            return Err("no output device — connect one (or install a virtual loopback \
+            return Err(
+                "no output device — connect one (or install a virtual loopback \
                         device; see README \"Testing requirements\")"
-                .into());
+                    .into(),
+            );
         }
         Err(CantodeError::UnsupportedFormat(detail)) => {
             return Err(format!("unsupported format: {detail}").into());

@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use crate::{decoder::AudioFormat, AudioSource, PlayerContext};
+use crate::{AudioSource, PlayerContext, decoder::AudioFormat};
 
 /// Parsed metadata describing an audio source.
 #[derive(Debug, Clone, Default)]

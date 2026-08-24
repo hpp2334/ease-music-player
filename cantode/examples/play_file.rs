@@ -23,13 +23,13 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
     process::ExitCode,
-    sync::{mpsc::RecvTimeoutError, Arc},
+    sync::{Arc, mpsc::RecvTimeoutError},
     time::Duration,
 };
 
 use cantode::{
-    AudioSource, CantodeError, ChannelEventSink, Player, PlayerConfig, PlayerContext,
-    PlayerEvent, PlayerState,
+    AudioSource, CantodeError, ChannelEventSink, Player, PlayerConfig, PlayerContext, PlayerEvent,
+    PlayerState,
 };
 
 fn main() -> ExitCode {
@@ -61,16 +61,23 @@ fn run() -> Result<(), Box<dyn Error>> {
     let events = sink.subscribe();
 
     let cx = PlayerContext::new()?;
-    let player = Player::with_config(&cx, PlayerConfig { event_sink: Some(sink) })?;
+    let player = Player::with_config(
+        &cx,
+        PlayerConfig {
+            event_sink: Some(sink),
+        },
+    )?;
 
     // `load` blocks until the decoder is open and metadata is ready; it
     // does NOT start playback (the player sits in `Paused` afterwards).
     let meta = match player.load(Box::new(FileAudioSource::open(Path::new(&path))?)) {
         Ok(meta) => meta,
         Err(CantodeError::NoOutputDevice) => {
-            return Err("no output device — connect one (or install a virtual loopback \
+            return Err(
+                "no output device — connect one (or install a virtual loopback \
                         device; see README \"Testing requirements\")"
-                .into());
+                    .into(),
+            );
         }
         Err(CantodeError::UnsupportedFormat(detail)) => {
             return Err(format!("unsupported format: {detail}").into());
@@ -82,9 +89,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         "loaded: {} Hz / {} ch, duration {}",
         meta.format.sample_rate,
         meta.format.channels,
-        duration
-            .map(fmt_time)
-            .unwrap_or_else(|| "(unknown)".into())
+        duration.map(fmt_time).unwrap_or_else(|| "(unknown)".into())
     );
 
     player.set_volume(volume)?;
