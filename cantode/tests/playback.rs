@@ -25,6 +25,7 @@ mod common;
 fn player_with_events(cx: &PlayerContext, event_sink: Arc<dyn cantode::EventSink>) -> Player {
     let cfg = PlayerConfig {
         event_sink: Some(event_sink),
+        ..Default::default()
     };
     Player::with_config(cx, cfg).expect("player construction failed")
 }

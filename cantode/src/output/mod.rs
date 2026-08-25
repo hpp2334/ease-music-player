@@ -1,39 +1,43 @@
-//! The output (sink) layer (internal).
+//! The output (sink) layer.
 //!
-//! [`AudioSink`] is an internal abstraction that consumes interleaved `f32`
-//! PCM and pushes it to a destination. The only implementation shipped is
+//! [`AudioSink`] consumes interleaved `f32` PCM and pushes it to a
+//! destination. The only implementation shipped is CpalSink, a
 //! push-based API to cpal's callback-based output via a lock-free ring
-//! buffer.
+//! buffer. It is the default sink the [`Player`](crate::Player) opens for
+//! every loaded source; if the host has no output device, `Player::load`
+//! fails with [`CantodeError::NoOutputDevice`](crate::CantodeError::NoOutputDevice).
 //!
-//! `AudioSink` and `CpalSink` are deliberately `pub(crate)` — embedders
-//! don't select or implement sinks; they just call [`Player`](crate::Player)
-//! and cantode drives the system audio device on their behalf. There is no
-//! "null" sink: tests and embedders run against the real cpal host. If the
-//! host has no output device, `Player::load` fails with
-//! [`CantodeError::NoOutputDevice`](crate::CantodeError::NoOutputDevice).
+//! `AudioSink` is one of cantode's three public plug points (alongside
+//! [`AudioSource`](crate::AudioSource) and
+//! [`Decoder`](crate::Decoder)): pass your own
+//! [`AudioSinkFactory`] via [`PlayerConfig`](crate::PlayerConfig) to
+//! substitute the output destination — capture the PCM for testing, route
+//! it to a platform mixer, and so on — without forking. `CpalSink` itself
+//! is internal: embedders implement the trait rather than construct the
+//! default sink.
 
 pub(crate) mod cpal;
 
 pub(crate) use self::cpal::CpalSink;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::decoder::AudioFormat;
 
-/// A destination for decoded PCM audio. Internal — not part of the public
-/// API. See the module docs for why.
+/// A destination for decoded PCM audio.
 ///
-/// Lifecycle: a sink is created (via [`CpalSinkBuilder`]), then
-/// [`AudioSink::start`] opens the underlying device/stream with a specific
-/// [`AudioFormat`]; [`AudioSink::write`] is called repeatedly to feed PCM;
-/// [`AudioSink::pause`] / [`AudioSink::resume`] gate output; and
-/// [`AudioSink::stop`] closes the stream. Dropping the sink should be
-/// equivalent to `stop()`.
+/// Lifecycle: a sink is created (one per loaded source, via an
+/// [`AudioSinkFactory`]), then [`AudioSink::start`] opens the underlying
+/// device/stream with a specific [`AudioFormat`]; [`AudioSink::write`] is
+/// called repeatedly to feed PCM; [`AudioSink::pause`] /
+/// [`AudioSink::resume`] gate output; and [`AudioSink::stop`] closes the
+/// stream. Dropping the sink should be equivalent to `stop()`.
 ///
 /// The sink must be `Send` because the player worker owns it and may move
 /// it onto its dedicated thread. It need not be `Sync`: only the worker
 /// touches it after `start`.
-pub(crate) trait AudioSink: Send {
+pub trait AudioSink: Send {
     /// Open the underlying stream with the given format.
     ///
     /// The sink should be ready to receive `write` calls immediately on
@@ -84,6 +88,18 @@ pub(crate) trait AudioSink: Send {
     #[allow(dead_code)]
     fn latency(&self) -> Duration;
 }
+
+/// Constructs one [`AudioSink`] per loaded source.
+///
+/// The player worker calls the factory at the start of every
+/// `Player::load`; the returned sink is `start`-ed with the decoded
+/// format and lives until the session is dropped (stop, replace, or
+/// failure). When unset, `Player` uses the default cpal device sink.
+///
+/// Passed to [`PlayerConfig::audio_sink_factory`](crate::PlayerConfig) —
+/// the output-side twin of
+/// [`PlayerContextConfig::decoder_factory`](crate::PlayerContextConfig).
+pub type AudioSinkFactory = Arc<dyn Fn() -> crate::Result<Box<dyn AudioSink>> + Send + Sync>;
 
 /// Convert interleaved f32 PCM from `src_channels` to `dst_channels`,
 /// writing into `out`.
