@@ -15,8 +15,9 @@ use crate::{
 use super::session::Loaded;
 use super::shared::SharedStatus;
 
-/// Decoder stub: reports a fixed format, yields no frames.
-pub(super) struct StubDecoder {
+/// Decoder stub: reports a fixed format, yields no frames. Private to
+/// this module — only `loaded_session` constructs it.
+struct StubDecoder {
     pub(super) fmt: AudioFormat,
 }
 
@@ -70,8 +71,10 @@ impl SinkLog {
     }
 }
 
-pub(super) struct StubSink {
-    pub(super) log: SinkLog,
+/// Sink stub: passes every written sample into a shared `SinkLog`.
+/// Private to this module — only `loaded_session` constructs it.
+struct StubSink {
+    log: SinkLog,
 }
 
 impl AudioSink for StubSink {
