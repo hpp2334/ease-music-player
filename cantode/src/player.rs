@@ -39,6 +39,7 @@ use crate::{
     context::{PlayerContext, PlayerHandle},
     decoder::{DecodedFrame, Decoder},
     events::{EventSink, PlayerEvent},
+    output::AudioSinkFactory,
     state::{PlayerState, WorkerEvent, transition},
 };
 
@@ -105,11 +106,37 @@ pub(crate) enum SeekResult {
 }
 
 /// Configuration for an individual [`Player`].
+///
+/// Acts as a builder: start from [`PlayerConfig::default`] and chain the
+/// setters, then pass to [`Player::with_config`]. All fields are also
+/// public, so struct-update syntax works too.
 #[derive(Default)]
 pub struct PlayerConfig {
     /// Optional per-player event sink, in addition to the
     /// [`PlayerContext`]'s global one.
     pub event_sink: Option<Arc<dyn EventSink>>,
+    /// Optional replacement for the default (cpal device) audio sink.
+    /// The factory is called once per loaded source on the worker thread.
+    ///
+    /// Unset by default. See [`AudioSinkFactory`].
+    pub audio_sink_factory: Option<AudioSinkFactory>,
+}
+
+impl PlayerConfig {
+    /// Set (or clear, with `None`) the per-player event sink.
+    #[must_use]
+    pub fn event_sink(mut self, sink: Option<Arc<dyn EventSink>>) -> Self {
+        self.event_sink = sink;
+        self
+    }
+
+    /// Replace the default cpal device sink with a custom one. The
+    /// factory is called once per loaded source on the worker thread.
+    #[must_use]
+    pub fn audio_sink_factory(mut self, factory: AudioSinkFactory) -> Self {
+        self.audio_sink_factory = Some(factory);
+        self
+    }
 }
 
 /// A handle to one audio playback pipeline.
@@ -143,6 +170,12 @@ impl Player {
         let decoder_factory = Arc::clone(cx.decoder_factory());
         let cx_event_sink = cx.event_sink().cloned();
         let player_event_sink = config.event_sink.clone();
+        // Resolve the sink factory once, on the handle side: custom if
+        // configured, otherwise the default cpal device sink. The worker
+        // calls it at the top of every `load`.
+        let sink_factory: AudioSinkFactory = config
+            .audio_sink_factory
+            .unwrap_or_else(|| Arc::new(|| Ok(Box::new(crate::output::CpalSink::new()))));
 
         let worker_shared = Arc::clone(&shared);
 
@@ -155,6 +188,7 @@ impl Player {
                     decoder_factory,
                     cmd_rx,
                     shared: worker_shared,
+                    sink_factory,
                     sinks: EventSinks {
                         cx: cx_event_sink,
                         player: player_event_sink,
@@ -495,6 +529,9 @@ struct Worker {
     phase: Phase,
     decoder_factory: Arc<dyn crate::decoder::DecoderFactory>,
     cmd_rx: mpsc::Receiver<Command>,
+    /// Constructs the sink for each loaded source (custom, or the default
+    /// cpal device sink when the config didn't provide one).
+    sink_factory: AudioSinkFactory,
     /// Observable projection shared with the `Player` handle.
     shared: Arc<SharedStatus>,
     sinks: EventSinks,
@@ -615,8 +652,16 @@ impl Worker {
         let meta = dec.metadata().clone();
         let fmt = dec.format();
 
-        // Open the cpal output device (default host device).
-        let mut sink: Box<dyn crate::output::AudioSink> = Box::new(crate::output::CpalSink::new());
+        // Construct the sink (custom factory, or the default cpal device)
+        // and open it. Both failure paths mirror each other: transition to
+        // `Error` and propagate.
+        let mut sink: Box<dyn crate::output::AudioSink> = match (self.sink_factory)() {
+            Ok(sink) => sink,
+            Err(e) => {
+                self.apply_worker_event(WorkerEvent::Failed);
+                return Err(e);
+            }
+        };
         let actual_fmt = match sink.start(fmt) {
             Ok(actual_fmt) => actual_fmt,
             Err(e) => {
@@ -986,6 +1031,7 @@ mod tests {
             phase,
             decoder_factory: Arc::new(StubFactory),
             cmd_rx: rx,
+            sink_factory: Arc::new(|| Err(CantodeError::Internal("stub factory".into()))),
             shared,
             sinks: EventSinks {
                 cx: None,

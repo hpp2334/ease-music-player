@@ -135,6 +135,7 @@ fn exercise_file(case: Case) {
         &cx2,
         PlayerConfig {
             event_sink: Some(event_sink),
+            ..Default::default()
         },
     )
     .expect("player construction failed");

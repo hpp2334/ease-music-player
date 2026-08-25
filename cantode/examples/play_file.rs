@@ -65,6 +65,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         &cx,
         PlayerConfig {
             event_sink: Some(sink),
+            ..Default::default()
         },
     )?;
 

@@ -78,14 +78,16 @@ pub use decoder::{AudioFormat, DecodedFrame, Decoder, DecoderFactory};
 pub use error::{CantodeError, Result};
 pub use events::{ChannelEventSink, EventSink, NullEventSink, PlayerEvent};
 pub use metadata::{CoverArt, Metadata, Tag, probe_metadata};
+pub use output::{AudioSink, AudioSinkFactory};
 pub use player::{Player, PlayerConfig};
 pub use source::{AudioSource, MemoryAudioSource};
 pub use state::PlayerState;
 
 pub use decoder::SymphoniaDecoderFactory;
 
-// Note: `AudioSink`, `CpalSink`, `CpalSinkBuilder`, and `NullSink` are
-// intentionally NOT re-exported. The output layer is an internal
-// abstraction; embedders drive audio through `Player` and cantode selects
-// the cpal backend on its own. Tests run against the real cpal host and
-// require an audio device (see `tests/` for the rationale).
+// Note: `CpalSink`, `CpalSinkBuilder`, and `NullSink` are intentionally
+// NOT re-exported. The output *destination* stays an embedder-provided
+// [`AudioSink`] via [`PlayerConfig::audio_sink_factory`]; the default
+// cpal-backed sink cantode builds for itself is internal. Tests run
+// against the real cpal host by default and require an audio device (see
+// `tests/` for the rationale).
