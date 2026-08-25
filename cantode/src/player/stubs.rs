@@ -59,7 +59,7 @@ impl DecoderFactory for StubFactory {
 #[derive(Clone, Default)]
 pub(super) struct SinkLog {
     calls: Arc<Mutex<Vec<String>>>,
-    pub(super) samples: Arc<Mutex<Vec<f32>>>,
+    samples: Arc<Mutex<Vec<f32>>>,
 }
 
 impl SinkLog {
@@ -68,6 +68,10 @@ impl SinkLog {
     }
     pub(super) fn recorded(&self, call: &str) -> bool {
         self.calls.lock().unwrap().iter().any(|c| c == call)
+    }
+    /// The samples written so far.
+    pub(super) fn samples(&self) -> std::sync::MutexGuard<'_, Vec<f32>> {
+        self.samples.lock().unwrap()
     }
 }
 
@@ -117,20 +121,21 @@ pub(super) struct Fixture {
 }
 
 /// Build a `Loaded` session backed by stubs, plus the handles to
-/// observe it (sink call log + shared observables).
+/// observe it (sink call log + shared observables). The stub decoder
+/// reports `src` channels at 48 kHz; the "device" is told `device`
+/// channels to exercise or skip the conversion path.
 pub(super) fn loaded_session(src: u16, device: u16) -> (Loaded, Fixture) {
     let log = SinkLog::default();
     let shared = Arc::new(SharedStatus::new());
-    let loaded = Loaded {
-        decoder: Box::new(StubDecoder {
-            fmt: AudioFormat::new(src, 48_000),
-        }),
-        sink: Box::new(StubSink { log: log.clone() }),
-        src_channels: src,
-        device_channels: device,
-        remix_buf: Vec::new(),
-        ended: false,
-        shared: Arc::clone(&shared),
-    };
+    let decoder = Box::new(StubDecoder {
+        fmt: AudioFormat::new(src, 48_000),
+    });
+    let sink = Box::new(StubSink { log: log.clone() });
+    let loaded = Loaded::new(
+        decoder,
+        sink,
+        AudioFormat::new(device, 48_000),
+        Arc::clone(&shared),
+    );
     (loaded, Fixture { log, shared })
 }

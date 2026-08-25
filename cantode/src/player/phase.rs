@@ -285,7 +285,7 @@ impl Machine {
     fn commit(&mut self, phase: Phase) {
         let state = phase.state();
         self.phase = phase;
-        self.shared.state.store(state);
+        self.shared.set_state(state);
         self.sinks.emit(PlayerEvent::StateChanged(state));
         self.on_phase_changed();
     }
@@ -294,13 +294,13 @@ impl Machine {
     fn on_phase_changed(&mut self) {
         match &mut self.phase {
             Phase::Playing { loaded, .. } => {
-                let _ = loaded.sink.resume();
+                loaded.resume();
             }
             Phase::Paused(loaded) | Phase::Ended(loaded) => {
                 // Pause the sink so the device stops outputting whatever
                 // samples it had buffered (on `Ended`, the tail of the
                 // source).
-                let _ = loaded.sink.pause();
+                loaded.pause();
             }
             // `Buffering` keeps the stream running on purpose: the sink
             // ring buffer drains what it has while the source stalls.
@@ -309,11 +309,10 @@ impl Machine {
     }
 
     /// Test constructor: a machine resting in `Paused` on the given
-    /// session. The shared status is the session's own (they are one
+    /// session, mirroring into the given shared status (they are one
     /// unit in production too).
     #[cfg(test)]
-    pub(super) fn paused(loaded: Loaded) -> Self {
-        let shared = Arc::clone(&loaded.shared);
+    pub(super) fn paused(loaded: Loaded, shared: Arc<SharedStatus>) -> Self {
         Self {
             phase: Phase::Paused(loaded),
             shared,
@@ -399,14 +398,11 @@ mod tests {
         assert!(matches!(phase, Phase::Ended(_)));
 
         // The session survived every move: it's still the same sink (the
-        // log is shared), and it was never stopped or reset.
-        phase
-            .loaded_mut()
-            .expect("Ended carries the session")
-            .sink
-            .write(&[0.5])
-            .unwrap();
-        assert_eq!(fx.log.samples.lock().unwrap().last(), Some(&0.5));
+        // log is shared — a `pause` through the moved session shows up in
+        // it), and it was never stopped or reset.
+        let session = phase.loaded_mut().expect("Ended carries the session");
+        session.pause();
+        assert!(fx.log.recorded("pause"));
         assert!(!fx.log.recorded("stop"));
     }
 
@@ -415,54 +411,51 @@ mod tests {
         // Position/duration reset only on session *exit*, never on a
         // variant-to-variant move (which destructures, not drops).
         let (loaded, fx) = loaded_session(2, 2);
-        fx.shared.position.store(Duration::from_secs(42));
-        *fx.shared.duration.lock().unwrap() = Some(Duration::from_secs(60));
+        fx.shared.set_position(Duration::from_secs(42));
+        fx.shared.set_duration(Some(Duration::from_secs(60)));
 
         let phase = morph(Phase::Paused(loaded), PlayerState::Playing);
         let phase = morph(phase, PlayerState::Buffering);
         let _phase = morph(phase, PlayerState::Ended);
 
-        assert_eq!(fx.shared.position.load(), Duration::from_secs(42));
-        assert_eq!(
-            *fx.shared.duration.lock().unwrap(),
-            Some(Duration::from_secs(60))
-        );
+        assert_eq!(fx.shared.position(), Duration::from_secs(42));
+        assert_eq!(fx.shared.duration(), Some(Duration::from_secs(60)));
     }
 
     #[test]
     fn morph_drops_the_session_on_unloaded_targets() {
         for target in [PlayerState::Idle, PlayerState::Loading, PlayerState::Error] {
             let (loaded, fx) = loaded_session(2, 2);
-            fx.shared.position.store(Duration::from_secs(7));
-            *fx.shared.duration.lock().unwrap() = Some(Duration::from_secs(7));
+            fx.shared.set_position(Duration::from_secs(7));
+            fx.shared.set_duration(Some(Duration::from_secs(7)));
 
             let phase = morph(Phase::Paused(loaded), target);
             assert_eq!(phase.state(), target);
 
             // The drop ran: sink stopped, observables reset.
             assert!(fx.log.recorded("stop"), "sink not stopped for {target:?}");
-            assert_eq!(fx.shared.position.load(), Duration::ZERO);
-            assert_eq!(*fx.shared.duration.lock().unwrap(), None);
+            assert_eq!(fx.shared.position(), Duration::ZERO);
+            assert_eq!(fx.shared.duration(), None);
         }
     }
 
     #[test]
     fn begin_load_discards_the_session_and_publishes_loading() {
         let (loaded, fx) = loaded_session(2, 2);
-        let mut machine = Machine::paused(loaded);
+        let mut machine = Machine::paused(loaded, Arc::clone(&fx.shared));
         // Put the mirror where the phase is, as production would have it.
-        fx.shared.state.store(PlayerState::Paused);
+        fx.shared.set_state(PlayerState::Paused);
 
         machine.begin_load();
 
         // The old session tore down exactly once (stop + observable
         // resets)…
         assert!(fx.log.recorded("stop"));
-        assert_eq!(fx.shared.position.load(), Duration::ZERO);
-        assert!(fx.shared.duration.lock().unwrap().is_none());
+        assert_eq!(fx.shared.position(), Duration::ZERO);
+        assert_eq!(fx.shared.duration(), None);
         // …and the machine published `Loading`, not a phantom `Idle`.
         assert_eq!(machine.state(), PlayerState::Loading);
-        assert_eq!(fx.shared.state.load(), PlayerState::Loading);
+        assert_eq!(fx.shared.state(), PlayerState::Loading);
     }
 
     #[test]
@@ -482,7 +475,7 @@ mod tests {
         machine.complete_load(loaded);
 
         assert_eq!(machine.state(), PlayerState::Paused);
-        assert_eq!(fx.shared.state.load(), PlayerState::Paused);
+        assert_eq!(fx.shared.state(), PlayerState::Paused);
         // Phase-commit side effect: a paused sink stops outputting.
         assert!(fx.log.recorded("pause"));
         // The fresh session is alive (not stopped) and was announced.

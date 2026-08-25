@@ -238,20 +238,20 @@ impl Player {
 
     /// Current externally-observable state. Lock-free read.
     pub fn state(&self) -> PlayerState {
-        self.shared.state.load()
+        self.shared.state()
     }
 
     /// Current playback position. Lock-free read; updated by the worker
     /// roughly every 100 ms while playing (`POSITION_EMIT_INTERVAL` in
     /// the worker module).
     pub fn position(&self) -> Duration {
-        self.shared.position.load()
+        self.shared.position()
     }
 
     /// Total duration of the loaded source, if known. `None` before the
     /// first `load` or if the container doesn't report it.
     pub fn duration(&self) -> Option<Duration> {
-        *self.shared.duration.lock().unwrap()
+        self.shared.duration()
     }
 
     // ---- internals ----
