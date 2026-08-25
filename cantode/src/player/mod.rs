@@ -48,16 +48,36 @@ use std::{
 use crate::{
     AudioSource, CantodeError, Metadata, PlayerState,
     context::{PlayerContext, PlayerHandle},
-    events::EventSink,
+    events::{EventSink, PlayerEvent},
     output::AudioSinkFactory,
 };
 
 use self::command::{COMMAND_CHANNEL_CAP, LoadResult, SeekResult};
-use self::phase::Phase;
+use self::phase::Machine;
 use self::shared::SharedStatus;
-use self::worker::{EventSinks, Worker};
+use self::worker::Worker;
 
 pub(crate) use self::command::Command;
+
+/// The event sinks one player emits to: the context's global sink (if
+/// any) plus the per-player sink (if any). Both the [`Machine`] (state
+/// events) and the [`Worker`] (operational events) hold a clone.
+#[derive(Clone, Default)]
+struct EventSinks {
+    cx: Option<Arc<dyn EventSink>>,
+    player: Option<Arc<dyn EventSink>>,
+}
+
+impl EventSinks {
+    fn emit(&self, ev: PlayerEvent) {
+        if let Some(s) = &self.cx {
+            s.emit(ev.clone());
+        }
+        if let Some(s) = &self.player {
+            s.emit(ev);
+        }
+    }
+}
 
 /// Configuration for an individual [`Player`].
 ///
@@ -122,8 +142,6 @@ impl Player {
         let shared = Arc::new(SharedStatus::new());
 
         let decoder_factory = Arc::clone(cx.decoder_factory());
-        let cx_event_sink = cx.event_sink().cloned();
-        let player_event_sink = config.event_sink.clone();
         // Resolve the sink factory once, on the handle side: custom if
         // configured, otherwise the default cpal device sink. The worker
         // calls it at the top of every `load`.
@@ -132,21 +150,22 @@ impl Player {
             .unwrap_or_else(|| Arc::new(|| Ok(Box::new(crate::output::CpalSink::new()))));
 
         let worker_shared = Arc::clone(&shared);
+        let sinks = EventSinks {
+            cx: cx.event_sink().cloned(),
+            player: config.event_sink.clone(),
+        };
 
         let name = cx.next_worker_name();
         let join = thread::Builder::new()
             .name(name)
             .spawn(move || {
                 let mut worker = Worker::new(
-                    Phase::Idle,
+                    Machine::new(Arc::clone(&worker_shared), sinks.clone()),
                     decoder_factory,
                     cmd_rx,
                     sink_factory,
                     worker_shared,
-                    EventSinks {
-                        cx: cx_event_sink,
-                        player: player_event_sink,
-                    },
+                    sinks,
                 );
                 worker.run();
             })
