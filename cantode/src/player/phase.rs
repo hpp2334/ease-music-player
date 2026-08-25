@@ -201,7 +201,9 @@ impl Machine {
     /// [`transition`](crate::state::transition), reshape the payload via
     /// `morph`, and commit. Illegal transitions surface as a non-fatal
     /// `PlayerEvent::Error` instead of wedging the machine.
-    pub(super) fn apply(&mut self, ev: WorkerEvent) {
+    ///
+    /// Private to this module: callers use the intent methods below.
+    fn apply(&mut self, ev: WorkerEvent) {
         let from = self.phase.state();
         match transition(from, ev) {
             Ok(next) => {
@@ -218,6 +220,33 @@ impl Machine {
                 self.sinks.emit(PlayerEvent::Error(e));
             }
         }
+    }
+
+    // ----- intent methods: the worker's vocabulary for transitions -----
+
+    /// Resume / start playback (`PlayRequested`).
+    pub(super) fn play(&mut self) {
+        self.apply(WorkerEvent::PlayRequested);
+    }
+
+    /// Suspend playback (`PauseRequested`).
+    pub(super) fn pause(&mut self) {
+        self.apply(WorkerEvent::PauseRequested);
+    }
+
+    /// Drop the loaded session and return to `Idle` (`StopRequested`).
+    pub(super) fn stop(&mut self) {
+        self.apply(WorkerEvent::StopRequested);
+    }
+
+    /// An unrecoverable error occurred (`Failed`).
+    pub(super) fn fail(&mut self) {
+        self.apply(WorkerEvent::Failed);
+    }
+
+    /// The decoder reached end of stream (`EndOfStream`).
+    pub(super) fn end_of_stream(&mut self) {
+        self.apply(WorkerEvent::EndOfStream);
     }
 
     /// Start a load: discard any existing session, then publish
@@ -475,8 +504,8 @@ mod tests {
             },
         );
 
-        // PlayRequested is illegal from Idle.
-        machine.apply(WorkerEvent::PlayRequested);
+        // PlayRequested is illegal from Idle — through the public door.
+        machine.play();
 
         assert_eq!(machine.state(), PlayerState::Idle);
         assert!(matches!(

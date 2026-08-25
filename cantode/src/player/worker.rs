@@ -6,11 +6,11 @@
 //! real-time audio.
 //!
 //! State transitions are *requested* from the
-//! [`Machine`](super::phase::Machine) — the worker names causes
-//! ([`WorkerEvent`](crate::state::WorkerEvent)), never phases. The
-//! worker's own writes are the session-independent observables
-//! (`position`, `duration`) and the operational events
-//! (`MetadataReady`, `PositionChanged`, `Ended`).
+//! [`Machine`](super::phase::Machine) — the worker names intents
+//! (`play`, `pause`, `fail`, …), never causes or phases. The worker's
+//! own writes are the session-independent observables (`position`,
+//! `duration`) and the operational events (`MetadataReady`,
+//! `PositionChanged`, `Ended`).
 //!
 //! The loop parks in `recv_timeout`: **5 ms while `Playing`** (so decode
 //! work interleaves with command handling — a command arriving mid-wait
@@ -30,7 +30,7 @@ use std::{
 
 use crate::{
     AudioSource, CantodeError, Metadata, decoder::DecoderFactory, events::PlayerEvent,
-    output::AudioSinkFactory, state::WorkerEvent,
+    output::AudioSinkFactory,
 };
 
 use super::EventSinks;
@@ -138,8 +138,8 @@ impl Worker {
                     Err(e) => LoadResult::Err(e.clone()),
                 });
             }
-            Command::Play => self.machine.apply(WorkerEvent::PlayRequested),
-            Command::Pause => self.machine.apply(WorkerEvent::PauseRequested),
+            Command::Play => self.machine.play(),
+            Command::Pause => self.machine.pause(),
             Command::Stop => self.do_stop(),
             Command::Unload { reply } => {
                 let r = self.do_unload();
@@ -171,7 +171,7 @@ impl Worker {
         let dec = match opened {
             Ok(dec) => dec,
             Err(e) => {
-                self.machine.apply(WorkerEvent::Failed);
+                self.machine.fail();
                 return Err(e);
             }
         };
@@ -184,14 +184,14 @@ impl Worker {
         let mut sink: Box<dyn crate::output::AudioSink> = match (self.sink_factory)() {
             Ok(sink) => sink,
             Err(e) => {
-                self.machine.apply(WorkerEvent::Failed);
+                self.machine.fail();
                 return Err(e);
             }
         };
         let actual_fmt = match sink.start(fmt) {
             Ok(actual_fmt) => actual_fmt,
             Err(e) => {
-                self.machine.apply(WorkerEvent::Failed);
+                self.machine.fail();
                 return Err(e);
             }
         };
@@ -233,7 +233,7 @@ impl Worker {
         // `StopRequested → Idle`. The machine drops the session (if any),
         // which stops the sink and resets position/duration. From `Idle`
         // the transition is a no-op and nothing runs.
-        self.machine.apply(WorkerEvent::StopRequested);
+        self.machine.stop();
     }
 
     fn do_unload(&mut self) -> crate::Result<()> {
@@ -308,7 +308,7 @@ impl Worker {
                     loaded.ended = true;
                     self.sinks.emit(PlayerEvent::Ended);
                 }
-                self.machine.apply(WorkerEvent::EndOfStream);
+                self.machine.end_of_stream();
             }
             PumpOutcome::Skipped => {}
         }
