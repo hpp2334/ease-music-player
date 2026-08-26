@@ -6,11 +6,13 @@
 //!   `Host` and the shared decoder factory. One per app.
 //! - [`PlayerHandle`] — wraps [`cantode::Player`] behind a `Mutex` so it can
 //!   be shared across UniFFI calls. Holds one worker thread.
-//! - [`remote_music_source`] — builds a [`cantode::RemoteSource`] (the
-//!   cantode-owned windowed source) over the backend's own
-//!   [`services::get_asset_file`] seam. The fetch closure runs on the shared
-//!   tokio runtime; the byte source itself never crosses the FFI boundary
-//!   (UniFFI can't express `Box<dyn AudioSource>`).
+//! - [`remote_music_source`] — builds a [`cantode::BufferedSource`] (the
+//!   cantode-owned windowed source) over an [`AssetRemoteAudio`]
+//!   long-lived session provider backed by [`services::get_asset_file`].
+//!   All trait methods are non-blocking and run on cantode's session
+//!   thread; the response body is forwarded on the shared tokio runtime,
+//!   gated by cantode's demand (the byte source itself never crosses the
+//!   FFI boundary — UniFFI can't express `Box<dyn AudioSource>`).
 //!
 //! The cover-art writeback hook lives in [`ct_player_load_music`]: if the
 //! probed metadata carries embedded artwork and the DB's `Music.cover` is
@@ -23,7 +25,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use cantode::{AudioSource, RemoteSource};
+use cantode::{AudioSource, BufferedSource, Pushed, RemoteAudioSource, StreamReply};
 use ease_client_schema::{DataSourceKey, MusicId};
 use ease_client_tokio::tokio_runtime;
 
@@ -38,30 +40,74 @@ use crate::{
 };
 
 // ============================================================================
-// remote_music_source — cantode::RemoteSource over the backend's asset seam
+// remote_music_source — cantode::BufferedSource over the backend's asset seam
 // ============================================================================
 
-/// Build the byte source for a music asset: a [`RemoteSource`] whose fetch
-/// closure opens the asset stream at the requested offset on the shared
-/// tokio runtime and forwards chunks until `max_len`.
+/// One live streaming session: cantode's reply, the asset stream's chunk
+/// receiver, and the demand gate the forward task parks on.
+struct Session {
+    reply: StreamReply,
+    /// Outstanding demand in bytes — `request` raises it, the forward
+    /// task consumes it as pushes are accepted.
+    demand: std::sync::atomic::AtomicUsize,
+    /// Set when cantode closed/superseded this session; wakes the parked
+    /// forward task so it returns and drops the receiver — which aborts
+    /// the underlying HTTP request (the producer task exits once its
+    /// sends fail).
+    dead: std::sync::atomic::AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
+impl Session {
+    fn retire(&self) {
+        self.dead.store(true, std::sync::atomic::Ordering::Release);
+        self.notify.notify_one();
+    }
+}
+
+/// A [`RemoteAudioSource`] over the backend's own asset seam: one
+/// long-lived `get_asset_file` request per session, its body forwarded
+/// exactly as cantode demands it.
 ///
-/// This is the whole network-side integration — the windowing, retries,
-/// seek cancellation, and EOF validation live in cantode. The closure only
-/// bridges: `get_asset_file` → `StreamFile` receiver → `ReplyHandle`.
-pub(crate) fn remote_music_source(cx: Arc<BackendContext>, key: DataSourceKey) -> RemoteSource {
-    RemoteSource::new(move |offset, max_len, reply| {
-        let cx = Arc::clone(&cx);
-        let key = key.clone();
-        let reply = reply.clone();
-        // Fire-and-forget on the shared runtime; the closure itself must
-        // return immediately (the RemoteSource prefetch thread is calling).
-        let _ = tokio_runtime().spawn(async move {
+/// This is the whole network-side integration — the windowing, demand
+/// scheduling, seek cancellation, retries, and EOF validation live in
+/// cantode. The bridge only maps the session lifecycle onto the storage
+/// seam: `open` spawns the ranged request, `request` opens the demand
+/// gate, `close` marks the session dead (tearing the transport down).
+struct AssetRemoteAudio {
+    cx: Arc<BackendContext>,
+    key: DataSourceKey,
+    cur: Mutex<Option<Arc<Session>>>,
+}
+
+impl RemoteAudioSource for AssetRemoteAudio {
+    fn open(&self, offset: u64, reply: StreamReply) {
+        // Retire any current session (normally cantode already closed it;
+        // retiring again is an idempotent no-op).
+        if let Some(old) = self.cur.lock().unwrap().take() {
+            old.retire();
+        }
+        let session = Arc::new(Session {
+            reply: reply.clone(),
+            demand: std::sync::atomic::AtomicUsize::new(0),
+            dead: std::sync::atomic::AtomicBool::new(false),
+            notify: tokio::sync::Notify::new(),
+        });
+        *self.cur.lock().unwrap() = Some(Arc::clone(&session));
+
+        // Fire-and-forget on the shared runtime; `open` itself must
+        // return immediately (cantode's session thread is calling).
+        let cx = Arc::clone(&self.cx);
+        let key = self.key.clone();
+        let forward_session = Arc::clone(&session);
+        tokio_runtime().spawn(async move {
             match get_asset_file(&cx, key, offset).await {
                 Ok(Some(file)) => {
                     if let Some(total) = file.total_size() {
                         reply.set_total_len(Some(total as u64));
                     }
-                    forward_chunks(file.into_rx(), max_len, &reply).await;
+                    let rx = file.into_rx();
+                    tokio::spawn(forward_chunks(forward_session, rx));
                 }
                 Ok(None) => {
                     reply.finish_error("asset not found for source".into());
@@ -71,48 +117,115 @@ pub(crate) fn remote_music_source(cx: Arc<BackendContext>, key: DataSourceKey) -
                 }
             }
         });
-    })
+    }
+
+    fn request(&self, want: usize) {
+        if let Some(s) = self.cur.lock().unwrap().as_ref() {
+            s.demand
+                .fetch_add(want, std::sync::atomic::Ordering::AcqRel);
+            s.notify.notify_one();
+        }
+    }
+
+    fn close(&self) {
+        if let Some(s) = self.cur.lock().unwrap().take() {
+            s.retire();
+        }
+    }
 }
 
-/// Forward receiver chunks onto the reply until `max_len` bytes are
-/// delivered, the stream ends, or it errors.
+/// The demand-gated copy loop: pull the response body and push exactly as
+/// much as cantode demanded — no more, so the stream idles mid-body while
+/// the window is full (TCP backpressure doing the work).
 ///
-/// End-of-stream mapping: a channel close after a partial delivery becomes
-/// `finish_eof` — and because the adapter knows the reported total length,
-/// an EOF that lands short of it is retried as a failed range instead of
-/// surfacing as a premature `Ended` (the phantom-Ended fix). Exactly
-/// `max_len` delivered means the resource may continue, so no finish is
-/// sent; the adapter requests the next range when it needs it.
+/// End-of-stream mapping: a channel close becomes `finish_eof` — and
+/// because cantode knows the reported total length, an EOF that lands
+/// short of it is retried as a failed session instead of surfacing as a
+/// premature `Ended`. Over-delivery beyond the accepted push is kept as
+/// the leftover tail and re-offered against future demand.
 async fn forward_chunks(
-    mut rx: async_channel::Receiver<ease_remote_storage::StorageBackendResult<Bytes>>,
-    mut remaining: usize,
-    reply: &cantode::ReplyHandle,
+    session: Arc<Session>,
+    rx: async_channel::Receiver<ease_remote_storage::StorageBackendResult<Bytes>>,
 ) {
-    while remaining > 0 {
-        match rx.recv().await {
-            Ok(Ok(chunk)) => {
-                if chunk.is_empty() {
-                    continue;
-                }
-                let take = chunk.len().min(remaining);
-                reply.push_chunk(chunk[..take].to_vec());
-                remaining -= take;
-                if take < chunk.len() {
-                    // Served beyond the request — drop the rest; the
-                    // adapter will re-fetch from the right offset.
-                    return;
+    // Bytes a partially-accepted push rejected (the "keep the tail"
+    // contract) plus any chunk that raced ahead of demand.
+    let mut leftover: Option<Bytes> = None;
+    let mut want: usize = 0;
+    loop {
+        if session.dead.load(std::sync::atomic::Ordering::Acquire) {
+            return; // drops rx → the producer task aborts the request
+        }
+        want += session
+            .demand
+            .swap(0, std::sync::atomic::Ordering::AcqRel);
+
+        // Serve the outstanding demand: leftover first, then fresh chunks.
+        while want > 0 {
+            let chunk = match leftover.take() {
+                Some(c) => c,
+                None => match rx.recv().await {
+                    Ok(Ok(c)) => c,
+                    Ok(Err(e)) => {
+                        session.reply.finish_error(format!("storage: {e:?}"));
+                        return;
+                    }
+                    Err(_) => {
+                        session.reply.finish_eof();
+                        return;
+                    }
+                },
+            };
+            if chunk.is_empty() {
+                continue;
+            }
+            let take = chunk.len().min(want);
+            match session.reply.push(chunk[..take].to_vec()) {
+                Pushed::Superseded => return,
+                Pushed::Accepted(n) => {
+                    want -= n;
+                    if n < chunk.len() {
+                        // Rejected tail: keep it for the next demand.
+                        leftover = Some(chunk.slice(n..));
+                    }
                 }
             }
-            Ok(Err(e)) => {
-                reply.finish_error(format!("storage: {e:?}"));
-                return;
-            }
-            Err(_) => {
-                reply.finish_eof();
-                return;
+        }
+
+        // No demand left: park until more demand arrives, the session is
+        // retired, or (when the tail is empty) the stream itself ends.
+        // Holding a leftover means we cannot pull another chunk without
+        // over-consuming the body positionally, so only demand/death can
+        // wake us — the close signal surfaces once the tail drains.
+        if leftover.is_some() {
+            session.notify.notified().await;
+        } else {
+            tokio::select! {
+                _ = session.notify.notified() => {}
+                res = rx.recv() => match res {
+                    Ok(Ok(c)) => leftover = Some(c),
+                    Ok(Err(e)) => {
+                        session.reply.finish_error(format!("storage: {e:?}"));
+                        return;
+                    }
+                    Err(_) => {
+                        session.reply.finish_eof();
+                        return;
+                    }
+                },
             }
         }
     }
+}
+
+/// Build the byte source for a music asset: a [`BufferedSource`] (the
+/// cantode-owned windowed source) over an [`AssetRemoteAudio`] session
+/// provider.
+pub(crate) fn remote_music_source(cx: Arc<BackendContext>, key: DataSourceKey) -> BufferedSource {
+    BufferedSource::new(Box::new(AssetRemoteAudio {
+        cx,
+        key,
+        cur: Mutex::new(None),
+    }))
 }
 
 // ============================================================================
