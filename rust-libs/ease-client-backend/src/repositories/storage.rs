@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use ease_client_schema::entities::{music, playlist_music, storage};
 use ease_client_schema::{BlobId, StorageHandle, StorageId};
-use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+};
 
 use crate::error::BResult;
 
@@ -83,9 +85,7 @@ impl DatabaseServer {
     /// Plugin detail (kv + secret) is the plugin's responsibility.
     pub async fn remove_storage(self: &Arc<Self>, id: StorageId) -> BResult<()> {
         let db = self.db();
-        let reg = storage::Entity::find_by_id(*id.as_ref())
-            .one(&db)
-            .await?;
+        let reg = storage::Entity::find_by_id(*id.as_ref()).one(&db).await?;
         if reg.is_none() {
             return Ok(());
         }
@@ -106,7 +106,9 @@ impl DatabaseServer {
             music::Entity::delete_by_id(m.id).exec(&db).await?;
         }
 
-        storage::Entity::delete_by_id(*id.as_ref()).exec(&db).await?;
+        storage::Entity::delete_by_id(*id.as_ref())
+            .exec(&db)
+            .await?;
 
         for blob_id in to_remove_blobs {
             self.blob().remove(blob_id)?;

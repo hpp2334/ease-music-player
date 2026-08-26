@@ -7,7 +7,10 @@
 //! preserves the existing `Arc<Backend>` / `Arc<PlayerHandle>` semantics
 //! that the underlying `ct_*` / `cts_*` functions expect.
 
-use std::sync::{atomic::{AtomicU64, Ordering}, Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex, OnceLock,
+};
 
 use crate::{Backend, PlayerContextHandle, PlayerHandle};
 

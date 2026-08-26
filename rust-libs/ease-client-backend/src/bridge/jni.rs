@@ -162,8 +162,7 @@ fn build_error_result<'local>(
         "errorCode": "BridgeInternalError",
         "errorDetail": message,
     });
-    let payload = serde_json::to_string(&err).unwrap_or_else(|_| {
-        r#"{"success":false,"errorCode":"BridgeInternalError"}"#.to_string()
-    });
+    let payload = serde_json::to_string(&err)
+        .unwrap_or_else(|_| r#"{"success":false,"errorCode":"BridgeInternalError"}"#.to_string());
     build_result_pojo(env, &payload, &[]).map_err(|_| ())
 }

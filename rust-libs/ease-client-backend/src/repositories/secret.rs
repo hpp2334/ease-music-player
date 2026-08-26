@@ -23,7 +23,11 @@ use super::core::DatabaseServer;
 /// no-op).
 pub trait SecretStore: Send + Sync {
     fn secret_put(&self, scope: SecretScope, secret: String) -> BoxFuture<'_, BResult<SecretId>>;
-    fn secret_get(&self, scope: SecretScope, id: SecretId) -> BoxFuture<'_, BResult<Option<String>>>;
+    fn secret_get(
+        &self,
+        scope: SecretScope,
+        id: SecretId,
+    ) -> BoxFuture<'_, BResult<Option<String>>>;
     fn secret_remove(&self, scope: SecretScope, id: SecretId) -> BoxFuture<'_, BResult<()>>;
 }
 
@@ -41,7 +45,11 @@ impl SecretStore for DatabaseServer {
         })
     }
 
-    fn secret_get(&self, scope: SecretScope, id: SecretId) -> BoxFuture<'_, BResult<Option<String>>> {
+    fn secret_get(
+        &self,
+        scope: SecretScope,
+        id: SecretId,
+    ) -> BoxFuture<'_, BResult<Option<String>>> {
         Box::pin(async move {
             let db = self.db();
             let row = secret::Entity::find_by_id(*id.as_ref()).one(&db).await?;

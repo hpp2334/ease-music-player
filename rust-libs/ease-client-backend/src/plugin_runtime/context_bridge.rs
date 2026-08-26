@@ -41,9 +41,10 @@ pub fn build_fns() -> Vec<FnEntry> {
 fn resolve(args: &[JsValue]) -> JsResult<(PluginId, PluginInstance)> {
     let js_ctx = extract_js_ctx(args)?;
     let pid = js_ctx.data::<PluginId>().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(
-            "ease:context: no plugin context bound to this instance",
-        ))
+        JsError::from(
+            JsNativeError::typ()
+                .with_message("ease:context: no plugin context bound to this instance"),
+        )
     })?;
     let instance = js_ctx
         .data::<PluginInstance>()
@@ -64,26 +65,28 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
         ))));
     }
     let s = v.as_string().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:context: expected string at index {idx}"
-        )))
+        JsError::from(
+            JsNativeError::typ()
+                .with_message(format!("ease:context: expected string at index {idx}")),
+        )
     })?;
     Ok(s.to_std_string_escaped())
 }
 
 fn backend_ctx() -> JsResult<&'static std::sync::Arc<crate::ctx::BackendContext>> {
     crate::BACKEND_CONTEXT.get().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(
-            "ease:context: backend not initialized (BACKEND_CONTEXT is unset)",
-        ))
+        JsError::from(
+            JsNativeError::typ()
+                .with_message("ease:context: backend not initialized (BACKEND_CONTEXT is unset)"),
+        )
     })
 }
 
 fn map_bresult<R>(description: &str, result: BResult<R>) -> JsResult<R> {
     result.map_err(|e| {
-        JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:context {description} failed: {e:?}"
-        )))
+        JsError::from(
+            JsNativeError::typ().with_message(format!("ease:context {description} failed: {e:?}")),
+        )
     })
 }
 
@@ -152,7 +155,10 @@ fn create_storage(
             });
         match result {
             Ok(id) => {
-                tracing::debug!("createStorage: registered {instance} as storage {:?}", id.as_ref());
+                tracing::debug!(
+                    "createStorage: registered {instance} as storage {:?}",
+                    id.as_ref()
+                );
                 #[cfg(target_os = "android")]
                 {
                     if let Err(e) = upcall_storage_created(&pid_str, &instance) {
@@ -215,8 +221,8 @@ fn upcall_storage_created(plugin_id: &str, instance: &str) -> Result<(), String>
         .attach_current_thread()
         .map_err(|e| format!("attach: {e}"))?;
 
-    let raw_class = super::host_cache::storage_host_class()
-        .ok_or("storage host class not cached")?;
+    let raw_class =
+        super::host_cache::storage_host_class().ok_or("storage host class not cached")?;
     let class = unsafe { JClass::from_raw(raw_class) };
     let pid_jstr = env
         .new_string(plugin_id)
@@ -244,8 +250,8 @@ fn upcall_notify_change(plugin_id: &str, instance: &str) -> Result<(), String> {
         .attach_current_thread()
         .map_err(|e| format!("attach: {e}"))?;
 
-    let raw_class = super::host_cache::storage_host_class()
-        .ok_or("storage host class not cached")?;
+    let raw_class =
+        super::host_cache::storage_host_class().ok_or("storage host class not cached")?;
     let class = unsafe { JClass::from_raw(raw_class) };
     let pid_jstr = env
         .new_string(plugin_id)

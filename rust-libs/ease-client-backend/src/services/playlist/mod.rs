@@ -53,10 +53,7 @@ pub(crate) async fn build_playlist_abstract(
     model: PlaylistModel,
 ) -> BResult<(PlaylistAbstract, Vec<MusicAbstract>)> {
     let id = model.id;
-    let musics = cx
-        .database_server()
-        .load_musics_by_playlist_id(id)
-        .await?;
+    let musics = cx.database_server().load_musics_by_playlist_id(id).await?;
     let first_cover_music_id = musics.iter().find(|m| m.cover.is_some()).map(|v| v.id);
     let meta = build_playlist_meta(cx, model, first_cover_music_id);
 

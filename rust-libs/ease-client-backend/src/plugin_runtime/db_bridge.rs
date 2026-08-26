@@ -58,9 +58,9 @@ pub fn build_fns() -> Vec<FnEntry> {
 fn plugin_id(args: &[JsValue]) -> JsResult<PluginId> {
     let js_ctx = extract_js_ctx(args)?;
     js_ctx.data::<PluginId>().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(
-            "ease:db: no plugin context bound to this instance",
-        ))
+        JsError::from(
+            JsNativeError::typ().with_message("ease:db: no plugin context bound to this instance"),
+        )
     })
 }
 
@@ -72,9 +72,9 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
         ))));
     }
     let s = v.as_string().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:db: expected string at index {idx}"
-        )))
+        JsError::from(
+            JsNativeError::typ().with_message(format!("ease:db: expected string at index {idx}")),
+        )
     })?;
     Ok(s.to_std_string_escaped())
 }
@@ -83,58 +83,53 @@ fn read_string_array(arg: &JsValue, ctx: &mut boa_engine::Context) -> JsResult<V
     let obj = arg.as_object().ok_or_else(|| {
         JsError::from(JsNativeError::typ().with_message("ease:db: expected array"))
     })?;
-    let arr = JsArray::from_object(obj.clone()).map_err(|_| {
-        JsError::from(JsNativeError::typ().with_message("ease:db: expected array"))
-    })?;
+    let arr = JsArray::from_object(obj.clone())
+        .map_err(|_| JsError::from(JsNativeError::typ().with_message("ease:db: expected array")))?;
     let len = arr.length(ctx).unwrap_or(0);
     let mut out = Vec::with_capacity(len as usize);
     for i in 0..len {
         let v = arr.at(i as i64, ctx)?;
         let s = v.as_string().ok_or_else(|| {
-            JsError::from(JsNativeError::typ().with_message(
-                "ease:db: array elements must be strings",
-            ))
+            JsError::from(
+                JsNativeError::typ().with_message("ease:db: array elements must be strings"),
+            )
         })?;
         out.push(s.to_std_string_escaped());
     }
     Ok(out)
 }
 
-fn read_entry_array(
-    arg: &JsValue,
-    ctx: &mut boa_engine::Context,
-) -> JsResult<Vec<PluginKvEntry>> {
+fn read_entry_array(arg: &JsValue, ctx: &mut boa_engine::Context) -> JsResult<Vec<PluginKvEntry>> {
     let obj = arg.as_object().ok_or_else(|| {
         JsError::from(JsNativeError::typ().with_message("ease:db: expected array"))
     })?;
-    let arr = JsArray::from_object(obj.clone()).map_err(|_| {
-        JsError::from(JsNativeError::typ().with_message("ease:db: expected array"))
-    })?;
+    let arr = JsArray::from_object(obj.clone())
+        .map_err(|_| JsError::from(JsNativeError::typ().with_message("ease:db: expected array")))?;
     let len = arr.length(ctx).unwrap_or(0);
     let mut out = Vec::with_capacity(len as usize);
     for i in 0..len {
         let v = arr.at(i as i64, ctx)?;
         let obj = v.as_object().ok_or_else(|| {
-            JsError::from(JsNativeError::typ().with_message(
-                "ease:db: array elements must be { key, value }",
-            ))
+            JsError::from(
+                JsNativeError::typ().with_message("ease:db: array elements must be { key, value }"),
+            )
         })?;
         let key = obj
             .get(js_string!("key"), ctx)?
             .as_string()
             .ok_or_else(|| {
-                JsError::from(JsNativeError::typ().with_message(
-                    "ease:db: entry.key must be a string",
-                ))
+                JsError::from(
+                    JsNativeError::typ().with_message("ease:db: entry.key must be a string"),
+                )
             })?
             .to_std_string_escaped();
         let value = obj
             .get(js_string!("value"), ctx)?
             .as_string()
             .ok_or_else(|| {
-                JsError::from(JsNativeError::typ().with_message(
-                    "ease:db: entry.value must be a string",
-                ))
+                JsError::from(
+                    JsNativeError::typ().with_message("ease:db: entry.value must be a string"),
+                )
             })?
             .to_std_string_escaped();
         out.push(PluginKvEntry { key, value });
@@ -174,17 +169,18 @@ fn make_count_object(key: &str, count: u64, ctx: &mut boa_engine::Context) -> Js
 
 fn run_blocking<R>(description: &str, result: BResult<R>) -> JsResult<R> {
     result.map_err(|e| {
-        JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:db {description} failed: {e:?}"
-        )))
+        JsError::from(
+            JsNativeError::typ().with_message(format!("ease:db {description} failed: {e:?}")),
+        )
     })
 }
 
 fn db_clone() -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServer>> {
     let cx = crate::BACKEND_CONTEXT.get().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(
-            "ease:db: backend not initialized (BACKEND_CONTEXT is unset)",
-        ))
+        JsError::from(
+            JsNativeError::typ()
+                .with_message("ease:db: backend not initialized (BACKEND_CONTEXT is unset)"),
+        )
     })?;
     Ok(cx.database_server().clone())
 }
@@ -193,13 +189,16 @@ fn db_clone() -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServ
 // single-value bridge fns
 // ---------------------------------------------------------------------------
 
-fn single_get(_this: &JsValue, args: &[JsValue], _ctx: &mut boa_engine::Context) -> JsResult<JsValue> {
+fn single_get(
+    _this: &JsValue,
+    args: &[JsValue],
+    _ctx: &mut boa_engine::Context,
+) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_get(pid.as_str(), &key).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_single_get(pid.as_str(), &key).await });
     match run_blocking("singleGet", result)? {
         Some(value) => Ok(JsValue::from(js_string!(value.as_str()))),
         None => Ok(JsValue::null()),
@@ -214,9 +213,8 @@ fn single_get_multi(
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_get_multi(pid.as_str(), keys).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_single_get_multi(pid.as_str(), keys).await });
     let entries = run_blocking("singleGetMulti", result)?;
     let arr = JsArray::new(ctx)?;
     for (i, e) in entries.iter().enumerate() {
@@ -226,14 +224,17 @@ fn single_get_multi(
     Ok(arr.into())
 }
 
-fn single_set(_this: &JsValue, args: &[JsValue], _ctx: &mut boa_engine::Context) -> JsResult<JsValue> {
+fn single_set(
+    _this: &JsValue,
+    args: &[JsValue],
+    _ctx: &mut boa_engine::Context,
+) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let value = require_string(args, 2)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_set(pid.as_str(), &key, &value).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_single_set(pid.as_str(), &key, &value).await });
     run_blocking("singleSet", result)?;
     Ok(JsValue::undefined())
 }
@@ -246,9 +247,8 @@ fn single_set_multi(
     let pid = plugin_id(args)?;
     let entries = read_entry_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_set_multi(pid.as_str(), entries).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_single_set_multi(pid.as_str(), entries).await });
     run_blocking("singleSetMulti", result)?;
     Ok(JsValue::undefined())
 }
@@ -261,9 +261,8 @@ fn single_delete(
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_delete(pid.as_str(), &key).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_single_delete(pid.as_str(), &key).await });
     run_blocking("singleDelete", result)?;
     Ok(JsValue::undefined())
 }
@@ -276,9 +275,8 @@ fn single_delete_multi(
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_single_delete_multi(pid.as_str(), keys).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_single_delete_multi(pid.as_str(), keys).await });
     run_blocking("singleDeleteMulti", result)?;
     Ok(JsValue::undefined())
 }
@@ -296,9 +294,8 @@ fn multi_append(
     let key = require_string(args, 1)?;
     let value = require_string(args, 2)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_append(pid.as_str(), &key, &value).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_multi_append(pid.as_str(), &key, &value).await });
     run_blocking("multiAppend", result)?;
     Ok(JsValue::undefined())
 }
@@ -311,9 +308,8 @@ fn multi_append_multi(
     let pid = plugin_id(args)?;
     let entries = read_entry_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_append_multi(pid.as_str(), entries).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_multi_append_multi(pid.as_str(), entries).await });
     run_blocking("multiAppendMulti", result)?;
     Ok(JsValue::undefined())
 }
@@ -326,9 +322,8 @@ fn multi_get_all(
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_get_all(pid.as_str(), &key).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_multi_get_all(pid.as_str(), &key).await });
     let values = run_blocking("multiGetAll", result)?;
     let arr = JsArray::new(ctx)?;
     for (i, v) in values.iter().enumerate() {
@@ -345,9 +340,8 @@ fn multi_get_all_multi(
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_get_all_multi(pid.as_str(), keys).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_multi_get_all_multi(pid.as_str(), keys).await });
     let entries = run_blocking("multiGetAllMulti", result)?;
     let arr = JsArray::new(ctx)?;
     for (i, e) in entries.iter().enumerate() {
@@ -365,9 +359,8 @@ fn multi_count(
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_count(pid.as_str(), &key).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_multi_count(pid.as_str(), &key).await });
     let count = run_blocking("multiCount", result)?;
     Ok(JsValue::from(count as f64))
 }
@@ -380,9 +373,8 @@ fn multi_count_multi(
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_count_multi(pid.as_str(), keys).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_multi_count_multi(pid.as_str(), keys).await });
     let entries = run_blocking("multiCountMulti", result)?;
     let arr = JsArray::new(ctx)?;
     for (i, e) in entries.iter().enumerate() {
@@ -400,9 +392,8 @@ fn multi_delete(
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_delete(pid.as_str(), &key).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_multi_delete(pid.as_str(), &key).await });
     run_blocking("multiDelete", result)?;
     Ok(JsValue::undefined())
 }
@@ -415,9 +406,8 @@ fn multi_delete_multi(
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_multi_delete_multi(pid.as_str(), keys).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_multi_delete_multi(pid.as_str(), keys).await });
     run_blocking("multiDeleteMulti", result)?;
     Ok(JsValue::undefined())
 }
@@ -426,7 +416,11 @@ fn multi_delete_multi(
 // listing
 // ---------------------------------------------------------------------------
 
-fn list_keys(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsResult<JsValue> {
+fn list_keys(
+    _this: &JsValue,
+    args: &[JsValue],
+    ctx: &mut boa_engine::Context,
+) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let prefix_v = args.get_or_undefined(1);
     let prefix = if prefix_v.is_undefined() || prefix_v.is_null() {
@@ -435,16 +429,13 @@ fn list_keys(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -
         prefix_v
             .as_string()
             .ok_or_else(|| {
-                JsError::from(JsNativeError::typ().with_message(
-                    "ease:db: prefix must be a string",
-                ))
+                JsError::from(JsNativeError::typ().with_message("ease:db: prefix must be a string"))
             })?
             .to_std_string_escaped()
     };
     let db = db_clone()?;
-    let result = ease_client_tokio::tokio_runtime().block_on(async move {
-        db.plugin_kv_list_keys(pid.as_str(), &prefix).await
-    });
+    let result = ease_client_tokio::tokio_runtime()
+        .block_on(async move { db.plugin_kv_list_keys(pid.as_str(), &prefix).await });
     let entries = run_blocking("listKeys", result)?;
     let arr = JsArray::new(ctx)?;
     for (i, info) in entries.iter().enumerate() {

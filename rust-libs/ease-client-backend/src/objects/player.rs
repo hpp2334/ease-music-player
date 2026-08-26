@@ -6,10 +6,11 @@
 //!   `Host` and the shared decoder factory. One per app.
 //! - [`PlayerHandle`] — wraps [`cantode::Player`] behind a `Mutex` so it can
 //!   be shared across UniFFI calls. Holds one worker thread.
-//! - [`MusicAudioSource`] — a [`cantode::AudioSource`] backed by the
-//!   backend's own [`services::get_asset_file`] seam. This is the byte
-//!   source the decoder reads from; it never crosses the FFI boundary
-//!   itself (UniFFI can't express `Box<dyn AudioSource>`).
+//! - [`remote_music_source`] — builds a [`cantode::RemoteSource`] (the
+//!   cantode-owned windowed source) over the backend's own
+//!   [`services::get_asset_file`] seam. The fetch closure runs on the shared
+//!   tokio runtime; the byte source itself never crosses the FFI boundary
+//!   (UniFFI can't express `Box<dyn AudioSource>`).
 //!
 //! The cover-art writeback hook lives in [`ct_player_load_music`]: if the
 //! probed metadata carries embedded artwork and the DB's `Music.cover` is
@@ -17,16 +18,14 @@
 //! [`services::update_music_cover`] path.
 
 use std::{
-    io::{self, Read, Seek, SeekFrom},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
-use bytes::{Buf, Bytes};
-use cantode::AudioSource;
+use bytes::Bytes;
+use cantode::{AudioSource, RemoteSource};
 use ease_client_schema::{DataSourceKey, MusicId};
 use ease_client_tokio::tokio_runtime;
-use ease_remote_storage::{StorageBackendResult, StreamFile};
 
 use crate::{
     error::BError,
@@ -39,185 +38,80 @@ use crate::{
 };
 
 // ============================================================================
-// MusicAudioSource — cantode::AudioSource impl over the backend's asset seam
+// remote_music_source — cantode::RemoteSource over the backend's asset seam
 // ============================================================================
 
-/// A [`cantode::AudioSource`] that pulls bytes from the backend's cloud
-/// storage via [`get_asset_file`].
+/// Build the byte source for a music asset: a [`RemoteSource`] whose fetch
+/// closure opens the asset stream at the requested offset on the shared
+/// tokio runtime and forwards chunks until `max_len`.
 ///
-/// `Read` is fed by an `async_channel::Receiver<Bytes>` (the same primitive
-/// `ct_get_asset_stream` exposes); `Seek` drops the receiver and re-issues
-/// `get_asset_file` at the new offset — the only way to seek a forward-only
-/// HTTP response.
-///
-/// Block-on-tokio calls are safe here: this struct is only ever touched by
-/// the cantode worker thread (a dedicated `std::thread`), never by a tokio
-/// runtime thread, so we cannot deadlock the runtime.
-pub(crate) struct MusicAudioSource {
-    cx: Arc<BackendContext>,
-    key: DataSourceKey,
-    /// Active chunk receiver (None after EOF). Re-established by `open_stream_at`.
-    rx: Mutex<Option<async_channel::Receiver<StorageBackendResult<Bytes>>>>,
-    /// One-chunk lookahead buffer. `read` drains this first, then asks the
-    /// receiver for more. Keeps the read path simple (never half-chunks).
-    tail: Mutex<Bytes>,
-    /// Position within the source, advanced by `read` and reset by `seek`.
-    position: std::sync::atomic::AtomicU64,
-    /// Total content length (bytes). Set on the first `open_stream_at` call.
-    total_len: OnceLock<Option<u64>>,
-}
-
-impl MusicAudioSource {
-    /// Open `key` starting at byte 0. Eagerly opens so the first `read`
-    /// doesn't pay the open cost and `len()` is immediately known.
-    pub(crate) fn new(cx: Arc<BackendContext>, key: DataSourceKey) -> io::Result<Self> {
-        let this = Self {
-            cx,
-            key,
-            rx: Mutex::new(None),
-            tail: Mutex::new(Bytes::new()),
-            position: std::sync::atomic::AtomicU64::new(0),
-            total_len: OnceLock::new(),
-        };
-        this.open_stream_at(0)?;
-        Ok(this)
-    }
-
-    /// (Re)open the underlying byte stream at `offset`. Drops any prior
-    /// receiver + tail. Synchronously blocks on the tokio runtime — fine
-    /// because we're on the cantode worker thread.
-    fn open_stream_at(&self, offset: u64) -> io::Result<()> {
-        let cx = self.cx.clone();
-        let key = self.key.clone();
-        let file: Option<StreamFile> = tokio_runtime()
-            .handle()
-            .block_on(async move { get_asset_file(&cx, key, offset).await })
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("asset open: {e:?}")))?;
-
-        let Some(file) = file else {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "asset not found for source",
-            ));
-        };
-
-        // Cache total length on first open; subsequent opens (seeks)
-        // leave the cached value in place.
-        let _ = self.total_len.set(file.total_size().map(|n| n as u64));
-
-        let rx = file.into_rx();
-        *self.rx.lock().unwrap() = Some(rx);
-        *self.tail.lock().unwrap() = Bytes::new();
-        self.position
-            .store(offset, std::sync::atomic::Ordering::Relaxed);
-        Ok(())
-    }
-
-    /// Pull the next chunk from the receiver into `tail`. Returns `false`
-    /// on EOF (channel closed) without error.
-    fn refill_tail(&self) -> io::Result<bool> {
-        let rx_opt = self.rx.lock().unwrap().take();
-        let Some(rx) = rx_opt else {
-            // No receiver means EOF was hit on a previous call.
-            return Ok(false);
-        };
-        // `async_channel::Receiver::recv` takes `&self`, so we can borrow
-        // `rx` from the closure (no `move`) and put it back afterwards.
-        let recv_result = tokio_runtime()
-            .handle()
-            .block_on(async { rx.recv().await });
-        match recv_result {
-            Ok(chunk_result) => {
-                let chunk: Bytes = chunk_result.map_err(|e| {
-                    io::Error::new(io::ErrorKind::Other, format!("storage: {e:?}"))
-                })?;
-                *self.tail.lock().unwrap() = chunk;
-                // Put the receiver back so the next refill can continue.
-                *self.rx.lock().unwrap() = Some(rx);
-                Ok(true)
-            }
-            // Channel closed = EOF on the underlying stream.
-            Err(_) => Ok(false),
-        }
-    }
-}
-
-impl Read for MusicAudioSource {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let mut written = 0;
-        while written < buf.len() {
-            // Drain tail first.
-            let to_take = {
-                let mut tail = self.tail.lock().unwrap();
-                if tail.is_empty() {
-                    0
-                } else {
-                    let to_take = (buf.len() - written).min(tail.len());
-                    buf[written..written + to_take]
-                        .copy_from_slice(&tail[..to_take]);
-                    tail.advance(to_take);
-                    to_take
-                }
-            };
-            if to_take > 0 {
-                written += to_take;
-                self.position
-                    .fetch_add(to_take as u64, std::sync::atomic::Ordering::Relaxed);
-                continue;
-            }
-
-            // Tail empty: refill. If EOF, stop.
-            if !self.refill_tail()? {
-                break;
-            }
-        }
-        Ok(written)
-    }
-}
-
-impl Seek for MusicAudioSource {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        let total_opt: Option<u64> = self.total_len.get().copied().flatten();
-        let target = match pos {
-            SeekFrom::Start(n) => Some(n),
-            SeekFrom::Current(n) => {
-                let cur = self
-                    .position
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                n.checked_add(cur as i64).map(|n| n.max(0) as u64)
-            }
-            SeekFrom::End(n) => total_opt.map(|t| {
-                if n >= 0 {
-                    t
-                } else {
-                    let target = t as i64 + n;
-                    if target < 0 {
-                        0
-                    } else {
-                        target as u64
+/// This is the whole network-side integration — the windowing, retries,
+/// seek cancellation, and EOF validation live in cantode. The closure only
+/// bridges: `get_asset_file` → `StreamFile` receiver → `ReplyHandle`.
+pub(crate) fn remote_music_source(cx: Arc<BackendContext>, key: DataSourceKey) -> RemoteSource {
+    RemoteSource::new(move |offset, max_len, reply| {
+        let cx = Arc::clone(&cx);
+        let key = key.clone();
+        let reply = reply.clone();
+        // Fire-and-forget on the shared runtime; the closure itself must
+        // return immediately (the RemoteSource prefetch thread is calling).
+        let _ = tokio_runtime().spawn(async move {
+            match get_asset_file(&cx, key, offset).await {
+                Ok(Some(file)) => {
+                    if let Some(total) = file.total_size() {
+                        reply.set_total_len(Some(total as u64));
                     }
+                    forward_chunks(file.into_rx(), max_len, &reply).await;
                 }
-            }),
-        };
-        let Some(target) = target else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "seek from end with unknown length",
-            ));
-        };
-
-        // Drop current stream and re-open at the new offset. Even for
-        // target == current position we re-open: the tail may have stale
-        // bytes from a different offset and reasoning about it precisely
-        // isn't worth the complexity.
-        self.open_stream_at(target)?;
-        Ok(target)
-    }
+                Ok(None) => {
+                    reply.finish_error("asset not found for source".into());
+                }
+                Err(e) => {
+                    reply.finish_error(format!("asset open: {e:?}"));
+                }
+            }
+        });
+    })
 }
 
-impl AudioSource for MusicAudioSource {
-    fn len(&self) -> Option<u64> {
-        self.total_len.get().copied().flatten()
+/// Forward receiver chunks onto the reply until `max_len` bytes are
+/// delivered, the stream ends, or it errors.
+///
+/// End-of-stream mapping: a channel close after a partial delivery becomes
+/// `finish_eof` — and because the adapter knows the reported total length,
+/// an EOF that lands short of it is retried as a failed range instead of
+/// surfacing as a premature `Ended` (the phantom-Ended fix). Exactly
+/// `max_len` delivered means the resource may continue, so no finish is
+/// sent; the adapter requests the next range when it needs it.
+async fn forward_chunks(
+    mut rx: async_channel::Receiver<ease_remote_storage::StorageBackendResult<Bytes>>,
+    mut remaining: usize,
+    reply: &cantode::ReplyHandle,
+) {
+    while remaining > 0 {
+        match rx.recv().await {
+            Ok(Ok(chunk)) => {
+                if chunk.is_empty() {
+                    continue;
+                }
+                let take = chunk.len().min(remaining);
+                reply.push_chunk(chunk[..take].to_vec());
+                remaining -= take;
+                if take < chunk.len() {
+                    // Served beyond the request — drop the rest; the
+                    // adapter will re-fetch from the right offset.
+                    return;
+                }
+            }
+            Ok(Err(e)) => {
+                reply.finish_error(format!("storage: {e:?}"));
+                return;
+            }
+            Err(_) => {
+                reply.finish_eof();
+                return;
+            }
+        }
     }
 }
 
@@ -245,8 +139,9 @@ impl PlayerContextHandle {
     /// `ct_player_context_new` so it matches the `ct_*` controller
     /// convention.
     pub(crate) fn new() -> Result<Self, BError> {
-        let inner = cantode::PlayerContext::new()
-            .map_err(|e| BError::CustomError { message: format!("PlayerContext::new: {e:?}") })?;
+        let inner = cantode::PlayerContext::new().map_err(|e| BError::CustomError {
+            message: format!("PlayerContext::new: {e:?}"),
+        })?;
         Ok(Self { inner })
     }
 
@@ -272,8 +167,9 @@ pub struct PlayerHandle {
 
 impl PlayerHandle {
     pub(crate) fn new(cx: &PlayerContextHandle) -> Result<Self, BError> {
-        let player = cantode::Player::new(cx.context())
-            .map_err(|e| BError::CustomError { message: format!("Player::new: {e:?}") })?;
+        let player = cantode::Player::new(cx.context()).map_err(|e| BError::CustomError {
+            message: format!("Player::new: {e:?}"),
+        })?;
         Ok(Self {
             inner: Mutex::new(player),
         })
@@ -327,25 +223,19 @@ pub async fn ct_player_load_music(
         .handle()
         .spawn_blocking(move || -> Result<cantode::Metadata, BError> {
             let backend_cx = backend_for_closure.get_context().clone();
-            let source: Box<dyn AudioSource> = match MusicAudioSource::new(
+            let source: Box<dyn AudioSource> = Box::new(remote_music_source(
                 Arc::new(backend_cx),
                 DataSourceKey::Music { id: music_id },
-            ) {
-                Ok(s) => Box::new(s),
-                Err(e) => {
-                    return Err(BError::CustomError {
-                        message: format!("MusicAudioSource::new: {e}"),
-                    });
-                }
-            };
+            ));
             let player_inner = player.inner.lock().unwrap();
             player_inner.load(source).map_err(|e| BError::CustomError {
                 message: format!("Player::load: {e:?}"),
             })
         })
         .await;
-    let metadata = join_result
-        .map_err(|e| BError::CustomError { message: format!("join: {e}") })??;
+    let metadata = join_result.map_err(|e| BError::CustomError {
+        message: format!("join: {e}"),
+    })??;
 
     // Metadata writeback: if the probe found embedded cover AND/OR a
     // duration that the DB doesn't yet have, fire-and-forget a tokio task
@@ -405,24 +295,27 @@ pub async fn ct_player_load_music(
 /// Begin or resume playback.
 pub async fn ct_player_play(player: Arc<PlayerHandle>) -> BResult<()> {
     player.with_player(|p| {
-        p.play()
-            .map_err(|e| BError::CustomError { message: format!("Player::play: {e:?}") })
+        p.play().map_err(|e| BError::CustomError {
+            message: format!("Player::play: {e:?}"),
+        })
     })
 }
 
 /// Pause playback.
 pub async fn ct_player_pause(player: Arc<PlayerHandle>) -> BResult<()> {
     player.with_player(|p| {
-        p.pause()
-            .map_err(|e| BError::CustomError { message: format!("Player::pause: {e:?}") })
+        p.pause().map_err(|e| BError::CustomError {
+            message: format!("Player::pause: {e:?}"),
+        })
     })
 }
 
 /// Stop playback and drop the loaded source (back to Idle).
 pub async fn ct_player_stop(player: Arc<PlayerHandle>) -> BResult<()> {
     player.with_player(|p| {
-        p.stop()
-            .map_err(|e| BError::CustomError { message: format!("Player::stop: {e:?}") })
+        p.stop().map_err(|e| BError::CustomError {
+            message: format!("Player::stop: {e:?}"),
+        })
     })
 }
 
@@ -431,8 +324,9 @@ pub async fn ct_player_stop(player: Arc<PlayerHandle>) -> BResult<()> {
 pub async fn ct_player_seek(player: Arc<PlayerHandle>, pos_ms: u64) -> BResult<u64> {
     let target = Duration::from_millis(pos_ms);
     let actual = player.with_player(|p| {
-        p.seek(target)
-            .map_err(|e| BError::CustomError { message: format!("Player::seek: {e:?}") })
+        p.seek(target).map_err(|e| BError::CustomError {
+            message: format!("Player::seek: {e:?}"),
+        })
     })?;
     Ok(actual.as_millis() as u64)
 }
@@ -440,8 +334,9 @@ pub async fn ct_player_seek(player: Arc<PlayerHandle>, pos_ms: u64) -> BResult<u
 /// Set linear gain. `1.0` = unity, `0.0` = silent.
 pub async fn ct_player_set_volume(player: Arc<PlayerHandle>, volume: f32) -> BResult<()> {
     player.with_player(|p| {
-        p.set_volume(volume)
-            .map_err(|e| BError::CustomError { message: format!("Player::set_volume: {e:?}") })
+        p.set_volume(volume).map_err(|e| BError::CustomError {
+            message: format!("Player::set_volume: {e:?}"),
+        })
     })
 }
 
@@ -481,22 +376,17 @@ pub async fn ct_player_probe_duration_ms(
     let metadata = tokio_runtime()
         .handle()
         .spawn_blocking(move || -> Result<cantode::Metadata, BError> {
-            let source: Box<dyn AudioSource> = match MusicAudioSource::new(
+            let source: Box<dyn AudioSource> = Box::new(remote_music_source(
                 Arc::new(backend_cx),
                 DataSourceKey::Music { id: music_id },
-            ) {
-                Ok(s) => Box::new(s),
-                Err(e) => {
-                    return Err(BError::CustomError {
-                        message: format!("MusicAudioSource::new: {e}"),
-                    });
-                }
-            };
+            ));
             cantode::probe_metadata(&cx_inner.context(), source).map_err(|e| BError::CustomError {
                 message: format!("probe_metadata: {e:?}"),
             })
         })
         .await
-        .map_err(|e| BError::CustomError { message: format!("join: {e}") })??;
+        .map_err(|e| BError::CustomError {
+            message: format!("join: {e}"),
+        })??;
     Ok(metadata.duration.map(|d| d.as_millis() as u64))
 }

@@ -181,7 +181,10 @@ pub struct ArgUpdateMusicCover {
     pub id: MusicId,
     pub cover: Vec<u8>,
 }
-pub(crate) async fn update_music_cover(cx: &BackendContext, arg: ArgUpdateMusicCover) -> BResult<()> {
+pub(crate) async fn update_music_cover(
+    cx: &BackendContext,
+    arg: ArgUpdateMusicCover,
+) -> BResult<()> {
     cx.database_server()
         .update_music_cover(arg.id, arg.cover.clone())
         .await?;

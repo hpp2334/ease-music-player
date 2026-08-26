@@ -71,7 +71,9 @@ impl DatabaseServer {
             .resolve_key_id(plugin_id, key, PluginKvKind::Single)
             .await?;
         let now = now_ms();
-        let existing = plugin_kv_single::Entity::find_by_id(key_id).one(&db).await?;
+        let existing = plugin_kv_single::Entity::find_by_id(key_id)
+            .one(&db)
+            .await?;
         match existing {
             Some(row) => {
                 let mut am: plugin_kv_single::ActiveModel = row.into();
@@ -102,7 +104,9 @@ impl DatabaseServer {
                 .resolve_key_id(plugin_id, &entry.key, PluginKvKind::Single)
                 .await?;
             let now = now_ms();
-            let existing = plugin_kv_single::Entity::find_by_id(key_id).one(&db).await?;
+            let existing = plugin_kv_single::Entity::find_by_id(key_id)
+                .one(&db)
+                .await?;
             match existing {
                 Some(row) => {
                     let mut am: plugin_kv_single::ActiveModel = row.into();
@@ -180,7 +184,9 @@ impl DatabaseServer {
         let out: Vec<PluginKvEntry> = keys
             .into_iter()
             .filter_map(|k| {
-                by_key.remove(&k).map(|value| PluginKvEntry { key: k, value })
+                by_key
+                    .remove(&k)
+                    .map(|value| PluginKvEntry { key: k, value })
             })
             .collect();
         Ok(out)
@@ -414,8 +420,7 @@ impl DatabaseServer {
         .all(&db)
         .await?;
 
-        let mut by_key: std::collections::HashMap<String, u64> =
-            std::collections::HashMap::new();
+        let mut by_key: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for c in counts {
             if let Some(s) = key_id_to_string.get(&c.key_id) {
                 by_key.insert(s.clone(), c.n as u64);
@@ -425,10 +430,9 @@ impl DatabaseServer {
         let out: Vec<PluginKvCountEntry> = keys
             .into_iter()
             .filter_map(|k| {
-                by_key.remove(&k).map(|count| PluginKvCountEntry {
-                    key: k,
-                    count,
-                })
+                by_key
+                    .remove(&k)
+                    .map(|count| PluginKvCountEntry { key: k, count })
             })
             .collect();
         Ok(out)
@@ -473,8 +477,8 @@ impl DatabaseServer {
         prefix: &str,
     ) -> BResult<Vec<PluginKvKeyInfo>> {
         let db = self.db();
-        let mut q = plugin_kv_key::Entity::find()
-            .filter(plugin_kv_key::Column::PluginId.eq(plugin_id));
+        let mut q =
+            plugin_kv_key::Entity::find().filter(plugin_kv_key::Column::PluginId.eq(plugin_id));
         if !prefix.is_empty() {
             // LIKE 'prefix%' — escape any embedded `%`/`_` in the prefix.
             let escaped: String = prefix
@@ -493,10 +497,7 @@ impl DatabaseServer {
         let out: Vec<PluginKvKeyInfo> = rows
             .into_iter()
             .filter_map(|r| {
-                PluginKvKind::from_i32(r.kind).map(|kind| PluginKvKeyInfo {
-                    key: r.key,
-                    kind,
-                })
+                PluginKvKind::from_i32(r.kind).map(|kind| PluginKvKeyInfo { key: r.key, kind })
             })
             .collect();
         Ok(out)

@@ -40,17 +40,18 @@ fn call(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsR
 
     let js_ctx = extract_js_ctx(args)?;
     let pid = js_ctx.data::<PluginId>().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(
-            "ease:rpc: no plugin context bound to this instance",
-        ))
+        JsError::from(
+            JsNativeError::typ().with_message("ease:rpc: no plugin context bound to this instance"),
+        )
     })?;
 
     let op = args
         .get_or_undefined(1)
         .as_string()
         .ok_or_else(|| {
-            JsError::from(JsNativeError::typ()
-                .with_message("ease:rpc.call: op (arg 0) must be a string"))
+            JsError::from(
+                JsNativeError::typ().with_message("ease:rpc.call: op (arg 0) must be a string"),
+            )
         })?
         .to_std_string_escaped();
 
@@ -61,9 +62,9 @@ fn call(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsR
     };
 
     let Some(cx) = crate::BACKEND_CONTEXT.get() else {
-        return Err(JsError::from(JsNativeError::typ().with_message(
-            "ease:rpc.call: BACKEND_CONTEXT not set",
-        )));
+        return Err(JsError::from(
+            JsNativeError::typ().with_message("ease:rpc.call: BACKEND_CONTEXT not set"),
+        ));
     };
     let Some(rpc) = cx.service_rpc_for(pid.as_ref()) else {
         return Err(JsError::from(JsNativeError::typ().with_message(format!(
@@ -80,8 +81,7 @@ fn call(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsR
         completion_handle.push(Box::new(move |ctx| {
             match result {
                 Ok(value) => {
-                    let js_val =
-                        JsValue::from_json(&value, ctx).unwrap_or(JsValue::null());
+                    let js_val = JsValue::from_json(&value, ctx).unwrap_or(JsValue::null());
                     let _ = resolvers
                         .resolve
                         .call(&JsValue::undefined(), &[js_val], ctx);

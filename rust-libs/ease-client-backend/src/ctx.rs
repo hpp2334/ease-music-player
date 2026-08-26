@@ -1,18 +1,18 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    sync::{
-        atomic::AtomicU32,
-        Arc, RwLock, Weak,
-    },
+    sync::{atomic::AtomicU32, Arc, RwLock, Weak},
     time::Duration,
 };
 
-use ease_tur_rpc::RpcClient;
 use ease_client_tokio::tokio_runtime;
+use ease_tur_rpc::RpcClient;
 use serde_json::Value;
 
-use crate::{error::BResult, repositories::core::DatabaseServer, services::plugin_manager::PluginManagerShared, services::StorageState};
+use crate::{
+    error::BResult, repositories::core::DatabaseServer,
+    services::plugin_manager::PluginManagerShared, services::StorageState,
+};
 
 struct BackendContextInternal {
     storage_path: RwLock<String>,
@@ -58,7 +58,9 @@ impl Debug for BackendContext {
 
 impl WeakBackendContext {
     pub fn upgrade(&self) -> Option<BackendContext> {
-        self.internal.upgrade().map(|internal| BackendContext { internal })
+        self.internal
+            .upgrade()
+            .map(|internal| BackendContext { internal })
     }
 }
 
@@ -114,7 +116,11 @@ impl BackendContext {
     /// per plugin from the `wireServiceRpc` JNI trampoline after the
     /// plugin's headless tur instance is created + its backend module loaded.
     pub fn set_service_rpc(&self, plugin_id: &str, rpc: RpcClient) {
-        self.internal.service_rpcs.write().unwrap().insert(plugin_id.to_string(), rpc);
+        self.internal
+            .service_rpcs
+            .write()
+            .unwrap()
+            .insert(plugin_id.to_string(), rpc);
     }
 
     /// Drop the JS backend-plugin RPC handle for `plugin_id` (its headless
@@ -123,14 +129,23 @@ impl BackendContext {
     /// dispatch + event delivery for it degrade gracefully until the
     /// instance is re-wired.
     pub fn remove_service_rpc(&self, plugin_id: &str) {
-        self.internal.service_rpcs.write().unwrap().remove(plugin_id);
+        self.internal
+            .service_rpcs
+            .write()
+            .unwrap()
+            .remove(plugin_id);
     }
 
     /// The JS backend-plugin RPC handle for `plugin_id`, if that plugin's
     /// headless instance is up. `JsStorageBackend` clones this for each
     /// plugin storage row; event dispatch targets it per plugin.
     pub fn service_rpc_for(&self, plugin_id: &str) -> Option<RpcClient> {
-        self.internal.service_rpcs.read().unwrap().get(plugin_id).cloned()
+        self.internal
+            .service_rpcs
+            .read()
+            .unwrap()
+            .get(plugin_id)
+            .cloned()
     }
 
     /// Fire a `plugin.event` at one plugin's backend: push `{type, payload}`
@@ -144,13 +159,13 @@ impl BackendContext {
         event_type: &str,
         payload: Value,
     ) -> BResult<()> {
-        let rpc = self.service_rpc_for(plugin_id).ok_or_else(|| {
-            crate::error::BError::CustomError {
-                message: format!(
-                    "no service RPC wired for plugin {plugin_id} (headless instance not up)"
-                ),
-            }
-        })?;
+        let rpc =
+            self.service_rpc_for(plugin_id)
+                .ok_or_else(|| crate::error::BError::CustomError {
+                    message: format!(
+                        "no service RPC wired for plugin {plugin_id} (headless instance not up)"
+                    ),
+                })?;
         rpc.emit_event(event_type, payload);
         Ok(())
     }

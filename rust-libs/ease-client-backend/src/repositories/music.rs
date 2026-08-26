@@ -4,7 +4,10 @@ use ease_client_migration::converter;
 use ease_client_schema::entities::{music, playlist_music};
 use ease_client_schema::{BlobId, MusicId, MusicModel, PlaylistId, StorageEntryLoc};
 use ease_order_key::OrderKey;
-use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder,
+};
 
 use crate::error::BResult;
 
@@ -147,10 +150,7 @@ impl DatabaseServer {
 
     /// Remove the music if it has no remaining playlist references. Returns
     /// the cover blob id to remove (if any).
-    pub(crate) async fn compact_music(
-        self: &Arc<Self>,
-        id: MusicId,
-    ) -> BResult<Option<BlobId>> {
+    pub(crate) async fn compact_music(self: &Arc<Self>, id: MusicId) -> BResult<Option<BlobId>> {
         let db = self.db();
         let mid = *id.as_ref();
         let ref_count = playlist_music::Entity::find()

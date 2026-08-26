@@ -214,8 +214,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     } else {
         Some(instance_str)
     };
-    let view_pool = borrow_pools(pools_handle)
-        .map(|pools| pools.view.clone());
+    let view_pool = borrow_pools(pools_handle).map(|pools| pools.view.clone());
     tur_android::ops::create_instance(
         &mut env,
         runtime_handle,
@@ -230,9 +229,9 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
                 None => builder,
             };
             builder.instance_data(move |cx| {
-                cx.define::<crate::plugin_runtime::PluginId>(
-                    crate::plugin_runtime::PluginId::new(pid.clone()),
-                );
+                cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
+                    pid.clone(),
+                ));
                 cx.define::<crate::plugin_runtime::PluginInstance>(
                     crate::plugin_runtime::PluginInstance(instance_opt.clone()),
                 );
@@ -263,8 +262,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
             return 0;
         }
     };
-    let backend_pool = borrow_pools(pools_handle)
-        .map(|pools| pools.backend.clone());
+    let backend_pool = borrow_pools(pools_handle).map(|pools| pools.backend.clone());
     tur_android::ops::create_headless_instance(
         &mut env,
         runtime_handle,
@@ -275,9 +273,9 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
                 None => builder,
             };
             builder.instance_data(move |cx| {
-                cx.define::<crate::plugin_runtime::PluginId>(
-                    crate::plugin_runtime::PluginId::new(pid.clone()),
-                );
+                cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
+                    pid.clone(),
+                ));
                 cx.define::<crate::plugin_runtime::PluginInstance>(
                     crate::plugin_runtime::PluginInstance(None),
                 );
@@ -366,9 +364,9 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         // AsyncPluginContext; NativeHttp needs only the tokio Handle.
         let handle = ease_client_tokio::tokio_runtime().handle().clone();
         let builder = match pools {
-            Some((ref backend, ref view)) => {
-                builder.worker_pool(backend.clone()).worker_pool(view.clone())
-            }
+            Some((ref backend, ref view)) => builder
+                .worker_pool(backend.clone())
+                .worker_pool(view.clone()),
             None => builder,
         };
         builder
@@ -402,9 +400,9 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
             return 0;
         }
     };
-    let Some(rpc) = tur_android::ops::with_app(instance_handle, |app| {
-        ease_tur_rpc::RpcClient::wire(app)
-    }) else {
+    let Some(rpc) =
+        tur_android::ops::with_app(instance_handle, |app| ease_tur_rpc::RpcClient::wire(app))
+    else {
         tracing::error!("wireServiceRpc: invalid instance handle");
         return 0;
     };
@@ -470,10 +468,15 @@ struct AAsset {
 
 #[link(name = "android")]
 unsafe extern "C" {
-    fn AAssetManager_fromJava(env: *mut std::ffi::c_void, asset_manager: *mut std::ffi::c_void)
-        -> *mut AAssetManager;
-    fn AAssetManager_open(mgr: *mut AAssetManager, filename: *const std::ffi::c_char, mode: i32)
-        -> *mut AAsset;
+    fn AAssetManager_fromJava(
+        env: *mut std::ffi::c_void,
+        asset_manager: *mut std::ffi::c_void,
+    ) -> *mut AAssetManager;
+    fn AAssetManager_open(
+        mgr: *mut AAssetManager,
+        filename: *const std::ffi::c_char,
+        mode: i32,
+    ) -> *mut AAsset;
     fn AAsset_getLength(asset: *mut AAsset) -> u64;
     fn AAsset_read(asset: *mut AAsset, buf: *mut std::ffi::c_void, count: usize) -> i32;
     fn AAsset_close(asset: *mut AAsset);
@@ -500,7 +503,11 @@ pub(crate) fn read_asset_bytes(mgr: usize, path: &str) -> Option<Vec<u8>> {
     let mut filled = 0usize;
     while filled < len {
         let n = unsafe {
-            AAsset_read(asset, buf[filled..].as_mut_ptr() as *mut std::ffi::c_void, len - filled)
+            AAsset_read(
+                asset,
+                buf[filled..].as_mut_ptr() as *mut std::ffi::c_void,
+                len - filled,
+            )
         };
         if n <= 0 {
             break;
@@ -543,7 +550,5 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     let shared = cx.plugin_manager();
     shared.set_runtime_handle(runtime_handle);
     shared.set_asset_manager(mgr as usize);
-    tracing::info!(
-        "bindPluginRuntime: runtime handle {runtime_handle} + asset manager bound"
-    );
+    tracing::info!("bindPluginRuntime: runtime handle {runtime_handle} + asset manager bound");
 }
