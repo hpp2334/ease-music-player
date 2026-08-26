@@ -8,17 +8,42 @@
 //!
 //! Embedders implement this trait to plug their own byte source into
 //! cantode. A ready-made [`MemoryAudioSource`] is provided for tests and
-//! simple embedders; embedders fetching over a network should reach for
-//! [`RemoteSource`], which takes a plain fetch closure and owns the
-//! buffering, retries, and seek machinery itself.
+//! simple embedders; embedders streaming over a network should implement
+//! [`RemoteAudioSource`] (the long-lived session trait) and wrap it in a
+//! [`BufferedSource`], which owns the buffering, demand scheduling,
+//! retries, and seek machinery itself.
 
+pub mod buffered;
 pub mod memory;
 pub mod remote;
 
+pub use buffered::{BufferedSource, Pushed, RemoteAudioSource, StreamReply};
 pub use memory::MemoryAudioSource;
 pub use remote::{RemoteSource, ReplyHandle};
 
 use std::io::{Read, Seek};
+use std::time::Duration;
+
+/// Whether an [`AudioSource`] currently has bytes at the read cursor, or
+/// would park a reader.
+///
+/// An advisory signal for the player's play path: the worker consults it
+/// before each decode step so a starved network window surfaces as
+/// [`PlayerState::Buffering`](crate::PlayerState::Buffering) instead of a
+/// frozen-but-`Playing` position. Sources that can park (`BufferedSource`)
+/// override it; everything else defaults to [`Readiness::Ready`] and keeps
+/// the classic park semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Readiness {
+    /// A read at the cursor will be satisfied without parking (data is
+    /// buffered, or the source is at a terminal — EOF / error — where the
+    /// read returns immediately).
+    #[default]
+    Ready,
+    /// The cursor sits at the end of the buffered window while the source
+    /// is still alive — a read would park until data arrives.
+    NeedsData,
+}
 
 /// A seekable byte source feeding the decoder.
 ///
@@ -58,4 +83,23 @@ pub trait AudioSource: Read + Seek + Send + Sync {
     fn is_infinite(&self) -> bool {
         false
     }
+
+    /// Advisory: can a read at the current cursor be satisfied without
+    /// parking? See [`Readiness`]. Default [`Readiness::Ready`] — sources
+    /// that park (network windows) override this to opt into the player's
+    /// `Buffering` behavior.
+    fn readiness(&self) -> Readiness {
+        Readiness::Ready
+    }
+
+    /// Bound the parks of subsequent `Read` calls: while
+    /// a deadline is set, a read that finds no data at the cursor returns
+    /// an `io::ErrorKind::WouldBlock` error once the
+    /// deadline elapses instead of parking indefinitely. `None` (the
+    /// default resting state) parks until data arrives.
+    ///
+    /// Used by the player's play path (arm before a decode step, clear
+    /// after) so a starved read surfaces as "needs data" instead of
+    /// wedging the pump. Sources that cannot park ignore it.
+    fn set_read_deadline(&mut self, _deadline: Option<Duration>) {}
 }
