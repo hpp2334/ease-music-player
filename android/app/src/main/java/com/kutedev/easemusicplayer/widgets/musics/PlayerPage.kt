@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -608,6 +609,17 @@ private fun MusicPanel(
                 playerVM.playPrevious()
             }
         )
+        // Mid-play buffering (`Buffering` state surfaced as
+        // playing+loading): the transport keeps the pause button —
+        // pausing during a buffer stall is legal — and gains a small
+        // spinner so the stall is visible instead of a frozen position.
+        if (playing && loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
         if (!playing) {
             EaseIconButton(
                 sizeType = EaseIconButtonSize.Large,
