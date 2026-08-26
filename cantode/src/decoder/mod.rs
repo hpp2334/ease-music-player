@@ -120,6 +120,22 @@ pub trait Decoder: Send {
     /// container stores metadata at the end (e.g. ID3v1); in that case
     /// fields will simply be `None` / empty.
     fn metadata(&self) -> &Metadata;
+
+    /// Advisory: does the underlying source have bytes at its read
+    /// cursor, or would it park? Forwards
+    /// [`AudioSource::readiness`] when the
+    /// decoder can still reach its source; default
+    /// [`Readiness::Ready`](crate::Readiness::Ready).
+    fn readiness(&self) -> crate::Readiness {
+        crate::Readiness::Ready
+    }
+
+    /// Arm/clear the play-path read deadline on the underlying source
+    /// (see [`AudioSource::set_read_deadline`]).
+    /// The player's pump arms a short deadline around each decode step so
+    /// a starved source surfaces as [`crate::CantodeError::WouldBlock`]
+    /// instead of parking the worker. Default no-op.
+    fn set_read_deadline(&mut self, _deadline: Option<std::time::Duration>) {}
 }
 
 /// Constructs [`Decoder`]s from [`AudioSource`]s.

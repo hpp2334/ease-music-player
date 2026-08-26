@@ -16,13 +16,19 @@ use super::session::Loaded;
 use super::shared::SharedStatus;
 
 /// Decoder stub: reports a fixed format, yields no frames. Private to
-/// this module — only `loaded_session` constructs it.
-struct StubDecoder {
+/// the `player` module tree (the session tests construct it directly).
+pub(super) struct StubDecoder {
     pub(super) fmt: AudioFormat,
+    /// When set, `next_frame` yields this error once (for the pump's
+    /// outcome mapping tests) and returns to EOF afterwards.
+    pub(super) fail_once: Option<crate::CantodeError>,
 }
 
 impl Decoder for StubDecoder {
     fn next_frame(&mut self) -> crate::Result<Option<DecodedFrame>> {
+        if let Some(e) = self.fail_once.take() {
+            return Err(e);
+        }
         Ok(None)
     }
     fn seek(&mut self, target: Duration) -> crate::Result<Duration> {
@@ -125,14 +131,28 @@ pub(super) struct Fixture {
 /// reports `src` channels at 48 kHz; the "device" is told `device`
 /// channels to exercise or skip the conversion path.
 pub(super) fn loaded_session(src: u16, device: u16) -> (Loaded, Fixture) {
+    loaded_session_with(
+        StubDecoder {
+            fmt: AudioFormat::new(src, 48_000),
+            fail_once: None,
+        },
+        src,
+        device,
+    )
+}
+
+/// Like [`loaded_session`] but with an explicit decoder (e.g. one that
+/// fails once) — for the pump outcome-mapping tests.
+pub(super) fn loaded_session_with(
+    decoder: impl Decoder + 'static,
+    _src: u16,
+    device: u16,
+) -> (Loaded, Fixture) {
     let log = SinkLog::default();
     let shared = Arc::new(SharedStatus::new());
-    let decoder = Box::new(StubDecoder {
-        fmt: AudioFormat::new(src, 48_000),
-    });
     let sink = Box::new(StubSink { log: log.clone() });
     let loaded = Loaded::new(
-        decoder,
+        Box::new(decoder),
         sink,
         AudioFormat::new(device, 48_000),
         Arc::clone(&shared),

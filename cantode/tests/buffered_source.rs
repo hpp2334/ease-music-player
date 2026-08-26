@@ -833,9 +833,17 @@ fn stall_freezes_then_resumes_with_continuity() {
     })
     .expect("position must freeze while the session stalls");
     assert!(frozen > Duration::from_millis(300), "froze at {frozen:?}");
-    assert_eq!(harness.player.state(), PlayerState::Playing);
+    // The starved window surfaces as Buffering (the sink keeps draining
+    // its ring); not a frozen-but-Playing position.
+    assert_eq!(harness.player.state(), PlayerState::Buffering);
 
     h.release_gate();
+    assert!(
+        wait_until(Duration::from_secs(3), || {
+            harness.player.state() == PlayerState::Playing
+        }),
+        "refill must morph back to Playing"
+    );
     assert!(wait_for_ended(&harness.events, Duration::from_secs(10)));
 
     let captured = harness.capture.lock().unwrap().samples.clone();
@@ -859,9 +867,32 @@ fn persistent_error_stays_playing_silent() {
         frozen > Duration::from_millis(300) && frozen < Duration::from_secs(2),
         "froze at {frozen:?}, expected near the ~0.5s failure point"
     );
-    assert_eq!(harness.player.state(), PlayerState::Playing);
+    // The failing source settles back to Playing (silent) — possibly via
+    // a brief Buffering while the sticky error lands — and stays there.
     assert!(
-        !wait_for_ended(&harness.events, Duration::from_millis(300)),
-        "persistent session errors must not emit Ended"
+        wait_until(Duration::from_secs(2), || {
+            harness.player.state() == PlayerState::Playing
+        }),
+        "persistent errors must stay playing-silent (state: {:?})",
+        harness.player.state()
     );
+
+    // The failure is surfaced — exactly once (dedup latch): a failing
+    // source errors on every pump; the event stream must carry one
+    // `Error` for the whole episode, not a flood. (Drain-and-count —
+    // a "wait for Ended" helper would consume the Error events.)
+    let mut errors = 0;
+    let mut saw_ended = false;
+    let end = std::time::Instant::now() + Duration::from_millis(300);
+    while std::time::Instant::now() < end {
+        match harness.events.recv_timeout(Duration::from_millis(50)) {
+            Ok(PlayerEvent::Error(_)) => errors += 1,
+            Ok(PlayerEvent::Ended) => saw_ended = true,
+            Ok(_) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    assert!(!saw_ended, "persistent session errors must not emit Ended");
+    assert_eq!(errors, 1, "expected exactly one Error event, got {errors}");
 }

@@ -12,16 +12,20 @@
 //! `duration`) and the operational events (`MetadataReady`,
 //! `PositionChanged`, `Ended`).
 //!
-//! The loop parks in `recv_timeout`: **5 ms while `Playing`** (so decode
-//! work interleaves with command handling — a command arriving mid-wait
-//! wakes the loop instantly; the timeout is the idle fallback, not added
-//! latency), and one hour otherwise (pure event-driven idling, with the
-//! timeout acting only as a watchdog). Each timeout tick pumps exactly
-//! one frame. The pump loop is a buffer-*filler*, not the pacer: the
-//! sink's blocking write matches decode speed to playback speed once its
-//! ring is full, and the 5 ms quantum just guarantees the worker
-//! re-enters `recv_timeout` between every frame so queued commands
-//! preempt within one pump.
+//! The loop parks in `recv_timeout`: **5 ms while `Playing` or
+//! `Buffering`** (so decode work / refill polls interleave with command
+//! handling — a command arriving mid-wait wakes the loop instantly; the
+//! timeout is the idle fallback, not added latency), and one hour
+//! otherwise (pure event-driven idling, with the timeout acting only as
+//! a watchdog). Each timeout tick pumps exactly one frame while playing,
+//! or polls the source's readiness while buffering. The pump loop is a
+//! buffer-*filler*, not the pacer: the sink's blocking write matches
+//! decode speed to playback speed once its ring is full, and the 5 ms
+//! quantum just guarantees the worker re-enters `recv_timeout` between
+//! every frame so queued commands preempt within one pump. A starved
+//! source surfaces as `Playing → Buffering` (readiness pre-check, or the
+//! 250 ms play-path read deadline) and back on refill — the sink keeps
+//! draining its ring across the morph.
 
 use std::{
     sync::{Arc, mpsc},
@@ -62,6 +66,11 @@ pub(super) struct Worker {
     /// `StateChanged` / illegal-transition errors come from the machine's
     /// own copy.
     sinks: EventSinks,
+    /// Dedup latch for source-error events: a failing source errors on
+    /// every pump; the UI wants one `PlayerEvent::Error` per episode,
+    /// not a stream of them. Cleared by a successful seek (the classic
+    /// user-driven recovery).
+    error_latched: bool,
 }
 
 impl Worker {
@@ -82,14 +91,16 @@ impl Worker {
             sink_factory,
             shared,
             sinks,
+            error_latched: false,
         }
     }
 
     pub(super) fn run(&mut self) {
         loop {
-            // If we're playing, drain work with a short timeout so the
-            // decode loop progresses; otherwise block on commands.
-            let timeout = if self.machine.is_playing() {
+            // If we're playing (or buffering, waiting on the source), use
+            // a short timeout so decode work / refill polls interleave
+            // with command handling; otherwise block on commands.
+            let timeout = if self.machine.is_playing() || self.machine.is_buffering() {
                 // Short timeout so we can interleave decode work.
                 Duration::from_millis(5)
             } else {
@@ -105,6 +116,8 @@ impl Worker {
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if self.machine.is_playing() {
                         self.pump_once();
+                    } else if self.machine.is_buffering() {
+                        self.poll_refill();
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -220,6 +233,9 @@ impl Worker {
         // flush + latch clear + position publish); we announce it.
         let actual = loaded.seek(target)?;
         self.sinks.emit(PlayerEvent::PositionChanged(actual));
+        // A successful seek is the classic user-driven recovery — the
+        // source-error episode (if any) is over.
+        self.error_latched = false;
         Ok(actual)
     }
 
@@ -228,12 +244,18 @@ impl Worker {
     fn pump_once(&mut self) {
         // Stage 1 — the session's decode→render step under the playing
         // borrow. It stores the position observable itself and returns
-        // the emission decisions.
+        // the emission decisions. The readiness pre-check skips the read
+        // entirely when the window is starved (a read would park up to
+        // the deadline and defer commands behind it).
         let outcome = {
             let Some((loaded, last_position_emit)) = self.machine.playing_mut() else {
                 return;
             };
-            loaded.pump(last_position_emit, POSITION_EMIT_INTERVAL)
+            if loaded.readiness() == crate::Readiness::NeedsData {
+                PumpOutcome::NeedsData
+            } else {
+                loaded.pump(last_position_emit, POSITION_EMIT_INTERVAL)
+            }
         };
 
         // Stage 2 — events and transitions, after the borrow ended.
@@ -252,8 +274,38 @@ impl Worker {
                 }
                 self.machine.end_of_stream();
             }
-            PumpOutcome::Skipped => {}
+            PumpOutcome::NeedsData => {
+                // Starved but alive: park the pump (the sink drains its
+                // ring) until the refill poll sees data again.
+                self.machine.buffer_underrun();
+            }
+            PumpOutcome::Skipped(err) => {
+                if let Some(e) = err {
+                    self.report_source_error(e);
+                }
+            }
         }
+    }
+
+    /// While `Buffering`: poll the source's readiness and morph back to
+    /// `Playing` once data has arrived.
+    fn poll_refill(&mut self) {
+        if let Some(loaded) = self.machine.loaded_mut()
+            && loaded.readiness() == crate::Readiness::Ready
+        {
+            self.machine.buffer_refilled();
+        }
+    }
+
+    /// Surface a source/decode error as `PlayerEvent::Error` — once per
+    /// episode (a failing source errors on every pump; the UI doesn't
+    /// want a stream of identical events). Cleared by a successful seek.
+    fn report_source_error(&mut self, e: CantodeError) {
+        if self.error_latched {
+            return;
+        }
+        self.error_latched = true;
+        self.sinks.emit(PlayerEvent::Error(e));
     }
 }
 
@@ -280,6 +332,7 @@ mod tests {
             sink_factory: Arc::new(|| Err(CantodeError::Internal("stub factory".into()))),
             shared,
             sinks: EventSinks::default(),
+            error_latched: false,
         }
     }
 

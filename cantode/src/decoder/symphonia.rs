@@ -30,7 +30,7 @@ use symphonia::{
 };
 
 use crate::{
-    AudioSource, CantodeError, CoverArt, Metadata,
+    AudioSource, CantodeError, CoverArt, Metadata, Readiness,
     decoder::{AudioFormat, DecodedFrame, Decoder, DecoderFactory},
 };
 
@@ -55,20 +55,28 @@ impl DecoderFactory for SymphoniaDecoderFactory {
     }
 }
 
+/// The shared handle to the boxed source. symphonia's
+/// `MediaSourceStream` consumes the reader, so the decoder keeps this
+/// clone to service [`Decoder::readiness`] /
+/// [`Decoder::set_read_deadline`] after opening — the player's pump
+/// needs them on the play path, and everything stays on the worker
+/// thread (the `Mutex` is uncontended in practice).
+type SharedSource = std::sync::Arc<std::sync::Mutex<Box<dyn AudioSource>>>;
+
 /// Adapter that makes an [`AudioSource`] (our `Read + Seek + Send + Sync`
 /// trait) satisfy symphonia's [`MediaSource`] trait (same shape, plus an
 /// optional `byte_length` that we can delegate to `AudioSource::len`).
-struct AudioSourceMediaSource(Box<dyn AudioSource>);
+struct AudioSourceMediaSource(SharedSource);
 
 impl std::io::Read for AudioSourceMediaSource {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.0.read(buf)
+        self.0.lock().unwrap().read(buf)
     }
 }
 
 impl std::io::Seek for AudioSourceMediaSource {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-        self.0.seek(pos)
+        self.0.lock().unwrap().seek(pos)
     }
 }
 
@@ -77,7 +85,7 @@ impl MediaSource for AudioSourceMediaSource {
         true
     }
     fn byte_len(&self) -> Option<u64> {
-        self.0.len()
+        self.0.lock().unwrap().len()
     }
 }
 
@@ -95,13 +103,20 @@ pub struct SymphoniaDecoder {
     /// it when an unusually large packet arrives. In **frames** (channel
     /// groups), matching symphonia's notion of sample-buffer duration.
     sample_buf_capacity_frames: usize,
+    /// The shared handle to the boxed source (also held inside `reader`'s
+    /// `MediaSourceStream`) for readiness/deadline forwarding.
+    source: SharedSource,
 }
 
 impl SymphoniaDecoder {
     fn open(source: Box<dyn AudioSource>) -> crate::Result<Self> {
         // Wrap our AudioSource in symphonia's MediaSource trait via the
-        // adapter. Box<dyn AudioSource> → Box<dyn MediaSource>.
-        let boxed_msource: Box<dyn MediaSource> = Box::new(AudioSourceMediaSource(source));
+        // adapter, keeping a shared handle so readiness/deadline calls
+        // can still reach the source after the MediaSourceStream
+        // consumes the reader.
+        let source: SharedSource = std::sync::Arc::new(std::sync::Mutex::new(source));
+        let boxed_msource: Box<dyn MediaSource> =
+            Box::new(AudioSourceMediaSource(std::sync::Arc::clone(&source)));
         let mss = MediaSourceStream::new(boxed_msource, Default::default());
         let hint = Hint::new(); // sniff by content; we don't know the extension
 
@@ -187,6 +202,7 @@ impl SymphoniaDecoder {
             metadata,
             sample_buf,
             sample_buf_capacity_frames: initial_capacity_frames as usize,
+            source,
         })
     }
 }
@@ -198,6 +214,12 @@ impl Decoder for SymphoniaDecoder {
                 Ok(p) => p,
                 Err(SymError::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     return Ok(None);
+                }
+                Err(SymError::IoError(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // The play-path read deadline expired: the source is
+                    // starved, not broken. Distinct from every other error
+                    // so the pump can treat it as "needs data".
+                    return Err(CantodeError::WouldBlock);
                 }
                 Err(SymError::ResetRequired) => continue,
                 Err(e) => return Err(CantodeError::Decode(format!("read packet: {e}"))),
@@ -259,6 +281,14 @@ impl Decoder for SymphoniaDecoder {
 
     fn metadata(&self) -> &Metadata {
         &self.metadata
+    }
+
+    fn readiness(&self) -> Readiness {
+        self.source.lock().unwrap().readiness()
+    }
+
+    fn set_read_deadline(&mut self, deadline: Option<std::time::Duration>) {
+        self.source.lock().unwrap().set_read_deadline(deadline);
     }
 }
 

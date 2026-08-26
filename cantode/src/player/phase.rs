@@ -179,6 +179,12 @@ impl Machine {
         matches!(self.phase, Phase::Playing { .. })
     }
 
+    /// Whether the session is parked waiting on source data (the worker
+    /// keeps its short tick to poll for the refill).
+    pub(super) fn is_buffering(&self) -> bool {
+        matches!(self.phase, Phase::Buffering(_))
+    }
+
     /// The live session, if any. Session access is not a transition —
     /// the worker uses this to seek, set volume, and latch `Ended`.
     pub(super) fn loaded_mut(&mut self) -> Option<&mut Loaded> {
@@ -247,6 +253,19 @@ impl Machine {
     /// The decoder reached end of stream (`EndOfStream`).
     pub(super) fn end_of_stream(&mut self) {
         self.apply(WorkerEvent::EndOfStream);
+    }
+
+    /// The source starved mid-play (`BufferUnderrun`): morph
+    /// `Playing → Buffering` — the sink keeps draining its ring while the
+    /// worker polls for the refill.
+    pub(super) fn buffer_underrun(&mut self) {
+        self.apply(WorkerEvent::BufferUnderrun);
+    }
+
+    /// Data arrived again (`BufferRefilled`): morph `Buffering → Playing`
+    /// and resume pumping.
+    pub(super) fn buffer_refilled(&mut self) {
+        self.apply(WorkerEvent::BufferRefilled);
     }
 
     /// Start a load: discard any existing session, then publish
@@ -504,6 +523,64 @@ mod tests {
         assert!(matches!(
             rec.events.lock().unwrap().first(),
             Some(PlayerEvent::Error(CantodeError::InvalidState(_)))
+        ));
+    }
+
+    #[test]
+    fn underrun_and_refill_move_the_session_between_playing_and_buffering() {
+        let (loaded, fx) = loaded_session(2, 2);
+        let shared = Arc::clone(&fx.shared);
+        let rec = Arc::new(RecordingSink::default());
+        let mut machine = Machine::new(
+            shared,
+            EventSinks {
+                cx: None,
+                player: Some(rec.clone()),
+            },
+        );
+        machine.begin_load();
+        machine.complete_load(loaded);
+        machine.play();
+
+        machine.buffer_underrun();
+        assert_eq!(machine.state(), PlayerState::Buffering);
+        assert_eq!(fx.shared.state(), PlayerState::Buffering);
+
+        machine.buffer_refilled();
+        assert_eq!(machine.state(), PlayerState::Playing);
+        assert_eq!(fx.shared.state(), PlayerState::Playing);
+
+        // The session survived both morphs: same sink, never stopped.
+        assert!(!fx.log.recorded("stop"));
+        assert_eq!(
+            recorded_states(&rec),
+            vec![
+                PlayerState::Loading,
+                PlayerState::Paused,
+                PlayerState::Playing,
+                PlayerState::Buffering,
+                PlayerState::Playing
+            ]
+        );
+    }
+
+    #[test]
+    fn buffer_underrun_is_illegal_outside_playing() {
+        let rec = Arc::new(RecordingSink::default());
+        let mut machine = Machine::new(
+            Arc::new(SharedStatus::new()),
+            EventSinks {
+                cx: None,
+                player: Some(rec.clone()),
+            },
+        );
+
+        machine.buffer_underrun(); // illegal from Idle
+
+        assert_eq!(machine.state(), PlayerState::Idle);
+        assert!(matches!(
+            rec.events.lock().unwrap().first(),
+            Some(PlayerEvent::Error(_))
         ));
     }
 }

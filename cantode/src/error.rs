@@ -43,6 +43,13 @@ pub enum CantodeError {
     #[error("audio sink error: {0}")]
     Sink(String),
 
+    /// A bounded read expired before data arrived — the play-path read
+    /// deadline armed by the worker around a decode step. Not a failure:
+    /// the worker treats it as "needs data" and morphs to
+    /// [`PlayerState::Buffering`](crate::PlayerState::Buffering).
+    #[error("read deadline elapsed before data arrived")]
+    WouldBlock,
+
     /// No output device is available on the current host. Raised when the
     /// default cpal output device cannot be enumerated.
     #[error("no output device available")]
