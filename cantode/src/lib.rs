@@ -15,7 +15,8 @@
 //!   │   └─ SymphoniaDecoder      └─ CpalSink              │
 //!   ├─────────────────────────────────────────────────────┤
 //!   │  AudioSource (trait: Read + Seek + Send + Sync)     │
-//!   │   └─ MemoryAudioSource (tests)                      │
+//!   │   ├─ MemoryAudioSource (tests)                      │
+//!   │   └─ RemoteSource (network range fetches)           │
 //!   └─────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -31,7 +32,10 @@
 //! predictable thread, not a co-op-scheduled task. The public API is
 //! fully synchronous and non-blocking: methods post commands to the
 //! worker and return. Embedders on any runtime (tokio, async-std, none)
-//! call in via `spawn_blocking` or a channel bridge.
+//! call in via `spawn_blocking` or a channel bridge. For byte sources,
+//! [`RemoteSource`] performs that bridging for you: it takes a plain
+//! fetch closure you can run on your own runtime and owns the
+//! buffering/retrying itself.
 //!
 //! ## Quick start
 //!
@@ -80,7 +84,7 @@ pub use events::{ChannelEventSink, EventSink, NullEventSink, PlayerEvent};
 pub use metadata::{CoverArt, Metadata, Tag, probe_metadata};
 pub use output::{AudioSink, AudioSinkFactory};
 pub use player::{Player, PlayerConfig};
-pub use source::{AudioSource, MemoryAudioSource};
+pub use source::{AudioSource, MemoryAudioSource, RemoteSource, ReplyHandle};
 pub use state::PlayerState;
 
 pub use decoder::SymphoniaDecoderFactory;

@@ -41,15 +41,15 @@ use std::time::{Duration, Instant};
 
 use cantode::{
     AudioFormat, AudioSink, AudioSinkFactory, AudioSource, CantodeError, ChannelEventSink,
-    DecoderFactory, MemoryAudioSource, Player, PlayerConfig, PlayerContext, PlayerEvent,
-    PlayerState, SymphoniaDecoderFactory,
+    MemoryAudioSource, Player, PlayerConfig, PlayerContext, PlayerEvent, PlayerState,
 };
 
 mod common;
 
+use common::{RATE, reference_decode, wait_for_ended, wait_for_quiet, wait_until};
+
 /// Mono 16-bit 44.1 kHz → bytes per second of audio; WAV data starts at
 /// byte 44. Used to translate seek targets into expected byte offsets.
-const RATE: u32 = 44_100;
 const DATA_START: u64 = 44;
 
 fn wav(seconds: f32) -> Vec<u8> {
@@ -262,129 +262,17 @@ impl AudioSource for ScriptedSource {
 }
 
 // ============================================================================
-// CaptureSink — records everything the worker pushes
-// ============================================================================
-
-#[derive(Debug, Clone)]
-enum CapEvent {
-    Start { channels: u16, sample_rate: u32 },
-    Write { offset: usize, len: usize },
-    Flush,
-    Pause,
-    Resume,
-    Stop,
-    SetVolume,
-}
-
-#[derive(Default)]
-struct CaptureState {
-    samples: Vec<f32>,
-    events: Vec<CapEvent>,
-}
-
-struct CaptureSink {
-    state: Arc<Mutex<CaptureState>>,
-    pace_realtime: bool,
-    sample_rate: u32,
-    channels: u16,
-    started_at: Option<Instant>,
-    written: usize,
-}
-
-impl CaptureSink {
-    fn shared(state: &Arc<Mutex<CaptureState>>, pace_realtime: bool) -> Self {
-        Self {
-            state: Arc::clone(state),
-            pace_realtime,
-            sample_rate: RATE,
-            channels: 1,
-            started_at: None,
-            written: 0,
-        }
-    }
-}
-
-impl AudioSink for CaptureSink {
-    fn start(&mut self, fmt: AudioFormat) -> cantode::Result<AudioFormat> {
-        self.sample_rate = fmt.sample_rate;
-        self.channels = fmt.channels;
-        self.started_at = Some(Instant::now());
-        self.state.lock().unwrap().events.push(CapEvent::Start {
-            channels: fmt.channels,
-            sample_rate: fmt.sample_rate,
-        });
-        // Echo the format back: the worker's channel conversion stays on
-        // the passthrough path, so captured samples are exactly the
-        // decoder output.
-        Ok(fmt)
-    }
-
-    fn stop(&mut self) -> cantode::Result<()> {
-        self.state.lock().unwrap().events.push(CapEvent::Stop);
-        Ok(())
-    }
-
-    fn write(&mut self, frames: &[f32]) -> cantode::Result<()> {
-        if self.pace_realtime {
-            // Device-pace emulation with a 0.5s buffer: a real sink accepts
-            // writes until its buffer is full, then blocks while the device
-            // drains at 1x. Cumulative written audio may lead wall-clock by
-            // LEAD at most; blocking here blocks the worker — exactly how a
-            // real sink applies backpressure.
-            const LEAD: Duration = Duration::from_millis(500);
-            let frames_total = (self.written + frames.len()) / self.channels.max(1) as usize;
-            let audio_time = Duration::from_secs_f64(frames_total as f64 / self.sample_rate as f64);
-            if let Some(t0) = self.started_at {
-                let budget = t0.elapsed() + LEAD;
-                if audio_time > budget {
-                    std::thread::sleep(audio_time - budget);
-                }
-            }
-        }
-        let mut st = self.state.lock().unwrap();
-        let offset = st.samples.len();
-        st.samples.extend_from_slice(frames);
-        st.events.push(CapEvent::Write {
-            offset,
-            len: frames.len(),
-        });
-        self.written += frames.len();
-        Ok(())
-    }
-
-    fn flush(&mut self) -> cantode::Result<()> {
-        self.state.lock().unwrap().events.push(CapEvent::Flush);
-        Ok(())
-    }
-
-    fn pause(&mut self) -> cantode::Result<()> {
-        self.state.lock().unwrap().events.push(CapEvent::Pause);
-        Ok(())
-    }
-
-    fn resume(&mut self) -> cantode::Result<()> {
-        self.state.lock().unwrap().events.push(CapEvent::Resume);
-        Ok(())
-    }
-
-    fn set_volume(&mut self, _vol: f32) -> cantode::Result<()> {
-        self.state.lock().unwrap().events.push(CapEvent::SetVolume);
-        Ok(())
-    }
-
-    fn latency(&self) -> Duration {
-        Duration::ZERO
-    }
-}
-
-// ============================================================================
 // Harness + helpers
 // ============================================================================
+
+fn capture_factory(pace: bool) -> (Arc<Mutex<common::CaptureState>>, AudioSinkFactory) {
+    common::capture_factory(pace)
+}
 
 struct Harness {
     _cx: PlayerContext,
     player: Player,
-    capture: Arc<Mutex<CaptureState>>,
+    capture: Arc<Mutex<common::CaptureState>>,
     events: mpsc::Receiver<PlayerEvent>,
     /// Kept so test code can keep scripting the source after `load`
     /// moved it into the player (the player only needs `Box<dyn
@@ -442,80 +330,14 @@ fn harness_with(source: Arc<Mutex<ScriptedSource>>, pace: bool) -> Harness {
     }
 }
 
-fn capture_factory(pace: bool) -> (Arc<Mutex<CaptureState>>, AudioSinkFactory) {
-    let state = Arc::new(Mutex::new(CaptureState::default()));
-    let sink_state = Arc::clone(&state);
-    let factory: AudioSinkFactory =
-        Arc::new(move || Ok(Box::new(CaptureSink::shared(&sink_state, pace))));
-    (state, factory)
-}
-
-/// Poll `pred` every 10 ms until it holds or `timeout` elapses.
-fn wait_until(timeout: Duration, mut pred: impl FnMut() -> bool) -> bool {
-    let end = Instant::now() + timeout;
-    loop {
-        if pred() {
-            return true;
-        }
-        if Instant::now() >= end {
-            return false;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
-/// Drain the event receiver until `Ended` arrives (or timeout).
-fn wait_for_ended(rx: &mpsc::Receiver<PlayerEvent>, timeout: Duration) -> bool {
-    let end = Instant::now() + timeout;
-    loop {
-        let remaining = end.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return false;
-        }
-        match rx.recv_timeout(remaining.min(Duration::from_millis(100))) {
-            Ok(PlayerEvent::Ended) => return true,
-            Ok(_) => continue,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(mpsc::RecvTimeoutError::Disconnected) => return false,
-        }
-    }
-}
-
-/// Wait until `sample` stops changing for `quiet` — the detector for
-/// "playback froze". A stall/error does not freeze the position
-/// instantly: decode keeps advancing through already-buffered bytes for
-/// a while first, so waiting for quiet is the honest signal.
-fn wait_for_quiet<T: PartialEq + Copy>(
-    deadline: Duration,
-    quiet: Duration,
-    mut sample: impl FnMut() -> T,
-) -> Option<T> {
-    let end = Instant::now() + deadline;
-    let mut last = sample();
-    let mut last_change = Instant::now();
-    loop {
-        std::thread::sleep(Duration::from_millis(20));
-        let now = sample();
-        if now != last {
-            last = now;
-            last_change = Instant::now();
-        } else if last_change.elapsed() >= quiet {
-            return Some(last);
-        }
-        if Instant::now() >= end {
-            return None;
-        }
-    }
-}
-
-fn captured_samples(capture: &Arc<Mutex<CaptureState>>) -> Vec<f32> {
+fn captured_samples(capture: &Arc<Mutex<common::CaptureState>>) -> Vec<f32> {
     capture.lock().unwrap().samples.clone()
 }
 
 /// Split the captured samples into segments delimited by `flush` calls
 /// (each seek flushes the sink, so segments = inter-seek play spans).
 /// Empty segments are dropped (e.g. the leading span before any seek).
-fn captured_segments(capture: &Arc<Mutex<CaptureState>>) -> Vec<Vec<f32>> {
+fn captured_segments(capture: &Arc<Mutex<common::CaptureState>>) -> Vec<Vec<f32>> {
     captured_segments_raw(capture)
         .into_iter()
         .filter(|s| !s.is_empty())
@@ -526,33 +348,20 @@ fn captured_segments(capture: &Arc<Mutex<CaptureState>>) -> Vec<Vec<f32>> {
 /// span must be addressable even before it has any samples, or "wait for
 /// the current segment to grow" would pass vacuously on the previous
 /// segment.
-fn captured_segments_raw(capture: &Arc<Mutex<CaptureState>>) -> Vec<Vec<f32>> {
+fn captured_segments_raw(capture: &Arc<Mutex<common::CaptureState>>) -> Vec<Vec<f32>> {
     let st = capture.lock().unwrap();
     let mut segs: Vec<Vec<f32>> = vec![Vec::new()];
     for ev in &st.events {
         match ev {
-            CapEvent::Write { offset, len } => {
+            common::CapEvent::Write { offset, len } => {
                 let seg = segs.last_mut().expect("always one open segment");
                 seg.extend_from_slice(&st.samples[*offset..*offset + len]);
             }
-            CapEvent::Flush => segs.push(Vec::new()),
+            common::CapEvent::Flush => segs.push(Vec::new()),
             _ => {}
         }
     }
     segs
-}
-
-/// Decode the same bytes from RAM — the bit-exact oracle.
-fn reference_decode(wav_bytes: &[u8]) -> Vec<f32> {
-    let factory = SymphoniaDecoderFactory::new();
-    let mut dec = factory
-        .open(Box::new(MemoryAudioSource::new(wav_bytes.to_vec())))
-        .expect("reference open");
-    let mut out = Vec::new();
-    while let Some(frame) = dec.next_frame().expect("reference decode") {
-        out.extend_from_slice(&frame.data);
-    }
-    out
 }
 
 /// Locate `needle` in `haystack`, searching a ±`window` sample window
@@ -725,7 +534,7 @@ fn capture_sink_records_calls_and_shared_state() {
         .events
         .iter()
         .filter_map(|e| match e {
-            CapEvent::Start {
+            common::CapEvent::Start {
                 channels,
                 sample_rate,
             } => Some((*channels, *sample_rate)),
@@ -737,13 +546,13 @@ fn capture_sink_records_calls_and_shared_state() {
         .events
         .iter()
         .map(|e| match e {
-            CapEvent::Start { .. } => "start",
-            CapEvent::Write { .. } => "write",
-            CapEvent::Flush => "flush",
-            CapEvent::Pause => "pause",
-            CapEvent::Resume => "resume",
-            CapEvent::Stop => "stop",
-            CapEvent::SetVolume => "volume",
+            common::CapEvent::Start { .. } => "start",
+            common::CapEvent::Write { .. } => "write",
+            common::CapEvent::Flush => "flush",
+            common::CapEvent::Pause => "pause",
+            common::CapEvent::Resume => "resume",
+            common::CapEvent::Stop => "stop",
+            common::CapEvent::SetVolume => "volume",
         })
         .collect();
     assert_eq!(
@@ -756,7 +565,8 @@ fn capture_sink_records_calls_and_shared_state() {
 
 #[test]
 fn capture_sink_pacing_throttles_to_realtime() {
-    let mut sink = CaptureSink::shared(&Arc::new(Mutex::new(CaptureState::default())), true);
+    let mut sink =
+        common::CaptureSink::shared(&Arc::new(Mutex::new(common::CaptureState::default())), true);
     sink.start(AudioFormat::new(1, RATE)).unwrap();
 
     // A real device accepts writes until its buffer fills: the first
