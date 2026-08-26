@@ -16,7 +16,7 @@
 //!   ├─────────────────────────────────────────────────────┤
 //!   │  AudioSource (trait: Read + Seek + Send + Sync)     │
 //!   │   ├─ MemoryAudioSource (tests)                      │
-//!   │   └─ RemoteSource (network range fetches)           │
+//!   │   └─ BufferedSource (network streaming sessions)    │
 //!   └─────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -33,9 +33,10 @@
 //! fully synchronous and non-blocking: methods post commands to the
 //! worker and return. Embedders on any runtime (tokio, async-std, none)
 //! call in via `spawn_blocking` or a channel bridge. For byte sources,
-//! [`RemoteSource`] performs that bridging for you: it takes a plain
-//! fetch closure you can run on your own runtime and owns the
-//! buffering/retrying itself.
+//! [`BufferedSource`] performs that bridging for you: implement the
+//! non-blocking [`RemoteAudioSource`] session trait (`open` / `request` /
+//! `close` — one long-lived request per session, demand-told) on your
+//! own runtime, and cantode owns the buffering/retrying itself.
 //!
 //! ## Quick start
 //!
@@ -84,7 +85,10 @@ pub use events::{ChannelEventSink, EventSink, NullEventSink, PlayerEvent};
 pub use metadata::{CoverArt, Metadata, Tag, probe_metadata};
 pub use output::{AudioSink, AudioSinkFactory};
 pub use player::{Player, PlayerConfig};
-pub use source::{AudioSource, MemoryAudioSource, RemoteSource, ReplyHandle};
+pub use source::{
+    AudioSource, BufferedSource, MemoryAudioSource, Pushed, Readiness, RemoteAudioSource,
+    RemoteSource, ReplyHandle, StreamReply,
+};
 pub use state::PlayerState;
 
 pub use decoder::SymphoniaDecoderFactory;
