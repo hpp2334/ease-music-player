@@ -19,8 +19,16 @@ use std::time::{Duration, Instant};
 
 use crate::decoder::{AudioFormat, DecodedFrame, Decoder};
 use crate::output::AudioSink;
+use crate::{CantodeError, Readiness};
 
 use super::shared::SharedStatus;
+
+/// The play-path read deadline armed around each decode step in
+/// [`Loaded::pump`]: a starved source surfaces as
+/// [`CantodeError::WouldBlock`] (→ [`PumpOutcome::NeedsData`]) after this
+/// long instead of parking the worker indefinitely. Reads outside the
+/// pump (probe at load, seek) keep the unbounded park.
+const PLAY_READ_DEADLINE: Duration = Duration::from_millis(250);
 
 pub(super) struct Loaded {
     decoder: Box<dyn Decoder>,
@@ -55,8 +63,13 @@ pub(super) enum PumpOutcome {
     Frame { position: Duration, emit: bool },
     /// The decoder reached end of stream.
     EndOfStream,
-    /// A (non-fatal) decode error; the frame was skipped.
-    Skipped,
+    /// The source is starved but alive (a bounded read expired or the
+    /// readiness pre-check tripped). The worker morphs to `Buffering`.
+    NeedsData,
+    /// A (non-fatal) decode error; the frame was skipped. Carries the
+    /// error so the worker can surface it (deduplicated) as
+    /// `PlayerEvent::Error`.
+    Skipped(Option<CantodeError>),
 }
 
 impl Loaded {
@@ -97,8 +110,14 @@ impl Loaded {
     /// insisted on a different layout), and decide whether the
     /// position-event throttle elapsed. `interval` is passed in — event
     /// cadence is the worker's policy, not the session's.
+    ///
+    /// The read is bounded by [`PLAY_READ_DEADLINE`]: a starved source
+    /// yields [`PumpOutcome::NeedsData`] rather than parking the worker.
     pub(super) fn pump(&mut self, last_emit: &mut Instant, interval: Duration) -> PumpOutcome {
-        match self.decoder.next_frame() {
+        self.decoder.set_read_deadline(Some(PLAY_READ_DEADLINE));
+        let decoded = self.decoder.next_frame();
+        self.decoder.set_read_deadline(None);
+        match decoded {
             Ok(Some(frame)) => {
                 self.shared.set_position(frame.timestamp);
                 self.write_frame(&frame);
@@ -113,13 +132,20 @@ impl Loaded {
                 }
             }
             Ok(None) => PumpOutcome::EndOfStream,
-            Err(_e) => {
-                // Non-fatal: skip. A future improvement is to surface
-                // repeated decode failures via PlayerEvent::Error.
-                tracing::debug!("decode error in pump; skipping frame");
-                PumpOutcome::Skipped
+            Err(CantodeError::WouldBlock) => PumpOutcome::NeedsData,
+            Err(e) => {
+                // Non-fatal: skip. Surfaced (once per episode) by the
+                // worker as `PlayerEvent::Error` via `Skipped`.
+                tracing::debug!("decode error in pump; skipping frame: {e:?}");
+                PumpOutcome::Skipped(Some(e))
             }
         }
+    }
+
+    /// Forward of [`Decoder::readiness`]: can the source satisfy a read
+    /// at the cursor without parking?
+    pub(super) fn readiness(&self) -> Readiness {
+        self.decoder.readiness()
     }
 
     /// Seek choreography in one place: decoder seek, flush the sink's
@@ -211,7 +237,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::player::stubs::loaded_session;
+    use crate::player::stubs::{StubDecoder, loaded_session, loaded_session_with};
 
     #[test]
     fn loaded_drop_is_the_single_teardown_point() {
@@ -277,5 +303,47 @@ mod tests {
         ));
         assert!(fx.log.samples().is_empty());
         assert_eq!(fx.shared.position(), Duration::ZERO);
+    }
+
+    #[test]
+    fn pump_maps_would_block_to_needs_data() {
+        // A bounded-read expiry is "starved, not broken": the pump must
+        // surface NeedsData (the worker morphs to Buffering), not an
+        // error and not EOF.
+        let (mut loaded, _fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: Some(crate::CantodeError::WouldBlock),
+            },
+            2,
+            2,
+        );
+        let mut last = Instant::now();
+        assert!(matches!(
+            loaded.pump(&mut last, Duration::from_millis(100)),
+            PumpOutcome::NeedsData
+        ));
+        // And the very next pump behaves normally (no sticky state).
+        assert!(matches!(
+            loaded.pump(&mut last, Duration::from_millis(100)),
+            PumpOutcome::EndOfStream
+        ));
+    }
+
+    #[test]
+    fn pump_carries_decode_errors_for_event_surfacing() {
+        let (mut loaded, _fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: Some(crate::CantodeError::Decode("corrupt".into())),
+            },
+            2,
+            2,
+        );
+        let mut last = Instant::now();
+        let PumpOutcome::Skipped(err) = loaded.pump(&mut last, Duration::from_millis(100)) else {
+            panic!("expected Skipped");
+        };
+        assert!(matches!(err, Some(crate::CantodeError::Decode(_))));
     }
 }

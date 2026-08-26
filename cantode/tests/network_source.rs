@@ -29,11 +29,16 @@
 //!
 //! - `error_then_eof_*`: a source that errors once and then reports EOF
 //!   produces a premature `Ended` even though data remained — the exact
-//!   shape of a failed chunk over HTTP in the embedding app.
-//! - `Buffering`/`BufferUnderrun`/`BufferRefilled` are unreachable: a
-//!   stalled read just blocks the worker (see
-//!   `stall_freezes_position_and_defers_pause`), and
-//!   `AudioSource::is_infinite` is never consulted by the engine.
+//!   shape of a failed chunk over HTTP in the embedding app. (Sources
+//!   built on `BufferedSource` retry lying EOFs themselves, so this
+//!   only bites hand-rolled `AudioSource`s like this one.)
+//! - `AudioSource::is_infinite` is never consulted by the engine.
+//!
+//! Note on `Buffering`: `ScriptedSource` implements neither
+//! `readiness()` nor `set_read_deadline` (defaults), so a stall here
+//! still parks the worker — the classic freeze characterization. The
+//! `Buffering` morph itself is covered in `tests/buffered_source.rs`
+//! against a source that opts in.
 
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex, mpsc};
@@ -1027,8 +1032,7 @@ fn error_then_eof_output_is_exact_prefix() {
 // ============================================================================
 // - Distinguish source errors from clean EOF in `pump_once` so a failed
 //   chunk surfaces as `PlayerEvent::Error` instead of a phantom `Ended`
-//   (see `error_then_eof_emits_phantom_ended`).
-// - Wire `Buffering`/`BufferUnderrun` via a read deadline; today a stall
-//   is indistinguishable from a slow read (see
-//   `stall_freezes_position_and_defers_pause`).
+//   (see `error_then_eof_emits_phantom_ended`). (Done for persistent
+//   errors via the worker's dedup latch; the error-then-EOF shape still
+//   masquerades because the EOF wins.)
 // - Honor `AudioSource::is_infinite` (declared, but never consulted).

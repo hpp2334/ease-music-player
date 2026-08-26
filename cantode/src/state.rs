@@ -64,12 +64,11 @@ pub(crate) enum WorkerEvent {
     PauseRequested,
     /// `Player::stop` was called (drop the loaded source).
     StopRequested,
-    /// The source stalled during decode (network / slow I/O). Reserved for
-    /// future use by the worker's backpressure detection; currently unused.
-    #[allow(dead_code)]
+    /// The source stalled during decode (network / slow I/O) — the read
+    /// deadline expired or the readiness pre-check tripped. `Playing →
+    /// Buffering`.
     BufferUnderrun,
-    /// The buffer is full again; resume playback. Reserved for future use.
-    #[allow(dead_code)]
+    /// The buffer has data again; resume playback. `Buffering → Playing`.
     BufferRefilled,
     /// The decoder reached end of stream.
     EndOfStream,
