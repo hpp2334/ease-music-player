@@ -355,13 +355,17 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         tracing::error!("createRuntime: nonzero poolsHandle is not a live PluginWorkerPools");
     }
 
-    tur_android::ops::create_runtime(&mut env, context, |builder| {
+    tur_android::ops::create_runtime(&mut env, context, move |builder| {
         // tur's engine core is tokio-free (since the drop-tokio refactor); the
         // embedder must hand NativeHttp a Handle onto a runtime it owns + keeps
         // alive for the engine's lifetime. We use the shared ease-client-tokio
         // runtime (same one the backend + JsStorageBackend spawn onto). The
         // builder's capability() takes a closure that may receive the engine's
         // AsyncPluginContext; NativeHttp needs only the tokio Handle.
+        //
+        // `move`: the closure is marshalled onto the tur-host thread
+        // (#210), so it must be 'static — `pools` was already cloned up
+        // front for exactly this.
         let handle = ease_client_tokio::tokio_runtime().handle().clone();
         let builder = match pools {
             Some((ref backend, ref view)) => builder

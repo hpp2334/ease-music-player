@@ -77,9 +77,12 @@ fun TurView(
 /**
  * `SurfaceView` subclass that owns the [TurInstance] lifecycle + input dispatch.
  *
- * The instance is created lazily via [bind] (called once the surface is ready).
- * All methods must be called on the main looper (where `SurfaceHolder.Callback`
- * and input dispatch arrive).
+ * The instance is created lazily via [bind] (called once the surface is
+ * ready). All methods run on the main looper (where `SurfaceHolder.Callback`
+ * and input dispatch arrive) — they only marshal work onto the native
+ * tur-host thread, which runs the engine + GPU work off the main thread;
+ * [createInstance][TurRuntime.createInstance] returns before the native
+ * build finishes (failures log to logcat).
  */
 private class TurSurfaceView(context: Context) : SurfaceView(context) {
     private var instance: TurInstance? = null
@@ -121,6 +124,12 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
         holder.addCallback(surfaceCallback)
         setOnTouchListener { _, event ->
             userInteracted = true
+            // Reconcile the IME on the user-interaction transition itself:
+            // a tap on an already-focused editable may change no focus and
+            // request no new frame, so nothing else would run the sync —
+            // but the keyboard should appear now that the user has
+            // interacted.
+            syncIme()
             val inst = instance ?: return@setOnTouchListener false
             // `MotionEvent.getX/Y` are in physical px; the engine hit-tests in
             // logical px, so divide by dpr.
@@ -158,6 +167,13 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
             val h = (holder.surfaceFrame.height() / d).toInt().coerceAtLeast(1)
             val t0 = android.os.SystemClock.elapsedRealtime()
             instance = try {
+                // Spawn an isolated instance from the runtime — returns
+                // immediately; the native build (wgpu init + worker
+                // handshake) runs on the tur-host thread, and the
+                // loadModule below is queued behind it (FIFO). The
+                // TurPerf timings therefore cover queueing, not the build;
+                // `markBoot`→`markFirstPump` spans the whole async build +
+                // module eval + first render.
                 rt.createInstance(holder.surface, w, h, dprValue, pendingPluginId, pendingInstance).also {
                     val t1 = android.os.SystemClock.elapsedRealtime()
                     it.loadModule(sourceHandle)

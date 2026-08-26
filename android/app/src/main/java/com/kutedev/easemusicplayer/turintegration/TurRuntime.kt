@@ -58,6 +58,12 @@ class TurRuntime(
      * calling plugin from Rust, not from a JS argument. [instance] is the
      * storage's `plugin_storage_id` for edit-mode views (`null` for create
      * mode) — exposed to JS as `ease.context.instance()`.
+     *
+     * Returns as soon as the native handle exists — the heavy build (wgpu
+     * adapter/device init, worker handshake, plugin registration) runs on
+     * the native tur-host thread, so the first frames appear asynchronously.
+     * A native build failure logs to logcat (no exception here) and later
+     * ops on the returned instance become no-ops.
      */
     fun createInstance(
         surface: android.view.Surface,

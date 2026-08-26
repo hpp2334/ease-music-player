@@ -52,10 +52,11 @@ object EasePluginBridge {
     /**
      * Connect a headless backend instance's event bus to ease-tur-rpc and
      * stash the resulting `Send` `RpcClient` into the global backend context
-     * under [pluginId]. Call once per plugin, on the instance's own (JNI)
-     * thread, after `createHeadlessInstance` + `loadModule` (by source
-     * handle) so the JS dispatcher + backend handlers are registered. Returns `true` on
-     * success.
+     * under [pluginId]. Call once per plugin, after `createHeadlessInstance`
+     * + `loadModule` (by source handle) so the JS dispatcher + backend
+     * handlers are registered — the native op queue is FIFO, so the wire
+     * round-trip lands behind both even though the instance build is async.
+     * Returns `true` on success.
      */
     @JvmStatic
     external fun wireServiceRpc(instanceHandle: Long, pluginId: String): Boolean
