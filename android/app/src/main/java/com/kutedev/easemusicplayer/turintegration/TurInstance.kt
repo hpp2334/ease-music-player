@@ -50,12 +50,13 @@ class TurInstance(
     }
 
     init {
-        // Wire the frame loop's wake callbacks to pump this instance. Done
-        // at construction (the instance already exists by the time the handle
-        // reaches us) so the first Choreographer tick advances it.
-        // `onVsync` = a display frame was requested (fires the engine's
-        // vsync event + polls the loop); `onPump` = messages/tasks need the
-        // loop polled WITHOUT a frame (keeps an idle instance at 0% CPU).
+        // Wire the frame loop's wake callbacks to pump this instance. The
+        // native route exists by the time the handle reaches us (the heavy
+        // build may still be queued on the tur-host thread — FIFO op order
+        // makes any wake that lands first wait behind it). `onVsync` = a
+        // display frame was requested (fires the engine's vsync event +
+        // polls the loop); `onPump` = messages/tasks need the loop polled
+        // WITHOUT a frame (keeps an idle instance at 0% CPU).
         //
         // NOTE: `this.handle` (the property reading the atomic cell) — NOT
         // the constructor parameter. The parameter is captured by these
