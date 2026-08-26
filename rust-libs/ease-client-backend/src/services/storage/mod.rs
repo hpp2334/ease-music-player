@@ -8,8 +8,8 @@ use ease_client_schema::{
     DataSourceKey, PluginId, PluginStorageId, StorageEntryLoc, StorageHandle, StorageId,
     StorageType,
 };
-use ease_remote_storage::{LocalBackend, StorageBackend, StreamFile};
 use ease_js_storage::JsStorageBackend;
+use ease_remote_storage::{LocalBackend, StorageBackend, StreamFile};
 use tracing::instrument;
 
 /// JSON shape storage plugins store under
@@ -100,7 +100,9 @@ pub async fn get_storage_backend(
             // every RPC. The JS handlers live under `<provider>:<op>`.
             let plugin_storage_id = row.plugin_storage_id.clone().unwrap_or_default();
             let (provider, instance) = match plugin_storage_id.split_once(':') {
-                Some((p, rest)) if !p.is_empty() && !rest.is_empty() => (p.to_string(), plugin_storage_id.clone()),
+                Some((p, rest)) if !p.is_empty() && !rest.is_empty() => {
+                    (p.to_string(), plugin_storage_id.clone())
+                }
                 _ => {
                     return Err(BError::CustomError {
                         message: format!(

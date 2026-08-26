@@ -84,7 +84,11 @@ pub struct PluginState {
     pub first_run_done: bool,
     #[serde(default)]
     pub enabled: HashMap<String, bool>,
-    #[serde(rename = "lastSourceUrl", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "lastSourceUrl",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_source_url: Option<String>,
     #[serde(rename = "customSources", default)]
     pub custom_sources: Vec<CustomSource>,
@@ -177,8 +181,9 @@ fn write_state(app_document_dir: &str, state: &PluginState) -> BResult<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let text = serde_json::to_string_pretty(state)
-        .map_err(|e| BError::CustomError { message: format!("serialize plugin state: {e}") })?;
+    let text = serde_json::to_string_pretty(state).map_err(|e| BError::CustomError {
+        message: format!("serialize plugin state: {e}"),
+    })?;
     std::fs::write(path, text)?;
     Ok(())
 }
@@ -215,8 +220,9 @@ fn unsafe_entry_name(name: &str) -> bool {
 /// at the zip root, sane id, sanitized entry names, ≤200 entries, ≤20 MB.
 pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<ManifestRaw> {
     let reader = std::io::Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(reader)
-        .map_err(|e| BError::CustomError { message: format!("bad zip: {e}") })?;
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| BError::CustomError {
+        message: format!("bad zip: {e}"),
+    })?;
 
     let entries = archive.len();
     if entries > MAX_ENTRIES {
@@ -230,12 +236,14 @@ pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<Manife
     let mut files: Vec<(String, u64)> = Vec::new();
     let mut has_manifest = false;
     for i in 0..entries {
-        let entry = archive
-            .by_index_raw(i)
-            .map_err(|e| BError::CustomError { message: format!("zip entry {i}: {e}") })?;
+        let entry = archive.by_index_raw(i).map_err(|e| BError::CustomError {
+            message: format!("zip entry {i}: {e}"),
+        })?;
         let name = entry.name().to_string();
         if unsafe_entry_name(&name) {
-            return Err(BError::CustomError { message: format!("unsafe entry: {name}") });
+            return Err(BError::CustomError {
+                message: format!("unsafe entry: {name}"),
+            });
         }
         if name == "manifest.json" {
             has_manifest = true;
@@ -245,7 +253,9 @@ pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<Manife
         }
         total += entry.size();
         if total > MAX_TOTAL_BYTES {
-            return Err(BError::CustomError { message: "zip too large".into() });
+            return Err(BError::CustomError {
+                message: "zip too large".into(),
+            });
         }
         files.push((name, entry.size()));
     }
@@ -266,13 +276,17 @@ pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<Manife
         .expect("has_manifest checked above");
     let mut manifest_bytes = Vec::new();
     {
-        let mut manifest_file = archive
-            .by_index(manifest_idx)
-            .map_err(|e| BError::CustomError { message: format!("read manifest.json: {e}") })?;
+        let mut manifest_file =
+            archive
+                .by_index(manifest_idx)
+                .map_err(|e| BError::CustomError {
+                    message: format!("read manifest.json: {e}"),
+                })?;
         std::io::copy(&mut manifest_file, &mut manifest_bytes)?;
     }
-    let manifest_text = String::from_utf8(manifest_bytes)
-        .map_err(|_| BError::CustomError { message: "manifest.json is not utf-8".into() })?;
+    let manifest_text = String::from_utf8(manifest_bytes).map_err(|_| BError::CustomError {
+        message: "manifest.json is not utf-8".into(),
+    })?;
     let manifest = parse_manifest(&manifest_text)?;
     if !valid_plugin_id(&manifest.id) {
         return Err(BError::CustomError {
@@ -293,8 +307,8 @@ pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<Manife
         // Pass 2 — extract.
         for i in 0..entries {
             let name = {
-                let entry = archive.by_index_raw(i).map_err(|e| {
-                    BError::CustomError { message: format!("zip entry {i}: {e}") }
+                let entry = archive.by_index_raw(i).map_err(|e| BError::CustomError {
+                    message: format!("zip entry {i}: {e}"),
                 })?;
                 if entry.is_dir() {
                     String::new()
@@ -310,9 +324,9 @@ pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<Manife
                 std::fs::create_dir_all(parent)?;
             }
             let mut out = std::fs::File::create(&dest)?;
-            let mut fh = archive
-                .by_index(i)
-                .map_err(|e| BError::CustomError { message: format!("zip entry {i}: {e}") })?;
+            let mut fh = archive.by_index(i).map_err(|e| BError::CustomError {
+                message: format!("zip entry {i}: {e}"),
+            })?;
             std::io::copy(&mut fh, &mut out)?;
         }
         std::fs::write(staging.join("manifest.json"), &manifest_text)?;
@@ -363,8 +377,9 @@ fn opt_str(v: &Value, key: &str) -> Option<String> {
 }
 
 pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
-    let v: Value = serde_json::from_str(text)
-        .map_err(|e| BError::CustomError { message: format!("bad manifest.json: {e}") })?;
+    let v: Value = serde_json::from_str(text).map_err(|e| BError::CustomError {
+        message: format!("bad manifest.json: {e}"),
+    })?;
     let id = opt_str(&v, "id").unwrap_or_default();
     let contributions = v.get("contributions").cloned().unwrap_or(Value::Null);
     let parse_list = |key: &str| -> Vec<ContributionRaw> {
@@ -439,7 +454,11 @@ fn scan_manifests_blocking(root: &Path) -> Vec<(PathBuf, ManifestRaw)> {
             continue;
         };
         if let Ok(m) = parse_manifest(&text) {
-            let id = if m.id.is_empty() { name.to_string() } else { m.id };
+            let id = if m.id.is_empty() {
+                name.to_string()
+            } else {
+                m.id
+            };
             out.push((path, ManifestRaw { id, ..m }));
         }
     }
@@ -461,10 +480,8 @@ pub fn register_module_source(runtime_handle: i64, src: String) -> i64 {
     }
     #[cfg(target_os = "android")]
     {
-        tur_android::ops::with_runtime(runtime_handle, |rt| {
-            rt.module_sources.register(src) as i64
-        })
-        .unwrap_or(0)
+        tur_android::ops::with_runtime(runtime_handle, |rt| rt.module_sources.register(src) as i64)
+            .unwrap_or(0)
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -548,14 +565,18 @@ pub async fn http_get_text(url: &str) -> BResult<String> {
         .timeout(JSON_TIMEOUT)
         .send()
         .await
-        .map_err(|e| BError::CustomError { message: format!("GET {url}: {e}") })?;
+        .map_err(|e| BError::CustomError {
+            message: format!("GET {url}: {e}"),
+        })?;
     let status = resp.status();
     if !status.is_success() {
-        return Err(BError::CustomError { message: format!("GET {url}: HTTP {status}") });
+        return Err(BError::CustomError {
+            message: format!("GET {url}: HTTP {status}"),
+        });
     }
-    resp.text()
-        .await
-        .map_err(|e| BError::CustomError { message: format!("GET {url}: {e}") })
+    resp.text().await.map_err(|e| BError::CustomError {
+        message: format!("GET {url}: {e}"),
+    })
 }
 
 pub async fn http_download(url: &str) -> BResult<Vec<u8>> {
@@ -564,15 +585,18 @@ pub async fn http_download(url: &str) -> BResult<Vec<u8>> {
         .timeout(ZIP_TIMEOUT)
         .send()
         .await
-        .map_err(|e| BError::CustomError { message: format!("GET {url}: {e}") })?;
+        .map_err(|e| BError::CustomError {
+            message: format!("GET {url}: {e}"),
+        })?;
     let status = resp.status();
     if !status.is_success() {
-        return Err(BError::CustomError { message: format!("GET {url}: HTTP {status}") });
+        return Err(BError::CustomError {
+            message: format!("GET {url}: HTTP {status}"),
+        });
     }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| BError::CustomError { message: format!("GET {url}: {e}") })?;
+    let bytes = resp.bytes().await.map_err(|e| BError::CustomError {
+        message: format!("GET {url}: {e}"),
+    })?;
     Ok(bytes.into())
 }
 
@@ -582,8 +606,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 pub fn parse_registry(body: &str) -> BResult<Vec<RegistryEntry>> {
-    let v: Value = serde_json::from_str(body)
-        .map_err(|e| BError::CustomError { message: format!("bad plugins.json: {e}") })?;
+    let v: Value = serde_json::from_str(body).map_err(|e| BError::CustomError {
+        message: format!("bad plugins.json: {e}"),
+    })?;
     let arr = v.get("plugins").and_then(|x| x.as_array());
     Ok(arr
         .map(|arr| {
@@ -653,7 +678,11 @@ pub fn entry_zip_url(entry: &RegistryEntry, base_url: &str) -> String {
     if entry.zip.starts_with("http") {
         entry.zip.clone()
     } else {
-        format!("{}/{}", base_url.trim_end_matches('/'), entry.zip.trim_start_matches('/'))
+        format!(
+            "{}/{}",
+            base_url.trim_end_matches('/'),
+            entry.zip.trim_start_matches('/')
+        )
     }
 }
 
@@ -734,9 +763,7 @@ fn host_label(url: &str) -> String {
 /// whose ref changed — so the caller falls back to the first preset).
 pub fn effective_last_source(state: &PluginState) -> Option<String> {
     let url = state.last_source_url.as_ref()?;
-    let known = preset_sources()
-        .iter()
-        .any(|(u, _)| u == url)
+    let known = preset_sources().iter().any(|(u, _)| u == url)
         || state.custom_sources.iter().any(|s| &s.url == url);
     if known {
         Some(url.clone())
@@ -760,8 +787,12 @@ pub async fn install_from_zip_path(
     let path = path.to_string();
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(path))
         .await
-        .map_err(|e| BError::CustomError { message: format!("read zip: {e}") })?
-        .map_err(|e| BError::CustomError { message: format!("read zip: {e}") })?;
+        .map_err(|e| BError::CustomError {
+            message: format!("read zip: {e}"),
+        })?
+        .map_err(|e| BError::CustomError {
+            message: format!("read zip: {e}"),
+        })?;
     install_bytes_and_enable(cx, app_document_dir, bytes).await
 }
 
@@ -792,11 +823,12 @@ async fn install_bytes_and_enable(
     bytes: Vec<u8>,
 ) -> BResult<(String, i64)> {
     let dir = app_document_dir.to_string();
-    let manifest = tokio::task::spawn_blocking(move || {
-        install_zip_bytes_blocking(&plugins_root(&dir), bytes)
-    })
-    .await
-    .map_err(|e| BError::CustomError { message: format!("install task: {e}") })??;
+    let manifest =
+        tokio::task::spawn_blocking(move || install_zip_bytes_blocking(&plugins_root(&dir), bytes))
+            .await
+            .map_err(|e| BError::CustomError {
+                message: format!("install task: {e}"),
+            })??;
     mutate_state(app_document_dir, |s| PluginState {
         enabled: {
             let mut enabled = s.enabled;
@@ -823,7 +855,10 @@ pub async fn set_enabled(
         },
         ..s
     })?;
-    tracing::info!("plugin {}: {plugin_id}", if enabled { "enabled" } else { "disabled" });
+    tracing::info!(
+        "plugin {}: {plugin_id}",
+        if enabled { "enabled" } else { "disabled" }
+    );
     Ok(cx.plugin_manager().bump_generation())
 }
 
@@ -846,7 +881,9 @@ pub async fn uninstall(
         }
     })
     .await
-    .map_err(|e| BError::CustomError { message: format!("uninstall task: {e}") })?;
+    .map_err(|e| BError::CustomError {
+        message: format!("uninstall task: {e}"),
+    })?;
     mutate_state(app_document_dir, |s| PluginState {
         enabled: {
             let mut enabled = s.enabled;
@@ -880,10 +917,17 @@ pub async fn add_custom_source(
             s
         } else {
             PluginState {
-                custom_sources: s.custom_sources.iter().cloned().chain([CustomSource {
-                    url: normalized.clone(),
-                    label: label.map(|l| l.to_string()).unwrap_or_else(|| host_label(&normalized)),
-                }]).collect(),
+                custom_sources: s
+                    .custom_sources
+                    .iter()
+                    .cloned()
+                    .chain([CustomSource {
+                        url: normalized.clone(),
+                        label: label
+                            .map(|l| l.to_string())
+                            .unwrap_or_else(|| host_label(&normalized)),
+                    }])
+                    .collect(),
                 ..s
             }
         }
@@ -893,7 +937,12 @@ pub async fn add_custom_source(
 
 pub fn remove_custom_source(app_document_dir: &str, url: &str) -> BResult<()> {
     mutate_state(app_document_dir, |s| PluginState {
-        custom_sources: s.custom_sources.iter().filter(|c| c.url != url).cloned().collect(),
+        custom_sources: s
+            .custom_sources
+            .iter()
+            .filter(|c| c.url != url)
+            .cloned()
+            .collect(),
         last_source_url: if s.last_source_url.as_deref() == Some(url) {
             None
         } else {
@@ -1044,15 +1093,23 @@ pub struct ContributionInfo {
 /// Scan the installed tree and register module sources for **enabled**
 /// plugins only (disabled plugins come back with zero handles; a re-enable
 /// bumps the generation and the service rescans).
-pub async fn scan(cx: &crate::ctx::BackendContext, app_document_dir: &str) -> BResult<PluginListOut> {
+pub async fn scan(
+    cx: &crate::ctx::BackendContext,
+    app_document_dir: &str,
+) -> BResult<PluginListOut> {
     let root = plugins_root(app_document_dir);
     let dir = app_document_dir.to_string();
     let runtime_handle = cx.plugin_manager().runtime_handle();
     let (scanned, state) = tokio::task::spawn_blocking(move || {
-        (scan_manifests_blocking(&plugins_root(&dir)), read_state(&dir))
+        (
+            scan_manifests_blocking(&plugins_root(&dir)),
+            read_state(&dir),
+        )
     })
     .await
-    .map_err(|e| BError::CustomError { message: format!("scan task: {e}") })?;
+    .map_err(|e| BError::CustomError {
+        message: format!("scan task: {e}"),
+    })?;
 
     let plugins = scanned
         .into_iter()
@@ -1076,7 +1133,8 @@ pub async fn scan(cx: &crate::ctx::BackendContext, app_document_dir: &str) -> BR
             } else {
                 0
             };
-            let dashboard_infos = contribution_infos(dashboard, enabled, &root, &id, runtime_handle);
+            let dashboard_infos =
+                contribution_infos(dashboard, enabled, &root, &id, runtime_handle);
             let storages_infos = contribution_infos(storages, enabled, &root, &id, runtime_handle);
             PluginScanInfo {
                 id,
@@ -1210,10 +1268,7 @@ mod tests {
         )
         .unwrap();
         assert!(root.join("com.ease.test/extra.js").is_file());
-        assert_eq!(
-            scan_manifests_blocking(&root)[0].1.version,
-            "2.0.0"
-        );
+        assert_eq!(scan_manifests_blocking(&root)[0].1.version, "2.0.0");
     }
 
     #[test]
@@ -1359,7 +1414,10 @@ mod tests {
             ..state
         };
         // Still names a saved custom source → kept.
-        assert_eq!(effective_last_source(&state).as_deref(), Some("http://192.168.1.1:8899"));
+        assert_eq!(
+            effective_last_source(&state).as_deref(),
+            Some("http://192.168.1.1:8899")
+        );
     }
 
     #[test]

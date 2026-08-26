@@ -94,7 +94,9 @@ impl DatabaseServer {
 }
 
 async fn seed_blob_row(db: &DbConn) -> BResult<()> {
-    let existing = blob::Entity::find_by_id(blob::Model::ROW_ID).one(db).await?;
+    let existing = blob::Entity::find_by_id(blob::Model::ROW_ID)
+        .one(db)
+        .await?;
     if existing.is_none() {
         let am = blob::ActiveModel {
             id: ActiveValue::Set(blob::Model::ROW_ID),

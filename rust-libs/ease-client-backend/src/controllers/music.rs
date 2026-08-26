@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use ease_client_tokio::tokio_runtime;
+use std::sync::Arc;
 
 use ease_client_schema::MusicId;
 
@@ -14,10 +14,14 @@ use crate::{
 };
 
 pub async fn ct_get_music(cx: Arc<Backend>, id: MusicId) -> BResult<Option<Music>> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        get_music(cx, id).await
-    }).await.unwrap()
+    tokio_runtime()
+        .handle()
+        .spawn(async move {
+            let cx = cx.get_context();
+            get_music(cx, id).await
+        })
+        .await
+        .unwrap()
 }
 
 pub fn cts_get_music_abstract(cx: Arc<Backend>, id: MusicId) -> BResult<Option<MusicAbstract>> {
@@ -26,14 +30,18 @@ pub fn cts_get_music_abstract(cx: Arc<Backend>, id: MusicId) -> BResult<Option<M
 }
 
 pub async fn ct_update_music_lyric(cx: Arc<Backend>, arg: ArgUpdateMusicLyric) -> BResult<()> {
-    tokio_runtime().handle().spawn(async move {
-        let cx = cx.get_context();
-        cx.database_server()
-            .update_music_lyric(arg.id, arg.lyric_loc)
-            .await?;
+    tokio_runtime()
+        .handle()
+        .spawn(async move {
+            let cx = cx.get_context();
+            cx.database_server()
+                .update_music_lyric(arg.id, arg.lyric_loc)
+                .await?;
 
-        Ok(())
-    }).await.unwrap()
+            Ok(())
+        })
+        .await
+        .unwrap()
 }
 
 pub fn cts_update_music_duration(cx: Arc<Backend>, arg: ArgUpdateMusicDuration) -> BResult<()> {

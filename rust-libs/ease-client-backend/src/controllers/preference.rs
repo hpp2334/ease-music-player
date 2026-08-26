@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use ease_client_tokio::tokio_runtime;
+use std::sync::Arc;
 
 use ease_client_schema::PlayMode;
 

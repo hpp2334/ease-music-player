@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
+pub(crate) mod bridge;
 pub(crate) mod controllers;
 pub(crate) mod ctx;
 pub mod error;
 mod infra;
 mod objects;
-pub(crate) mod bridge;
 pub(crate) mod plugin_runtime;
 pub(crate) mod repositories;
 mod services;
@@ -32,7 +32,8 @@ use crate::{
 /// the tur engine — both `.so` symbols live in the same process (tur is
 /// linked as an rlib into `libease_client_backend.so`), so a OnceLock is
 /// all that's needed for cross-module sharing.
-pub(crate) static BACKEND_CONTEXT: std::sync::OnceLock<Arc<BackendContext>> = std::sync::OnceLock::new();
+pub(crate) static BACKEND_CONTEXT: std::sync::OnceLock<Arc<BackendContext>> =
+    std::sync::OnceLock::new();
 
 pub struct Backend {
     pub(crate) arg: ArgInitializeApp,
@@ -87,10 +88,7 @@ impl Backend {
 pub fn create_backend(arg: ArgInitializeApp) -> Arc<Backend> {
     let cx = Arc::new(BackendContext::new());
     init_infra(&arg.app_document_dir);
-    Arc::new(Backend {
-        cx,
-        arg,
-    })
+    Arc::new(Backend { cx, arg })
 }
 
 pub fn ease_log(msg: &str) {

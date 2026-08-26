@@ -34,9 +34,10 @@ pub fn build_fns() -> Vec<FnEntry> {
 fn plugin_id(args: &[JsValue]) -> JsResult<PluginId> {
     let js_ctx = extract_js_ctx(args)?;
     js_ctx.data::<PluginId>().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(
-            "ease:oauth: no plugin context bound to this instance",
-        ))
+        JsError::from(
+            JsNativeError::typ()
+                .with_message("ease:oauth: no plugin context bound to this instance"),
+        )
     })
 }
 
@@ -48,9 +49,10 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
         ))));
     }
     let s = v.as_string().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:oauth: expected string at index {idx}"
-        )))
+        JsError::from(
+            JsNativeError::typ()
+                .with_message(format!("ease:oauth: expected string at index {idx}")),
+        )
     })?;
     Ok(s.to_std_string_escaped())
 }
@@ -102,8 +104,7 @@ fn upcall_start_oauth(provider: &str, alias: &str) -> Result<(), String> {
         .attach_current_thread()
         .map_err(|e| format!("attach: {e}"))?;
 
-    let raw_class = super::host_cache::oauth_host_class()
-        .ok_or("oauth host class not cached")?;
+    let raw_class = super::host_cache::oauth_host_class().ok_or("oauth host class not cached")?;
     let class = unsafe { JClass::from_raw(raw_class) };
     let provider_jstr = env
         .new_string(provider)

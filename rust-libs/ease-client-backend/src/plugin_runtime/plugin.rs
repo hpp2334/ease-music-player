@@ -38,8 +38,8 @@ use tur_engine::core::js_runtime::module_loader::bound_native;
 use tur_engine::core::plugin::{Plugin, PluginRegisterContext};
 use tur_engine::error::TurError;
 
-use super::{context_bridge, db_bridge, oauth_bridge, rpc_bridge, secret_bridge, themes_bridge};
 use super::PluginInstance;
+use super::{context_bridge, db_bridge, oauth_bridge, rpc_bridge, secret_bridge, themes_bridge};
 
 pub struct EaseMusicPlugin;
 
@@ -61,10 +61,7 @@ impl Plugin for EaseMusicPlugin {
         // isolation is automatic: `register` re-runs in each instance, whose
         // values materialize into that instance's single engine-created
         // store (tur #207), seeded from its own `PluginInstance`.
-        let instance_id = ctx
-            .js_ctx()
-            .data::<PluginInstance>()
-            .and_then(|i| i.0);
+        let instance_id = ctx.js_ctx().data::<PluginInstance>().and_then(|i| i.0);
         let bridge: ReactiveBridgeStore = ctx.reactive();
         let id_value: JsValue = match &instance_id {
             Some(s) => JsValue::from(js_string!(s.as_str())),
@@ -91,11 +88,7 @@ impl Plugin for EaseMusicPlugin {
 
         // Attach the per-instance `storageId$` readable to the context
         // namespace object — JS reads it via `get(context.storageId$)`.
-        let _ = context_obj.create_data_property(
-            js_string!("storageId$"),
-            storage_id_js,
-            boa,
-        );
+        let _ = context_obj.create_data_property(js_string!("storageId$"), storage_id_js, boa);
 
         let consts: Vec<ConstEntry> = vec![
             ("db", JsValue::from(db_obj)),
@@ -123,7 +116,11 @@ impl Plugin for EaseMusicPlugin {
 fn build_namespace(
     boa: &mut boa_engine::Context,
     js_ctx_value: &JsValue,
-    fns: Vec<(&'static str, usize, tur_engine::core::js_runtime::helpers::Ptr)>,
+    fns: Vec<(
+        &'static str,
+        usize,
+        tur_engine::core::js_runtime::helpers::Ptr,
+    )>,
 ) -> JsObject {
     let obj = JsObject::with_object_proto(boa.intrinsics());
     for (name, length, ptr) in fns {

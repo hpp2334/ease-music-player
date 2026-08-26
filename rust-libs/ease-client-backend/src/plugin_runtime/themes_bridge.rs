@@ -23,10 +23,7 @@ use tur_engine::core::js_runtime::helpers::{extract_js_ctx, FnEntry, Ptr};
 
 /// Build the `FnEntry` table for the `themes` namespace object.
 pub fn build_fns() -> Vec<FnEntry> {
-    vec![
-        ("color", 1, color as Ptr),
-        ("isDark", 0, is_dark as Ptr),
-    ]
+    vec![("color", 1, color as Ptr), ("isDark", 0, is_dark as Ptr)]
 }
 
 fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
@@ -37,9 +34,10 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
         ))));
     }
     let s = v.as_string().ok_or_else(|| {
-        JsError::from(JsNativeError::typ().with_message(format!(
-            "ease:themes: expected string at index {idx}"
-        )))
+        JsError::from(
+            JsNativeError::typ()
+                .with_message(format!("ease:themes: expected string at index {idx}")),
+        )
     })?;
     Ok(s.to_std_string_escaped())
 }
@@ -83,8 +81,7 @@ fn upcall_get_color(name: &str) -> Result<String, String> {
         .attach_current_thread()
         .map_err(|e| format!("attach: {e}"))?;
 
-    let raw_class = super::host_cache::theme_host_class()
-        .ok_or("theme host class not cached")?;
+    let raw_class = super::host_cache::theme_host_class().ok_or("theme host class not cached")?;
     let class = unsafe { JClass::from_raw(raw_class) };
     let name_jstr = env
         .new_string(name)
@@ -97,10 +94,7 @@ fn upcall_get_color(name: &str) -> Result<String, String> {
             &[JValue::Object(&name_jstr)],
         )
         .map_err(|e| format!("call_static_method: {e}"))?;
-    let jstr = ret
-        .l()
-        .map_err(|e| format!("ret.l: {e}"))?
-        .into_raw();
+    let jstr = ret.l().map_err(|e| format!("ret.l: {e}"))?.into_raw();
     let jstr = unsafe { jni::objects::JString::from_raw(jstr) };
     let s: String = env
         .get_string(&jstr)
@@ -119,8 +113,7 @@ fn upcall_is_dark() -> Result<bool, String> {
         .attach_current_thread()
         .map_err(|e| format!("attach: {e}"))?;
 
-    let raw_class = super::host_cache::theme_host_class()
-        .ok_or("theme host class not cached")?;
+    let raw_class = super::host_cache::theme_host_class().ok_or("theme host class not cached")?;
     let class = unsafe { JClass::from_raw(raw_class) };
     let ret = env
         .call_static_method(class, "isDark", "()Z", &[])

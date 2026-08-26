@@ -33,7 +33,9 @@ async fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<(
     // Local storage is NOT seeded here. The biz layer synthesizes it on every
     // `list_storage` call (see services::storage::list_storage), so it is
     // always present regardless of DB / migration state.
-    cx.database_server().init(arg.app_document_dir.clone()).await?;
+    cx.database_server()
+        .init(arg.app_document_dir.clone())
+        .await?;
     let schema_version = cx.database_server().get_schema_version().await?;
     tracing::info!("database initialized; schema version = {}", schema_version);
     Ok(())

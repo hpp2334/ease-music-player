@@ -25,13 +25,29 @@ static STORAGE_HOST_CLASS: OnceLock<usize> = OnceLock::new();
 /// where `find_class` can resolve app classes. Idempotent; leaks the
 /// global refs for the app lifetime.
 pub fn cache_host_classes(env: &mut JNIEnv<'_>) -> Result<(), String> {
-    cache_one(env, "com/kutedev/easemusicplayer/turintegration/EaseThemesHost", &THEME_HOST_CLASS)?;
-    cache_one(env, "com/kutedev/easemusicplayer/turintegration/EaseOauthHost", &OAUTH_HOST_CLASS)?;
-    cache_one(env, "com/kutedev/easemusicplayer/turintegration/EaseStorageHost", &STORAGE_HOST_CLASS)?;
+    cache_one(
+        env,
+        "com/kutedev/easemusicplayer/turintegration/EaseThemesHost",
+        &THEME_HOST_CLASS,
+    )?;
+    cache_one(
+        env,
+        "com/kutedev/easemusicplayer/turintegration/EaseOauthHost",
+        &OAUTH_HOST_CLASS,
+    )?;
+    cache_one(
+        env,
+        "com/kutedev/easemusicplayer/turintegration/EaseStorageHost",
+        &STORAGE_HOST_CLASS,
+    )?;
     Ok(())
 }
 
-fn cache_one(env: &mut JNIEnv<'_>, name: &str, slot: &'static OnceLock<usize>) -> Result<(), String> {
+fn cache_one(
+    env: &mut JNIEnv<'_>,
+    name: &str,
+    slot: &'static OnceLock<usize>,
+) -> Result<(), String> {
     if slot.get().is_some() {
         return Ok(());
     }

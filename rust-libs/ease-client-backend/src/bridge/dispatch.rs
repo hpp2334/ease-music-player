@@ -9,7 +9,10 @@
 
 use std::sync::Arc;
 
-use ease_client_schema::{MusicId, PlaylistId, PlayMode, PluginId, PluginStorageId, StorageEntryLoc, StorageHandle, StorageId};
+use ease_client_schema::{
+    MusicId, PlayMode, PlaylistId, PluginId, PluginStorageId, StorageEntryLoc, StorageHandle,
+    StorageId,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -31,9 +34,7 @@ use crate::{
         storage::{ct_list_storage, ct_list_storage_entry_children, ct_remove_storage},
     },
     error::{BError, BResult},
-    objects::{
-        music::{MetadataRecord, PlayerStateRecord},
-    },
+    objects::music::{MetadataRecord, PlayerStateRecord},
     objects::player::{
         ct_player_context_new, ct_player_duration_ms, ct_player_load_music, ct_player_new,
         ct_player_pause, ct_player_play, ct_player_position_ms, ct_player_probe_duration_ms,
@@ -42,9 +43,9 @@ use crate::{
     services::{
         app::ArgInitializeApp,
         music::{
-            ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist,
-            ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric, ArgUpdatePlaylist,
-            get_music_abstract, update_music_cover, update_music_duration,
+            get_music_abstract, update_music_cover, update_music_duration, ArgAddMusicsToPlaylist,
+            ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdateMusicCover,
+            ArgUpdateMusicDuration, ArgUpdateMusicLyric, ArgUpdatePlaylist,
         },
         plugin_manager,
         preference::{get_preference_playmode, save_preference_playmode},
@@ -160,25 +161,19 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
                 bytesIndex: usize,
             }
             let args: Args = serde_json::from_value(req.args)?;
-            let cover = buffers
-                .into_iter()
-                .nth(args.bytesIndex)
-                .ok_or_else(|| BError::CustomError {
-                    message: format!(
-                        "music.updateCover: missing buffer at index {}",
-                        args.bytesIndex
-                    ),
-                })?;
+            let cover =
+                buffers
+                    .into_iter()
+                    .nth(args.bytesIndex)
+                    .ok_or_else(|| BError::CustomError {
+                        message: format!(
+                            "music.updateCover: missing buffer at index {}",
+                            args.bytesIndex
+                        ),
+                    })?;
             let cx = must_backend(handle)?;
             let cx_cx = cx.get_context().clone();
-            update_music_cover(
-                &cx_cx,
-                ArgUpdateMusicCover {
-                    id: args.id,
-                    cover,
-                },
-            )
-            .await?;
+            update_music_cover(&cx_cx, ArgUpdateMusicCover { id: args.id, cover }).await?;
             Ok((Value::Null, vec![]))
         }
 
@@ -282,9 +277,14 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
                     message: "service RPC not wired (headless instance not up)".into(),
                 })?;
             let result = rpc
-                .call(&format!("{}:oauth.url", args.provider), serde_json::json!({}))
+                .call(
+                    &format!("{}:oauth.url", args.provider),
+                    serde_json::json!({}),
+                )
                 .await
-                .map_err(|e| BError::CustomError { message: format!("oauth.url rpc: {e}") })?;
+                .map_err(|e| BError::CustomError {
+                    message: format!("oauth.url rpc: {e}"),
+                })?;
             Ok((serde_json::to_value(result)?, vec![]))
         }
         "storage_plugin.oauth_exchange" => {
@@ -310,7 +310,9 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let result = rpc
                 .call(&format!("{}:oauth.exchange", args.provider), call_args)
                 .await
-                .map_err(|e| BError::CustomError { message: format!("oauth.exchange rpc: {e}") })?;
+                .map_err(|e| BError::CustomError {
+                    message: format!("oauth.exchange rpc: {e}"),
+                })?;
             let instance = result
                 .get("instance")
                 .and_then(|v| v.as_str())
@@ -489,8 +491,11 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            cx.get_context()
-                .dispatch_plugin_event(&args.pluginId, &args.event_type, args.payload)?;
+            cx.get_context().dispatch_plugin_event(
+                &args.pluginId,
+                &args.event_type,
+                args.payload,
+            )?;
             Ok((Value::Null, vec![]))
         }
 
@@ -511,9 +516,12 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            let (id, generation) =
-                plugin_manager::install_from_zip_path(cx.get_context(), &cx.arg.app_document_dir, &args.path)
-                    .await?;
+            let (id, generation) = plugin_manager::install_from_zip_path(
+                cx.get_context(),
+                &cx.arg.app_document_dir,
+                &args.path,
+            )
+            .await?;
             Ok((json!({ "id": id, "generation": generation }), vec![]))
         }
         "plugin.installFromRegistry" => {
@@ -557,9 +565,12 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            let generation =
-                plugin_manager::uninstall(cx.get_context(), &cx.arg.app_document_dir, &args.pluginId)
-                    .await?;
+            let generation = plugin_manager::uninstall(
+                cx.get_context(),
+                &cx.arg.app_document_dir,
+                &args.pluginId,
+            )
+            .await?;
             Ok((json!({ "generation": generation }), vec![]))
         }
         "plugin.bootstrap" => {
@@ -582,7 +593,9 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let entries =
                 tokio::task::spawn_blocking(move || plugin_manager::stamp_entries(entries, &root))
                     .await
-                    .map_err(|e| BError::CustomError { message: format!("stamp task: {e}") })?;
+                    .map_err(|e| BError::CustomError {
+                        message: format!("stamp task: {e}"),
+                    })?;
             Ok((json!({ "entries": entries }), vec![]))
         }
         "plugin.registryCached" => {
@@ -600,7 +613,9 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
                     .unwrap_or_default()
             })
             .await
-            .map_err(|e| BError::CustomError { message: format!("cache task: {e}") })?;
+            .map_err(|e| BError::CustomError {
+                message: format!("cache task: {e}"),
+            })?;
             Ok((json!({ "entries": entries }), vec![]))
         }
         "plugin.sourcesList" => {
@@ -622,7 +637,9 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
                 })
             })
             .await
-            .map_err(|e| BError::CustomError { message: format!("sources task: {e}") })?;
+            .map_err(|e| BError::CustomError {
+                message: format!("sources task: {e}"),
+            })?;
             Ok((out, vec![]))
         }
         "plugin.sourceRemember" => {
@@ -651,7 +668,9 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let entries =
                 tokio::task::spawn_blocking(move || plugin_manager::stamp_entries(entries, &root))
                     .await
-                    .map_err(|e| BError::CustomError { message: format!("stamp task: {e}") })?;
+                    .map_err(|e| BError::CustomError {
+                        message: format!("stamp task: {e}"),
+                    })?;
             Ok((json!({ "entries": entries }), vec![]))
         }
         "plugin.sourceRemoveCustom" => {

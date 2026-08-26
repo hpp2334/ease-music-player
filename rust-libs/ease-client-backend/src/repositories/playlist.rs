@@ -28,10 +28,8 @@ impl DatabaseServer {
     pub async fn load_playlists(self: &Arc<Self>) -> BResult<Vec<PlaylistModel>> {
         let db = self.db();
         let rows = playlist::Entity::find().all(&db).await?;
-        let mut ret: Vec<PlaylistModel> = rows
-            .into_iter()
-            .map(converter::playlist_to_model)
-            .collect();
+        let mut ret: Vec<PlaylistModel> =
+            rows.into_iter().map(converter::playlist_to_model).collect();
         ret.sort_by_key(|v| OrderKey::wrap(v.order.clone()));
         Ok(ret)
     }
@@ -101,7 +99,8 @@ impl DatabaseServer {
         if let Some(row) = row {
             let mut am: playlist::ActiveModel = row.into();
             am.title = ActiveValue::Set(title);
-            am.picture_storage_id = ActiveValue::Set(picture.as_ref().map(|p| *p.storage_id.as_ref()));
+            am.picture_storage_id =
+                ActiveValue::Set(picture.as_ref().map(|p| *p.storage_id.as_ref()));
             am.picture_path = ActiveValue::Set(picture.map(|p| p.path));
             am.update(&db).await?;
         }
