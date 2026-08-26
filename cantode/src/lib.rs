@@ -87,7 +87,7 @@ pub use output::{AudioSink, AudioSinkFactory};
 pub use player::{Player, PlayerConfig};
 pub use source::{
     AudioSource, BufferedSource, MemoryAudioSource, Pushed, Readiness, RemoteAudioSource,
-    RemoteSource, ReplyHandle, StreamReply,
+    StreamReply,
 };
 pub use state::PlayerState;
 

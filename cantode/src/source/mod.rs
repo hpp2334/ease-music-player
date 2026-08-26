@@ -15,11 +15,9 @@
 
 pub mod buffered;
 pub mod memory;
-pub mod remote;
 
 pub use buffered::{BufferedSource, Pushed, RemoteAudioSource, StreamReply};
 pub use memory::MemoryAudioSource;
-pub use remote::{RemoteSource, ReplyHandle};
 
 use std::io::{Read, Seek};
 use std::time::Duration;
@@ -50,12 +48,12 @@ pub enum Readiness {
 /// `AudioSource` is intentionally **synchronous**. symphonia — cantode's
 /// default decoder — is itself a sync `Read + Seek` consumer, so a sync
 /// source lets the decoder read it directly with no adapter. Embedders
-/// with an async byte source (e.g. an HTTP range client) should either
-/// use the ready-made [`RemoteSource`] (which performs the bridging and
-/// buffering itself) or bridge to sync on their side: the natural
-/// pattern is to run the player's worker thread (or a `spawn_blocking`
-/// task) and issue the async reads from a blocked sync call. See the
-/// crate docs for the rationale.
+/// with an async byte source (e.g. an HTTP range client) should implement
+/// [`RemoteAudioSource`] and wrap it in [`BufferedSource`] (which performs
+/// the bridging and buffering itself), or bridge to sync on their side:
+/// the natural pattern is to run the player's worker thread (or a
+/// `spawn_blocking` task) and issue the async reads from a blocked sync
+/// call. See the crate docs for the rationale.
 ///
 /// Implementations must be `Send + Sync` because the source is moved onto
 /// the player's dedicated worker thread.
