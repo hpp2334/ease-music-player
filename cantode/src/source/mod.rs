@@ -1,18 +1,22 @@
 //! The byte-source layer.
 //!
-//! An [`AudioSource`] is anything cantode can decode from: a local file, an
-//! HTTP range reader, an in-memory buffer, ... The trait is a small
+//! An [`AudioSource`] is anything cantode can decode from: a local file,
+//! an HTTP range reader, an in-memory buffer, ... The trait is a small
 //! extension of [`std::io::Read`] + [`std::io::Seek`] so that the
 //! symphonia-based decoder (and `probe_metadata`) can consume it directly
 //! without any async↔sync bridge inside the engine.
 //!
 //! Embedders implement this trait to plug their own byte source into
 //! cantode. A ready-made [`MemoryAudioSource`] is provided for tests and
-//! simple embedders.
+//! simple embedders; embedders fetching over a network should reach for
+//! [`RemoteSource`], which takes a plain fetch closure and owns the
+//! buffering, retries, and seek machinery itself.
 
 pub mod memory;
+pub mod remote;
 
 pub use memory::MemoryAudioSource;
+pub use remote::{RemoteSource, ReplyHandle};
 
 use std::io::{Read, Seek};
 
@@ -21,10 +25,12 @@ use std::io::{Read, Seek};
 /// `AudioSource` is intentionally **synchronous**. symphonia — cantode's
 /// default decoder — is itself a sync `Read + Seek` consumer, so a sync
 /// source lets the decoder read it directly with no adapter. Embedders
-/// with an async byte source (e.g. an HTTP range client) should bridge to
-/// sync on their side: the natural pattern is to run the player's worker
-/// thread (or a `spawn_blocking` task) and issue the async reads from a
-/// blocked sync call. See the crate docs for the rationale.
+/// with an async byte source (e.g. an HTTP range client) should either
+/// use the ready-made [`RemoteSource`] (which performs the bridging and
+/// buffering itself) or bridge to sync on their side: the natural
+/// pattern is to run the player's worker thread (or a `spawn_blocking`
+/// task) and issue the async reads from a blocked sync call. See the
+/// crate docs for the rationale.
 ///
 /// Implementations must be `Send + Sync` because the source is moved onto
 /// the player's dedicated worker thread.
