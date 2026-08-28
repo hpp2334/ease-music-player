@@ -1,7 +1,7 @@
 {
   "id": "com.ease.onedrive",
   "name": "OneDrive",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless JS plugin.",
   "author": "ease",
   "backend": "backend.js",

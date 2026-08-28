@@ -27,6 +27,7 @@
 // `rust-libs/ease-remote-storage/src/impls/onedrive.rs`.
 
 import { request, requestStream } from "tur:net";
+import { decodeUtf8 } from "tur:std";
 import { registerHandler, pushChunk, endStream, errorStream } from "tur:rpc";
 import { db, secret, context } from "ease";
 
@@ -150,12 +151,11 @@ async function redeemToken(
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
-        responseType: "text",
-    });
+    }).promise;
     if (!resp.ok) {
         throw new HttpError(resp.status, `token ${grantType} failed: ${resp.status} ${resp.statusText}`);
     }
-    const j = JSON.parse(resp.bodyText ?? "{}");
+    const j = JSON.parse(decodeUtf8(resp.body));
     return { access_token: j.access_token, refresh_token: j.refresh_token };
 }
 
@@ -213,12 +213,11 @@ async function listImpl(token: string, dir: string): Promise<Entry[]> {
             url,
             method: "GET",
             headers: authHeaders(token),
-            responseType: "text",
-        });
+        }).promise;
         if (!resp.ok) {
             throw new HttpError(resp.status, `list: ${resp.status} ${resp.statusText}`);
         }
-        const j = JSON.parse(resp.bodyText ?? "{}");
+        const j = JSON.parse(decodeUtf8(resp.body));
         const value: any[] = j.value ?? [];
         for (const item of value) {
             const name: string = item.name;
@@ -276,7 +275,7 @@ async function getImpl(
         url,
         method: "GET",
         headers,
-    });
+    }).promise;
     if (!resp.ok) {
         errorStream(streamId, `get: ${resp.status} ${resp.statusText}`);
         return {};

@@ -26,7 +26,7 @@ import {
     Color, Condition, Column, Container, CrossAxisAlignment,
     HitTestBehavior, Input, MainAxisAlignment, MainAxisSize,
     PointerInteract, Row, SizedBox, Text, createTextEditingController,
-    derive, launch, mutate, mount, source, view, viewportSize$,
+    derive, mutate, mount, source, view, viewportSize$,
     type Readable, type Store, type StoreCtx,
 } from "tur:std";
 import { db, rpc, context, themes } from "ease";
@@ -254,9 +254,11 @@ function runTest(ctx: StoreCtx): void {
     }
     ctx.set(busy, true);
     setStatus(ctx, "测试中...", false);
-    launch(function* () {
+    // boa runs native async functions; since tur #212 async composition is
+    // plain `await` (the `launch` generator driver is gone).
+    void (async () => {
         try {
-            const r = (yield rpc.call("webdav:test", args)) as { result: string };
+            const r = (await rpc.call("webdav:test", args)) as { result: string };
             if (r.result === "SUCCESS") {
                 setStatus(ctx, "测试成功", false);
             } else if (r.result === "UNAUTHORIZED") {
@@ -271,7 +273,7 @@ function runTest(ctx: StoreCtx): void {
         } finally {
             ctx.set(busy, false);
         }
-    });
+    })();
 }
 
 function save(ctx: StoreCtx): void {
@@ -283,9 +285,9 @@ function save(ctx: StoreCtx): void {
     }
     ctx.set(busy, true);
     setStatus(ctx, "", false);
-    launch(function* () {
+    void (async () => {
         try {
-            yield rpc.call("webdav:connect", args);
+            await rpc.call("webdav:connect", args);
             if (isEdit) {
                 // The backend already rewrote the kv + notified the host;
                 // show confirmation (create mode pops via the host upcall).
@@ -296,7 +298,7 @@ function save(ctx: StoreCtx): void {
         } finally {
             ctx.set(busy, false);
         }
-    });
+    })();
 }
 
 // --- root ------------------------------------------------------------------

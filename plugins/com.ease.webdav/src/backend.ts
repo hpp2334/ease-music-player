@@ -35,6 +35,7 @@
 // Ported from the Rust implementation noted above.
 
 import { request, requestStream } from "tur:net";
+import { decodeUtf8 } from "tur:std";
 import { registerHandler, pushChunk, endStream, errorStream } from "tur:rpc";
 import { db, secret, context } from "ease";
 
@@ -336,8 +337,7 @@ async function davRequest(
             method: opts.method,
             headers,
             ...(opts.body !== undefined ? { body: opts.body } : {}),
-            responseType: "text",
-        });
+        }).promise;
         if (resp.status >= 400) {
             const wwwAuth = headerOf(resp.headers, "WWW-Authenticate");
             throw Object.assign(
@@ -349,7 +349,7 @@ async function davRequest(
             status: resp.status,
             statusText: resp.statusText,
             headers: resp.headers,
-            bodyText: (resp as any).bodyText ?? "",
+            bodyText: decodeUtf8(resp.body),
         };
     };
 
@@ -532,7 +532,7 @@ async function getImpl(
             const auth = authorizationFor(conf.addr, authScheme, conf.username, password, uri, "GET");
             if (auth != null) headers["Authorization"] = auth;
         }
-        return requestStream({ url, method: "GET", headers });
+        return requestStream({ url, method: "GET", headers }).promise;
     };
 
     let resp: any;
@@ -541,8 +541,8 @@ async function getImpl(
         const scheme = cached ? cached.header : (!conf.isAnonymous && conf.username ? "Basic" : null);
         resp = await attempt(scheme);
     } catch (e: any) {
-        // requestStream rejects (object with `message`) on transport errors;
-        // HTTP-level failures resolve with a status instead.
+        // requestStream's promise rejects (object with `message`) on transport
+        // errors; HTTP-level failures resolve with a status instead.
         throw markedError(e);
     }
     if (resp.status === 401 && !conf.isAnonymous) {
