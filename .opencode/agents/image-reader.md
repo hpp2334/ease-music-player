@@ -1,7 +1,7 @@
 ---
 description: Reads and describes image files. Use when you need to understand what's in a screenshot or image.
 mode: subagent
-model: deepseek/deepseek-v4-flash
+model: zai/glm-5.3-flash
 permission:
   edit: deny
   bash: deny
