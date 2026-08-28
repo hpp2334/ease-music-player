@@ -11,7 +11,7 @@
         "@rspack/cli": "^1.2.0",
         "@rspack/core": "^1.2.0",
         "@tur-ng/core": "^0.0.7",
-        "@tur-ng/std": "^0.0.8",
+        "@tur-ng/std": "^0.0.9",
         "typescript": "^5.7.0"
     }
 }

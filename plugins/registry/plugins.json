@@ -3,11 +3,11 @@
     {
       "id": "com.ease.onedrive",
       "name": "OneDrive",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "description": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless JS plugin.",
-      "zip": "zips/com.ease.onedrive-0.1.1.zip",
-      "sha256": "5dd87647f64ca28fcf7b9ae59879799514bf47f7afa53cb27e180992d17ef0b2",
-      "size": 24932
+      "zip": "zips/com.ease.onedrive-0.1.2.zip",
+      "sha256": "8a12dba4a43d1ddb1e37885e01312affd87d348ff9e6d41672b553a1f3a19831",
+      "size": 24976
     },
     {
       "id": "com.ease.playcount",
@@ -15,17 +15,17 @@
       "version": "1.0.1",
       "description": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
       "zip": "zips/com.ease.playcount-1.0.1.zip",
-      "sha256": "f4c68b3e0bb7c8b99bf5828f8cc85259a682e956eab524ed4e4d6d43c2097afc",
+      "sha256": "eaca42c66f053497997b519c6137aec3bf5ee9b547a841cc6272adc5f74f1aa2",
       "size": 34746
     },
     {
       "id": "com.ease.webdav",
       "name": "WebDAV",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "description": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless JS plugin.",
-      "zip": "zips/com.ease.webdav-0.1.1.zip",
-      "sha256": "36bf9e238c57de63b17234365caf52c7cc2f2cece91c9f57a71a36fc1ba98661",
-      "size": 49932
+      "zip": "zips/com.ease.webdav-0.1.2.zip",
+      "sha256": "0a142fe5752604845f6e17716cc78a390875e4a7cf80c3578de6700cabdc5130",
+      "size": 50138
     }
   ]
 }
