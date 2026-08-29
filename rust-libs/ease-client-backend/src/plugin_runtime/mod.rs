@@ -31,6 +31,7 @@ pub mod plugin_jni;
 pub mod rpc_bridge;
 pub mod secret_bridge;
 pub mod themes_bridge;
+pub mod webapi;
 
 pub use plugin::EaseMusicPlugin;
 

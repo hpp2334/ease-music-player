@@ -6,10 +6,11 @@
 //     import { db, secret, oauth, themes, rpc, context } from "ease";
 //     db.singleGet("key");               // identity resolved in Rust
 //     secret.put("refresh-token");
-//     oauth.start("onedrive", alias);
-//     themes.color("primary");
-//     rpc.call("onedrive:list", { ... }); // view → its backend handler
-//     store.get(context.storageId$);      // null = create, id = edit
+//     const oauthId = oauth.new();
+//     oauth.start(oauthId);              // fires the host OAuth flow
+//     themes.color("primary");           // throws on unknown names
+//     rpc.call("webdav:test", { ... });  // view → its backend handler
+//     store.get(context.storageId$);     // null = create, id = edit
 //
 // Per-instance identity: the Kotlin host stamps a `PluginId` into each tur
 // instance at build time (via `TurAppBuilder::instance_data`). Bridge fns
@@ -93,12 +94,23 @@ declare module "ease" {
 
     export const oauth: {
         /**
-         * Fire-and-forget OAuth trigger. The host fetches the provider's
-         * authorize URL, stashes `(provider, alias)`, and opens the system
-         * browser; the `easem://oauth2redirect` callback completes the
-         * exchange asynchronously.
+         * Mint a fresh, opaque OAuth flow id. The host keeps no state for
+         * it — key your pending flow data (alias, …) by this id in your own
+         * KV and consume it when your `oauth:exchange` handler runs.
+         * Enables concurrent flows. (`"new"` is quoted only because `new`
+         * is a reserved word in type-literal position.)
          */
-        start(provider: string, alias: string | null): void;
+        "new"(): string;
+        /**
+         * Fire-and-forget OAuth trigger for the flow `oauthId` (from
+         * `new()`). The host fetches the authorize URL from your backend
+         * (`oauth:url { pluginId, oauthId }`), stashes the pair, and opens
+         * the system browser; the `easem://oauth2redirect` callback
+         * completes the exchange asynchronously (`oauth:exchange
+         * { pluginId, oauthId, code }`). Your plugin's identity comes from
+         * the instance — never an argument.
+         */
+        start(oauthId: string): void;
     };
 
     // ---- themes namespace -------------------------------------------------
@@ -106,7 +118,16 @@ declare module "ease" {
     export const themes: {
         /**
          * Read the host app's Material 3 color by name. Returns `"#RRGGBBAA"`
-         * (RGBA hex) or `""` if the host hasn't pushed a value yet.
+         * (RGBA hex). **Throws** if `name` is not a known theme role — views
+         * load long after the host pushes its theme, so a miss is a bug
+         * (typo), not a startup race. Known names (pushed by
+         * `EaseMusicPlayerTheme`): `primary`, `onPrimary`,
+         * `primaryContainer`, `onPrimaryContainer`, `secondary`,
+         * `onSecondary`, `secondaryContainer`, `onSecondaryContainer`,
+         * `tertiary`, `onTertiary`, `background`, `onBackground`, `surface`,
+         * `onSurface`, `surfaceVariant`, `onSurfaceVariant`,
+         * `surfaceContainer`, `outline`, `outlineVariant`, `error`,
+         * `onError`.
          */
         color(name: string): string;
         /** Reports the resolved dark/light flag from the host theme. */
@@ -120,9 +141,11 @@ declare module "ease" {
          * Invoke handler `op` on this plugin's headless backend (the instance
          * wired via `wireServiceRpc`) with JSON-serializable `args`. Returns
          * a promise of the handler's result (or rejection with its error).
-         * The backend's `RpcClient` is reused — no cross-bus relay. Used by
-         * view instances to reach plugin-owned domain logic (e.g.
-         * `onedrive:removeInstance`).
+         * The backend's `RpcClient` is reused — no cross-bus relay.
+         *
+         * Calls land in the **view scope**: they resolve handlers the backend
+         * registered via `viewRpc.registerHandler`; host-side ops
+         * (`hostRpc.registerHandler` / `registerStream`) are out of reach.
          */
         call(op: string, args?: unknown): Promise<any>;
     };

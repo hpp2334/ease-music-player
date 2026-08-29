@@ -14,7 +14,7 @@
 //! secret.put("refresh-token");
 //! oauth.start("onedrive", alias);
 //! themes.color("primary");
-//! rpc.call("onedrive:list", { ... });   // view → its backend
+//! rpc.call("webdav:test", { ... });    // view → its backend (viewRpc scope)
 //! store.get(context.storageId$);        // null = create, id = edit
 //! ```
 //!
@@ -39,7 +39,7 @@ use tur_engine::core::plugin::{Plugin, PluginRegisterContext};
 use tur_engine::error::TurError;
 
 use super::PluginInstance;
-use super::{context_bridge, db_bridge, oauth_bridge, rpc_bridge, secret_bridge, themes_bridge};
+use super::{context_bridge, db_bridge, oauth_bridge, rpc_bridge, secret_bridge, themes_bridge, webapi};
 
 pub struct EaseMusicPlugin;
 
@@ -73,6 +73,9 @@ impl Plugin for EaseMusicPlugin {
         // loop below needs both simultaneously.
         let js_ctx_value = ctx.js_ctx_value.clone();
         let boa = ctx.boa_mut();
+        // Web Platform globals (crypto / TextEncoder / TextDecoder) — plain
+        // globals, not `ease.*`, so unmodified npm packages find them.
+        webapi::install_globals(boa);
         let storage_id_js = storage_id_src.into_js(boa);
 
         // Build the grouped namespace objects. Each method is a ctx-bound

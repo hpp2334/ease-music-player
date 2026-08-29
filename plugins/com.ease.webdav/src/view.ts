@@ -22,59 +22,66 @@
 // view instance, separate from the headless backend instance that owns the
 // `webdav:*` RPC handlers.
 
+// TextEncoder/TextDecoder polyfill FIRST — npm deps may rely on them.
+import "../../infra/string-polyfill";
+import "../../infra/text-polyfill";
 import {
     Color, Condition, Column, Container, CrossAxisAlignment,
     HitTestBehavior, Input, MainAxisAlignment, MainAxisSize,
     PointerInteract, Row, SizedBox, Text, createTextEditingController,
     derive, mutate, mount, source, view, viewportSize$,
-    type Readable, type Store, type StoreCtx,
+    type Mutation, type PointerInteractEvent, type Readable,
+    type Store, type StoreCtx, type TextController, type Val,
 } from "tur:std";
 import { db, rpc, context, themes } from "ease";
 
 const PROVIDER = "webdav";
 
-// Inherit the host app's Material 3 theme so the form matches the surrounding
-// UI. `themes.color(name)` returns "#RRGGBBAA" (or "" if the host hasn't
-// pushed a value yet — fall back to sensible defaults).
-function themed(name: string, fallback: string): Color {
-    const hex = themes.color(name);
-    return Color.hex(hex.length > 0 ? hex : fallback);
-}
-
-const COLOR_PRIMARY = themed("primary", "#2E89B0");
-const COLOR_CARD = themed("surface", "#FFFFFF");
-const COLOR_TEXT = themed("onSurface", "#0F172A");
-const COLOR_TEXT_MUTED = themed("onSurfaceVariant", "#64748B");
-const COLOR_DIVIDER = themed("outlineVariant", "#E2E8F0");
-const COLOR_ERROR = themed("error", "#B3261E");
+// Inherit the host app's Material 3 theme so the form matches the
+// surrounding UI. `themes.color(name)` throws on unknown names — views load
+// long after the host pushes its theme, so a miss is always a bug (typo /
+// outdated plugin) and failing fast beats silently rendering a fallback.
+const COLOR_PRIMARY = Color.hex(themes.color("primary"));
+const COLOR_CARD = Color.hex(themes.color("surface"));
+const COLOR_TEXT = Color.hex(themes.color("onSurface"));
+const COLOR_TEXT_MUTED = Color.hex(themes.color("onSurfaceVariant"));
+const COLOR_DIVIDER = Color.hex(themes.color("outlineVariant"));
+const COLOR_ERROR = Color.hex(themes.color("error"));
 const COLOR_WHITE = Color.hex("#FFFFFF");
 
 // --- mode + prefilled config ---------------------------------------------
 //
-// Hydration happens in `start({ store })` (before mount): reactive reads
-// need a store since the multi-store model removed the free module-level
-// `get`. These module-level `let`s are consumed only from inside the
-// `view()` thunk and factories, which run at mount time — after hydration.
+// No module-level mutable state: everything reactive is a declaration
+// (`source` / `derive`), materialized into the instance store that
+// `start({ store })` receives. The `hydrate$` mutation (dispatched from
+// `start` BEFORE mount) writes the prefilled controllers into the controller
+// sources; `Input` resolves a controller source at build time, so the
+// hydrated instances are what get attached — the seeds below are
+// placeholders that never reach an Input.
 
-let storageId: string | null = null;
-let isEdit = false;
-let initialAnon = false;
+const isEdit$ = derive((ctx) => ctx.get(context.storageId$) !== null);
 
-// Placeholders replaced by `hydrate()` once the config is known; the
-// placeholder controllers are never attached to any Input.
-let aliasController = createTextEditingController({ initialText: "" });
-let addrController = createTextEditingController({ initialText: "" });
-let usernameController = createTextEditingController({ initialText: "" });
-const passwordController = createTextEditingController({ initialText: "" });
+// Local reactive state (declarations — materialized into the instance store
+// that `start({ store })` received).
+const anonymous = source(false);
+const busy = source(false);
+const statusText = source("");
+const statusIsError = source(false);
 
-function hydrate(store: Store): void {
-    storageId = store.get(context.storageId$);
-    isEdit = storageId !== null;
+const aliasController$ = source(createTextEditingController({ initialText: "" }));
+const addrController$ = source(createTextEditingController({ initialText: "" }));
+const usernameController$ = source(createTextEditingController({ initialText: "" }));
+// Never replaced — a blank password means "keep the stored one".
+const passwordController$ = source(createTextEditingController({ initialText: "" }));
+
+const hydrate$ = mutate((ctx: StoreCtx): void => {
+    const storageId = ctx.get(context.storageId$);
+    const isEdit = storageId !== null;
 
     let initialAlias = "";
     let initialAddr = "";
     let initialUsername = "";
-    initialAnon = false;
+    let initialAnon = false;
     if (isEdit) {
         const raw = db.singleGet(`storage:${storageId}`);
         if (raw != null) {
@@ -89,26 +96,21 @@ function hydrate(store: Store): void {
             }
         }
     }
-    aliasController = createTextEditingController({ initialText: initialAlias });
-    addrController = createTextEditingController({ initialText: initialAddr });
-    usernameController = createTextEditingController({ initialText: initialUsername });
+    ctx.set(aliasController$, createTextEditingController({ initialText: initialAlias }));
+    ctx.set(addrController$, createTextEditingController({ initialText: initialAddr }));
+    ctx.set(usernameController$, createTextEditingController({ initialText: initialUsername }));
     // The `anonymous` source declaration is seeded `false` at eval time;
     // write the hydrated value into the store (before mount, so the first
     // render sees it). Writes are equality-gated, so false→false is a no-op.
-    store.set(anonymous, initialAnon);
-}
+    ctx.set(anonymous, initialAnon);
+});
 
-// Local reactive state (declarations — materialized into the instance store
-// that `start({ store })` received).
-const anonymous = source(false);
-const busy = source(false);
-const statusText = source("");
-const statusIsError = source(false);
-
-function setStatus(ctx: StoreCtx, text: string, isError: boolean): void {
-    ctx.set(statusText, text);
-    ctx.set(statusIsError, isError);
-}
+const setStatus$ = mutate(
+    (ctx: StoreCtx, text: string, isError: boolean): void => {
+        ctx.set(statusText, text);
+        ctx.set(statusIsError, isError);
+    },
+);
 
 // --- widgets ---------------------------------------------------------------
 
@@ -121,8 +123,8 @@ function FieldLabel({ text }: { text: string }) {
 }
 
 function TextField(opts: {
-    controller: ReturnType<typeof createTextEditingController>;
-    placeholder: string;
+    controller: Readable<TextController>;
+    placeholder: Val<string>;
     obscure?: boolean;
 }) {
     return Container({
@@ -133,7 +135,11 @@ function TextField(opts: {
         padding: 10,
         children: [
             Input({
-                controller: opts.controller,
+                // The engine resolves a controller READABLE at build time
+                // (`editable_text/element.rs` falls back to `controller_atom`
+                // when no plain controller was given); the published typings
+                // only declare the plain form — hence the cast.
+                controller: opts.controller as TextController,
                 placeholder: opts.placeholder,
                 fontSize: 15,
                 color: COLOR_TEXT,
@@ -178,10 +184,14 @@ function AnonymousToggle() {
     });
 }
 
-function ActionButton(opts: { label: string; primary: boolean; onClick: (ctx: StoreCtx) => void }) {
+function ActionButton(opts: {
+    label: Val<string>;
+    primary: boolean;
+    onClick$: Mutation<[PointerInteractEvent], void>;
+}) {
     return PointerInteract({
         behavior: HitTestBehavior.Opaque,
-        onClick: mutate((ctx) => opts.onClick(ctx)),
+        onClick: opts.onClick$,
         child: Container(
             opts.primary
                 ? {
@@ -217,7 +227,7 @@ function ActionButton(opts: { label: string; primary: boolean; onClick: (ctx: St
 // --- actions ---------------------------------------------------------------
 
 interface ConnectArgs {
-    instance?: string;
+    storageId?: string;
     addr: string;
     alias?: string;
     username?: string;
@@ -225,19 +235,21 @@ interface ConnectArgs {
     isAnonymous?: boolean;
 }
 
-function collectArgs(ctx: StoreCtx): ConnectArgs {
+const collectArgs$ = mutate((ctx: StoreCtx): ConnectArgs => {
     const isAnon = ctx.get(anonymous);
+    const isEdit = ctx.get(isEdit$);
+    const storageId = ctx.get(context.storageId$);
     return {
-        ...(isEdit && storageId != null ? { instance: storageId } : {}),
-        addr: (addrController.text ?? "").trim(),
-        alias: (aliasController.text ?? "").trim(),
-        username: isAnon ? "" : (usernameController.text ?? "").trim(),
-        password: isAnon ? "" : (passwordController.text ?? ""),
+        ...(isEdit && storageId != null ? { storageId } : {}),
+        addr: (ctx.get(addrController$).text ?? "").trim(),
+        alias: (ctx.get(aliasController$).text ?? "").trim(),
+        username: isAnon ? "" : (ctx.get(usernameController$).text ?? "").trim(),
+        password: isAnon ? "" : (ctx.get(passwordController$).text ?? ""),
         isAnonymous: isAnon,
     };
-}
+});
 
-function validate(args: ConnectArgs): string | null {
+function validate(args: ConnectArgs, isEdit: boolean): string | null {
     if (args.addr === "") return "服务器地址不能为空";
     if (args.alias === "") return "服务器名称 (别名) 不能为空";
     if (!args.isAnonymous && args.username === "") return "用户名不能为空";
@@ -245,61 +257,61 @@ function validate(args: ConnectArgs): string | null {
     return null;
 }
 
-function runTest(ctx: StoreCtx): void {
-    const args = collectArgs(ctx);
-    const invalid = validate(args);
+const runTest$ = mutate((ctx: StoreCtx, _ev: PointerInteractEvent): void => {
+    const args = ctx.set(collectArgs$);
+    const invalid = validate(args, ctx.get(isEdit$));
     if (invalid != null) {
-        setStatus(ctx, invalid, true);
+        ctx.set(setStatus$, invalid, true);
         return;
     }
     ctx.set(busy, true);
-    setStatus(ctx, "测试中...", false);
+    ctx.set(setStatus$, "测试中...", false);
     // boa runs native async functions; since tur #212 async composition is
     // plain `await` (the `launch` generator driver is gone).
     void (async () => {
         try {
             const r = (await rpc.call("webdav:test", args)) as { result: string };
             if (r.result === "SUCCESS") {
-                setStatus(ctx, "测试成功", false);
+                ctx.set(setStatus$, "测试成功", false);
             } else if (r.result === "UNAUTHORIZED") {
-                setStatus(ctx, "测试错误：认证错误", true);
+                ctx.set(setStatus$, "测试错误：认证错误", true);
             } else if (r.result === "TIMEOUT") {
-                setStatus(ctx, "测试错误：超时", true);
+                ctx.set(setStatus$, "测试错误：超时", true);
             } else {
-                setStatus(ctx, "测试错误：其他错误", true);
+                ctx.set(setStatus$, "测试错误：其他错误", true);
             }
         } catch (e: any) {
-            setStatus(ctx, `测试错误：${String(e?.message ?? e)}`, true);
+            ctx.set(setStatus$, `测试错误：${String(e?.message ?? e)}`, true);
         } finally {
             ctx.set(busy, false);
         }
     })();
-}
+});
 
-function save(ctx: StoreCtx): void {
-    const args = collectArgs(ctx);
-    const invalid = validate(args);
+const save$ = mutate((ctx: StoreCtx, _ev: PointerInteractEvent): void => {
+    const args = ctx.set(collectArgs$);
+    const invalid = validate(args, ctx.get(isEdit$));
     if (invalid != null) {
-        setStatus(ctx, invalid, true);
+        ctx.set(setStatus$, invalid, true);
         return;
     }
     ctx.set(busy, true);
-    setStatus(ctx, "", false);
+    ctx.set(setStatus$, "", false);
     void (async () => {
         try {
             await rpc.call("webdav:connect", args);
-            if (isEdit) {
+            if (ctx.get(isEdit$)) {
                 // The backend already rewrote the kv + notified the host;
                 // show confirmation (create mode pops via the host upcall).
-                setStatus(ctx, "已保存", false);
+                ctx.set(setStatus$, "已保存", false);
             }
         } catch (e: any) {
-            setStatus(ctx, String(e?.message ?? e), true);
+            ctx.set(setStatus$, String(e?.message ?? e), true);
         } finally {
             ctx.set(busy, false);
         }
     })();
-}
+});
 
 // --- root ------------------------------------------------------------------
 
@@ -336,11 +348,11 @@ const rootView = view(() => {
                 children: [
                     FieldLabel({ text: "服务器名称 (别名)" }),
                     SizedBox({ height: 6 }),
-                    TextField({ controller: aliasController, placeholder: "WebDAV" }),
+                    TextField({ controller: aliasController$, placeholder: "WebDAV" }),
                     SizedBox({ height: 16 }),
                     FieldLabel({ text: "服务器地址" }),
                     SizedBox({ height: 6 }),
-                    TextField({ controller: addrController, placeholder: "https://example.com/dav" }),
+                    TextField({ controller: addrController$, placeholder: "https://example.com/dav" }),
                     SizedBox({ height: 16 }),
                     AnonymousToggle(),
                     SizedBox({ height: 16 }),
@@ -353,13 +365,15 @@ const rootView = view(() => {
                                 children: [
                                     FieldLabel({ text: "用户名" }),
                                     SizedBox({ height: 6 }),
-                                    TextField({ controller: usernameController, placeholder: "" }),
+                                    TextField({ controller: usernameController$, placeholder: "" }),
                                     SizedBox({ height: 16 }),
                                     FieldLabel({ text: "密码" }),
                                     SizedBox({ height: 6 }),
                                     TextField({
-                                        controller: passwordController,
-                                        placeholder: isEdit ? "留空保持不变" : "",
+                                        controller: passwordController$,
+                                        placeholder: derive((ctx) =>
+                                            ctx.get(isEdit$) ? "留空保持不变" : "",
+                                        ),
                                         obscure: true,
                                     }),
                                     SizedBox({ height: 16 }),
@@ -371,9 +385,13 @@ const rootView = view(() => {
                         crossAlignment: CrossAxisAlignment.Center,
                         mainAxisSize: MainAxisSize.Min,
                         children: [
-                            ActionButton({ label: "测试", primary: false, onClick: (ctx) => runTest(ctx) }),
+                            ActionButton({ label: "测试", primary: false, onClick$: runTest$ }),
                             SizedBox({ width: 12 }),
-                            ActionButton({ label: isEdit ? "保存" : "连接", primary: true, onClick: (ctx) => save(ctx) }),
+                            ActionButton({
+                                label: derive((ctx) => (ctx.get(isEdit$) ? "保存" : "连接")),
+                                primary: true,
+                                onClick$: save$,
+                            }),
                         ],
                     }),
                     SizedBox({ height: 10 }),
@@ -394,10 +412,12 @@ const rootView = view(() => {
 // Module lifecycle contract: mount inside `start({ store })` (the engine
 // runs the returned cleanup before the next load / at destroy; it hands us
 // the instance-owned store — one per instance since tur #207, no
-// `createStore`). The root-tree lifecycle is engine-owned — `mount`
+// `createStore`). Hydration is dispatched BEFORE mount: `Input` resolves
+// its controller source at build time, so the prefilled controllers are
+// what get attached. The root-tree lifecycle is engine-owned — `mount`
 // replaces any existing root and module teardown clears it — so no cleanup
 // is returned.
 export function start({ store }: { store: Store }): void {
-    hydrate(store);
+    store.set(hydrate$);
     mount(rootView);
 }

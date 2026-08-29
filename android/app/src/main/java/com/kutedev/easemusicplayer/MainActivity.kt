@@ -123,19 +123,20 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         // OneDrive (and other JS plugin) OAuth redirect, e.g.
-        // `easem://oauth2redirect/?code=...`. Take the pending provider/alias
-        // stashed when the browser was launched, exchange the code via the
-        // plugin, and reload the storage list.
+        // `easem://oauth2redirect/?code=...`. Take the pending
+        // (pluginId, oauthId) stashed when the browser was launched,
+        // exchange the code via the plugin (which consumes its own
+        // `oauth:<oauthId>` pending slot), and reload the storage list.
         val data = intent?.data
         val code = data?.getQueryParameter("code")
         if (code.isNullOrBlank()) return
         val pending = pluginOAuthState.take() ?: return
         lifecycleScope.launch {
-            val id = storageRepository.pluginOAuthExchange(pending.first, code, pending.second)
+            val id = storageRepository.pluginOAuthExchange(pending.first, pending.second, code)
             if (id != null) {
-                bridge.logRaw("info", "plugin OAuth connected: provider=${pending.first} id=$id")
+                bridge.logRaw("info", "plugin OAuth connected: plugin=${pending.first} id=$id")
             } else {
-                bridge.logRaw("error", "plugin OAuth exchange failed: provider=${pending.first}")
+                bridge.logRaw("error", "plugin OAuth exchange failed: plugin=${pending.first}")
             }
         }
     }

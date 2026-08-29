@@ -5,8 +5,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginOauthExchange
-import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginProvider
+import com.kutedev.easemusicplayer.singleton.types.ArgOauthExchange
+import com.kutedev.easemusicplayer.singleton.types.ArgOauthUrl
 import com.kutedev.easemusicplayer.singleton.types.PluginOauthExchangeResult
 import com.kutedev.easemusicplayer.singleton.types.Storage
 import com.kutedev.easemusicplayer.singleton.types.StorageId
@@ -41,21 +41,22 @@ class StorageRepository @Inject constructor(
 
     // === JS plugin storage providers (OneDrive, WebDAV, ...) ===============
 
-    /** Ask the plugin for its OAuth authorization URL (`<provider>:oauth.url`). */
-    suspend fun pluginOAuthUrl(provider: String): String? =
-        bridge.call(BridgeMethods.StoragePlugin.OAUTH_URL, ArgStoragePluginProvider(provider))
+    /** Ask the plugin for its OAuth authorization URL (`oauth:url`). */
+    suspend fun pluginOAuthUrl(pluginId: String, oauthId: String): String? =
+        bridge.call(BridgeMethods.Oauth.URL, ArgOauthUrl(pluginId, oauthId))
             .unwrapOrNull()?.payload?.url
 
     /**
      * Complete OAuth: exchange the authorization `code` for tokens via the
-     * plugin (`<provider>:oauth.exchange`), which mints + persists a new
-     * instance, then register the storage row. Returns the new storage id.
+     * plugin (`oauth:exchange`), which mints + persists a new instance (its
+     * `oauth:<oauthId>` pending slot carries any business data the plugin
+     * stashed), then register the storage row. Returns the new storage id.
      */
-    suspend fun pluginOAuthExchange(provider: String, code: String, alias: String?): StorageId? {
+    suspend fun pluginOAuthExchange(pluginId: String, oauthId: String, code: String): StorageId? {
         val result: PluginOauthExchangeResult? =
             bridge.call(
-                BridgeMethods.StoragePlugin.OAUTH_EXCHANGE,
-                ArgStoragePluginOauthExchange(provider = provider, code = code, alias = alias),
+                BridgeMethods.Oauth.EXCHANGE,
+                ArgOauthExchange(pluginId = pluginId, oauthId = oauthId, code = code),
             ).unwrapOrNull()?.payload
         if (result != null) {
             reload()
@@ -91,25 +92,27 @@ class StorageRepository @Inject constructor(
 /**
  * Holds the in-flight plugin OAuth flow state between launching the browser
  * and the `easem://oauth2redirect` callback reaching `MainActivity.onNewIntent`.
- * Set when the user taps "Authorize", consumed when the redirect lands.
+ * Set when the plugin fires `ease.oauth.start(oauthId)`, consumed when the
+ * redirect lands. Identity only — business data (e.g. the alias) stays in
+ * the plugin's own KV, keyed by the same `oauthId`.
  */
 @Singleton
 class PluginOAuthState @Inject constructor() {
-    @Volatile var provider: String? = null
+    @Volatile var pluginId: String? = null
         private set
-    @Volatile var alias: String? = null
+    @Volatile var oauthId: String? = null
         private set
 
-    fun set(provider: String, alias: String?) {
-        this.provider = provider
-        this.alias = alias
+    fun set(pluginId: String, oauthId: String) {
+        this.pluginId = pluginId
+        this.oauthId = oauthId
     }
 
-    fun take(): Pair<String, String?>? {
-        val p = provider ?: return null
-        val a = alias
-        provider = null
-        alias = null
-        return p to a
+    fun take(): Pair<String, String>? {
+        val p = pluginId ?: return null
+        val o = oauthId
+        pluginId = null
+        oauthId = null
+        return if (o != null) p to o else null
     }
 }

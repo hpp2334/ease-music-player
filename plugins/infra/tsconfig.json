@@ -1,0 +1,30 @@
+{
+    // Self-contained project for the shared plugin-infra modules (polyfills
+    // + ambient d.ts). Without this, editors fall back to the repo-root
+    // tsconfig, whose auto-discovered `@types/node` globals clash with the
+    // TextEncoder/TextDecoder declarations in text-polyfill.ts (TS2403) and
+    // `tur:std` cannot resolve (TS2307) — the per-plugin projects never see
+    // those errors because they set `types` and pull these files in via
+    // imports. The @tur-ng declarations are referenced by path (this folder
+    // has no node_modules); any plugin's copy works — they are ambient
+    // `declare module` files, versions are kept in lockstep.
+    "compilerOptions": {
+        "target": "ES2020",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "lib": ["ES2020"],
+        // Do NOT auto-discover @types from ancestor node_modules.
+        "types": [],
+        "strict": true,
+        "noEmit": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "isolatedModules": true
+    },
+    "include": [
+        "*.ts",
+        "../com.ease.playcount/node_modules/@tur-ng/std/src/index.d.ts",
+        "../com.ease.playcount/node_modules/@tur-ng/core/src/index.d.ts"
+    ]
+}

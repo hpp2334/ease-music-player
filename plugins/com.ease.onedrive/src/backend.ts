@@ -16,20 +16,34 @@
 // `ease.*` bridge fns resolve the calling plugin from that slot — no
 // pluginId argument is needed (or accepted) on any call here.
 //
-// Host handlers (under the `onedrive:` prefix):
-//   - onedrive:list           { instance, dir }                  -> Entry[]
-//   - onedrive:get            { instance, streamId, path, offset } -> { totalLength?, name?, contentType? }
-//   - onedrive:oauth.url      {}                                 -> { url }
-//   - onedrive:oauth.exchange { code, alias }                    -> { instance }
-//   - onedrive:removeInstance { instance }                       -> {}
+// Handlers — contract literals under hostRpc scope: identical op names for
+// every storage provider, identity riding the payload (`pluginId` = this
+// manifest's id; `storageId` = the `plugin_storage_id` instance). The OAuth
+// flow is host-bridged (the view fires `ease.oauth.start`, the host comes
+// back through the `oauth.url` / `oauth.exchange` bridges):
+//   - storage:list           { pluginId, storageId, dir }          -> Entry[]
+//   - storage:get            { pluginId, storageId, path, offset } -> registerStream: meta
+//     { totalLength?, name?, contentType? } + credit-gated body
+//   - oauth:url              { pluginId, oauthId }                 -> { url }
+//   - oauth:exchange         { pluginId, oauthId, code }           -> { storageId }
+//   - storage:removeInstance { pluginId, storageId }               -> {}
+// The connect-form alias never crosses the host: the view stashes it in
+// this plugin's KV under `oauth:<oauthId>` (see `oauth-pending.ts`) and the
+// `oauth:exchange` handler consumes it.
 //
 // Ported from the Rust implementation at
 // `rust-libs/ease-remote-storage/src/impls/onedrive.rs`.
 
+// TextEncoder/TextDecoder polyfill FIRST — npm deps below may rely on them.
+import "../../infra/string-polyfill";
+import "../../infra/text-polyfill";
 import { request, requestStream } from "tur:net";
 import { decodeUtf8 } from "tur:std";
-import { registerHandler, pushChunk, endStream, errorStream } from "tur:rpc";
+import { hostRpc } from "tur:rpc";
+import type { StreamSource } from "tur:rpc";
 import { db, secret, context } from "ease";
+import { takePending } from "./oauth-pending";
+import { v4 as uuidv4 } from "uuid";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -261,43 +275,42 @@ function parseTotalLength(headers: Record<string, string>): number | undefined {
     return undefined;
 }
 
-async function getImpl(
+/**
+ * Streaming get opener: one ranged request per stream. The dispatcher pumps
+ * `body` with host-granted credits; `release` cancels the Task on any pump
+ * exit (host cancel included). OneDrive honors Range, so no `dataOffset`.
+ */
+async function openGet(
     token: string,
-    streamId: number,
     path: string,
     offset: number,
-): Promise<{ totalLength?: number; name?: string; contentType?: string }> {
+): Promise<StreamSource> {
     const url = `${ONEDRIVE_ROOT_API}/root:${path}:/content`;
     const headers = authHeaders(token);
     headers["Range"] = `bytes=${offset}-`;
 
-    const resp = await requestStream({
+    const t = requestStream({
         url,
         method: "GET",
         headers,
-    }).promise;
-    if (!resp.ok) {
-        errorStream(streamId, `get: ${resp.status} ${resp.statusText}`);
-        return {};
+    });
+    const resp = await t.promise;
+    if (resp.status >= 400) {
+        // Fail the RPC itself so the host's `get` returns Err and withRetry's
+        // 401 rotation can kick in — the error rides the reply, not the
+        // stream.
+        t.cancel();
+        throw new HttpError(resp.status, `get: ${resp.status} ${resp.statusText}`);
     }
     const totalLength = parseTotalLength(resp.headers);
     const contentType = resp.headers["Content-Type"] ?? resp.headers["content-type"];
     const name = path.split("/").pop() || path;
 
-    // Pump the body asynchronously: the host returns from open_stream as soon
-    // as this metadata lands, then drains the stream as chunks arrive.
-    (async () => {
-        try {
-            for await (const chunk of resp.body) {
-                pushChunk(streamId, chunk);
-            }
-            endStream(streamId);
-        } catch (e: any) {
-            errorStream(streamId, String(e?.message ?? e));
-        }
-    })();
-
-    return { totalLength, name, contentType };
+    return {
+        meta: { totalLength, name, contentType },
+        body: resp.body,
+        release: () => t.cancel(), // wire abort on any pump exit; no-op when done
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -315,54 +328,73 @@ function authorizeUrl(): string {
     return `${ONEDRIVE_API_BASE}/authorize?${q}`;
 }
 
-/** RFC 4122 v4 UUID (crypto.getRandomValues may be absent in boa; Math.random
- *  is plenty for non-adversarial instance-id minting). */
-function uuid(): string {
-    const hex = "0123456789abcdef";
-    let out = "";
-    for (let i = 0; i < 36; i++) {
-        if (i === 8 || i === 13 || i === 18 || i === 23) {
-            out += "-";
-        } else if (i === 14) {
-            out += "4";
-        } else if (i === 19) {
-            out += hex[(Math.random() * 4) | 0 | 8];
-        } else {
-            out += hex[(Math.random() * 16) | 0];
-        }
-    }
-    return out;
+
+// Handler args shapes (see the op table in the header comment). `pluginId`
+// is this plugin's manifest id, literal-typed — a mismatch would mean the
+// host routed somebody else's call here.
+
+interface ListArgs {
+    pluginId: "com.ease.onedrive";
+    storageId: string;
+    dir: string;
+}
+
+interface GetArgs {
+    pluginId: "com.ease.onedrive";
+    storageId: string;
+    path: string;
+    offset: number;
+}
+
+interface OauthUrlArgs {
+    pluginId: "com.ease.onedrive";
+    oauthId: string;
+}
+
+interface ExchangeArgs {
+    pluginId: "com.ease.onedrive";
+    oauthId: string;
+    code: string;
+}
+
+interface RemoveInstanceArgs {
+    pluginId: "com.ease.onedrive";
+    storageId: string;
 }
 
 /**
  * Exchange an authorization code for tokens, mint a new `onedrive:<uuid>`
- * instance, persist its config + refresh token, and return the instance id.
- * `args.alias` is the user-facing display name.
+ * storage instance, persist its config + refresh token, and return its id.
+ * The user-facing alias comes from this flow's pending slot
+ * (`oauth:<oauthId>`, stashed by the view before `ease.oauth.start`) —
+ * never from the host.
  */
-async function exchangeCode(args: { code: string; alias?: string }): Promise<{ instance: string }> {
+async function exchangeCode(args: ExchangeArgs): Promise<{ storageId: string }> {
     const t = await redeemToken("authorization_code", { code: args.code });
-    const instance = `onedrive:${uuid()}`;
+    const instance = `onedrive:${uuidv4()}`;
     const secretId = secret.put(t.refresh_token);
-    const alias = args.alias && args.alias.length > 0 ? args.alias : "OneDrive";
+    const pending = takePending(db, args.oauthId);
+    const alias = pending?.alias && pending.alias.length > 0 ? pending.alias : "OneDrive";
     db.singleSet(
         kvKey(instance),
         JSON.stringify({ alias, secretId }),
     );
     // Prime the in-memory state so the first list/get skips a config reload.
     instances.set(instance, { alias, secretId, accessToken: t.access_token });
-    return { instance };
+    return { storageId: instance };
 }
 
 /** Remove an instance: drop its config (kv) + its refresh-token secret, ask
- *  the host to delete the storage row, and reload the dashboard. Called from
- *  two paths — the view-side disconnect button (`onedrive:removeInstance`
- *  via `ease.rpc.call`) and the host trash button (which also deletes the
- *  row; `removeStorage` is idempotent so the overlap is harmless). */
-function removeInstance(args: { instance: string }): void {
-    const st = instances.get(args.instance);
+ *  the host to delete the storage row, and reload the dashboard. Called only
+ *  from the host — the edit view's top-bar trash icon and the storages-page
+ *  trash both route through `context.removeStorage` / the host's
+ *  `storage_plugin.remove_instance` bridge, which invokes this op
+ *  (`storage:removeInstance`, hostRpc scope) before deleting the row. */
+function removeInstance(args: RemoveInstanceArgs): void {
+    const st = instances.get(args.storageId);
     let secretId: number | undefined = st?.secretId;
     if (secretId === undefined) {
-        const raw = db.singleGet(kvKey(args.instance));
+        const raw = db.singleGet(kvKey(args.storageId));
         if (raw != null) {
             try {
                 secretId = JSON.parse(raw).secretId;
@@ -374,11 +406,11 @@ function removeInstance(args: { instance: string }): void {
     if (secretId !== undefined) {
         secret.remove(secretId);
     }
-    db.singleDelete(kvKey(args.instance));
-    instances.delete(args.instance);
+    db.singleDelete(kvKey(args.storageId));
+    instances.delete(args.storageId);
     // Complete the disconnect on the host side: drop the storage row, then
     // reload so the dashboard + edit page reflect the removal.
-    context.removeStorage(args.instance);
+    context.removeStorage(args.storageId);
     context.notifyChange();
 }
 
@@ -390,24 +422,19 @@ function removeInstance(args: { instance: string }): void {
 // runs the returned cleanup before the next load / at destroy). Handlers are
 // per-instance and die with the instance, so no cleanup is needed.
 export function start(): void {
-    registerHandler("onedrive:list", (args) =>
-        withRetry(args.instance, (token) => listImpl(token, args.dir)),
+    hostRpc.registerHandler("storage:list", (args: ListArgs) =>
+        withRetry(args.storageId, (token) => listImpl(token, args.dir)),
     );
 
-    registerHandler("onedrive:get", (args) => {
-        const { instance, streamId, path, offset } = args;
-        return withRetry(instance, (token) => getImpl(token, streamId, path, offset)).catch((e: any) => {
-            // surface non-401 failures as a stream error
-            errorStream(streamId, String(e?.message ?? e));
-            return {};
-        });
-    });
+    hostRpc.registerStream("storage:get", (args: GetArgs) =>
+        withRetry(args.storageId, (token) => openGet(token, args.path, args.offset)),
+    );
 
-    registerHandler("onedrive:oauth.url", () => ({ url: authorizeUrl() }));
+    hostRpc.registerHandler("oauth:url", (_args: OauthUrlArgs) => ({ url: authorizeUrl() }));
 
-    registerHandler("onedrive:oauth.exchange", (args) => exchangeCode(args));
+    hostRpc.registerHandler("oauth:exchange", (args: ExchangeArgs) => exchangeCode(args));
 
-    registerHandler("onedrive:removeInstance", (args) => {
+    hostRpc.registerHandler("storage:removeInstance", (args: RemoveInstanceArgs) => {
         removeInstance(args);
         return {};
     });
