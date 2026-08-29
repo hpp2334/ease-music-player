@@ -1,7 +1,7 @@
 ---
 description: Commit all changes, push, create/update PR, run local CI. Use when finishing work on a feature branch.
 mode: subagent
-model: zai/glm-5.3-flash
+model: zai-coding-plan/glm-5.3-flash
 permission:
   edit: deny
 ---
