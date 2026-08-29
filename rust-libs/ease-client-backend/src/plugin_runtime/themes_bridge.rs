@@ -4,7 +4,8 @@
 //!
 //! Plugin JS calls (via the `themes` namespace object on the unified
 //! `ease` module):
-//! - `themes.color("primary")` → `"#RRGGBBAA"` (or `""` if unknown).
+//! - `themes.color("primary")` → `"#RRGGBBAA"`; **throws** if `name` is not
+//!   a known theme role (fail fast on typos — no silent fallbacks).
 //! - `themes.isDark()` → `boolean`.
 //!
 //! Kotlin is the source of truth: the app theme pushes the resolved
@@ -42,7 +43,10 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
     Ok(s.to_std_string_escaped())
 }
 
-/// `themes.color(name)` → `"#RRGGBBAA"` hex string (or `""`).
+/// `themes.color(name)` → `"#RRGGBBAA"` hex string. Throws a `TypeError`
+/// when the host has no color for `name` (unknown role) or the upcall
+/// fails — plugin views load after the host theme is pushed, so a missing
+/// name is always a bug (typo / outdated plugin), not a startup race.
 fn color(_this: &JsValue, args: &[JsValue], _ctx: &mut boa_engine::Context) -> JsResult<JsValue> {
     // Ctx-bound (consistent with the rest of `ease`) — the per-instance
     // context is the first arg; the user-facing `name` is at index 1.
@@ -50,14 +54,29 @@ fn color(_this: &JsValue, args: &[JsValue], _ctx: &mut boa_engine::Context) -> J
     let name = require_string(args, 1)?;
 
     #[cfg(target_os = "android")]
-    let hex = upcall_get_color(&name).unwrap_or_default();
-    #[cfg(not(target_os = "android"))]
-    let hex = {
-        let _ = &name;
-        String::new()
-    };
+    {
+        let hex = upcall_get_color(&name).map_err(|e| {
+            JsError::from(
+                JsNativeError::typ()
+                    .with_message(format!("ease:themes.color: host upcall failed: {e}")),
+            )
+        })?;
+        let hex = hex.ok_or_else(|| {
+            JsError::from(JsNativeError::typ().with_message(format!(
+                "ease:themes.color: unknown color name {name:?}"
+            )))
+        })?;
+        return Ok(JsValue::from(js_string!(hex.as_str())));
+    }
 
-    Ok(JsValue::from(js_string!(hex.as_str())))
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &name;
+        Err(JsError::from(
+            JsNativeError::typ()
+                .with_message("ease:themes.color: theme is only available on Android"),
+        ))
+    }
 }
 
 /// `themes.isDark()` → `boolean`.
@@ -72,7 +91,7 @@ fn is_dark(_this: &JsValue, args: &[JsValue], _ctx: &mut boa_engine::Context) ->
 }
 
 #[cfg(target_os = "android")]
-fn upcall_get_color(name: &str) -> Result<String, String> {
+fn upcall_get_color(name: &str) -> Result<Option<String>, String> {
     use jni::objects::{JClass, JValue};
 
     let raw_vm = ndk_context::android_context().vm() as *mut jni::sys::JavaVM;
@@ -94,13 +113,17 @@ fn upcall_get_color(name: &str) -> Result<String, String> {
             &[JValue::Object(&name_jstr)],
         )
         .map_err(|e| format!("call_static_method: {e}"))?;
-    let jstr = ret.l().map_err(|e| format!("ret.l: {e}"))?.into_raw();
-    let jstr = unsafe { jni::objects::JString::from_raw(jstr) };
+    let obj = ret.l().map_err(|e| format!("ret.l: {e}"))?;
+    // Kotlin returns null when the name matches no theme role.
+    if obj.is_null() {
+        return Ok(None);
+    }
+    let jstr = unsafe { jni::objects::JString::from_raw(obj.into_raw()) };
     let s: String = env
         .get_string(&jstr)
         .map_err(|e| format!("get_string: {e}"))?
         .into();
-    Ok(s)
+    Ok(Some(s))
 }
 
 #[cfg(target_os = "android")]

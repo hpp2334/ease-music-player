@@ -33,9 +33,12 @@ object EaseThemesHost {
         this.colors = colors
     }
 
-    /** `ease:themes.color(name)` upcall entry. Returns `"#AARRGGBB"` or `""`. */
+    /** `ease:themes.color(name)` upcall entry. Returns `"#RRGGBBAA"`, or
+     *  null when [name] is not a known theme role — the Rust bridge turns
+     *  that into a thrown JS `Error`, so typos fail fast instead of
+     *  silently rendering with fallback colors. */
     @JvmStatic
-    fun getColor(name: String): String = colors[name] ?: ""
+    fun getColor(name: String): String? = colors[name]
 
     /** `ease:themes.isDark()` upcall entry. */
     @JvmStatic
