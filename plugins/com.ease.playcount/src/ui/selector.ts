@@ -26,7 +26,7 @@ import {
     mutate,
     source,
 } from "tur:std";
-import type { Source, Readable, Element, StoreCtx } from "tur:core";
+import type { Mutation, Source, Readable, Element } from "tur:core";
 
 export interface SelectorOption<T> {
     value: T;
@@ -43,17 +43,6 @@ export interface SelectorStyle {
     shadow: Color;
 }
 
-// NOTE: tur `Color.rgba` takes all components as 0–255 (alpha is NOT 0–1).
-const DEFAULT_STYLE: SelectorStyle = {
-    primary: Color.hex("#2E89B0"),
-    primarySoft: Color.hex("#C9EBFA"),
-    surface: Color.hex("#FFFFFF"),
-    text: Color.hex("#0F172A"),
-    textMuted: Color.hex("#64748B"),
-    divider: Color.hex("#E2E8F0"),
-    shadow: Color.rgba(15, 23, 42, 31),
-};
-
 export interface SelectorHandle<T> {
     open$: Source<boolean>;
     SelectorTrigger: () => Element;
@@ -64,20 +53,23 @@ export interface SelectorHandle<T> {
 export interface CreateSelectorOptions<T> {
     options: SelectorOption<T>[];
     selectedValue$: Readable<T>;
-    /** Invoked with the click's store ctx — dispatch a mutation via
-     *  `ctx.set(...)`; there is no module-level store to write through. */
-    onSelect: (ctx: StoreCtx, value: T) => void;
+    /** Dispatched when the user picks an option — a mutation handle, so it
+     *  writes through the click's store ctx (`ctx.set(onSelect$, value)`);
+     *  there is no module-level store to write through. */
+    onSelect$: Mutation<[T], void>;
     label$?: Readable<string>;
     gap?: number;
     menuWidth?: number;
     triggerHeight?: number;
-    style?: Partial<SelectorStyle>;
+    /** Full palette — required so every consumer passes its host-theme
+     * colors; there is no built-in fallback palette. */
+    style: SelectorStyle;
 }
 
 export function createSelector<T>(
     opts: CreateSelectorOptions<T>,
 ): SelectorHandle<T> {
-    const style: SelectorStyle = { ...DEFAULT_STYLE, ...(opts.style ?? {}) };
+    const style: SelectorStyle = opts.style;
     const gap = opts.gap ?? 6;
     const menuWidth = opts.menuWidth ?? 196;
     const triggerHeight = opts.triggerHeight ?? 36;
@@ -144,7 +136,7 @@ export function createSelector<T>(
             onClick: mutate((ctx) => {
                 ctx.set(open$, false);
                 if (ctx.get(opts.selectedValue$) !== option.value) {
-                    opts.onSelect(ctx, option.value);
+                    ctx.set(opts.onSelect$, option.value);
                 }
             }),
             child: Container({

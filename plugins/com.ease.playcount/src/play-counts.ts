@@ -47,7 +47,7 @@ import {
     mutate,
 } from "tur:std";
 import type { Source, Readable, Element, StoreCtx } from "tur:core";
-import { db as Storage } from "ease";
+import { db as Storage, themes } from "ease";
 import { createSelector } from "./ui/selector";
 
 // ---------------------------------------------------------------------------
@@ -58,7 +58,6 @@ interface RangeDef {
     id: string;
     label: string;
     days: number;
-    offset: number;
 }
 
 interface PlayCountEntry {
@@ -74,12 +73,12 @@ type Status = "loading" | "empty" | "ready";
 // ---------------------------------------------------------------------------
 
 const RANGES: RangeDef[] = [
-    { id: "today",     label: "Today",       days: 1,   offset: 0 },
-    { id: "yesterday", label: "Yesterday",   days: 1,   offset: 1 },
-    { id: "3days",     label: "Last 3 Days", days: 3,   offset: 0 },
-    { id: "week",      label: "Last Week",   days: 7,   offset: 0 },
-    { id: "month",     label: "Last Month",  days: 30,  offset: 0 },
-    { id: "year",      label: "Last Year",   days: 365, offset: 0 },
+    { id: "today",  label: "Today",       days: 1 },
+    { id: "2days",  label: "Last 2 Days", days: 2 },
+    { id: "3days",  label: "Last 3 Days", days: 3 },
+    { id: "week",   label: "Last Week",   days: 7 },
+    { id: "month",  label: "Last Month",  days: 30 },
+    { id: "year",   label: "Last Year",   days: 365 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -129,7 +128,7 @@ function dateKey(offsetDays: number): string {
 }
 
 function dateKeysForRange(range: RangeDef): string[] {
-    if (range.id === "yesterday") return [dateKey(1)];
+    // "Last N days" is inclusive of today: offsets 0 .. N-1.
     const keys: string[] = [];
     for (let i = 0; i < range.days; i++) keys.push(dateKey(i));
     return keys;
@@ -147,7 +146,7 @@ interface PlayEventRow {
 
 // A mutation (dispatched from `start({ store })` / the range selector) so it
 // can write through the instance store's ctx — there is no module-level store.
-export const refresh = mutate((ctx: StoreCtx): void => {
+export const refresh$ = mutate((ctx: StoreCtx): void => {
     ctx.set(loading$, true);
     try {
         const range = RANGES[ctx.get(selectedRange$)];
@@ -193,28 +192,38 @@ export const refresh = mutate((ctx: StoreCtx): void => {
 });
 
 // ---------------------------------------------------------------------------
-// Palette — design rule: ONE tier accent per card, expressed ONLY by the
-// medal. Everything else (border, bar, count pill) is neutral / brand-blue
-// and identical across ranks, so each card reads as one coherent object
-// rather than a collection of colored parts.
+// Palette — the HOST app's Material 3 theme, read via `ease:themes` (views
+// load after the host pushes its theme, so module-eval-time reads are safe;
+// `themes.color` throws on unknown names — a miss is a typo, not a race).
+// The app's `primary` (#2E89B0) and `secondary` (#C9EBFA) ARE the brand
+// pair this page was designed around; page/card/text/divider colors become
+// real roles so the page follows the app's dark/light scheme instead of
+// shipping its own light-only palette.
 //
-// Brand (aligned with EaseMusicPlayerTheme, Material 3 light scheme):
-//   primary         = #2E89B0
-//   secondary       = #C9EBFA
+// Design rule: ONE tier accent per card, expressed ONLY by the medal.
+// Gold / silver / bronze are semantic tier colors and stay fixed; the
+// long-tail badge uses theme roles. Everything else (page, card, border,
+// bar, text, count pill) is identical across ranks, so each card reads as
+// one coherent object rather than a collection of colored parts.
 // ---------------------------------------------------------------------------
 
-const COLOR_PRIMARY: Color = Color.hex("#2E89B0");
-const COLOR_PRIMARY_SOFT: Color = Color.hex("#C9EBFA");
-const COLOR_PAGE_BG: Color = Color.hex("#F8FAFC");
-const COLOR_CARD: Color = Color.hex("#FFFFFF");
-const COLOR_TEXT: Color = Color.hex("#0F172A");
-const COLOR_TEXT_MUTED: Color = Color.hex("#64748B");
-const COLOR_DIVIDER: Color = Color.hex("#E2E8F0");
-const COLOR_BAR_TRACK: Color = Color.hex("#E2E8F0");
+const COLOR_PRIMARY: Color = Color.hex(themes.color("primary"));
+// The app's `secondary` is the soft tint of `primary` (the former
+// "primarySoft"); the count pill keeps `primary`-on-`secondary` text,
+// which is legible in both schemes.
+const COLOR_PRIMARY_SOFT: Color = Color.hex(themes.color("secondary"));
+const COLOR_PAGE_BG: Color = Color.hex(themes.color("background"));
+const COLOR_CARD: Color = Color.hex(themes.color("surfaceContainer"));
+const COLOR_TEXT: Color = Color.hex(themes.color("onSurface"));
+const COLOR_TEXT_MUTED: Color = Color.hex(themes.color("onSurfaceVariant"));
+const COLOR_DIVIDER: Color = Color.hex(themes.color("outlineVariant"));
+const COLOR_BAR_TRACK: Color = Color.hex(themes.color("outlineVariant"));
+// Translucent near-black in both schemes — barely visible on dark, which is
+// the conventional treatment (dark UIs get their elevation from surfaces).
 const COLOR_SHADOW: Color = Color.rgba(15, 23, 42, 28);
 
 // Medal fills — the SINGLE tier signal (gold / silver / bronze for the
-// podium; a muted disc for the long tail).
+// podium; a themed muted disc for the long tail).
 const COLOR_GOLD: Color = Color.hex("#F5C400");
 const COLOR_GOLD_RING: Color = Color.hex("#E2B400");
 const COLOR_GOLD_NUM: Color = Color.hex("#3D2E00");
@@ -224,8 +233,8 @@ const COLOR_SILVER_NUM: Color = Color.hex("#2F3640");
 const COLOR_BRONZE: Color = Color.hex("#CD7F32");
 const COLOR_BRONZE_RING: Color = Color.hex("#A05A1E");
 const COLOR_BRONZE_NUM: Color = Color.hex("#FFFFFF");
-const COLOR_MUTED_BADGE: Color = Color.hex("#E8EDF2");
-const COLOR_MUTED_NUM: Color = Color.hex("#6E7B8B");
+const COLOR_MUTED_BADGE: Color = Color.hex(themes.color("surfaceVariant"));
+const COLOR_MUTED_NUM: Color = Color.hex(themes.color("onSurfaceVariant"));
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -241,11 +250,11 @@ const CHIP_RADIUS = 999;
 
 // Range change: update the selection + re-aggregate, composed as one
 // mutation dispatched through the click ctx.
-const selectRange = mutate((ctx: StoreCtx, id: string): void => {
+const selectRange$ = mutate((ctx: StoreCtx, id: string): void => {
     const i = RANGES.findIndex((r) => r.id === id);
     if (i >= 0 && i !== ctx.get(selectedRange$)) {
         ctx.set(selectedRange$, i);
-        ctx.set(refresh);
+        ctx.set(refresh$);
     }
 });
 
@@ -254,7 +263,7 @@ const rangeSel = createSelector<string>({
     selectedValue$: derive(
         (ctx) => RANGES[ctx.get(selectedRange$)]?.id ?? RANGES[0].id,
     ),
-    onSelect: (ctx, id) => ctx.set(selectRange, id),
+    onSelect$: selectRange$,
     style: {
         primary: COLOR_PRIMARY,
         primarySoft: COLOR_PRIMARY_SOFT,
