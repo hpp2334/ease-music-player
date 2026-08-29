@@ -107,6 +107,15 @@ class PlaybackService : android.app.Service() {
         if (intent != null) {
             MediaButtonReceiver.handleIntent(mediaSession, intent)
         }
+        // Every startForegroundService() call arms a fresh ~10 s
+        // "must call startForeground()" window — even when the service
+        // is already running. Satisfy it immediately, unconditionally,
+        // with no dependency on the (async, network-bound) track-load
+        // chain: gating startForeground() on `music != null` crashed
+        // the app (ForegroundServiceDidNotStartInTimeException) whenever
+        // a load stalled. The state observers refresh / detach the
+        // notification afterwards.
+        promoteToForeground()
         return START_NOT_STICKY
     }
 
@@ -226,20 +235,30 @@ class PlaybackService : android.app.Service() {
             // request audio focus once. Subsequent promotions (e.g. user
             // plays → pauses → plays again) reuse the same focus request.
             requestAudioFocus()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
+            promoteToForeground()
         } else {
             // No track loaded — detach from foreground but keep the
             // service alive so the session stays connected.
             stopForeground(STOP_FOREGROUND_DETACH)
             notificationManager?.notify(NOTIFICATION_ID, notification)
+        }
+    }
+
+    /**
+     * Promote this service to foreground (mediaPlayback type on U+) with the
+     * current notification. Cheap and idempotent: safe to call on every
+     * [onStartCommand] delivery and on every state refresh.
+     */
+    private fun promoteToForeground() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
         }
     }
 
