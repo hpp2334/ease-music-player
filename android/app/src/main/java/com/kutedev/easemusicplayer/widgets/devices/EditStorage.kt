@@ -154,9 +154,10 @@ private fun StorageBlock(
  * Hosts a plugin storage's view JS in a [TurView]. The plugin owns all
  * config UI (alias / connection fields, "Connect your account", test +
  * save buttons, edit-view disconnect, ...). Providers with an OAuth flow
- * trigger it via `ease.oauth.start(provider, alias)`; non-OAuth providers
- * (e.g. WebDAV) persist their instance from the view via a backend RPC +
- * `ease.context.createStorage`.
+ * trigger it via `ease.oauth.new()` + `ease.oauth.start(oauthId)` (business
+ * data like the alias stays in the plugin, keyed by the flow id);
+ * non-OAuth providers (e.g. WebDAV) persist their instance from the view
+ * via a backend RPC + `ease.context.createStorage`.
  *
  * [pluginId] is stamped into the instance's per-instance data slot so
  * `ease:*` bridge fns resolve the calling plugin from Rust. [sourceHandle]

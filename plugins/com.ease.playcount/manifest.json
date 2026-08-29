@@ -1,7 +1,7 @@
 {
   "id": "com.ease.playcount",
   "name": "Play Counts",
-  "version": "1.0.1",
+  "version": "0.0.1",
   "description": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
   "author": "ease",
   "backend": "backend.js",

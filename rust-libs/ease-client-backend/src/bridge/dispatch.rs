@@ -258,28 +258,37 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
         }
 
         // ====================================================================
-        // storage_plugin.* — OAuth add / instance removal for JS plugin
-        // storage providers (e.g. OneDrive). The provider prefixes the op
-        // namespace (`<provider>:oauth.url` etc.); the plugin id follows the
-        // `com.ease.<provider>` convention.
+        // oauth.* — OAuth flow for JS plugin providers (e.g. OneDrive). The
+        // plugin's identity rides the args (`pluginId` from the instance
+        // data slot via the `ease.oauth.start` upcall; `oauthId` from the
+        // host-minted `ease.oauth.new()` token). The JS ops are contract
+        // literals — the host composes no op names. Non-OAuth providers
+        // (WebDAV) create their instances from their own setup view via a
+        // backend RPC + `ease.context.createStorage` instead.
         // ====================================================================
-        "storage_plugin.oauth_url" => {
+        "oauth.url" => {
+            // Wire args are camelCase (kotlinx.serialization default on the
+            // Kotlin side) — same convention as every other bridge arm.
             #[derive(Deserialize)]
             struct Args {
-                provider: String,
+                pluginId: String,
+                oauthId: String,
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
             let rpc = cx
                 .get_context()
-                .service_rpc_for(&format!("com.ease.{}", args.provider))
+                .service_rpc_for(&args.pluginId)
                 .ok_or_else(|| BError::CustomError {
-                    message: "service RPC not wired (headless instance not up)".into(),
+                    message: format!(
+                        "service RPC not wired for plugin {} (headless instance not up)",
+                        args.pluginId
+                    ),
                 })?;
             let result = rpc
-                .call(
-                    &format!("{}:oauth.url", args.provider),
-                    serde_json::json!({}),
+                .call_host(
+                    "oauth:url",
+                    serde_json::json!({ "pluginId": args.pluginId, "oauthId": args.oauthId }),
                 )
                 .await
                 .map_err(|e| BError::CustomError {
@@ -287,41 +296,46 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
                 })?;
             Ok((serde_json::to_value(result)?, vec![]))
         }
-        "storage_plugin.oauth_exchange" => {
+        "oauth.exchange" => {
             #[derive(Deserialize)]
             struct Args {
-                provider: String,
+                pluginId: String,
+                oauthId: String,
                 code: String,
-                #[serde(default)]
-                alias: Option<String>,
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
             let cx_cx = cx.get_context().clone();
             let rpc = cx_cx
-                .service_rpc_for(&format!("com.ease.{}", args.provider))
+                .service_rpc_for(&args.pluginId)
                 .ok_or_else(|| BError::CustomError {
-                    message: "service RPC not wired (headless instance not up)".into(),
+                    message: format!(
+                        "service RPC not wired for plugin {} (headless instance not up)",
+                        args.pluginId
+                    ),
                 })?;
-            let mut call_args = serde_json::json!({ "code": args.code });
-            if let Some(a) = &args.alias {
-                call_args["alias"] = serde_json::Value::String(a.clone());
-            }
             let result = rpc
-                .call(&format!("{}:oauth.exchange", args.provider), call_args)
+                .call_host(
+                    "oauth:exchange",
+                    serde_json::json!({
+                        "pluginId": args.pluginId,
+                        "oauthId": args.oauthId,
+                        "code": args.code,
+                    }),
+                )
                 .await
                 .map_err(|e| BError::CustomError {
                     message: format!("oauth.exchange rpc: {e}"),
                 })?;
-            let instance = result
-                .get("instance")
+            let storage_id = result
+                .get("storageId")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| BError::CustomError {
-                    message: "oauth.exchange: plugin did not return an instance id".into(),
+                    message: "oauth.exchange: plugin did not return a storageId".into(),
                 })?;
             let handle = StorageHandle::Plugin {
-                plugin_id: PluginId::new(format!("com.ease.{}", args.provider)),
-                plugin_storage_id: PluginStorageId::new(instance.to_string()),
+                plugin_id: PluginId::new(args.pluginId.clone()),
+                plugin_storage_id: PluginStorageId::new(storage_id.to_string()),
             };
             let id = cx_cx.database_server().obtain_storage(&handle).await?;
             crate::services::evict_storage_backend_cache(&cx_cx, id);
@@ -331,22 +345,20 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let id: StorageId = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
             let cx_cx = cx.get_context().clone();
-            // Load the row to find the provider + instance, then ask the plugin
+            // Load the row to find the plugin + instance, then ask the plugin
             // to drop its config (kv) + secret before removing the registry row.
             if let Some(row) = cx_cx.database_server().load_storage_row(id).await? {
                 if let (Some(plugin_storage_id), Some(plugin_id)) =
                     (row.plugin_storage_id, row.plugin_id)
                 {
-                    let provider = plugin_storage_id
-                        .split(':')
-                        .next()
-                        .unwrap_or(&plugin_storage_id)
-                        .to_string();
                     if let Some(rpc) = cx_cx.service_rpc_for(&plugin_id) {
                         let _ = rpc
-                            .call(
-                                &format!("{}:removeInstance", provider),
-                                serde_json::json!({ "instance": plugin_storage_id }),
+                            .call_host(
+                                "storage:removeInstance",
+                                serde_json::json!({
+                                    "pluginId": plugin_id,
+                                    "storageId": plugin_storage_id,
+                                }),
                             )
                             .await;
                     }

@@ -4,10 +4,14 @@
 //! `call(op, args): Promise<any>` resolves the calling plugin's identity
 //! from the per-instance data slot, looks up the backend's wired `RpcClient`
 //! (`BackendContext::service_rpc_for(pluginId)`), and awaits
-//! `rpc.call(op, args)`. The promise settles with the handler's result, or
-//! rejects with its error. This is the channel a tur-rendered view uses to
+//! `rpc.call_view(op, args)`. The promise settles with the handler's result,
+//! or rejects with its error. This is the channel a tur-rendered view uses to
 //! reach plugin-owned domain logic that lives in the backend instance
-//! (e.g. `onedrive:removeInstance`).
+//! (e.g. `webdav:test` / `webdav:connect` from the add-storage form).
+//!
+//! Calls land in the **view scope** — they resolve handlers registered via
+//! `viewRpc.registerHandler` in the backend's `tur:rpc` module; host-side ops
+//! (`hostRpc.registerHandler` / `registerStream`) are out of reach.
 //!
 //! Implementation mirrors `tur:net`'s `request` bridge: mint a pending
 //! `JsPromise`, spawn the async `rpc.call` via the instance's
@@ -77,7 +81,7 @@ fn call(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsR
     let completion_handle = js_ctx.completion_handle();
 
     let _ = js_ctx.spawn_local(move |_aw| async move {
-        let result = rpc.call(&op, args_json).await;
+        let result = rpc.call_view(&op, args_json).await;
         completion_handle.push(Box::new(move |ctx| {
             match result {
                 Ok(value) => {

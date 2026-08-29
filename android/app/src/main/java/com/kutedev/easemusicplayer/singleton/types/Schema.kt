@@ -285,13 +285,16 @@ data class ArgInitializeApp(
 )
 
 @Serializable
-data class ArgStoragePluginProvider(val provider: String)
+data class ArgOauthUrl(
+    val pluginId: String,
+    val oauthId: String,
+)
 
 @Serializable
-data class ArgStoragePluginOauthExchange(
-    val provider: String,
+data class ArgOauthExchange(
+    val pluginId: String,
+    val oauthId: String,
     val code: String,
-    val alias: String? = null,
 )
 
 @Serializable

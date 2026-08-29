@@ -95,23 +95,19 @@ pub async fn get_storage_backend(
         Some(StorageType::Local) => Arc::new(LocalBackend::new()),
         Some(StorageType::Plugin) => {
             // A plugin storage references a JS service plugin instance. The
-            // provider is the prefix of `plugin_storage_id` (e.g. `onedrive`
-            // in `onedrive:<uuid>`); the full id is the `instance` carried in
-            // every RPC. The JS handlers live under `<provider>:<op>`.
-            let plugin_storage_id = row.plugin_storage_id.clone().unwrap_or_default();
-            let (provider, instance) = match plugin_storage_id.split_once(':') {
-                Some((p, rest)) if !p.is_empty() && !rest.is_empty() => {
-                    (p.to_string(), plugin_storage_id.clone())
-                }
-                _ => {
-                    return Err(BError::CustomError {
-                        message: format!(
-                            "plugin storage has malformed plugin_storage_id: {plugin_storage_id:?}"
-                        ),
-                    });
-                }
-            };
+            // row carries both identities verbatim: `plugin_id` (manifest id)
+            // and `plugin_storage_id` (the plugin-scoped storage instance).
+            // Both ride the RPC payloads as-is — the host composes no op
+            // names and derives no prefixes.
             let plugin_id = row.plugin_id.clone().unwrap_or_default();
+            let storage_id = row.plugin_storage_id.clone().unwrap_or_default();
+            if plugin_id.is_empty() || !storage_id.contains(':') {
+                return Err(BError::CustomError {
+                    message: format!(
+                        "plugin storage has malformed identities: plugin_id={plugin_id:?} plugin_storage_id={storage_id:?}"
+                    ),
+                });
+            }
             let rpc = cx.service_rpc_for(&plugin_id).ok_or_else(|| BError::CustomError {
                 message: format!(
                     "plugin storage requested but service RPC is not wired for {plugin_id} (headless instance not up)"
@@ -119,8 +115,8 @@ pub async fn get_storage_backend(
             })?;
             Arc::new(JsStorageBackend::new(
                 rpc,
-                provider,
-                instance,
+                plugin_id,
+                storage_id,
                 cx.tokio_handle(),
             ))
         }

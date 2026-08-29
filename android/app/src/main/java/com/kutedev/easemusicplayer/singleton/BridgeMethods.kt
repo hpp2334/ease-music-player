@@ -22,8 +22,8 @@ import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicDuration
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
-import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginOauthExchange
-import com.kutedev.easemusicplayer.singleton.types.ArgStoragePluginProvider
+import com.kutedev.easemusicplayer.singleton.types.ArgOauthExchange
+import com.kutedev.easemusicplayer.singleton.types.ArgOauthUrl
 import com.kutedev.easemusicplayer.singleton.types.ListLogFiles
 import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
 import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
@@ -89,19 +89,21 @@ object BridgeMethods {
             bridgeSpecArg<StorageEntryLoc, ListStorageEntryChildrenResp>("storage.listEntryChildren")
     }
 
-    /** `storage_plugin.*` — OAuth add + instance removal for JS plugin
-     *  storage providers (OneDrive, WebDAV, ...). `provider` prefixes the JS
-     *  op namespace (`<provider>:oauth.url` / `<provider>:oauth.exchange` /
-     *  `<provider>:removeInstance`). Non-OAuth providers (WebDAV) create
-     *  their instances from their own setup view via a backend RPC +
-     *  `ease.context.createStorage` instead. */
+    /** `oauth.*` — OAuth flow for JS plugin providers (e.g. OneDrive). The
+     *  JS ops are contract literals (`oauth:url` / `oauth:exchange`); the
+     *  plugin's identity (`pluginId`, from the instance data slot) and the
+     *  host-minted flow token (`oauthId`, from `ease.oauth.new()`) ride the
+     *  args. Business data (the alias) stays inside the plugin. */
+    object Oauth {
+        val URL = bridgeSpecArg<ArgOauthUrl, PluginOauthUrl>("oauth.url")
+        val EXCHANGE = bridgeSpecArg<ArgOauthExchange, PluginOauthExchangeResult>("oauth.exchange")
+    }
+
+    /** `storage_plugin.*` — storage-instance lifecycle for JS plugin storage
+     *  providers. Non-OAuth providers (WebDAV) create their instances from
+     *  their own setup view via a backend RPC + `ease.context.createStorage`
+     *  instead. */
     object StoragePlugin {
-        val OAUTH_URL =
-            bridgeSpecArg<ArgStoragePluginProvider, PluginOauthUrl>("storage_plugin.oauth_url")
-        val OAUTH_EXCHANGE =
-            bridgeSpecArg<ArgStoragePluginOauthExchange, PluginOauthExchangeResult>(
-                "storage_plugin.oauth_exchange"
-            )
         val REMOVE_INSTANCE =
             bridgeSpecArg<StorageId, Unit>("storage_plugin.remove_instance")
     }

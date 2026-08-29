@@ -150,9 +150,9 @@ impl BackendContext {
 
     /// Fire a `plugin.event` at one plugin's backend: push `{type, payload}`
     /// onto that plugin's dedicated event bus channel (tur #190 layout —
-    /// [`ease_tur_rpc::EVENT_CHANNEL_ID`]), delivered to the JS `onEvent`
-    /// registration. Fire-and-forget: no reply is sent, and a plugin with
-    /// no registration silently never hears it.
+    /// [`ease_tur_rpc::EVENT_CHANNEL_ID`]), delivered to the JS
+    /// `hostRpc.onEvent` registration. Fire-and-forget: no reply is sent, and
+    /// a plugin with no registration silently never hears it.
     pub fn dispatch_plugin_event(
         &self,
         plugin_id: &str,

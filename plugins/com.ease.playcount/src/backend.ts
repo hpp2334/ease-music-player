@@ -13,7 +13,10 @@
 // The view module (`view.ts` → `play-counts.ts`) reads the rows back via
 // `db.multiGetAllMulti` and aggregates per musicId.
 
-import { onEvent } from "tur:rpc";
+// TextEncoder/TextDecoder polyfill FIRST — npm deps may rely on them.
+import "../../infra/string-polyfill";
+import "../../infra/text-polyfill";
+import { hostRpc } from "tur:rpc";
 import { db } from "ease";
 
 interface MusicPlayPayload {
@@ -36,7 +39,7 @@ function dayKey(ts: number): string {
 // runs the returned cleanup before the next load / at destroy). The event
 // subscription dies with the instance, so no cleanup is needed.
 export function start(): void {
-    onEvent("music:play", (args: MusicPlayPayload) => {
+    hostRpc.onEvent("music:play", (args: MusicPlayPayload) => {
         db.multiAppend(
             dayKey(args.ts),
             JSON.stringify({ musicId: args.musicId, title: args.title, ts: args.ts }),

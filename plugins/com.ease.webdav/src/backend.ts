@@ -4,8 +4,8 @@
 // treats WebDAV like any other `StorageBackend`.
 //
 // Multi-instance: each configured WebDAV server is one *instance* named
-// `webdav:<uuid>` (the storage row's `plugin_storage_id`; legacy-migrated
-// rows use `webdav:<legacy-id>`). Per-instance config lives in `ease.db`
+// `webdav:<uuid>` (the storage row's `plugin_storage_id`;
+// legacy-migrated rows use `webdav:<legacy-id>`). Per-instance config lives in `ease.db`
 // (this plugin's KV) under `storage:<instance>` = JSON
 // `{ alias, addr, username, isAnonymous, secretId }`; the password lives in
 // `ease.secret` under that `secretId` (scope `plugin:com.ease.webdav`).
@@ -15,12 +15,24 @@
 // `ease.*` bridge fns resolve the calling plugin from that slot — no
 // pluginId argument is needed (or accepted) on any call here.
 //
-// Host handlers (under the `webdav:` prefix):
-//   - webdav:list           { instance, dir }                    -> Entry[]
-//   - webdav:get            { instance, streamId, path, offset } -> { totalLength?, name?, contentType? }
-//   - webdav:test           { instance?, addr, username, password?, isAnonymous } -> { result }
-//   - webdav:connect        { instance?, addr, alias, username, password?, isAnonymous } -> { instance, created }
-//   - webdav:removeInstance { instance }                          -> {}
+// Handlers, split by caller (the dispatcher routes strictly by scope). The
+// host-called ops are contract literals — identical names for every storage
+// provider, identity riding the payload (`pluginId` = this manifest's id,
+// `storageId` = the `plugin_storage_id` instance):
+//
+// hostRpc — the Rust host invokes these:
+//   - storage:list           { pluginId, storageId, dir }          -> Entry[]
+//   - storage:get            { pluginId, storageId, path, offset } -> registerStream: meta
+//     { totalLength?, name?, contentType?, dataOffset? } + credit-gated body
+//   - storage:removeInstance { pluginId, storageId }               -> {}
+//     (the storages-page trash button, via the host's
+//     `storage_plugin.remove_instance` bridge)
+//
+// viewRpc — this plugin's own view invokes these via `ease.rpc.call`
+// (plugin-private names, no identity needed — the backend knows itself):
+//   - webdav:test           { storageId?, addr, username, password?, isAnonymous } -> { result }
+//   - webdav:connect        { storageId?, addr, alias, username?, password?, isAnonymous } -> { storageId, created }
+//     (the add/edit-storage form)
 //
 // Auth: Basic preemptively when credentials exist; on a 401 the
 // `WWW-Authenticate` challenge is cached per server and Digest (MD5 /
@@ -35,12 +47,24 @@
 // Ported from the Rust implementation noted above.
 
 import { request, requestStream } from "tur:net";
+// TextEncoder/TextDecoder polyfill FIRST — npm deps below may rely on them.
+import "../../infra/string-polyfill";
+import "../../infra/text-polyfill";
+import type { StreamResponse } from "tur:net";
 import { decodeUtf8 } from "tur:std";
-import { registerHandler, pushChunk, endStream, errorStream } from "tur:rpc";
+import { hostRpc, viewRpc } from "tur:rpc";
+import type { StreamSource } from "tur:rpc";
 import { db, secret, context } from "ease";
 
-import { md5Hex } from "./vendor/md5";
-import { base64EncodeUtf8 } from "./vendor/base64";
+// npm deps — bundled by rspack (only `tur:*` / `ease` are externals). The
+// runtime provides Web Platform globals the usual way: `crypto` (OS entropy,
+// installed Rust-side by `plugin_runtime/webapi.rs`) and
+// TextEncoder/TextDecoder (via the text-polyfill import above) — so
+// crypto-dependent packages like `uuid` work unmodified.
+import { v4 as uuidv4 } from "uuid";
+import { md5 } from "js-md5";
+import { Base64 } from "js-base64";
+import { XMLParser } from "fast-xml-parser";
 
 // ---------------------------------------------------------------------------
 // Per-instance state
@@ -133,31 +157,10 @@ function encodePath(p: string): string {
         if (ch === "/" || safe.test(ch)) {
             out += ch;
         } else {
-            for (const b of Array.from(ch)) {
-                const code = b.codePointAt(0)!;
-                if (code < 0x80) {
-                    out += "%" + code.toString(16).toUpperCase().padStart(2, "0");
-                } else {
-                    // multi-byte — encode via UTF-8 bytes
-                    for (const byte of utf8Bytes(ch)) {
-                        out += "%" + byte.toString(16).toUpperCase().padStart(2, "0");
-                    }
-                }
-            }
+            // encodeURIComponent percent-encodes as UTF-8 by spec (uppercase
+            // hex); every char it leaves unescaped is already in `safe`
+            out += encodeURIComponent(ch).toUpperCase();
         }
-    }
-    return out;
-}
-
-function utf8Bytes(s: string): number[] {
-    const out: number[] = [];
-    for (let i = 0; i < s.length; i++) {
-        let cp = s.codePointAt(i)!;
-        if (cp > 0xffff) i++;
-        if (cp < 0x80) out.push(cp);
-        else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
-        else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
-        else out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
     }
     return out;
 }
@@ -239,19 +242,19 @@ function authorizationFor(
         return null; // SHA-256 variants unsupported
     }
 
-    let ha1 = md5Hex(`${username}:${realm}:${password}`);
+    let ha1 = md5(`${username}:${realm}:${password}`);
     const cnonce = randomHex(16);
     const entry = challenges.get(addr);
     const nc = ((entry?.nc ?? 0) + 1);
     const ncHex = nc.toString(16).padStart(8, "0");
     if (entry) entry.nc = nc;
     if (algorithm === "MD5-SESS") {
-        ha1 = md5Hex(`${ha1}:${nonce}:${cnonce}`);
+        ha1 = md5(`${ha1}:${nonce}:${cnonce}`);
     }
-    const ha2 = md5Hex(`${method}:${uri}`);
+    const ha2 = md5(`${method}:${uri}`);
     const response = qop
-        ? md5Hex(`${ha1}:${nonce}:${ncHex}:${cnonce}:${qop}:${ha2}`)
-        : md5Hex(`${ha1}:${nonce}:${ha2}`);
+        ? md5(`${ha1}:${nonce}:${ncHex}:${cnonce}:${qop}:${ha2}`)
+        : md5(`${ha1}:${nonce}:${ha2}`);
 
     let header =
         `Digest username="${username}", realm="${realm}", nonce="${nonce}", ` +
@@ -263,7 +266,7 @@ function authorizationFor(
 }
 
 function basicHeader(username: string, password: string): string {
-    return "Basic " + base64EncodeUtf8(`${username}:${password}`);
+    return "Basic " + Base64.encode(`${username}:${password}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +376,7 @@ async function davRequest(
 }
 
 // ---------------------------------------------------------------------------
-// PROPFIND + minimal multistatus XML parsing
+// PROPFIND + multistatus parsing (fast-xml-parser)
 // ---------------------------------------------------------------------------
 
 const PROPFIND_BODY =
@@ -389,50 +392,75 @@ interface RawEntry {
     size?: number;
 }
 
-function decodeXmlText(s: string): string {
-    const cdata = /^<!\[CDATA\[([\s\S]*)\]\]>$/g.exec(s.trim());
-    if (cdata) return cdata[1];
-    return s
-        .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'")
-        .replace(/&amp;/g, "&");
+// fast-xml-parser configuration:
+// - `removeNSPrefix` normalizes `D:href` / `d:href` / bare `href` alike (the
+//   old regex scraper was prefix-agnostic too).
+// - `parseTagValue: false` keeps tag text verbatim — strnum would otherwise
+//   turn a displayname of "123" into a number.
+// - response/propstat always become arrays: servers reply with a single
+//   <D:response> or with 200 + 404 propstat blocks, and merging every
+//   propstat's props mirrors the old whole-block scan.
+const xmlParser = new XMLParser({
+    removeNSPrefix: true,
+    parseTagValue: false,
+    isArray: (name) => /(?:^|:)(response|propstat)$/i.test(name),
+});
+
+/** Case-insensitive child lookup — servers occasionally vary prop-name
+ *  casing even though RFC 4918 defines them lowercase. Returns the first
+ *  match; used for leaf values. */
+function pick(obj: unknown, name: string): unknown {
+    if (obj == null || typeof obj !== "object") return undefined;
+    for (const k of Object.keys(obj)) {
+        if (k.toLowerCase() === name) return (obj as Record<string, unknown>)[k];
+    }
+    return undefined;
 }
 
-function tagContent(block: string, localName: string): string | undefined {
-    const re = new RegExp(
-        `<(?:[A-Za-z0-9_.-]+:)?${localName}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[A-Za-z0-9_.-]+:)?${localName}\\s*>`,
-        "i",
-    );
-    const m = re.exec(block);
-    return m ? decodeXmlText(m[1]) : undefined;
+/** All children whose key case-insensitively matches `name`, non-array
+ *  values wrapped — like `pick`, but merging casing variants instead of
+ *  stopping at the first. Used for the response/propstat levels. */
+function pickAll(obj: unknown, name: string): unknown[] {
+    if (obj == null || typeof obj !== "object") return [];
+    const out: unknown[] = [];
+    for (const k of Object.keys(obj)) {
+        if (k.toLowerCase() === name) {
+            const v = (obj as Record<string, unknown>)[k];
+            out.push(...(Array.isArray(v) ? v : [v]));
+        }
+    }
+    return out;
 }
 
+/** Parse a PROPFIND `207 Multistatus` body — real XML semantics (nesting,
+ *  attributes, self-closing tags, CDATA + entity decoding) via
+ *  fast-xml-parser, replacing the previous regex scraping. Throws on
+ *  malformed bodies — a silent `[]` here once hid a runtime gap (missing
+ *  `substr` in boa) as an "empty directory" for weeks of debugging. */
 function parseMultistatus(xml: string): RawEntry[] {
+    const parsed: unknown = xmlParser.parse(xml);
     const out: RawEntry[] = [];
-    const responseRe =
-        /<(?:[A-Za-z0-9_.-]+:)?response(?:\s[^>]*)?>([\s\S]*?)<\/(?:[A-Za-z0-9_.-]+:)?response\s*>/gi;
-    let m: RegExpExecArray | null;
-    while ((m = responseRe.exec(xml)) !== null) {
-        const block = m[1];
-        const href = tagContent(block, "href");
-        if (href == null) continue;
-        const resourcetype = new RegExp(
-            "<(?:[A-Za-z0-9_.-]+:)?resourcetype(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[A-Za-z0-9_.-]+:)?resourcetype\\s*>",
-            "i",
-        ).exec(block);
-        const isDir = resourcetype != null && /<(?:[A-Za-z0-9_.-]+:)?collection(\s|\/|>)/i.test(resourcetype[1]);
-        const lengthStr = tagContent(block, "getcontentlength");
+    for (const response of pickAll(parsed, "multistatus").flatMap((ms) => pickAll(ms, "response"))) {
+        const href = pick(response, "href");
+        if (typeof href !== "string") continue;
+        const props: Record<string, unknown> = {};
+        for (const ps of pickAll(response, "propstat")) {
+            Object.assign(props, pick(ps, "prop") ?? {});
+        }
+        const resourcetype = pick(props, "resourcetype");
+        const isDir =
+            resourcetype != null &&
+            typeof resourcetype === "object" &&
+            pick(resourcetype, "collection") != null;
         let size: number | undefined;
-        if (lengthStr != null && /^\d+$/.test(lengthStr.trim())) {
+        const lengthStr = pick(props, "getcontentlength");
+        if (typeof lengthStr === "string" && /^\d+$/.test(lengthStr.trim())) {
             size = parseInt(lengthStr.trim(), 10);
         }
+        const displayName = pick(props, "displayname");
         out.push({
             href: href.trim(),
-            displayName: tagContent(block, "displayname"),
+            displayName: typeof displayName === "string" ? displayName : undefined,
             isDir,
             size,
         });
@@ -515,86 +543,78 @@ function parseTotalLength(headers: Record<string, string>): number | undefined {
     return undefined;
 }
 
-async function getImpl(
+/**
+ * Streaming get opener: one ranged request per stream. The dispatcher pumps
+ * `body` with host-granted credits and calls `release` on any exit (host
+ * cancel included) — `t.cancel()` wire-aborts the download. When the server
+ * ignores the Range request (full 200 body from byte 0), `meta.dataOffset: 0`
+ * tells the host to drop the `offset` prefix bytes itself.
+ */
+async function openGet(
     conf: InstanceConfig,
-    streamId: number,
     path: string,
     offset: number,
-): Promise<{ totalLength?: number; name?: string; contentType?: string }> {
+): Promise<StreamSource> {
     const password = loadPassword(conf);
     const { origin } = splitAddr(conf.addr);
     const url = buildUrl(conf.addr, path, false);
     const uri = url.substring(origin.length);
 
-    const attempt = async (authScheme: string | null) => {
+    // Keep the Task, not just the promise — it is the abort handle.
+    const attempt = (authScheme: string | null) => {
         const headers: Record<string, string> = { Range: `bytes=${offset}-` };
         if (authScheme != null && !conf.isAnonymous) {
             const auth = authorizationFor(conf.addr, authScheme, conf.username, password, uri, "GET");
             if (auth != null) headers["Authorization"] = auth;
         }
-        return requestStream({ url, method: "GET", headers }).promise;
+        return requestStream({ url, method: "GET", headers });
     };
 
-    let resp: any;
+    let t = attempt(challenges.get(conf.addr)?.header ??
+        (!conf.isAnonymous && conf.username ? "Basic" : null));
+    let resp: StreamResponse;
     try {
-        const cached = challenges.get(conf.addr);
-        const scheme = cached ? cached.header : (!conf.isAnonymous && conf.username ? "Basic" : null);
-        resp = await attempt(scheme);
-    } catch (e: any) {
         // requestStream's promise rejects (object with `message`) on transport
         // errors; HTTP-level failures resolve with a status instead.
+        resp = await t.promise;
+    } catch (e: any) {
         throw markedError(e);
     }
     if (resp.status === 401 && !conf.isAnonymous) {
         const wwwAuth = headerOf(resp.headers, "WWW-Authenticate");
         if (wwwAuth) {
             challenges.set(conf.addr, { header: wwwAuth, nc: 0 });
-            resp = await attempt(wwwAuth);
+            t.cancel(); // discard the 401 body before the Digest retry
+            t = attempt(wwwAuth);
+            resp = await t.promise;
         }
     }
     if (resp.status >= 400) {
         // Fail the RPC itself (throw) so the host's `get` returns Err —
-        // callers treat missing entries as `None`. (errorStream would defer
-        // the error into the byte stream, which stream consumers may not
-        // expect.)
+        // callers treat missing entries as `None`. The error rides the reply,
+        // not the byte stream.
+        t.cancel();
         const msg = `get: ${resp.status} ${resp.statusText ?? ""}`.trim();
         throw new HttpError(resp.status, resp.status === 401 ? `UNAUTHORIZED: ${msg}` : msg);
     }
 
     const contentRange = headerOf(resp.headers, "Content-Range");
     const rangeHonored = contentRange != null || resp.status === 206;
-    const totalLength = parseTotalLength(resp.headers);
-    const contentType = headerOf(resp.headers, "Content-Type");
-    const name = path.split("/").pop() || path;
 
-    // When the server ignored the Range request (full 200 body) and an
-    // offset was requested, skip the offset ourselves — the host assumes
-    // pushed chunks start at `offset`.
-    const skip = rangeHonored ? 0 : offset;
-
-    (async () => {
-        try {
-            let remaining = skip;
-            for await (const chunk of resp.body) {
-                let c: Uint8Array = chunk;
-                if (remaining > 0) {
-                    if (c.length <= remaining) {
-                        remaining -= c.length;
-                        continue;
-                    }
-                    c = c.subarray(remaining);
-                    remaining = 0;
-                }
-                pushChunk(streamId, c);
-            }
-            endStream(streamId);
-        } catch (e: any) {
-            const msg = String(e?.message ?? e);
-            errorStream(streamId, isTimeoutMessage(msg) ? `TIMEOUT: ${msg}` : msg);
-        }
-    })();
-
-    return { totalLength, name, contentType };
+    return {
+        meta: {
+            totalLength: parseTotalLength(resp.headers),
+            name: path.split("/").pop() || path,
+            contentType: headerOf(resp.headers, "Content-Type"),
+            // The host assumes pushed chunks start at `offset`; a server that
+            // ignored the Range request sends them from 0 — say so, and the
+            // host drops the prefix.
+            dataOffset: rangeHonored ? offset : 0,
+        },
+        body: resp.body,
+        release: () => t.cancel(), // wire abort on any pump exit; no-op when done
+        mapError: (e) => markedError(e), // keep TIMEOUT classification mid-body
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -606,15 +626,15 @@ type TestOutcome = "SUCCESS" | "UNAUTHORIZED" | "TIMEOUT" | "OTHER_ERROR";
 /** Resolve the credentials for a test call: explicit values win; on edit a
  * blank password falls back to the stored one. */
 function testCredentials(
-    instance: string | undefined,
+    storageId: string | undefined,
     addr: string,
     username: string,
     password: string,
 ): { addr: string; username: string; password: string } {
-    if (password !== "" || instance == null) {
+    if (password !== "" || storageId == null) {
         return { addr, username, password };
     }
-    const conf = configOf(instance);
+    const conf = configOf(storageId);
     return {
         addr: addr !== "" ? addr : conf.addr,
         username: username !== "" ? username : conf.username,
@@ -622,15 +642,48 @@ function testCredentials(
     };
 }
 
-async function testImpl(args: {
-    instance?: string;
+// Handler args shapes (see the op table in the header comment). Host-op
+// `pluginId` is literal-typed — a mismatch would mean the host routed
+// somebody else's call here.
+
+interface ListArgs {
+    pluginId: "com.ease.webdav";
+    storageId: string;
+    dir: string;
+}
+
+interface GetArgs {
+    pluginId: "com.ease.webdav";
+    storageId: string;
+    path: string;
+    offset: number;
+}
+
+interface TestArgs {
+    storageId?: string;
     addr: string;
     username: string;
     password?: string;
     isAnonymous?: boolean;
-}): Promise<{ result: TestOutcome }> {
+}
+
+interface ConnectArgs {
+    storageId?: string;
+    addr: string;
+    alias?: string;
+    username?: string;
+    password?: string;
+    isAnonymous?: boolean;
+}
+
+interface RemoveInstanceArgs {
+    pluginId: "com.ease.webdav";
+    storageId: string;
+}
+
+async function testImpl(args: TestArgs): Promise<{ result: TestOutcome }> {
     const anon = !!args.isAnonymous;
-    const cred = testCredentials(args.instance, args.addr, args.username, args.password ?? "");
+    const cred = testCredentials(args.storageId, args.addr, args.username, args.password ?? "");
     try {
         const url = buildUrl(cred.addr, "/", true);
         await davRequest(cred.addr, cred.username, cred.password, anon, {
@@ -653,38 +706,16 @@ async function testImpl(args: {
     }
 }
 
-/** RFC 4122 v4 UUID (Math.random is plenty for non-adversarial id minting). */
-function uuid(): string {
-    const hex = "0123456789abcdef";
-    let out = "";
-    for (let i = 0; i < 36; i++) {
-        if (i === 8 || i === 13 || i === 18 || i === 23) {
-            out += "-";
-        } else if (i === 14) {
-            out += "4";
-        } else if (i === 19) {
-            out += hex[((Math.random() * 4) | 0) | 8];
-        } else {
-            out += hex[(Math.random() * 16) | 0];
-        }
-    }
-    return out;
-}
+// (id minting: `uuidv4()` from the uuid package — `crypto.getRandomValues`
+// is provided as a Web Platform global by the host)
 
 /**
- * Create or update a WebDAV instance. On create (no `instance`), persist the
+ * Create or update a WebDAV instance. On create (no `storageId`), persist the
  * config + password secret, mint `webdav:<uuid>`, and register the host
  * storage row (`context.createStorage` — the host pops the create form). On
  * update, rewrite the kv config; a blank `password` keeps the stored secret.
  */
-function connectImpl(args: {
-    instance?: string;
-    addr: string;
-    alias?: string;
-    username?: string;
-    password?: string;
-    isAnonymous?: boolean;
-}): { instance: string; created: boolean } {
+function connectImpl(args: ConnectArgs): { storageId: string; created: boolean } {
     const isAnonymous = !!args.isAnonymous;
     const addr = args.addr.trim();
     const alias = (args.alias ?? "").trim() || "WebDAV";
@@ -698,9 +729,9 @@ function connectImpl(args: {
         throw new Error("webdav: username cannot be empty");
     }
 
-    if (args.instance != null) {
+    if (args.storageId != null) {
         // Update: keep the existing secret unless a new password is given.
-        const conf = configOf(args.instance);
+        const conf = configOf(args.storageId);
         let secretId = conf.secretId;
         if (password !== "") {
             const newId = secret.put(password);
@@ -715,17 +746,17 @@ function connectImpl(args: {
             secretId,
             password: password !== "" ? password : null,
         };
-        db.singleSet(kvKey(args.instance), JSON.stringify(configToJson(updated)));
-        instances.set(args.instance, updated);
+        db.singleSet(kvKey(args.storageId), JSON.stringify(configToJson(updated)));
+        instances.set(args.storageId, updated);
         context.notifyChange();
-        return { instance: args.instance, created: false };
+        return { storageId: args.storageId, created: false };
     }
 
     // Create: password required for non-anonymous servers.
     if (!isAnonymous && password === "") {
         throw new Error("webdav: password cannot be empty");
     }
-    const instance = `webdav:${uuid()}`;
+    const instance = `webdav:${uuidv4()}`;
     const secretId = password !== "" ? secret.put(password) : null;
     const conf: InstanceConfig = {
         alias,
@@ -739,7 +770,7 @@ function connectImpl(args: {
     instances.set(instance, conf);
     // Register the host storage row; the upcall pops the create form.
     context.createStorage(instance);
-    return { instance, created: true };
+    return { storageId: instance, created: true };
 }
 
 function configToJson(conf: InstanceConfig): Record<string, unknown> {
@@ -754,12 +785,12 @@ function configToJson(conf: InstanceConfig): Record<string, unknown> {
 
 /** Remove an instance: drop its config (kv) + password secret, ask the host
  * to delete the storage row, and reload the dashboard. Called from the
- * host trash button (`webdav:removeInstance` via `storage_plugin.remove_instance`). */
-function removeInstance(args: { instance: string }): void {
-    const conf = instances.get(args.instance);
+ * host trash button (`storage:removeInstance` via `storage_plugin.remove_instance`). */
+function removeInstance(args: RemoveInstanceArgs): void {
+    const conf = instances.get(args.storageId);
     let secretId: number | null | undefined = conf?.secretId;
     if (secretId === undefined) {
-        const raw = db.singleGet(kvKey(args.instance));
+        const raw = db.singleGet(kvKey(args.storageId));
         if (raw != null) {
             try {
                 secretId = JSON.parse(raw).secretId ?? null;
@@ -771,12 +802,12 @@ function removeInstance(args: { instance: string }): void {
     if (secretId != null) {
         secret.remove(secretId);
     }
-    db.singleDelete(kvKey(args.instance));
-    instances.delete(args.instance);
+    db.singleDelete(kvKey(args.storageId));
+    instances.delete(args.storageId);
     challenges.delete(conf?.addr ?? "");
     // Complete the disconnect on the host side: drop the storage row, then
     // reload so the dashboard + edit page reflect the removal.
-    context.removeStorage(args.instance);
+    context.removeStorage(args.storageId);
     context.notifyChange();
 }
 
@@ -789,26 +820,23 @@ function removeInstance(args: { instance: string }): void {
 // ---------------------------------------------------------------------------
 
 export function start(): void {
-    registerHandler("webdav:list", (args) =>
-        listImpl(configOf(args.instance), args.dir).catch((e: any) => {
+    hostRpc.registerHandler("storage:list", (args: ListArgs) =>
+        listImpl(configOf(args.storageId), args.dir).catch((e: any) => {
             throw markedError(e);
         }),
     );
 
-    registerHandler("webdav:get", (args) => {
-        const { instance, streamId, path, offset } = args;
-        return getImpl(configOf(instance), streamId, path, offset).catch((e: any) => {
-            const err = markedError(e);
-            errorStream(streamId, String(err?.message ?? err));
-            return {};
-        });
-    });
+    hostRpc.registerStream("storage:get", (args: GetArgs) =>
+        openGet(configOf(args.storageId), args.path, args.offset).catch((e: any) => {
+            throw markedError(e);
+        }),
+    );
 
-    registerHandler("webdav:test", (args) => testImpl(args));
+    viewRpc.registerHandler("webdav:test", (args: TestArgs) => testImpl(args));
 
-    registerHandler("webdav:connect", (args) => connectImpl(args));
+    viewRpc.registerHandler("webdav:connect", (args: ConnectArgs) => connectImpl(args));
 
-    registerHandler("webdav:removeInstance", (args) => {
+    hostRpc.registerHandler("storage:removeInstance", (args: RemoveInstanceArgs) => {
         removeInstance(args);
         return {};
     });
