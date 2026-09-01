@@ -40,6 +40,10 @@
     <string name="import_musics_error_timeout_title">CONNECTION TIMEOUT</string>
     <string name="import_musics_error_unknown_title">UNKNOWN ERROR</string>
     <string name="import_musics_error_permission_title">PERMISSION ERROR</string>
+    <string name="import_local_picker_title">Select from Device</string>
+    <string name="import_local_picker_desc">Open the system file picker to choose files stored on this device.</string>
+    <string name="import_local_picker_button">Open File Picker</string>
+    <string name="import_local_skipped">Some files were skipped (unsupported location or type).</string>
     <string name="music_player_context_menu_remove">Remove</string>
     <string name="time_to_pause_delete">DELETE</string>
     <string name="time_to_pause_cancel">CANCEL</string>

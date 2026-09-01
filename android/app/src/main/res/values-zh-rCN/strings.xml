@@ -40,6 +40,10 @@
     <string name="import_musics_error_timeout_title">连接超时</string>
     <string name="import_musics_error_unknown_title">未知错误</string>
     <string name="import_musics_error_permission_title">权限错误</string>
+    <string name="import_local_picker_title">从本机选择</string>
+    <string name="import_local_picker_desc">打开系统文件选择器，选择本机存储中的文件。</string>
+    <string name="import_local_picker_button">打开系统文件选择器</string>
+    <string name="import_local_skipped">部分文件已跳过（位置或类型不受支持）。</string>
     <string name="music_player_context_menu_remove">删除</string>
     <string name="time_to_pause_delete">删除</string>
     <string name="time_to_pause_cancel">取消</string>
