@@ -74,7 +74,8 @@ class MainActivity : ComponentActivity() {
             playlistRepository.reload()
             setupCantodeEngine()
             // Connect the plugin event bus after the player repo is wired
-            // so plugins begin receiving music:play / pause / stop / complete.
+            // so plugins begin receiving music:play / resume / pause / stop /
+            // complete.
             pluginRepository.bindPlayerEvents(playerControllerRepository)
         }
     }
