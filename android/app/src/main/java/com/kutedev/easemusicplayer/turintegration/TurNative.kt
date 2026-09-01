@@ -28,36 +28,34 @@ package com.kutedev.easemusicplayer.turintegration
  */
 object TurNative {
     /**
-     * Spawn an isolated rendering instance attached to [surface], sharing the
-     * runtime's fonts/clock/capabilities. [pluginId] is stamped into the
-     * instance's per-instance data slot so `ease:*` bridge fns can resolve
-     * the calling plugin without a JS argument. [instance] is the storage's
-     * `plugin_storage_id` for edit-mode views (empty string for create mode)
-     * — exposed to JS as `ease.context.instance()`. [poolsHandle] (from
-     * [`EasePluginBridge.createPluginWorkerPools`]) assigns the instance to
-     * the shared view worker pool; `0` keeps the engine default. Returns the
-     * instance handle **immediately** — the heavy build (wgpu surface +
-     * adapter/device + worker handshake) is queued onto the native tur-host
-     * thread while the caller stays free; ops for this handle are ordered
-     * behind the build. A build failure logs to logcat (no exception) and
-     * turns later ops into no-ops. Returns `0` only for an invalid runtime
+     * Spawn an isolated **renderer-less** engine instance — the INITIALIZE
+     * half of tur's two-phase lifecycle (#215). No surface yet: the native
+     * build (worker handshake + plugin registration) is queued onto the
+     * native tur-host thread while the caller stays free; ops for this
+     * handle are ordered behind it. Attach a rendering surface later via
+     * [attachInstance] (from `surfaceCreated`); a never-attached instance
+     * is simply headless. [pluginId] is stamped into the instance's
+     * per-instance data slot so `ease:*` bridge fns can resolve the
+     * calling plugin without a JS argument. [instance] is the storage's
+     * `plugin_storage_id` for edit-mode views (empty string for create
+     * mode) — exposed to JS as `ease.context.instance()`. [poolsHandle]
+     * (from [`EasePluginBridge.createPluginWorkerPools`]) assigns the
+     * instance to the shared view worker pool; `0` keeps the engine
+     * default. A build failure logs to logcat (no exception) and turns
+     * later ops into no-ops. Returns `0` only for an invalid runtime
      * handle or if the host thread is gone.
      */
     external fun createInstance(
         runtimeHandle: Long,
         poolsHandle: Long,
-        surface: android.view.Surface,
-        width: Int,
-        height: Int,
-        dpr: Double,
         frameLoop: FrameLoop,
         pluginId: String,
         instance: String,
     ): Long
 
     /**
-     * Spawn an isolated headless instance (no surface, no rendering) from the
-     * runtime. Runs JS + capabilities + events only. [pluginId] mirrors
+     * Spawn an isolated headless instance (never attached to a surface).
+     * Runs JS + capabilities + events only. [pluginId] mirrors
      * [`createInstance`]'s identity stamp. [poolsHandle] (from
      * [`EasePluginBridge.createPluginWorkerPools`]) assigns the instance to
      * the shared backend worker pool; `0` keeps the engine default. Same
@@ -70,6 +68,35 @@ object TurNative {
         frameLoop: FrameLoop,
         pluginId: String,
     ): Long
+
+    /**
+     * Attach a rendering surface to a built instance — the ATTACH half of
+     * the two-phase lifecycle (call from `surfaceCreated`, where the
+     * `Surface` is guaranteed valid). The attach op is ordered behind the
+     * instance build, so the instance exists when it runs: it acquires
+     * the native window, performs the wgpu surface/adapter/device init,
+     * and hands the renderer to the engine. If the instance is already
+     * gone (destroyed / failed build) or the wgpu init fails, the error
+     * is logged and the instance stays renderer-less — attachable again
+     * later. Pair with [detachInstance] on `surfaceDestroyed`; the pair
+     * is repeatable (a re-created surface re-attaches without rebuilding
+     * the JS realm).
+     */
+    external fun attachInstance(
+        handle: Long,
+        surface: android.view.Surface,
+        width: Int,
+        height: Int,
+        dpr: Double,
+    )
+
+    /**
+     * Detach the rendering surface — the DETACH half (call from
+     * `surfaceDestroyed`). Drops the renderer and releases the native
+     * window reference; the instance keeps running (JS, capabilities,
+     * events) and can attach a fresh surface later. Idempotent.
+     */
+    external fun detachInstance(handle: Long)
 
     /** Register a JS module source on the runtime's shared registry and
      *  return its opaque handle (`0` on failure). The source crosses JNI
@@ -143,6 +170,22 @@ object TurNative {
 
     /** Drop the instance and free its resources (the runtime is unaffected). */
     external fun destroy(handle: Long)
+
+    /**
+     * Drop an instance and **block until its teardown settled** on the
+     * native tur-host thread: the destroy op ran, and with it the
+     * instance's renderer, surface, and loop future were dropped. Returns
+     * `true` when settled, `false` if the host thread had already shut
+     * down.
+     *
+     * The fence for hosts that must know disposal finished — e.g. before
+     * re-creating an instance on the same surface — replacing sleep-based
+     * quiesce heuristics. **Blocking** (it waits behind any ops still
+     * queued for the instance, including an in-flight build): call off
+     * the main thread, e.g. `withContext(Dispatchers.Default) {
+     * TurNative.destroySettled(handle) }`.
+     */
+    external fun destroySettled(handle: Long): Boolean
 
     /** Drop the runtime and free its resources. Destroy all instances first. */
     external fun destroyRuntime(handle: Long)

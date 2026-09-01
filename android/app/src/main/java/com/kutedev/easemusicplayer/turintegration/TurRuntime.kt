@@ -9,10 +9,11 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Built once via [EasePluginBridge.createRuntime] (which calls into
  * `libease_client_backend.so` with the Ease plugin set). From a runtime,
- * create rendering instances via [createInstance] (attached to a
- * `android.view.Surface`) or headless instances via [createHeadlessInstance].
- * Multiple instances share the runtime's fonts/clock/capabilities/plugins
- * while keeping fully isolated JS state.
+ * spawn isolated instances via [createInstance] (renderer-less; attach an
+ * `android.view.Surface` later via [TurInstance.attach]) or headless
+ * instances via [createHeadlessInstance]. Multiple instances share the
+ * runtime's fonts/clock/capabilities/plugins while keeping fully isolated
+ * JS state.
  */
 class TurRuntime(
     handle: Long,
@@ -51,25 +52,24 @@ class TurRuntime(
     }
 
     /**
-     * Spawn an isolated rendering instance attached to [surface] and return it.
-     * Shares this runtime's fonts/clock/capabilities/plugins; gets its own JS
-     * realm, element tree, and renderer. [pluginId] is stamped into the
+     * Spawn an isolated engine instance (**renderer-less** — the initialize
+     * half of the two-phase lifecycle) and return it. Shares this runtime's
+     * fonts/clock/capabilities/plugins; gets its own JS realm + element
+     * tree. Attach an `android.view.Surface` later via
+     * [TurInstance.attach] (from `surfaceCreated`); a never-attached
+     * instance is simply headless. [pluginId] is stamped into the
      * instance's per-instance data slot so `ease:*` bridge fns resolve the
      * calling plugin from Rust, not from a JS argument. [instance] is the
      * storage's `plugin_storage_id` for edit-mode views (`null` for create
      * mode) — exposed to JS as `ease.context.instance()`.
      *
-     * Returns as soon as the native handle exists — the heavy build (wgpu
-     * adapter/device init, worker handshake, plugin registration) runs on
-     * the native tur-host thread, so the first frames appear asynchronously.
-     * A native build failure logs to logcat (no exception here) and later
-     * ops on the returned instance become no-ops.
+     * Returns as soon as the native handle exists — the heavy build
+     * (worker handshake, plugin registration) runs on the native tur-host
+     * thread, so the instance becomes usable asynchronously. A native
+     * build failure logs to logcat (no exception here) and later ops on
+     * the returned instance become no-ops.
      */
     fun createInstance(
-        surface: android.view.Surface,
-        width: Int,
-        height: Int,
-        dpr: Double,
         pluginId: String,
         instance: String? = null,
     ): TurInstance {
@@ -78,10 +78,6 @@ class TurRuntime(
         val h = TurNative.createInstance(
             handle,
             poolsHandle,
-            surface,
-            width,
-            height,
-            dpr,
             frameLoop,
             pluginId,
             instance ?: "",
@@ -91,10 +87,10 @@ class TurRuntime(
     }
 
     /**
-     * Spawn an isolated headless instance (no surface, no rendering). Runs JS +
-     * capabilities + events only. Useful for service plugins (e.g. a JS storage
-     * provider) that must stay alive independent of any view. [pluginId] mirrors
-     * [`createInstance`]'s identity stamp.
+     * Spawn an isolated headless instance (never attached to a surface).
+     * Runs JS + capabilities + events only. Useful for service plugins (e.g.
+     * a JS storage provider) that must stay alive independent of any view.
+     * [pluginId] mirrors [`createInstance`]'s identity stamp.
      */
     fun createHeadlessInstance(pluginId: String): TurInstance {
         check(handle != 0L) { "runtime destroyed" }

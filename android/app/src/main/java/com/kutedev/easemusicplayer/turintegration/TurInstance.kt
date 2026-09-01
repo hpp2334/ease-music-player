@@ -4,8 +4,10 @@ import java.io.Closeable
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Owns one native tur instance — an isolated JS realm + element tree +
- * renderer (or headless), spawned from a [TurRuntime].
+ * Owns one native tur instance — an isolated JS realm + element tree,
+ * spawned renderer-less from a [TurRuntime] and attached to an Android
+ * [android.view.Surface] later (the two-phase initialize → attach
+ * lifecycle; a never-attached instance is simply headless).
  *
  * Built on top of [TurNative] (the JNI bridge): holds the instance handle,
  * drives frames via a [FrameLoop], and translates Android input into the
@@ -65,6 +67,31 @@ class TurInstance(
         // the engine's `pump_loop`).
         frameLoop.onVsync = { if (this.handle != 0L) TurNative.pump(this.handle) }
         frameLoop.onPump = { if (this.handle != 0L) TurNative.pumpMessages(this.handle) }
+    }
+
+    /**
+     * Attach a rendering surface — the **attach** half of the two-phase
+     * lifecycle (call from `surfaceCreated`, where the surface is valid).
+     * The native attach op (ordered behind the instance build) performs
+     * the wgpu surface/adapter/device init and hands the renderer to the
+     * engine. On failure the instance stays renderer-less and attachable
+     * again. Pair with [detach]; the pair is repeatable — a re-created
+     * surface re-attaches without rebuilding the JS realm.
+     */
+    fun attach(surface: android.view.Surface, width: Int, height: Int, dpr: Double) {
+        if (handle == 0L) return
+        TurNative.attachInstance(handle, surface, width.coerceAtLeast(1), height.coerceAtLeast(1), dpr)
+    }
+
+    /**
+     * Detach the rendering surface — the **detach** half (call from
+     * `surfaceDestroyed`). Drops the renderer + releases the native window;
+     * the instance keeps running and can [attach] a fresh surface later.
+     * Idempotent.
+     */
+    fun detach() {
+        if (handle == 0L) return
+        TurNative.detachInstance(handle)
     }
 
     /**
@@ -140,12 +167,35 @@ class TurInstance(
     fun nativeHandle(): Long = handle
 
     /** Drop the instance and free native resources. The parent runtime is
-     *  unaffected. Idempotent. */
+     *  unaffected. Idempotent.
+     *
+     *  Fire-and-forget (main-thread safe): the destroy op is queued on the
+     *  native tur-host thread; a still-in-flight build for this instance is
+     *  harmless — the build creates no surface (the two-phase lifecycle), so
+     *  whichever op runs second simply finds nothing. A still-attached
+     *  surface is detached by the destroy op itself. Use [closeBlocking]
+     *  when you need to know teardown finished. */
     override fun close() {
         val h = handleCell.getAndSet(0L)
         if (h == 0L) return
         frameLoop.cancel()
         TurNative.destroy(h)
+    }
+
+    /** Close and **block until native teardown settled** — the destroy op ran
+     *  on the tur-host thread (instance, renderer, surface dropped; the
+     *  module's `start()` cleanup runs on the worker as it winds down).
+     *
+     *  The fence for disposal-sensitive flows — replaces sleep-based quiesce
+     *  heuristics. **Off-main-thread only**: it can wait behind an in-flight
+     *  instance build (~hundreds of ms of GPU init), e.g.
+     *  `withContext(Dispatchers.Default) { instance.closeBlocking() }`.
+     *  Idempotent. */
+    fun closeBlocking() {
+        val h = handleCell.getAndSet(0L)
+        if (h == 0L) return
+        frameLoop.cancel()
+        TurNative.destroySettled(h)
     }
 
     @Suppress("REM_ELLIPSIS")
