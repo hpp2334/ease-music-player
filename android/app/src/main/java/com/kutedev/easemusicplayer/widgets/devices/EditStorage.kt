@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -228,6 +229,17 @@ fun EditStoragesPage(
     // storage provider (WebDAV, OneDrive, ...). In edit mode the provider
     // is fixed by the loaded storage's handle (`pluginMode`).
     var selectedProvider by remember { mutableStateOf<StorageProvider?>(null) }
+
+    // Entering the create view pre-selects the first discovered provider,
+    // so the setup form is visible right away (no extra tap). Providers
+    // arrive async from `scanPlugins`, so this fires when the list first
+    // becomes non-empty; once set (by us or the user) it never overrides.
+    LaunchedEffect(isCreated, providers) {
+        if (isCreated && selectedProvider == null && providers.isNotEmpty()) {
+            selectedProvider = providers.first()
+        }
+    }
+
     val activeProvider = if (isCreated) selectedProvider else null
     val showPlugin = if (isCreated) selectedProvider != null else pluginMode
 
@@ -303,7 +315,17 @@ fun EditStoragesPage(
                         val handle = activeProvider?.viewSourceHandle ?: 0L
                         val pid = activeProvider?.pluginId
                         if (pid != null) {
-                            PluginStorageView(pid, handle, instance = null)
+                            // Keyed on the provider: a TurView keeps its
+                            // instance while composed, so switching
+                            // providers must rebuild it (dispose + fresh
+                            // bind) instead of reusing the old instance.
+                            // Disposal needs no timing guards anymore —
+                            // tur's two-phase lifecycle builds instances
+                            // renderer-less, so a fire-and-forget close()
+                            // racing an in-flight build is safe.
+                            key(activeProvider?.storageId) {
+                                PluginStorageView(pid, handle, instance = null)
+                            }
                         }
                     } else {
                         // Edit mode: render the storage's plugin view,
