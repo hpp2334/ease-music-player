@@ -1,6 +1,13 @@
 package com.kutedev.easemusicplayer.widgets.musics
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContract
+import androidx.activity.result.contract.ActivityResultContracts
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -48,6 +55,9 @@ import com.kutedev.easemusicplayer.components.EaseCheckbox
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.components.EaseTextButton
+import com.kutedev.easemusicplayer.components.EaseTextButtonSize
+import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.viewmodels.ImportVM
 import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.viewmodels.VImportStorageEntry
@@ -464,6 +474,101 @@ private fun ImportMusicsError(
     )
 }
 
+/**
+ * Like [ActivityResultContracts.OpenMultipleDocuments], but sets the concrete
+ * MIME via [Intent.setType] when only one type is requested — some OEM
+ * DocumentsUI builds (e.g. MIUI) ignore `EXTRA_MIME_TYPES` when the intent
+ * type is the any-file wildcard.
+ */
+private class OpenDocumentsMultiple : ActivityResultContract<List<String>, List<Uri>>() {
+    override fun createIntent(context: Context, input: List<String>): Intent {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        if (input.size == 1) {
+            intent.setType(input[0])
+        } else {
+            intent.setType("*/*")
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, input.toTypedArray())
+        }
+        return intent
+    }
+
+    override fun parseResult(resultCode: Int, intent: Intent?): List<Uri> {
+        if (resultCode != Activity.RESULT_OK || intent == null) {
+            return emptyList()
+        }
+        val uris = mutableListOf<Uri>()
+        intent.data?.let { uri -> uris.add(uri) }
+        intent.clipData?.let { clipData ->
+            for (index in 0 until clipData.itemCount) {
+                clipData.getItemAt(index).uri?.let { uri -> uris.add(uri) }
+            }
+        }
+        return uris
+    }
+}
+
+@Composable
+private fun ImportLocalPicker(
+    importVM: ImportVM = hiltViewModel()
+) {
+    val navController = LocalNavController.current
+
+    val picker = rememberLauncherForActivityResult(
+        OpenDocumentsMultiple()
+    ) { uris ->
+        if (importVM.onPickedUris(uris)) {
+            navController.popBackStack()
+        }
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_folder),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                )
+            }
+            Text(
+                text = stringResource(id = R.string.import_local_picker_title),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = stringResource(id = R.string.import_local_picker_desc),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .widthIn(0.dp, 220.dp)
+            )
+            EaseTextButton(
+                text = stringResource(id = R.string.import_local_picker_button),
+                type = EaseTextButtonType.PrimaryVariant,
+                size = EaseTextButtonSize.Medium,
+                onClick = {
+                    picker.launch(importVM.allowMimeTypes())
+                }
+            )
+        }
+    }
+}
+
 @Composable
 fun ImportMusicsPage(
     importVM: ImportVM = hiltViewModel(),
@@ -531,14 +636,27 @@ fun ImportMusicsPage(
             }
         }
         ImportStorages()
-        when (loadState) {
-            CurrentStorageStateType.LOADING -> ImportEntriesSkeleton()
-            CurrentStorageStateType.TIMEOUT,
-            CurrentStorageStateType.AUTHENTICATION_FAILED,
-            CurrentStorageStateType.UNKNOWN_ERROR,
-            CurrentStorageStateType.NEED_PERMISSION -> ImportMusicsError()
+        val isLocalSelected by importVM.isLocalSelected.collectAsState()
+        when {
+            isLocalSelected && loadState == CurrentStorageStateType.NEED_PERMISSION -> {
+                ImportMusicsError()
+            }
+
+            isLocalSelected -> {
+                ImportLocalPicker(importVM)
+            }
+
             else -> {
-                ImportEntries()
+                when (loadState) {
+                    CurrentStorageStateType.LOADING -> ImportEntriesSkeleton()
+                    CurrentStorageStateType.TIMEOUT,
+                    CurrentStorageStateType.AUTHENTICATION_FAILED,
+                    CurrentStorageStateType.UNKNOWN_ERROR,
+                    CurrentStorageStateType.NEED_PERMISSION -> ImportMusicsError()
+                    else -> {
+                        ImportEntries()
+                    }
+                }
             }
         }
     }
