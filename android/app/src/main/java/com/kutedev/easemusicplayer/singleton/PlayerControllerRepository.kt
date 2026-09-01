@@ -9,6 +9,7 @@ import com.kutedev.easemusicplayer.singleton.types.Music
 import com.kutedev.easemusicplayer.singleton.types.Playlist
 import com.kutedev.easemusicplayer.singleton.types.MusicId
 import com.kutedev.easemusicplayer.singleton.types.PlaylistId
+import com.kutedev.easemusicplayer.singleton.types.PlayerStateRecord
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -172,7 +173,13 @@ class PlayerControllerRepository @Inject constructor(
         }
         val engine = _cantodeEngine.value ?: return
 
-        if (_music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
+        // A natural-end replay (repeat-one auto-replay, or re-tapping the
+        // finished track) must go through the fresh-load branch below so it
+        // emits a countable MusicPlay — only a PAUSED current track resumes
+        // in place. `lastState` is @Volatile and set before `endedEvent` is
+        // collected, so it reads ENDED by the time playOnComplete() runs.
+        val ended = engine.lastState == PlayerStateRecord.ENDED
+        if (!ended && _music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
             resume(); return
         }
 
@@ -218,6 +225,13 @@ class PlayerControllerRepository @Inject constructor(
         if (playerId < 0) return
         _scope.launch {
             bridge.call(BridgeMethods.Player.PLAY).unwrapOrNull()
+            _pluginEvents.tryEmit(
+                PluginEvent.MusicResume(
+                    musicId = _music.value?.meta?.id,
+                    timestamp = System.currentTimeMillis(),
+                    positionMs = getCurrentPosition(),
+                )
+            )
         }
     }
 
