@@ -167,13 +167,33 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     tur_android::ops::destroy(handle)
 }
 
-/// `TurNative.createInstance(runtimeHandle, poolsHandle, surface, w, h, dpr, frameLoop, pluginId, instance): long`
+/// `TurNative.destroySettled(handle): boolean` — destroy plus a fence:
+/// blocks until the tur-host op queue drained past this instance's
+/// destroy op (FIFO), i.e. until the instance, its renderer + surface,
+/// and its loop future are dropped. The fence for disposal-sensitive
+/// teardown (replacing sleep-based quiesce heuristics); **off-main-thread
+/// only** — it can wait behind an in-flight build. Returns `true` when
+/// settled, `false` if the host thread had shut down.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_destroySettled(
+    _env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    handle: tur_android::jlong,
+) -> tur_android::jboolean {
+    tur_android::ops::destroy_settled(handle)
+}
+
+/// `TurNative.createInstance(runtimeHandle, poolsHandle, frameLoop, pluginId, instance): long`
 ///
-/// Spawns an isolated rendering instance for the given `pluginId`. The
-/// plugin id is stamped into the instance's per-instance data slot at
-/// build time (via `TurAppBuilder::instance_data`) so `ease:*` bridge fns
-/// can resolve the calling plugin via `extract_js_ctx` + `data::<PluginId>()`
-/// — without trusting a JS argument.
+/// Spawns an isolated **renderer-less** instance for the given `pluginId`
+/// — the INITIALIZE half of tur's two-phase lifecycle (#215). The plugin
+/// id is stamped into the instance's per-instance data slot at build time
+/// (via `TurAppBuilder::instance_data`) so `ease:*` bridge fns can resolve
+/// the calling plugin via `extract_js_ctx` + `data::<PluginId>()` —
+/// without trusting a JS argument. No surface is involved: the Kotlin
+/// host ATTACHES one later via [`Java_..._TurNative_attachInstance`]
+/// (`surfaceCreated`), and an instance that never attaches is simply
+/// headless.
 ///
 /// `poolsHandle` assigns the instance to the shared `ease-plugin-view`
 /// worker pool (see [`PluginWorkerPools`]); `0` keeps the engine default.
@@ -187,10 +207,6 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     _class: tur_android::JClass,
     runtime_handle: tur_android::jlong,
     pools_handle: tur_android::jlong,
-    surface: tur_android::JObject,
-    width: tur_android::jint,
-    height: tur_android::jint,
-    dpr: tur_android::jdouble,
     frame_loop: tur_android::JObject,
     plugin_id: tur_android::JString,
     instance: tur_android::JString,
@@ -215,37 +231,31 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
         Some(instance_str)
     };
     let view_pool = borrow_pools(pools_handle).map(|pools| pools.view.clone());
-    tur_android::ops::create_instance(
-        &mut env,
-        runtime_handle,
-        surface,
-        width,
-        height,
-        dpr,
-        frame_loop,
-        move |builder| {
-            let builder = match view_pool {
-                Some(ref pool) => builder.worker_pool(pool.clone()),
-                None => builder,
-            };
-            builder.instance_data(move |cx| {
-                cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
-                    pid.clone(),
-                ));
-                cx.define::<crate::plugin_runtime::PluginInstance>(
-                    crate::plugin_runtime::PluginInstance(instance_opt.clone()),
-                );
-            })
-        },
-    )
+    tur_android::ops::create_instance(&mut env, runtime_handle, frame_loop, move |builder| {
+        let builder = match view_pool {
+            Some(ref pool) => builder.worker_pool(pool.clone()),
+            None => builder,
+        };
+        builder.instance_data(move |cx| {
+            cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
+                pid.clone(),
+            ));
+            cx.define::<crate::plugin_runtime::PluginInstance>(
+                crate::plugin_runtime::PluginInstance(instance_opt.clone()),
+            );
+        })
+    })
 }
 
 /// `TurNative.createHeadlessInstance(runtimeHandle, poolsHandle, frameLoop, pluginId): long`
 ///
 /// Headless variant — same per-instance `PluginId` stamping as
-/// [`Java_..._TurNative_createInstance`], but no surface / renderer.
-/// `poolsHandle` assigns the instance to the shared `ease-plugin-backend`
-/// worker pool (see [`PluginWorkerPools`]); `0` keeps the engine default.
+/// [`Java_..._TurNative_createInstance`], never attached to a surface.
+/// Since tur #215 the engine has a single renderer-less
+/// `create_instance` op (a never-attached instance IS headless), so this
+/// only differs in the worker pool: `poolsHandle` assigns the instance to
+/// the shared `ease-plugin-backend` pool (see [`PluginWorkerPools`]); `0`
+/// keeps the engine default.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_createHeadlessInstance(
     mut env: tur_android::JNIEnv,
@@ -263,25 +273,55 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
         }
     };
     let backend_pool = borrow_pools(pools_handle).map(|pools| pools.backend.clone());
-    tur_android::ops::create_headless_instance(
-        &mut env,
-        runtime_handle,
-        frame_loop,
-        move |builder| {
-            let builder = match backend_pool {
-                Some(ref pool) => builder.worker_pool(pool.clone()),
-                None => builder,
-            };
-            builder.instance_data(move |cx| {
-                cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
-                    pid.clone(),
-                ));
-                cx.define::<crate::plugin_runtime::PluginInstance>(
-                    crate::plugin_runtime::PluginInstance(None),
-                );
-            })
-        },
-    )
+    tur_android::ops::create_instance(&mut env, runtime_handle, frame_loop, move |builder| {
+        let builder = match backend_pool {
+            Some(ref pool) => builder.worker_pool(pool.clone()),
+            None => builder,
+        };
+        builder.instance_data(move |cx| {
+            cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
+                pid.clone(),
+            ));
+            cx.define::<crate::plugin_runtime::PluginInstance>(
+                crate::plugin_runtime::PluginInstance(None),
+            );
+        })
+    })
+}
+
+/// `TurNative.attachInstance(handle, surface, width, height, dpr)` — the
+/// ATTACH half of tur's two-phase lifecycle (#215). Call from
+/// `surfaceCreated`, where the `Surface` is guaranteed valid. The attach
+/// op (FIFO-ordered behind the instance build, so the instance exists
+/// when it runs) acquires the `ANativeWindow`, performs the wgpu
+/// surface/adapter/device init, and hands the renderer to the engine. On
+/// failure the instance stays renderer-less and attachable again. Pair
+/// with [`Java_..._TurNative_detachInstance`]; the pair is repeatable —
+/// a re-created surface re-attaches without rebuilding the JS realm.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_attachInstance(
+    mut env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    handle: tur_android::jlong,
+    surface: tur_android::JObject,
+    width: tur_android::jint,
+    height: tur_android::jint,
+    dpr: tur_android::jdouble,
+) {
+    tur_android::ops::attach_instance(&mut env, handle, surface, width, height, dpr)
+}
+
+/// `TurNative.detachInstance(handle)` — the DETACH half (#215). Call from
+/// `surfaceDestroyed`. Drops the renderer (releasing the native window
+/// ref) while the instance keeps running (JS, capabilities, events) and
+/// can attach a fresh surface later. Idempotent.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_detachInstance(
+    mut env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    handle: tur_android::jlong,
+) {
+    tur_android::ops::detach_instance(&mut env, handle)
 }
 
 /// `TurNative.destroyRuntime(handle)`

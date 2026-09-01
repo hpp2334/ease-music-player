@@ -17,8 +17,8 @@ futures-util = "0.3"
 tracing = "0.1"
 
 [dev-dependencies]
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "e16c97aa250fee3a6868851bd648f0829bd110c3" }
-tur-native = { git = "https://github.com/hpp2334/tur", rev = "e16c97aa250fee3a6868851bd648f0829bd110c3" }
-tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "e16c97aa250fee3a6868851bd648f0829bd110c3" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
+tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
 boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "93a9e31a83bbaa15bbd8b687e61639ffc53bbef1" }
 ease-client-tokio = { path = "../ease-client-tokio" }

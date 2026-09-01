@@ -2298,7 +2298,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -3739,7 +3739,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls 0.23.43",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -3777,7 +3777,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -5420,7 +5420,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -5840,7 +5840,7 @@ dependencies = [
 [[package]]
 name = "tur-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "android_logger",
  "boa_engine",
@@ -5865,7 +5865,7 @@ dependencies = [
 [[package]]
 name = "tur-animation"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5877,7 +5877,7 @@ dependencies = [
 [[package]]
 name = "tur-clipboard-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "jni",
  "tracing",
@@ -5887,7 +5887,7 @@ dependencies = [
 [[package]]
 name = "tur-engine"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5910,7 +5910,7 @@ dependencies = [
 [[package]]
 name = "tur-filepicker-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "boa_engine",
  "tracing",
@@ -5920,7 +5920,7 @@ dependencies = [
 [[package]]
 name = "tur-integration-tests"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "boa_engine",
  "futures",
@@ -5936,7 +5936,7 @@ dependencies = [
 [[package]]
 name = "tur-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "futures",
  "parley",
@@ -5947,7 +5947,7 @@ dependencies = [
 [[package]]
 name = "tur-net-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5959,7 +5959,7 @@ dependencies = [
 [[package]]
 name = "tur-net-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e16c97aa250fee3a6868851bd648f0829bd110c3#e16c97aa250fee3a6868851bd648f0829bd110c3"
+source = "git+https://github.com/hpp2334/tur?rev=b63b03de9d31522f93bf6992ec300f8b3543900a#b63b03de9d31522f93bf6992ec300f8b3543900a"
 dependencies = [
  "futures",
  "reqwest 0.12.28",
@@ -6554,7 +6554,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

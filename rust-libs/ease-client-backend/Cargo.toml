@@ -48,7 +48,7 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ e16c97a).
+# tur engine integration (https://github.com/hpp2334/tur @ b63b03d).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
 # main↔worker threaded runtime (#178), the fully-wired bidirectional event
 # bus (#181 — host↔JS byte transport for the OneDrive service plugin), the
@@ -85,15 +85,23 @@ anyhow = { workspace = true }
 # requestStream resolves the Task with a pull-driven body iterator and
 # takes `backpressure: { value, unit }` instead of `bufferBytes` — a
 # byte-budgeted semaphore now propagates TCP flow control instead of the
-# old unbounded bridge).
+# old unbounded bridge). Since 56dab72: the virtual app model (#214 —
+# nested instances render via a host-driven virtual app; `register_module`
+# is fn-pointers-only now, per-instance state rides
+# `define_plugin_state`/`plugin_state()` instead of closure captures).
+# Since b63b03d: the two-phase Android instance lifecycle (#215 —
+# `createInstance` builds the instance renderer-less (INITIALIZE), the new
+# `attachInstance`/`detachInstance` ops own the surface/wgpu work
+# (ATTACH/DETACH, repeatable), and `destroySettled` is the fenced teardown;
+# wgpu errors degrade (log) instead of aborting the process).
 # The engine core is tokio-free; the embedder provides a tokio Handle to NativeHttp
 # (registered on the runtime builder) and for timer/sleep.
 # All crates live in the same repo; cargo clones once and resolves their
 # internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "e16c97aa250fee3a6868851bd648f0829bd110c3" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "e16c97aa250fee3a6868851bd648f0829bd110c3" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "e16c97aa250fee3a6868851bd648f0829bd110c3" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "e16c97aa250fee3a6868851bd648f0829bd110c3" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
 
 # Plugin install layer (`services/plugin_manager.rs`): zip extraction
 # (SAF/registry installs), sha256 registry verification, md5 registry-cache

@@ -102,7 +102,7 @@ impl Plugin for EaseMusicPlugin {
             ("context", JsValue::from(context_obj)),
         ];
 
-        ctx.register_module("ease", vec![], vec![], consts);
+        ctx.register_module("ease", vec![], consts);
 
         tracing::info!(
             "EaseMusicPlugin registered ease (unified: db + secret + oauth + themes + rpc + context)"

@@ -29,11 +29,15 @@ import androidx.compose.ui.viewinterop.AndroidView
  * The plugin id is stamped into the instance's per-instance data slot so
  * `ease:*` bridge fns resolve the calling plugin from Rust, not from a JS
  * argument; the instance id is exposed to JS as `ease.context.instance()`.
- * When the surface becomes ready the view spawns an instance via
- * [TurRuntime.createInstance]; when the surface is destroyed the instance
- * is torn down (the runtime survives, shared across views). Pointer
- * (touch), resize, soft keyboard (IME), and basic hardware-key dispatch
- * are wired automatically.
+ *
+ * Two-phase lifecycle (tur #215): the view spawns a renderer-less instance
+ * via [TurRuntime.createInstance] as soon as it binds and loads the
+ * module; `surfaceCreated` ATTACHES the surface ([TurInstance.attach])
+ * and `surfaceDestroyed` DETACHES it ([TurInstance.detach]) — the
+ * instance (JS realm + module state) survives surface recreation and
+ * re-attaches; leaving the composition destroys it. Pointer (touch),
+ * resize, soft keyboard (IME), and basic hardware-key dispatch are wired
+ * automatically.
  *
  * @param runtime the shared [TurRuntime] to spawn the instance from.
  * @param sourceHandle a registered module-source handle (from
@@ -77,20 +81,23 @@ fun TurView(
 /**
  * `SurfaceView` subclass that owns the [TurInstance] lifecycle + input dispatch.
  *
- * The instance is created lazily via [bind] (called once the surface is
- * ready). All methods run on the main looper (where `SurfaceHolder.Callback`
- * and input dispatch arrive) — they only marshal work onto the native
+ * Two-phase lifecycle (tur #215): the instance (JS realm, worker, plugins)
+ * is created in [bind] — no surface involved, so nothing can race
+ * Android's surface lifecycle — and `loadModule` is ordered right behind
+ * the native build (FIFO). `surfaceCreated` ATTACHES the surface;
+ * `surfaceDestroyed` DETACHES it (the instance survives and re-attaches
+ * when the platform re-creates the surface); [unbind] destroys the
+ * instance.
+ *
+ * All methods run on the main looper (where `SurfaceHolder.Callback` and
+ * input dispatch arrive) — they only marshal work onto the native
  * tur-host thread, which runs the engine + GPU work off the main thread;
  * [createInstance][TurRuntime.createInstance] returns before the native
  * build finishes (failures log to logcat).
  */
 private class TurSurfaceView(context: Context) : SurfaceView(context) {
     private var instance: TurInstance? = null
-    private var pendingSourceHandle: Long = 0L
-    private var pendingPluginId: String = ""
-    private var pendingInstance: String? = null
     private var dprValue: Double = 0.0
-    private var runtime: TurRuntime? = null
     /** Tracks the last IME state we drove so we only call the IMM on
      *  show↔hide transitions (not every frame). */
     private var imeActive = false
@@ -109,18 +116,43 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
         holder.setFormat(PixelFormat.RGBA_8888)
     }
 
-    /** Stash the source handle + pluginId + instance + dpr + runtime and
-     *  register the surface callback; spawn the instance when the surface
-     *  is ready. */
+    /** Stash the dpr, spawn the renderer-less instance (stamped with
+     *  [pluginId]/[instanceId]), load the module, and register the surface
+     *  callback; attach the surface when it's ready. */
     fun bind(runtime: TurRuntime, sourceHandle: Long, pluginId: String, instanceId: String?, dpr: Double) {
-        pendingSourceHandle = sourceHandle
-        pendingPluginId = pluginId
-        pendingInstance = instanceId
         dprValue = dpr
-        this.runtime = runtime
         isFocusable = true
         isFocusableInTouchMode = true
         requestFocus()
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        instance = try {
+            // INITIALIZE — returns as soon as the handle exists; the build
+            // (worker handshake + plugin registration) runs on the native
+            // tur-host thread, and the loadModule below is queued behind
+            // it (FIFO). The TurPerf timings therefore cover queueing, not
+            // the build; `markBoot`→`markFirstPump` spans the whole async
+            // build + module eval + first render.
+            runtime.createInstance(pluginId, instanceId).also {
+                val t1 = android.os.SystemClock.elapsedRealtime()
+                if (sourceHandle != 0L) it.loadModule(sourceHandle)
+                val t2 = android.os.SystemClock.elapsedRealtime()
+                android.util.Log.d(
+                    "TurPerf",
+                    "bind: createInstance=${t1 - t0}ms loadModule=${t2 - t1}ms",
+                )
+                it.markBoot()
+                // After each frame, sync the soft keyboard with the
+                // engine's text-input state (reads the value native
+                // pushed into the FrameLoop via onTextInputChanged).
+                it.setAfterPump {
+                    it.markFirstPump()
+                    syncIme()
+                }
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("TurView", "instance create failed", e)
+            null
+        }
         holder.addCallback(surfaceCallback)
         setOnTouchListener { _, event ->
             userInteracted = true
@@ -156,45 +188,16 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
 
     private val surfaceCallback = object : SurfaceHolder.Callback {
         override fun surfaceCreated(holder: SurfaceHolder) {
-            if (instance != null) return
-            val sourceHandle = pendingSourceHandle
-            if (sourceHandle == 0L) return
-            val rt = runtime ?: return
-            // SurfaceHolder.surfaceFrame reports *physical* pixels; the
+            val inst = instance ?: return
+            // `SurfaceHolder.surfaceFrame` reports *physical* pixels; the
             // engine's viewport is in *logical* px, so divide by dpr.
             val d = dprValue.coerceAtLeast(1.0)
             val w = (holder.surfaceFrame.width() / d).toInt().coerceAtLeast(1)
             val h = (holder.surfaceFrame.height() / d).toInt().coerceAtLeast(1)
-            val t0 = android.os.SystemClock.elapsedRealtime()
-            instance = try {
-                // Spawn an isolated instance from the runtime — returns
-                // immediately; the native build (wgpu init + worker
-                // handshake) runs on the tur-host thread, and the
-                // loadModule below is queued behind it (FIFO). The
-                // TurPerf timings therefore cover queueing, not the build;
-                // `markBoot`→`markFirstPump` spans the whole async build +
-                // module eval + first render.
-                rt.createInstance(holder.surface, w, h, dprValue, pendingPluginId, pendingInstance).also {
-                    val t1 = android.os.SystemClock.elapsedRealtime()
-                    it.loadModule(sourceHandle)
-                    val t2 = android.os.SystemClock.elapsedRealtime()
-                    android.util.Log.d(
-                        "TurPerf",
-                        "surfaceCreated: createInstance=${t1 - t0}ms loadModule=${t2 - t1}ms",
-                    )
-                    it.markBoot()
-                    // After each frame, sync the soft keyboard with the
-                    // engine's text-input state (reads the value native
-                    // pushed into the FrameLoop via onTextInputChanged).
-                    it.setAfterPump {
-                        it.markFirstPump()
-                        syncIme()
-                    }
-                }
-            } catch (e: Throwable) {
-                android.util.Log.e("TurView", "instance create failed", e)
-                null
-            }
+            // ATTACH: the native attach op is FIFO behind the instance
+            // build, so the instance exists when it runs; the wgpu
+            // surface/adapter/device init happens there.
+            inst.attach(holder.surface, w, h, dprValue)
         }
 
         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -207,8 +210,10 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
         }
 
         override fun surfaceDestroyed(holder: SurfaceHolder) {
-            instance?.close()
-            instance = null
+            // DETACH — not destroy: the instance (JS realm, module state)
+            // survives the platform surface going away and re-attaches
+            // when the surface is created again.
+            instance?.detach()
         }
     }
 
