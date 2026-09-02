@@ -1,6 +1,11 @@
 package com.kutedev.easemusicplayer.widgets.musics
 
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
@@ -24,7 +29,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -168,6 +172,7 @@ private fun MusicSlider(
     totalDuration: String,
     totalDurationMS: ULong,
     onChangeMusicPosition: (ms: ULong) -> Unit,
+    loading: Boolean = false,
 ) {
     val handleSize = 12.dp
     val sliderHeight = 4.dp
@@ -196,6 +201,11 @@ private fun MusicSlider(
         sliderWidth.toDp()
     }
 
+    // While loading/buffering, a short band sweeps across the track
+    // (indeterminate Material-style) — duration-independent, so it reads
+    // as "activity" even before the track duration is known. The infinite
+    // transition is only composed while loading, so the frame clock can
+    // idle otherwise.
     val draggableState = rememberDraggableState { deltaPx ->
         val delta = (deltaPx.toDouble() / sliderWidth.toDouble() * totalDurationMS.toDouble()).toLong()
         var nextMS = draggingCurrentDurationMS.toLong() + delta
@@ -258,6 +268,28 @@ private fun MusicSlider(
                         .fillMaxHeight()
                         .background(MaterialTheme.colorScheme.primary)
                 )
+                if (loading) {
+                    val loadingTransition = rememberInfiniteTransition(label = "sliderLoading")
+                    val loadingBandRate by loadingTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1100, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart,
+                        ),
+                        label = "sliderLoadingBand",
+                    )
+                    val loadingBandWidth = sliderWidthDp * 0.3f
+                    Box(
+                        modifier = Modifier
+                            .offset(
+                                x = -loadingBandWidth + (sliderWidthDp + loadingBandWidth) * loadingBandRate
+                            )
+                            .width(loadingBandWidth)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
             }
             Box(
                 modifier = Modifier
@@ -609,26 +641,25 @@ private fun MusicPanel(
                 playerVM.playPrevious()
             }
         )
-        // Mid-play buffering (`Buffering` state surfaced as
-        // playing+loading): the transport keeps the pause button —
-        // pausing during a buffer stall is legal — and gains a small
-        // spinner so the stall is visible instead of a frozen position.
-        if (playing && loading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
+        // Loading/buffering is surfaced on the play/pause button itself:
+        // a spinner replaces the icon. Mid-play buffering (`Buffering`
+        // state surfaced as playing+loading) keeps the button tappable —
+        // pausing during a buffer stall is legal; initial load
+        // (`!playing && loading`) keeps it disabled since resume is a
+        // no-op while the engine is preparing.
         if (!playing) {
             EaseIconButton(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
+                loading = loading,
                 disabled = loading,
                 overrideColors = if (loading) {
+                    // Keep the primary look (instead of the usual disabled
+                    // wash-out) so the spinner reads as "working", not "off".
                     EaseIconButtonColors(
-                        buttonDisabledBg = MaterialTheme.colorScheme.secondary,
+                        buttonDisabledBg = MaterialTheme.colorScheme.primary,
+                        iconDisabledTint = Color.White,
                     )
                 } else {
                     null
@@ -643,6 +674,7 @@ private fun MusicPanel(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_pause),
+                loading = loading,
                 onClick = {
                     playerVM.pause()
                 }
@@ -678,6 +710,7 @@ fun MusicPlayerPage(
     val previousMusic by playerVM.previousMusic.collectAsState()
     val nextMusic by playerVM.nextMusic.collectAsState()
     val bufferMs by playerVM.bufferMs.collectAsState()
+    val loading by playerVM.loading.collectAsState()
     val currentLyricIndex by playerVM.lyricIndex.collectAsState()
     val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.LOADING
     val lyrics = currentMusic?.lyric?.data?.lines ?: emptyList()
@@ -738,7 +771,8 @@ fun MusicPlayerPage(
                     totalDurationMS = toMusicDurationMs(currentMusic),
                     onChangeMusicPosition = { nextMS ->
                         playerVM.seek(nextMS)
-                    }
+                    },
+                    loading = loading,
                 )
             }
             Row(

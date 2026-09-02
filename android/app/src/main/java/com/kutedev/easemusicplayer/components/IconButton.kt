@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -49,6 +50,7 @@ data class EaseIconButtonColors(
     val buttonBg: Color? = null,
     val buttonDisabledBg: Color? = null,
     val iconTint: Color? = null,
+    val iconDisabledTint: Color? = null,
 )
 
 @Composable
@@ -59,6 +61,7 @@ fun EaseIconButton(
     onClick: () -> Unit,
     overrideColors: EaseIconButtonColors? = null,
     disabled: Boolean = false,
+    loading: Boolean = false,
 ) {
     val buttonSize = easeIconButtonSizeToDp(sizeType)
     val isVariant = buttonType == EaseIconButtonType.Primary || buttonType == EaseIconButtonType.ErrorVariant
@@ -90,9 +93,9 @@ fun EaseIconButton(
     val iconTint = run {
         if (disabled) {
             if (!isVariant) {
-                MaterialTheme.colorScheme.surfaceVariant
+                overrideColors?.iconDisabledTint ?: MaterialTheme.colorScheme.surfaceVariant
             } else {
-                MaterialTheme.colorScheme.surface
+                overrideColors?.iconDisabledTint ?: MaterialTheme.colorScheme.surface
             }
         } else {
             overrideColors?.iconTint
@@ -119,11 +122,23 @@ fun EaseIconButton(
             ),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            painter = painter,
-            contentDescription = null,
-            modifier = Modifier.size(iconSize),
-            tint = iconTint,
-        )
+        if (loading) {
+            // Loading replaces the icon with a spinner (the click behavior
+            // is unchanged — `disabled` alone governs clickability, so a
+            // loading-but-enabled button stays tappable).
+            CircularProgressIndicator(
+                modifier = Modifier.size(iconSize),
+                color = iconTint,
+                strokeWidth = iconSize / 8,
+                trackColor = Color.Transparent,
+            )
+        } else {
+            Icon(
+                painter = painter,
+                contentDescription = null,
+                modifier = Modifier.size(iconSize),
+                tint = iconTint,
+            )
+        }
     }
 }
