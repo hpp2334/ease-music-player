@@ -36,6 +36,9 @@ class PlayerVM @Inject constructor(
     val playMode = playerRepository.playMode
     val loading = playerRepository.loading
 
+    /** Music id mirrored from [music]; used to detect track switches. */
+    private var lastMusicId: MusicId? = null
+
     val lyricIndex = combine(currentMs, music) { currentMs, music ->
         music?.lyric?.data?.lines?.indexOfLast { it.duration <= currentMs } ?: -1
     }.stateIn(viewModelScope, SharingStarted.Lazily, -1)
@@ -50,6 +53,20 @@ class PlayerVM @Inject constructor(
         viewModelScope.launch {
             playerRepository.durationChanged.collect {
                 syncPosition()
+            }
+        }
+        viewModelScope.launch {
+            // Track switch: zero the progress immediately instead of
+            // showing the previous track's position for up to one poll
+            // tick (the 1 Hz loop below refreshes it right after).
+            playerRepository.music.collect { music ->
+                val id = music?.meta?.id
+                if (id != lastMusicId) {
+                    lastMusicId = id
+                    _currentMs.value = 0L
+                    _bufferMs.value = 0L
+                    syncPosition()
+                }
             }
         }
     }

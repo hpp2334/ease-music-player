@@ -10,9 +10,11 @@
 //! open ⟹ decoder open" holds by construction instead of by discipline.
 //!
 //! The session owns the decode→render step (`pump`) and the
-//! position observable: it writes the position when decoding, seeking,
-//! and when the session dies. It emits no events — it returns decisions
-//! ([`PumpOutcome`], seek results) and lets the worker do the emission.
+//! position observable: it writes the position when decoding (the sink's
+//! realtime output clock when available, the decode timestamp otherwise),
+//! seeking, and when the session dies. It emits no events — it returns
+//! decisions ([`PumpOutcome`], seek results) and lets the worker do the
+//! emission.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -37,6 +39,12 @@ pub(super) struct Loaded {
     /// construction from `decoder.format()`. Zero means "no source
     /// loaded" / "no conversion needed yet".
     src_channels: u16,
+    /// Sample rate of the loaded source (frames → duration math for
+    /// `decoded_through`).
+    src_rate: u32,
+    /// Media time just past the last decoded frame — the drain target
+    /// when decode reaches EOF. Reset by seek.
+    decoded_through: Duration,
     /// Channel count the device stream actually opened with (the format
     /// `sink.start` negotiated). When this differs from `src_channels`,
     /// `write_frame` runs each decoded frame through `remux_channels`
@@ -84,7 +92,9 @@ impl Loaded {
         device_fmt: AudioFormat,
         shared: Arc<SharedStatus>,
     ) -> Self {
-        let src_channels = decoder.format().channels;
+        let src_format = decoder.format();
+        let src_channels = src_format.channels;
+        let src_rate = src_format.sample_rate;
         let device_channels = device_fmt.channels;
         if src_channels != device_channels {
             tracing::info!(
@@ -98,6 +108,8 @@ impl Loaded {
             decoder,
             sink,
             src_channels,
+            src_rate,
+            decoded_through: Duration::ZERO,
             device_channels,
             remix_buf: Vec::new(),
             ended: false,
@@ -105,11 +117,13 @@ impl Loaded {
         }
     }
 
-    /// Decode one frame and render it: store the position observable,
-    /// write the samples (with channel conversion when the device
-    /// insisted on a different layout), and decide whether the
-    /// position-event throttle elapsed. `interval` is passed in — event
-    /// cadence is the worker's policy, not the session's.
+    /// Decode one frame and render it: track the decode frontier, write
+    /// the samples (with channel conversion when the device insisted on a
+    /// different layout), and publish the **audible** position — the
+    /// sink's realtime output clock when it tracks one, the decode
+    /// timestamp otherwise (which leads the audio by the sink's whole
+    /// buffer). `interval` is passed in — event cadence is the worker's
+    /// policy, not the session's.
     ///
     /// The read is bounded by [`PLAY_READ_DEADLINE`]: a starved source
     /// yields [`PumpOutcome::NeedsData`] rather than parking the worker.
@@ -119,15 +133,24 @@ impl Loaded {
         self.decoder.set_read_deadline(None);
         match decoded {
             Ok(Some(frame)) => {
-                self.shared.set_position(frame.timestamp);
+                // The decode frontier's end — the drain target on EOF.
+                let frame_end = if self.src_rate > 0 {
+                    frame.timestamp
+                        + Duration::from_secs_f64(frame.frames as f64 / self.src_rate as f64)
+                } else {
+                    frame.timestamp
+                };
+                self.decoded_through = frame_end;
                 self.write_frame(&frame);
+                let reported = self.sink.output_position().unwrap_or(frame.timestamp);
+                self.shared.set_position(reported);
                 let now = Instant::now();
                 let emit = now.duration_since(*last_emit) >= interval;
                 if emit {
                     *last_emit = now;
                 }
                 PumpOutcome::Frame {
-                    position: frame.timestamp,
+                    position: reported,
                     emit,
                 }
             }
@@ -140,6 +163,19 @@ impl Loaded {
                 PumpOutcome::Skipped(Some(e))
             }
         }
+    }
+
+    /// The sink's realtime output position — media time of the sample the
+    /// device is mixing right now — when the sink tracks one. `None` for
+    /// sinks without tracking (the worker then falls back to the decode
+    /// frontier and ends at EOF without a tail drain).
+    pub(super) fn output_position(&self) -> Option<Duration> {
+        self.sink.output_position()
+    }
+
+    /// Media time just past the last decoded frame (the EOF drain target).
+    pub(super) fn decoded_through(&self) -> Duration {
+        self.decoded_through
     }
 
     /// Forward of [`Decoder::readiness`]: can the source satisfy a read
@@ -159,6 +195,9 @@ impl Loaded {
         let actual = self.decoder.seek(target)?;
         let _ = self.sink.flush();
         self.ended = false;
+        // The frontier jumps with the seek; the next empty-ring write
+        // re-anchors the sink's output clock at `actual`.
+        self.decoded_through = actual;
         self.shared.set_position(actual);
         Ok(actual)
     }
@@ -210,9 +249,9 @@ impl Loaded {
                 &mut self.remix_buf[..out_samples],
                 self.device_channels,
             );
-            let _ = self.sink.write(&self.remix_buf[..written]);
+            let _ = self.sink.write(&self.remix_buf[..written], frame.timestamp);
         } else {
-            let _ = self.sink.write(&frame.data);
+            let _ = self.sink.write(&frame.data, frame.timestamp);
         }
     }
 }
@@ -237,7 +276,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::player::stubs::{StubDecoder, loaded_session, loaded_session_with};
+    use crate::player::stubs::{FrameDecoder, StubDecoder, loaded_session, loaded_session_with};
 
     #[test]
     fn loaded_drop_is_the_single_teardown_point() {
@@ -290,6 +329,62 @@ mod tests {
         assert!(fx.log.recorded("flush"));
         assert!(!loaded.has_ended());
         assert_eq!(fx.shared.position(), Duration::from_secs(5));
+        // The decode frontier jumps with the seek (EOF-drain target).
+        assert_eq!(loaded.decoded_through(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn pump_publishes_the_sink_output_position_when_tracked() {
+        // One frame at ts 10 s (480 frames @ 48 kHz = 10 ms). With
+        // tracking enabled, the stub sink's instant-play model reports
+        // the write's end — and that is what the observable carries.
+        let (mut loaded, fx) = loaded_session_with(
+            FrameDecoder {
+                frame: DecodedFrame {
+                    data: vec![0.0; 2 * 480],
+                    frames: 480,
+                    timestamp: Duration::from_secs(10),
+                },
+                yielded: false,
+            },
+            2,
+            2,
+        );
+        fx.enable_output_tracking();
+        let mut last = Instant::now();
+        let PumpOutcome::Frame { position, .. } =
+            loaded.pump(&mut last, Duration::from_millis(100))
+        else {
+            panic!("expected Frame");
+        };
+        assert_eq!(position, Duration::from_millis(10_010));
+        assert_eq!(fx.shared.position(), Duration::from_millis(10_010));
+        // The decode frontier sits at the frame's end.
+        assert_eq!(loaded.decoded_through(), Duration::from_millis(10_010));
+    }
+
+    #[test]
+    fn pump_falls_back_to_the_decode_ts_without_tracking() {
+        let (mut loaded, fx) = loaded_session_with(
+            FrameDecoder {
+                frame: DecodedFrame {
+                    data: vec![0.0; 2 * 480],
+                    frames: 480,
+                    timestamp: Duration::from_secs(10),
+                },
+                yielded: false,
+            },
+            2,
+            2,
+        );
+        let mut last = Instant::now();
+        let PumpOutcome::Frame { position, .. } =
+            loaded.pump(&mut last, Duration::from_millis(100))
+        else {
+            panic!("expected Frame");
+        };
+        assert_eq!(position, Duration::from_secs(10));
+        assert_eq!(fx.shared.position(), Duration::from_secs(10));
     }
 
     #[test]

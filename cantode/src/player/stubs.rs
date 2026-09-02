@@ -51,6 +51,40 @@ impl Decoder for StubDecoder {
     }
 }
 
+/// Decoder stub that yields exactly one frame (then EOF) — for tests
+/// that need a real decode frontier (`decoded_through`).
+pub(super) struct FrameDecoder {
+    pub(super) frame: DecodedFrame,
+    pub(super) yielded: bool,
+}
+
+impl Decoder for FrameDecoder {
+    fn next_frame(&mut self) -> crate::Result<Option<DecodedFrame>> {
+        if self.yielded {
+            return Ok(None);
+        }
+        self.yielded = true;
+        Ok(Some(self.frame.clone()))
+    }
+    fn seek(&mut self, target: Duration) -> crate::Result<Duration> {
+        Ok(target)
+    }
+    fn format(&self) -> AudioFormat {
+        // 2 ch @ 48 kHz — matches the stub sink's negotiated format.
+        AudioFormat::new(2, 48_000)
+    }
+    fn metadata(&self) -> &Metadata {
+        static META: Metadata = Metadata {
+            format: AudioFormat::new(0, 0),
+            duration: None,
+            total_samples: None,
+            tags: Vec::new(),
+            cover_art: None,
+        };
+        &META
+    }
+}
+
 /// Decoder factory stub — present so a `Worker` can be constructed;
 /// these tests never call `do_load`.
 pub(super) struct StubFactory;
@@ -81,10 +115,15 @@ impl SinkLog {
     }
 }
 
-/// Sink stub: passes every written sample into a shared `SinkLog`.
-/// Private to this module — only `loaded_session` constructs it.
+/// Sink stub: passes every written sample into a shared `SinkLog`, with
+/// an optional simulated output clock. Private to this module — only
+/// `loaded_session*` constructs it.
 struct StubSink {
     log: SinkLog,
+    /// Simulated output clock. `None` (the default) = untracked sink;
+    /// `Some(d)` = "everything written through `d` has sounded" — each
+    /// write advances it to that write's end (instant-play model).
+    out_pos: Arc<Mutex<Option<Duration>>>,
 }
 
 impl AudioSink for StubSink {
@@ -96,8 +135,14 @@ impl AudioSink for StubSink {
         self.log.record("stop");
         Ok(())
     }
-    fn write(&mut self, frames: &[f32]) -> crate::Result<()> {
+    fn write(&mut self, frames: &[f32], start_ts: Duration) -> crate::Result<()> {
         self.log.samples.lock().unwrap().extend_from_slice(frames);
+        let mut out_pos = self.out_pos.lock().unwrap();
+        if let Some(pos) = out_pos.as_mut() {
+            // Instant-play model: written audio has immediately sounded,
+            // so the clock sits at the write's end (2 ch @ 48 kHz device).
+            *pos = start_ts + Duration::from_secs_f64(frames.len() as f64 / 96_000.0);
+        }
         Ok(())
     }
     fn flush(&mut self) -> crate::Result<()> {
@@ -115,8 +160,8 @@ impl AudioSink for StubSink {
     fn set_volume(&mut self, _vol: f32) -> crate::Result<()> {
         Ok(())
     }
-    fn latency(&self) -> Duration {
-        Duration::ZERO
+    fn output_position(&self) -> Option<Duration> {
+        *self.out_pos.lock().unwrap()
     }
 }
 
@@ -124,6 +169,22 @@ impl AudioSink for StubSink {
 pub(super) struct Fixture {
     pub(super) log: SinkLog,
     pub(super) shared: Arc<SharedStatus>,
+    /// The stub sink's simulated output clock (see [`StubSink`]).
+    out_pos: Arc<Mutex<Option<Duration>>>,
+}
+
+impl Fixture {
+    /// Enable output-position tracking on the stub sink (simulates a
+    /// sink whose written audio has instantly sounded).
+    pub(super) fn enable_output_tracking(&self) {
+        *self.out_pos.lock().unwrap() = Some(Duration::ZERO);
+    }
+
+    /// Force the stub sink's reported output position (`None` disables
+    /// tracking again).
+    pub(super) fn set_output_position(&self, pos: Option<Duration>) {
+        *self.out_pos.lock().unwrap() = pos;
+    }
 }
 
 /// Build a `Loaded` session backed by stubs, plus the handles to
@@ -150,12 +211,23 @@ pub(super) fn loaded_session_with(
 ) -> (Loaded, Fixture) {
     let log = SinkLog::default();
     let shared = Arc::new(SharedStatus::new());
-    let sink = Box::new(StubSink { log: log.clone() });
+    let out_pos = Arc::new(Mutex::new(None));
+    let sink = Box::new(StubSink {
+        log: log.clone(),
+        out_pos: Arc::clone(&out_pos),
+    });
     let loaded = Loaded::new(
         Box::new(decoder),
         sink,
         AudioFormat::new(device, 48_000),
         Arc::clone(&shared),
     );
-    (loaded, Fixture { log, shared })
+    (
+        loaded,
+        Fixture {
+            log,
+            shared,
+            out_pos,
+        },
+    )
 }

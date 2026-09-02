@@ -521,7 +521,7 @@ fn capture_sink_records_calls_and_shared_state() {
     let mut a = factory().unwrap();
     let fmt = AudioFormat::new(2, 48_000);
     assert_eq!(a.start(fmt).unwrap().channels, 2);
-    a.write(&[0.5, -0.5]).unwrap();
+    a.write(&[0.5, -0.5], Duration::ZERO).unwrap();
     a.flush().unwrap();
     a.pause().unwrap();
     a.resume().unwrap();
@@ -531,7 +531,7 @@ fn capture_sink_records_calls_and_shared_state() {
     // A second sink from the same factory (next `load`) shares the state.
     let mut b = factory().unwrap();
     b.start(AudioFormat::new(2, 48_000)).unwrap();
-    b.write(&[1.0, 1.0]).unwrap();
+    b.write(&[1.0, 1.0], Duration::ZERO).unwrap();
 
     let st = state.lock().unwrap();
     assert_eq!(st.samples, vec![0.5, -0.5, 1.0, 1.0]);
@@ -578,14 +578,14 @@ fn capture_sink_pacing_throttles_to_realtime() {
     // 0.5s chunk fits within the emulated buffer and returns instantly…
     let t0 = Instant::now();
     let half_second = vec![0.0; RATE as usize / 2];
-    sink.write(&half_second).unwrap();
+    sink.write(&half_second, Duration::ZERO).unwrap();
     assert!(
         t0.elapsed() < Duration::from_millis(150),
         "buffered chunk must be accepted quickly"
     );
 
     // …but writing beyond the buffer blocks until the device drains.
-    sink.write(&half_second).unwrap(); // 1.0s total vs 0.5s budget
+    sink.write(&half_second, Duration::ZERO).unwrap(); // 1.0s total vs 0.5s budget
     assert!(
         t0.elapsed() >= Duration::from_millis(400),
         "over-buffer chunk must pace to real time (took {:?})",
