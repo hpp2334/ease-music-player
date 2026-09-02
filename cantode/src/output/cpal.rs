@@ -14,7 +14,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -46,6 +46,89 @@ fn load_vol(slot: &AtomicU32) -> f32 {
     f32::from_bits(slot.load(Ordering::Relaxed))
 }
 
+/// The realtime output clock shared between the worker-side sink and the
+/// cpal callback: the callback counts what it actually plays, and the
+/// worker anchors that count to media time. [`CpalSink::output_position`]
+/// then reads as "media time of the sample currently being mixed" instead
+/// of the decode frontier (which leads the audio by the whole ring buffer).
+///
+/// - The **callback** is the only writer of `played` (one relaxed
+///   `fetch_add` per drain — RT-safe, no locks). Samples popped from the
+///   ring count; silence written on underflow does not (media time must
+///   freeze while the listener hears silence).
+/// - The **worker** publishes the anchor `(head_ts, head_played)` under a
+///   seqlock on empty-ring writes (rare: session start, post-flush/seek,
+///   post-underflow refill). An anchor means: "the sample at media time
+///   `head_ts` is the callback's next pop once `played == head_played`".
+/// - Readers (never the callback) compute
+///   `head_ts + (played − head_played) / samples_per_sec`.
+///
+/// The anchor is exact because of the ring's SPSC discipline: pops require
+/// a non-empty ring, and the worker — having just observed an empty ring —
+/// is the only party able to make it non-empty, so `played` cannot advance
+/// between the observation and the anchor's `played` read.
+struct OutputClock {
+    /// Interleaved samples popped by the callback so far.
+    played: AtomicU64,
+    /// Seqlock version over the anchor pair (odd = write in flight).
+    seq: AtomicU32,
+    head_ts_nanos: AtomicU64,
+    head_played: AtomicU64,
+    /// Interleaved samples per second of the negotiated device format.
+    samples_per_sec: u64,
+}
+
+impl OutputClock {
+    fn new(samples_per_sec: u64) -> Self {
+        Self {
+            played: AtomicU64::new(0),
+            seq: AtomicU32::new(0),
+            head_ts_nanos: AtomicU64::new(0),
+            head_played: AtomicU64::new(0),
+            samples_per_sec: samples_per_sec.max(1),
+        }
+    }
+
+    /// Callback side: account for `samples` interleaved samples actually
+    /// popped from the ring.
+    fn add_played(&self, samples: usize) {
+        self.played.fetch_add(samples as u64, Ordering::Relaxed);
+    }
+
+    /// Worker side: publish a fresh anchor. Only valid when the ring was
+    /// observed empty (see [`CpalSink::write`]).
+    fn anchor(&self, ts: Duration) {
+        let played = self.played.load(Ordering::Relaxed);
+        let seq = self.seq.load(Ordering::Relaxed);
+        self.seq.store(seq.wrapping_add(1) | 1, Ordering::Release); // odd
+        self.head_ts_nanos
+            .store(ts.as_nanos() as u64, Ordering::Relaxed);
+        self.head_played.store(played, Ordering::Relaxed);
+        self.seq.store(seq.wrapping_add(2), Ordering::Release); // even
+    }
+
+    /// Worker side: media time of the sample the callback is mixing right
+    /// now (≈ what the listener hears, modulo the device's own short
+    /// output buffer). Retries while an anchor write is in flight.
+    fn position(&self) -> Duration {
+        loop {
+            let seq = self.seq.load(Ordering::Acquire);
+            if seq & 1 == 1 {
+                continue; // anchor write in flight; retry
+            }
+            let ts = self.head_ts_nanos.load(Ordering::Relaxed);
+            let head_played = self.head_played.load(Ordering::Relaxed);
+            let played = self.played.load(Ordering::Relaxed);
+            if self.seq.load(Ordering::Acquire) != seq {
+                continue; // anchor changed under us; retry
+            }
+            let extra = played.saturating_sub(head_played) as u128;
+            let nanos = ts as u128 + extra * 1_000_000_000u128 / self.samples_per_sec as u128;
+            return Duration::from_nanos(nanos.min(u64::MAX as u128) as u64);
+        }
+    }
+}
+
 /// A hardware [`AudioSink`] backed by cpal.
 ///
 /// Always targets the host's default output device and a 2-second ring
@@ -69,6 +152,9 @@ pub(crate) struct CpalSink {
     /// plays up to `buffer_secs` of pre-seek audio before the new position
     /// arrives, producing a discontinuous mix.
     flush_gen: Arc<AtomicU32>,
+    /// The realtime output clock, shared with the cpal callback once the
+    /// stream is open (see [`OutputClock`]).
+    clock: Option<Arc<OutputClock>>,
     format: Option<AudioFormat>,
 }
 
@@ -81,6 +167,7 @@ impl CpalSink {
             producer: None,
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
             flush_gen: Arc::new(AtomicU32::new(0)),
+            clock: None,
             format: None,
         }
     }
@@ -120,37 +207,90 @@ impl AudioSink for CpalSink {
 
         let volume = self.volume.clone();
         let flush_gen = self.flush_gen.clone();
+        let clock = Arc::new(OutputClock::new(
+            actual.sample_rate as u64 * actual.channels as u64,
+        ));
         let stream = match supported.sample_format() {
-            cpal::SampleFormat::F32 => {
-                build_stream::<f32>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::I16 => {
-                build_stream::<i16>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::U16 => {
-                build_stream::<u16>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::F64 => {
-                build_stream::<f64>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::I32 => {
-                build_stream::<i32>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::U32 => {
-                build_stream::<u32>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::I8 => {
-                build_stream::<i8>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::U8 => {
-                build_stream::<u8>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::I64 => {
-                build_stream::<i64>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
-            cpal::SampleFormat::U64 => {
-                build_stream::<u64>(&device, &stream_config, consumer, volume, flush_gen)?
-            }
+            cpal::SampleFormat::F32 => build_stream::<f32>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::I16 => build_stream::<i16>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::U16 => build_stream::<u16>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::F64 => build_stream::<f64>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::I32 => build_stream::<i32>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::U32 => build_stream::<u32>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::I8 => build_stream::<i8>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::U8 => build_stream::<u8>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::I64 => build_stream::<i64>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
+            cpal::SampleFormat::U64 => build_stream::<u64>(
+                &device,
+                &stream_config,
+                consumer,
+                volume,
+                flush_gen,
+                clock.clone(),
+            )?,
             other => {
                 return Err(CantodeError::StreamConfig(format!(
                     "unsupported sample format: {other:?}"
@@ -160,6 +300,7 @@ impl AudioSink for CpalSink {
 
         self.stream = Some(stream);
         self.producer = Some(producer);
+        self.clock = Some(clock);
         self.format = Some(actual);
         Ok(actual)
     }
@@ -167,16 +308,29 @@ impl AudioSink for CpalSink {
     fn stop(&mut self) -> crate::Result<()> {
         self.stream = None;
         self.producer = None;
+        self.clock = None;
         self.format = None;
         Ok(())
     }
 
-    fn write(&mut self, frames: &[f32]) -> crate::Result<()> {
+    fn write(&mut self, frames: &[f32], start_ts: Duration) -> crate::Result<()> {
         let Some(producer) = self.producer.as_mut() else {
             // Pre-start writes are silently discarded; callers don't need
             // to special-case initial buffering.
             return Ok(());
         };
+
+        // Output-clock anchor: when the ring is empty, the sample at
+        // `start_ts` is the next one the callback will pop. Pops require a
+        // non-empty ring and we are the only producer, so `played` cannot
+        // advance between this observation and our push — the anchor is
+        // exact. Anchors land exactly at the timestamp-discontinuity
+        // points: session start, post-flush/seek, post-underflow refill.
+        if producer.is_empty()
+            && let Some(clock) = &self.clock
+        {
+            clock.anchor(start_ts);
+        }
 
         let mut to_push = frames;
         let total = frames.len();
@@ -265,16 +419,8 @@ impl AudioSink for CpalSink {
         Ok(())
     }
 
-    fn latency(&self) -> Duration {
-        if let Some(p) = &self.producer {
-            let occ = p.occupied_len();
-            let fmt = self.format.unwrap_or(AudioFormat::new(2, 44_100));
-            let samples_per_sec = (fmt.sample_rate as u64) * (fmt.channels as u64);
-            if samples_per_sec > 0 {
-                return Duration::from_secs_f64(occ as f64 / samples_per_sec as f64);
-            }
-        }
-        Duration::ZERO
+    fn output_position(&self) -> Option<Duration> {
+        self.clock.as_ref().map(|c| c.position())
     }
 }
 
@@ -360,6 +506,8 @@ fn pick_supported_config(
 /// current volume (read atomically) and converting f32 → `T` via
 /// [`cpal::Sample::from_sample`]. On underflow it writes silence
 /// (`T::EQUILIBRIUM`) rather than blocking — standard RT-safety discipline.
+/// Every sample actually popped is accounted on the [`OutputClock`] so
+/// `output_position` tracks what the listener hears.
 ///
 /// `flush_gen` is a generation counter shared with [`CpalSink::flush`]. When
 /// the worker bumps it, the callback drains-and-discards the entire ring
@@ -370,6 +518,7 @@ fn build_stream<T>(
     consumer: HeapCons<f32>,
     volume: Arc<AtomicU32>,
     flush_gen: Arc<AtomicU32>,
+    clock: Arc<OutputClock>,
 ) -> crate::Result<Stream>
 where
     T: SizedSample + cpal::FromSample<f32> + Send + 'static,
@@ -400,7 +549,8 @@ where
                     // Output silence for this period — the worker's
                     // post-seek samples haven't arrived yet (or only just
                     // started arriving after the clear). Filling silence
-                    // avoids a partial-buffer glitch.
+                    // avoids a partial-buffer glitch. Nothing was popped,
+                    // so the output clock does not advance.
                     for slot in out.iter_mut() {
                         *slot = T::EQUILIBRIUM;
                     }
@@ -408,7 +558,8 @@ where
                 }
 
                 let vol = load_vol(&volume);
-                drain_into(&mut consumer, out, vol);
+                let played = drain_into(&mut consumer, out, vol);
+                clock.add_played(played);
             },
             err_fn,
             None,
@@ -418,12 +569,14 @@ where
 }
 
 /// Drain the ring buffer into `out`, applying gain in f32 space, then
-/// converting to the device sample type. Silence on underflow.
+/// converting to the device sample type. Silence on underflow. Returns the
+/// number of interleaved samples actually popped from the ring (the
+/// underflow tail is silence and not counted).
 fn drain_into<T: Sample + cpal::FromSample<f32>>(
     consumer: &mut HeapCons<f32>,
     out: &mut [T],
     vol: f32,
-) {
+) -> usize {
     // Stack scratch avoids per-call allocation while keeping the pop loop
     // reasonably chunky.
     let mut tmp = [0f32; 256];
@@ -442,5 +595,73 @@ fn drain_into<T: Sample + cpal::FromSample<f32>>(
     // Underflow tail → silence.
     for slot in &mut out[filled..] {
         *slot = T::EQUILIBRIUM;
+    }
+    filled
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the [`OutputClock`] arithmetic — pure atomics, no
+    //! audio device needed. The anchor/race discipline itself is exercised
+    //! by the device-free player tests via the tracking stub sink.
+
+    use super::*;
+
+    /// 48 kHz stereo = 96 000 interleaved samples per second.
+    const SPS: u64 = 96_000;
+
+    #[test]
+    fn clock_starts_at_zero_before_any_anchor() {
+        let clock = OutputClock::new(SPS);
+        assert_eq!(clock.position(), Duration::ZERO);
+    }
+
+    #[test]
+    fn clock_reports_anchor_plus_played() {
+        let clock = OutputClock::new(SPS);
+        clock.anchor(Duration::from_secs(10));
+        // Nothing popped yet: exactly at the anchor.
+        assert_eq!(clock.position(), Duration::from_secs(10));
+        // 96 000 samples = 1 s of stereo audio.
+        clock.add_played(SPS as usize);
+        assert_eq!(clock.position(), Duration::from_secs(11));
+        clock.add_played(SPS as usize / 2);
+        assert_eq!(clock.position(), Duration::from_millis(11_500));
+    }
+
+    #[test]
+    fn clock_freezes_while_nothing_is_popped() {
+        // Underflow silence must not advance media time.
+        let clock = OutputClock::new(SPS);
+        clock.anchor(Duration::from_secs(5));
+        clock.add_played(SPS as usize);
+        assert_eq!(clock.position(), Duration::from_secs(6));
+        assert_eq!(clock.position(), Duration::from_secs(6));
+        assert_eq!(clock.position(), Duration::from_secs(6));
+    }
+
+    #[test]
+    fn clock_reanchor_resumes_from_the_new_timestamp() {
+        // Post-seek: the flush discards the ring, the next empty-ring
+        // write re-anchors at the new timestamp, and the played counter
+        // continues monotonically from wherever it was.
+        let clock = OutputClock::new(SPS);
+        clock.anchor(Duration::from_secs(100));
+        clock.add_played(SPS as usize);
+        assert_eq!(clock.position(), Duration::from_secs(101));
+
+        clock.anchor(Duration::from_secs(42));
+        assert_eq!(clock.position(), Duration::from_secs(42));
+        clock.add_played(SPS as usize / 4);
+        assert_eq!(clock.position(), Duration::from_millis(42_250));
+    }
+
+    #[test]
+    fn clock_clamps_before_the_first_pop_after_reanchor() {
+        // A reader that observes the anchor before the callback accounts
+        // the first pops must never report before the anchor.
+        let clock = OutputClock::new(SPS);
+        clock.anchor(Duration::from_secs(9));
+        assert_eq!(clock.position(), Duration::from_secs(9));
     }
 }

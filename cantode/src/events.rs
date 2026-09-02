@@ -29,8 +29,10 @@ pub enum PlayerEvent {
     /// A non-fatal or fatal error occurred. Fatal errors also flip the
     /// player to [`PlayerState::Error`].
     Error(CantodeError),
-    /// The loaded source has played to its end. Emitted exactly once per
-    /// `load` (subsequent seeks back into the audio will not re-emit).
+    /// The loaded source has been played to its end — with a
+    /// position-tracking sink, after the buffered tail has actually
+    /// sounded. Emitted exactly once per `load` (subsequent seeks back
+    /// into the audio will not re-emit).
     Ended,
 }
 

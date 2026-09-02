@@ -25,11 +25,14 @@
 //! every frame so queued commands preempt within one pump. A starved
 //! source surfaces as `Playing → Buffering` (readiness pre-check, or the
 //! 250 ms play-path read deadline) and back on refill — the sink keeps
-//! draining its ring across the morph.
+//! draining its ring across the morph. When decode hits EOF on a
+//! position-tracking sink, the loop keeps ticking as a **tail drain**:
+//! `Ended` fires only once the sink's realtime output position reaches
+//! the end of what was decoded, so the listener hears the full track.
 
 use std::{
     sync::{Arc, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -48,6 +51,28 @@ use super::shared::SharedStatus;
 /// event channel from saturating. Passed into `Loaded::pump` — event
 /// cadence is the worker's policy, not the session's.
 const POSITION_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+
+/// How long the end-of-stream tail drain may make no output progress
+/// (device stalled or paused mid-drain) before giving up and ending
+/// anyway. Generous compared to the sink ring buffer's ~3 s capacity.
+const DRAIN_MAX_STALL: Duration = Duration::from_secs(8);
+
+/// Tail-drain state: decode reached EOF, but the sink still holds up to
+/// its full ring buffer (~3 s) of decoded-but-unheard audio.
+/// [`PlayerEvent::Ended`] must wait until the listener has actually heard
+/// the end, so the worker keeps its short tick and watches the sink's
+/// realtime output position.
+struct Drain {
+    /// Media time just past the last decoded frame — when the output
+    /// position reaches this, the tail has sounded.
+    target: Duration,
+    /// Last observed output position (progress detection).
+    last_pos: Duration,
+    /// When output progress was last observed; `None` while advancing.
+    /// Armed on the first no-progress tick; the drain gives up once
+    /// `DRAIN_MAX_STALL` elapses without progress.
+    stalled_since: Option<Instant>,
+}
 
 pub(super) struct Worker {
     /// The state-machine core: owns the phase and the shared state
@@ -71,6 +96,11 @@ pub(super) struct Worker {
     /// not a stream of them. Cleared by a successful seek (the classic
     /// user-driven recovery).
     error_latched: bool,
+    /// Active end-of-stream tail drain (see [`Drain`]). Lives only while
+    /// the phase stays `Playing`; cleared by any phase-changing command
+    /// (pause/seek/stop/load) — a pause, for instance, freezes the
+    /// output clock, and the re-pump after resume re-arms the drain.
+    drain: Option<Drain>,
 }
 
 impl Worker {
@@ -92,6 +122,7 @@ impl Worker {
             shared,
             sinks,
             error_latched: false,
+            drain: None,
         }
     }
 
@@ -133,6 +164,7 @@ impl Worker {
         match cmd {
             Command::Shutdown => return true,
             Command::Load { source, reply } => {
+                self.drain = None;
                 let result = self.do_load(source);
                 let _ = reply.send(match &result {
                     Ok(m) => LoadResult::Ok(m.clone()),
@@ -140,13 +172,21 @@ impl Worker {
                 });
             }
             Command::Play => self.machine.play(),
-            Command::Pause => self.machine.pause(),
-            Command::Stop => self.do_stop(),
+            Command::Pause => {
+                self.drain = None;
+                self.machine.pause();
+            }
+            Command::Stop => {
+                self.drain = None;
+                self.do_stop();
+            }
             Command::Unload { reply } => {
+                self.drain = None;
                 let r = self.do_unload();
                 let _ = reply.send(r);
             }
             Command::Seek { target, reply } => {
+                self.drain = None;
                 let r = self.do_seek(target);
                 let _ = reply.send(match r {
                     Ok(d) => SeekResult::Ok(d),
@@ -240,8 +280,13 @@ impl Worker {
     }
 
     /// Decode one frame and push it to the sink. Called from the
-    /// Playing-loop body.
+    /// Playing-loop body — also while a tail drain is pending, in which
+    /// case the tick drives [`Worker::drain_tick`] instead of a decode.
     fn pump_once(&mut self) {
+        if self.drain.is_some() {
+            self.drain_tick();
+            return;
+        }
         // Stage 1 — the session's decode→render step under the playing
         // borrow. It stores the position observable itself and returns
         // the emission decisions. The readiness pre-check skips the read
@@ -266,13 +311,26 @@ impl Worker {
                 }
             }
             PumpOutcome::EndOfStream => {
-                if let Some(loaded) = self.machine.loaded_mut()
-                    && !loaded.has_ended()
-                {
-                    loaded.mark_ended();
-                    self.sinks.emit(PlayerEvent::Ended);
+                // With a position-tracking sink, defer `Ended` until the
+                // buffered tail has actually sounded (the ring holds up
+                // to ~3 s of decoded-but-unheard audio — ending now would
+                // cut every track's last seconds short and auto-advance
+                // early). Sinks without tracking keep the historical
+                // immediate end.
+                let drain_target = self
+                    .machine
+                    .loaded_mut()
+                    .and_then(|loaded| loaded.output_position().map(|_| loaded.decoded_through()));
+                match drain_target {
+                    Some(target) => {
+                        self.drain = Some(Drain {
+                            target,
+                            last_pos: Duration::ZERO,
+                            stalled_since: None,
+                        });
+                    }
+                    None => self.finish_end_of_stream(),
                 }
-                self.machine.end_of_stream();
             }
             PumpOutcome::NeedsData => {
                 // Starved but alive: park the pump (the sink drains its
@@ -287,9 +345,75 @@ impl Worker {
         }
     }
 
+    /// One tail-drain tick: watch the sink's realtime output position
+    /// until it reaches the decode frontier's end (the tail has sounded),
+    /// then end. Gives up after [`DRAIN_MAX_STALL`] without progress.
+    /// The observed position is mirrored into the observable so the
+    /// progress glides to the end instead of freezing ~ring-fill short.
+    fn drain_tick(&mut self) {
+        // Disjoint-field borrows: the drain bookkeeping and the machine.
+        let mut live_pos = None;
+        let finish = match (self.drain.as_mut(), self.machine.loaded_mut()) {
+            (Some(drain), Some(loaded)) => match loaded.output_position() {
+                // The sink stopped reporting positions mid-drain — end now.
+                None => true,
+                Some(pos) if pos >= drain.target => {
+                    live_pos = Some(pos);
+                    true
+                }
+                Some(pos) => {
+                    live_pos = Some(pos);
+                    if pos > drain.last_pos {
+                        drain.last_pos = pos;
+                        drain.stalled_since = None;
+                        false
+                    } else if drain.stalled_since.is_none() {
+                        drain.stalled_since = Some(Instant::now());
+                        false
+                    } else {
+                        drain.stalled_since.unwrap().elapsed() >= DRAIN_MAX_STALL
+                    }
+                }
+            },
+            // No session to drain (stop/load raced in) — end now.
+            _ => true,
+        };
+        // Same live-position mirror as the Buffering tick: the pump is
+        // parked, but the device keeps draining its ring.
+        if let Some(pos) = live_pos {
+            self.shared.set_position(pos);
+        }
+        if finish {
+            self.finish_end_of_stream();
+        }
+    }
+
+    /// Emit `Ended` (once, via the session latch) and leave the playing
+    /// phases. The single exit for both the immediate and the drained
+    /// end-of-stream paths.
+    fn finish_end_of_stream(&mut self) {
+        self.drain = None;
+        if let Some(loaded) = self.machine.loaded_mut()
+            && !loaded.has_ended()
+        {
+            loaded.mark_ended();
+            self.sinks.emit(PlayerEvent::Ended);
+        }
+        self.machine.end_of_stream();
+    }
+
     /// While `Buffering`: poll the source's readiness and morph back to
-    /// `Playing` once data has arrived.
+    /// `Playing` once data has arrived. Also keeps the position observable
+    /// live — the pump is parked, but the device keeps draining its ring,
+    /// so the audible position keeps advancing until the ring runs dry.
     fn poll_refill(&mut self) {
+        let live = self
+            .machine
+            .loaded_mut()
+            .and_then(|loaded| loaded.output_position());
+        if let Some(pos) = live {
+            self.shared.set_position(pos);
+        }
         if let Some(loaded) = self.machine.loaded_mut()
             && loaded.readiness() == crate::Readiness::Ready
         {
@@ -320,7 +444,8 @@ mod tests {
 
     use super::*;
     use crate::CantodeError;
-    use crate::player::stubs::{StubFactory, loaded_session};
+    use crate::decoder::DecodedFrame;
+    use crate::player::stubs::{FrameDecoder, StubFactory, loaded_session, loaded_session_with};
     use crate::state::PlayerState;
 
     fn worker_with(machine: Machine, shared: Arc<SharedStatus>) -> Worker {
@@ -333,6 +458,7 @@ mod tests {
             shared,
             sinks: EventSinks::default(),
             error_latched: false,
+            drain: None,
         }
     }
 
@@ -382,5 +508,99 @@ mod tests {
         assert!(fx.log.recorded("stop"));
         assert_eq!(fx.shared.position(), Duration::ZERO);
         assert_eq!(fx.shared.duration(), None);
+    }
+
+    #[test]
+    fn eof_without_output_tracking_ends_immediately() {
+        // Sinks that don't report their output position keep the
+        // historical behavior: `Ended` at decode EOF.
+        let (loaded, fx) = loaded_session(2, 2);
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+
+        worker.pump_once(); // stub decoder: immediate EOF
+
+        assert_eq!(worker.machine.state(), PlayerState::Ended);
+        assert_eq!(fx.shared.state(), PlayerState::Ended);
+    }
+
+    #[test]
+    fn eof_with_output_tracking_ends_only_after_the_tail_drains() {
+        // The stub decoder yields one frame (ts 9 s, 480 frames @ 48 kHz
+        // = 10 ms), then EOF. The tracking sink reports the instant-play
+        // model, so the drain completes once its reported position
+        // reaches the frame's end (9.01 s).
+        let (loaded, fx) = loaded_session_with(
+            FrameDecoder {
+                frame: DecodedFrame {
+                    data: vec![0.0; 2 * 480],
+                    frames: 480,
+                    timestamp: Duration::from_secs(9),
+                },
+                yielded: false,
+            },
+            2,
+            2,
+        );
+        fx.enable_output_tracking();
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+
+        worker.pump_once(); // decode + write the frame (position → 9.01 s)
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+
+        // Hold the tail mid-buffer: EOF arms the drain, no end yet.
+        fx.set_output_position(Some(Duration::from_secs(9)));
+        worker.pump_once(); // EOF → drain armed
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        worker.pump_once(); // drain tick: 9 s < 9.01 s — still playing
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        // The drain tick mirrors the live output position so the
+        // progress glides to the end instead of freezing short.
+        assert_eq!(fx.shared.position(), Duration::from_secs(9));
+
+        // The tail has sounded: 9.01 s ≥ target → Ended.
+        fx.set_output_position(Some(Duration::from_millis(9_010)));
+        worker.pump_once();
+        assert_eq!(worker.machine.state(), PlayerState::Ended);
+        assert!(worker.machine.loaded_mut().unwrap().has_ended());
+
+        // Exactly once: another tick changes nothing.
+        worker.pump_once();
+        assert_eq!(worker.machine.state(), PlayerState::Ended);
+    }
+
+    #[test]
+    fn pause_cancels_a_pending_drain_and_eof_re_arms_it() {
+        let (loaded, fx) = loaded_session(2, 2);
+        fx.enable_output_tracking();
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+        worker.pump_once(); // EOF (no frames) → drain armed
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        assert!(worker.drain.is_some());
+
+        // User pauses mid-drain (through the command door, as production
+        // does): the drain is cancelled, not stalled through it.
+        worker.handle_command(Command::Pause);
+        assert_eq!(worker.machine.state(), PlayerState::Paused);
+        assert!(worker.drain.is_none());
+
+        // Resume: the pump hits EOF again and re-arms the drain.
+        worker.handle_command(Command::Play);
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        worker.pump_once(); // EOF → drain re-armed
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        worker.pump_once(); // drain completes instantly (target 0 = pos 0)
+        assert_eq!(worker.machine.state(), PlayerState::Ended);
     }
 }

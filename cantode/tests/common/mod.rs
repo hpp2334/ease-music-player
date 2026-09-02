@@ -103,7 +103,7 @@ impl cantode::AudioSink for CaptureSink {
         Ok(())
     }
 
-    fn write(&mut self, frames: &[f32]) -> cantode::Result<()> {
+    fn write(&mut self, frames: &[f32], _start_ts: std::time::Duration) -> cantode::Result<()> {
         if self.pace_realtime {
             // Device-pace emulation with a 0.5s buffer: a real sink accepts
             // writes until its buffer is full, then blocks while the device
@@ -152,9 +152,9 @@ impl cantode::AudioSink for CaptureSink {
         Ok(())
     }
 
-    fn latency(&self) -> std::time::Duration {
-        std::time::Duration::ZERO
-    }
+    // No `output_position` override: the capture sink deliberately does
+    // not track realtime playback, so it keeps the historical
+    // end-at-decode-EOF behavior (and its tests' timing assumptions).
 }
 
 /// Build a `(shared capture state, factory)` pair for injecting a

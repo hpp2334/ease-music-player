@@ -241,9 +241,12 @@ impl Player {
         self.shared.state()
     }
 
-    /// Current playback position. Lock-free read; updated by the worker
-    /// roughly every 100 ms while playing (`POSITION_EMIT_INTERVAL` in
-    /// the worker module).
+    /// Current playback position — the media time of the audio currently
+    /// being output when the sink tracks it (see
+    /// [`AudioSink::output_position`](crate::AudioSink)), otherwise the
+    /// decode frontier (which leads the audio by the sink's buffer).
+    /// Lock-free read; updated by the worker roughly every 100 ms while
+    /// playing (`POSITION_EMIT_INTERVAL` in the worker module).
     pub fn position(&self) -> Duration {
         self.shared.position()
     }

@@ -51,13 +51,17 @@ pub trait AudioSink: Send {
     fn stop(&mut self) -> crate::Result<()>;
 
     /// Push interleaved f32 samples (`frames * format.channels` long) into
-    /// the sink's internal buffer.
+    /// the sink's internal buffer. `start_ts` is the media timestamp of the
+    /// slice's **first** sample — sinks that implement
+    /// [`AudioSink::output_position`] use it to anchor their realtime
+    /// position (the anchor is taken when the write lands in an empty
+    /// buffer).
     ///
     /// Must not block indefinitely: sinks should either grow their buffer
     /// (bounded) or drop samples when full and report backpressure via the
     /// returned [`crate::Result`]. The player worker uses the return value
     /// to decide whether to enter `Buffering`.
-    fn write(&mut self, frames: &[f32]) -> crate::Result<()>;
+    fn write(&mut self, frames: &[f32], start_ts: Duration) -> crate::Result<()>;
 
     /// Drop all samples currently buffered in the sink without closing the
     /// stream. After `flush()` returns, the next `write()`d samples are the
@@ -81,12 +85,21 @@ pub trait AudioSink: Send {
     /// Linear gain in `[0.0, ∞)`. `1.0` is unity; `0.0` is silent.
     fn set_volume(&mut self, vol: f32) -> crate::Result<()>;
 
-    /// Current estimated end-to-end latency: time between a sample being
-    /// `write`-en and it leaving the speakers. Reserved for use by the
-    /// player to report accurate positions; not yet wired into the worker's
-    /// position computation (a future improvement).
-    #[allow(dead_code)]
-    fn latency(&self) -> Duration;
+    /// The media-time position of the audio currently being output — the
+    /// sample the device is mixing right now, **not** the last sample
+    /// written. `None` when the sink doesn't track playback (callers fall
+    /// back to the decode frontier, which leads the audio by the sink's
+    /// whole buffer).
+    ///
+    /// Cheap, lock-free where possible, and only ever called from
+    /// non-realtime threads (the worker); implementations must never
+    /// invoke this from their audio callback. [`CpalSink`] implements it
+    /// by counting what its realtime callback pops and anchoring that
+    /// count to media time via the `start_ts` of writes into an empty
+    /// buffer.
+    fn output_position(&self) -> Option<Duration> {
+        None
+    }
 }
 
 /// Constructs one [`AudioSink`] per loaded source.
