@@ -12,6 +12,7 @@ import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallFromRegistry
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallZipPath
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetEnable
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSourceAddCustom
+import com.kutedev.easemusicplayer.singleton.types.ArgPollState
 import com.kutedev.easemusicplayer.singleton.types.PluginListResult
 import com.kutedev.easemusicplayer.singleton.types.PluginMutationResult
 import com.kutedev.easemusicplayer.singleton.types.PluginSourcesResult
@@ -149,7 +150,7 @@ object BridgeMethods {
         val STOP = bridgeSpecNoArg<Unit>("player.stop", HandleKind.PLAYER)
         val SEEK = bridgeSpecArg<Long, Unit>("player.seek", HandleKind.PLAYER)
         val SET_VOLUME = bridgeSpecArg<Float, Unit>("player.setVolume", HandleKind.PLAYER)
-        val POLL_STATE = bridgeSpecNoArg<PlayerPollState>("player.pollState", HandleKind.PLAYER)
+        val POLL_STATE = bridgeSpecArg<ArgPollState, PlayerPollState>("player.pollState", HandleKind.PLAYER)
     }
 
     /** `plugin.*` — plugin event dispatch + the Rust-side install layer. */

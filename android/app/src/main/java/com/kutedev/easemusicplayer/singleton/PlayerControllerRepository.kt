@@ -186,7 +186,16 @@ class PlayerControllerRepository @Inject constructor(
         runCatching { PlaybackService.start(cx) }
 
         _scope.launch(Dispatchers.Main) {
-            stop()
+            // No early `resetCurrent()` here: blanking the current music
+            // first makes the title vanish, the mini bar disappear and the
+            // slider go stale for the whole load window. The old track's
+            // UI stays visible until `setCurrent(new)` below — the engine
+            // meanwhile reports Loading (spinner) once the load reaches
+            // the worker, and the old audio keeps sounding until then.
+            _cantodeEngine.value?.clearMedia()
+            _pluginEvents.tryEmit(
+                PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
+            )
 
             val music: Music? = bridge.call(BridgeMethods.Music.GET, id).unwrapOrNull()?.payload
             val playlist: Playlist? = bridge.call(BridgeMethods.Playlist.GET, playlistId)
@@ -198,16 +207,19 @@ class PlayerControllerRepository @Inject constructor(
                 playerRepository.setCurrent(music!!, playlist!!)
                 engine.setCurrentMedia(id, music.meta.title)
                 // player.loadMusic stays on callRaw — cross-handle arg
-                // (backendHandle from Bridge state + musicId).
+                // (backendHandle from Bridge state + musicId). `autoplay`
+                // completes the load straight into Playing — a separate
+                // `player.play` would park in Paused between the two and
+                // flash the paused/resume button.
                 bridge.callRaw(
                     "player.loadMusic",
                     buildJsonObject {
                         put("backendHandle", bridge.getBackendId())
                         put("musicId", id.value)
+                        put("autoplay", true)
                     },
                     handle = playerId,
                 ).unwrapOrNull()
-                bridge.call(BridgeMethods.Player.PLAY).unwrapOrNull()
                 _pluginEvents.tryEmit(
                     PluginEvent.MusicPlay(
                         musicId = id,
@@ -216,7 +228,11 @@ class PlayerControllerRepository @Inject constructor(
                     )
                 )
             } else {
+                // Music/playlist gone: reset the UI (only now) and stop
+                // the engine — nothing to load.
                 playerRepository.resetCurrent()
+                _cantodeEngine.value?.clearMedia()
+                bridge.call(BridgeMethods.Player.STOP).unwrapOrNull()
             }
         }
     }

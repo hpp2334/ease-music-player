@@ -283,7 +283,10 @@ impl Machine {
         self.apply(WorkerEvent::LoadRequested);
     }
 
-    /// Finish a load by committing the fresh session as `Paused`.
+    /// Finish a load by committing the fresh session as `Paused` — or,
+    /// when the load was requested with autoplay, straight into `Playing`
+    /// (no observable `Paused` park; the play intent is part of the load,
+    /// not a follow-up command racing the completion).
     ///
     /// The only transition that carries a *fresh* session, which is why
     /// it bypasses `morph` (`Loading` has no payload to reshape). Still
@@ -291,12 +294,25 @@ impl Machine {
     /// table so it stays the single authority on what a completed load
     /// means. Runs synchronously on the worker thread, so no command can
     /// interleave and no pending-play bookkeeping is needed.
-    pub(super) fn complete_load(&mut self, loaded: Loaded) {
+    pub(super) fn complete_load(&mut self, loaded: Loaded, autoplay: bool) {
         debug_assert!(matches!(self.phase, Phase::Loading));
-        let next = transition(PlayerState::Loading, WorkerEvent::LoadCompleted)
-            .expect("LoadCompleted is legal from Loading");
-        self.commit(Phase::Paused(loaded));
-        debug_assert_eq!(next, PlayerState::Paused);
+        let ev = if autoplay {
+            WorkerEvent::LoadCompletedAutoPlay
+        } else {
+            WorkerEvent::LoadCompleted
+        };
+        let next = transition(PlayerState::Loading, ev)
+            .expect("LoadCompleted(±autoplay) is legal from Loading");
+        let phase = if autoplay {
+            Phase::Playing {
+                loaded,
+                last_position_emit: Instant::now(),
+            }
+        } else {
+            Phase::Paused(loaded)
+        };
+        self.commit(phase);
+        debug_assert_eq!(next, self.phase.state());
     }
 
     /// Commit a new phase: install it, mirror it, announce it, run its
@@ -491,7 +507,7 @@ mod tests {
         );
 
         machine.begin_load();
-        machine.complete_load(loaded);
+        machine.complete_load(loaded, false);
 
         assert_eq!(machine.state(), PlayerState::Paused);
         assert_eq!(fx.shared.state(), PlayerState::Paused);
@@ -502,6 +518,34 @@ mod tests {
         assert_eq!(
             recorded_states(&rec),
             vec![PlayerState::Loading, PlayerState::Paused]
+        );
+    }
+
+    #[test]
+    fn complete_load_autoplay_publishes_playing_and_resumes_the_sink() {
+        let (loaded, fx) = loaded_session(2, 2);
+        let shared = Arc::clone(&fx.shared);
+        let rec = Arc::new(RecordingSink::default());
+        let mut machine = Machine::new(
+            shared,
+            EventSinks {
+                cx: None,
+                player: Some(rec.clone()),
+            },
+        );
+
+        machine.begin_load();
+        machine.complete_load(loaded, true);
+
+        // No observable `Paused` park: Loading → Playing in one commit.
+        assert_eq!(machine.state(), PlayerState::Playing);
+        assert_eq!(fx.shared.state(), PlayerState::Playing);
+        // Phase-commit side effect: playing resumes the sink.
+        assert!(fx.log.recorded("resume"));
+        assert!(!fx.log.recorded("stop"));
+        assert_eq!(
+            recorded_states(&rec),
+            vec![PlayerState::Loading, PlayerState::Playing]
         );
     }
 
@@ -539,7 +583,7 @@ mod tests {
             },
         );
         machine.begin_load();
-        machine.complete_load(loaded);
+        machine.complete_load(loaded, false);
         machine.play();
 
         machine.buffer_underrun();

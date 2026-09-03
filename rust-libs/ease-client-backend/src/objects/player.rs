@@ -4,8 +4,9 @@
 //!
 //! - [`PlayerContextHandle`] — wraps [`cantode::PlayerContext`]; owns the cpal
 //!   `Host` and the shared decoder factory. One per app.
-//! - [`PlayerHandle`] — wraps [`cantode::Player`] behind a `Mutex` so it can
-//!   be shared across UniFFI calls. Holds one worker thread.
+//! - [`PlayerHandle`] — shared [`cantode::Player`] (lock-free access; see
+//!   its docs for why no `Mutex` may wrap it), one per app.
+//!   Holds one worker thread.
 //! - [`remote_music_source`] — builds a [`cantode::BufferedSource`] (the
 //!   cantode-owned windowed source) over an [`AssetRemoteAudio`]
 //!   long-lived session provider backed by [`services::get_asset_file`].
@@ -264,18 +265,23 @@ impl PlayerContextHandle {
 }
 
 // ============================================================================
-// PlayerHandle — wraps cantode::Player behind a Mutex
+// PlayerHandle — shared cantode::Player
 // ============================================================================
 
-/// One audio playback pipeline. Wraps [`cantode::Player`] behind a `Mutex`
-/// so multiple UniFFI calls can share it.
+/// One audio playback pipeline. Holds a [`cantode::Player`] directly — no
+/// Mutex: every `Player` method takes `&self` and is internally
+/// thread-safe (commands serialize in the worker's channel; state and
+/// position reads are lock-free). Wrapping it in a Mutex would starve
+/// the 10 Hz `player.pollState` poll behind a blocking `loadMusic`
+/// (the load holds the lock for its entire duration), making `Loading`
+/// unobservable — exactly the bug this type must never reintroduce.
 ///
 /// Create via [`ct_player_new`]; load a music with
 /// [`ct_player_load_music`]; drive with `ct_player_play` /
 /// `ct_player_pause` / `ct_player_stop` / `ct_player_seek` /
 /// `ct_player_set_volume`.
 pub struct PlayerHandle {
-    inner: Mutex<cantode::Player>,
+    player: cantode::Player,
 }
 
 impl PlayerHandle {
@@ -283,13 +289,11 @@ impl PlayerHandle {
         let player = cantode::Player::new(cx.context()).map_err(|e| BError::CustomError {
             message: format!("Player::new: {e:?}"),
         })?;
-        Ok(Self {
-            inner: Mutex::new(player),
-        })
+        Ok(Self { player })
     }
 
     pub(crate) fn with_player<R>(&self, f: impl FnOnce(&cantode::Player) -> R) -> R {
-        f(&self.inner.lock().unwrap())
+        f(&self.player)
     }
 }
 
@@ -326,6 +330,7 @@ pub async fn ct_player_load_music(
     backend: Arc<Backend>,
     player: Arc<PlayerHandle>,
     music_id: MusicId,
+    autoplay: bool,
 ) -> BResult<MetadataRecord> {
     // Bridge the sync `Player::load` onto the tokio pool so we don't
     // stall the UniFFI thread. The closure captures a clone of `backend`
@@ -340,8 +345,18 @@ pub async fn ct_player_load_music(
                 Arc::new(backend_cx),
                 DataSourceKey::Music { id: music_id },
             ));
-            let player_inner = player.inner.lock().unwrap();
-            player_inner.load(source).map_err(|e| BError::CustomError {
+            let player_inner = &player.player;
+            // Autoplay: the load completes straight into `Playing` — the
+            // caller must NOT follow with `player.play`, which would be
+            // observable as a `Paused` park between the two. This blocks
+            // the calling thread only — `with_player` is lock-free, so
+            // the 10 Hz poll keeps observing `Loading` throughout.
+            let result = if autoplay {
+                player_inner.load_and_play(source)
+            } else {
+                player_inner.load(source)
+            };
+            result.map_err(|e| BError::CustomError {
                 message: format!("Player::load: {e:?}"),
             })
         })
@@ -456,6 +471,25 @@ pub async fn ct_player_set_volume(player: Arc<PlayerHandle>, volume: f32) -> BRe
 /// Current externally-observable state.
 pub fn ct_player_state(player: Arc<PlayerHandle>) -> PlayerStateRecord {
     player.with_player(|p| PlayerStateRecord::from_cantode(p.state()))
+}
+
+/// Current transition seq + the `(seq, state)` transitions recorded after
+/// `after`, in order. Lets the 10 Hz UI poll recover sub-tick excursions
+/// (e.g. a fast `Loading → Playing` that completed between two polls).
+pub fn ct_player_transitions(
+    player: Arc<PlayerHandle>,
+    after: u64,
+) -> (u64, Vec<(u64, PlayerStateRecord)>) {
+    player.with_player(|p| {
+        let (seq, entries) = p.transitions_since(after);
+        (
+            seq,
+            entries
+                .into_iter()
+                .map(|(s, st)| (s, PlayerStateRecord::from_cantode(st)))
+                .collect(),
+        )
+    })
 }
 
 /// Current playback position in milliseconds.

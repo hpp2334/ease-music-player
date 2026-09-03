@@ -106,8 +106,19 @@ adb connect 127.0.0.1:7777
 adb -s 127.0.0.1:7777 devices -l
 ```
 
+- **Once connected, immediately lock adbd to a fixed port** (`adb tcpip 5555`):
+  the wireless-debugging port changes every time adbd restarts, which forces
+  a re-scan + proxy retarget each session. Locking makes the device always
+  reachable at `<device-ip>:5555`. The current link drops when adbd restarts
+  — that's expected: kill the proxy, restart it targeting `<device-ip>:5555`,
+  reconnect, and verify with `adb shell getprop service.adb.tcp.port` (= 5555).
+  ```sh
+  adb -s 127.0.0.1:7777 tcpip 5555   # adbd restarts on the fixed port
+  # proxy: kill + restart with target port 5555, then:
+  adb connect 127.0.0.1:7777
+  ```
 - If `adb` reports `device offline`: `adb disconnect 127.0.0.1:7777 && adb connect 127.0.0.1:7777`.
-- If the device's connect port changed, re-check it on the device and restart the proxy.
+- If the device's connect port changed (device not locked yet), re-check it on the device and restart the proxy.
 
 ## Reading logs on-device
 

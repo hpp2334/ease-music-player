@@ -399,4 +399,22 @@ data class PlayerPollState(
     val state: PlayerStateRecord,
     val positionMs: ULong,
     val durationMs: ULong? = null,
+    /** Monotonic transition counter (never resets); pass it back as the
+     * next poll's [ArgPollState.sinceSeq]. */
+    val stateSeq: ULong = 0u,
+    /** State transitions recorded after the poll's `sinceSeq`, in order —
+     * lets the 10 Hz poller recover sub-tick excursions (e.g. a fast
+     * `Loading → Playing` that completed between two polls). */
+    val transitions: List<PlayerTransition> = emptyList(),
+)
+
+@Serializable
+data class PlayerTransition(
+    val seq: ULong,
+    val state: PlayerStateRecord,
+)
+
+@Serializable
+data class ArgPollState(
+    val sinceSeq: ULong = 0u,
 )

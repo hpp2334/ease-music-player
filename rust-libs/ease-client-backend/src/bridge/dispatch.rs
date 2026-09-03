@@ -39,6 +39,7 @@ use crate::{
         ct_player_context_new, ct_player_duration_ms, ct_player_load_music, ct_player_new,
         ct_player_pause, ct_player_play, ct_player_position_ms, ct_player_probe_duration_ms,
         ct_player_seek, ct_player_set_volume, ct_player_state, ct_player_stop,
+        ct_player_transitions,
     },
     services::{
         app::ArgInitializeApp,
@@ -405,11 +406,17 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             struct Args {
                 backendHandle: u64,
                 musicId: MusicId,
+                /// Complete the load straight into `Playing` instead of
+                /// parking in `Paused`. The caller must NOT follow with
+                /// `player.play`.
+                #[serde(default)]
+                autoplay: bool,
             }
             let args: Args = serde_json::from_value(req.args)?;
             let player = must_player(handle)?;
             let backend = must_backend(args.backendHandle)?;
-            let metadata = ct_player_load_music(backend, player, args.musicId).await?;
+            let metadata =
+                ct_player_load_music(backend, player, args.musicId, args.autoplay).await?;
             Ok((serde_json::to_value(metadata)?, vec![]))
         }
         "player.play" => {
@@ -456,15 +463,34 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             // Batched: state + positionMs + durationMs in one shot.
             // Hot path (10 Hz from CantodeEngine); combining three FFI
             // calls into one cuts JSON overhead 3x.
+            //
+            // `sinceSeq` (optional): return the transitions recorded
+            // after that seq plus the current seq, so the poller can
+            // recover sub-tick state excursions it would otherwise miss
+            // (e.g. a fast `Loading → Playing` between two polls).
+            #[derive(Deserialize)]
+            struct Args {
+                #[serde(default)]
+                sinceSeq: Option<u64>,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
             let player = must_player(handle)?;
             let state = ct_player_state(player.clone());
             let position_ms = ct_player_position_ms(player.clone());
-            let duration_ms = ct_player_duration_ms(player);
+            let duration_ms = ct_player_duration_ms(player.clone());
+            let (state_seq, transitions) =
+                ct_player_transitions(player, args.sinceSeq.unwrap_or(u64::MAX));
+            let transitions: Vec<_> = transitions
+                .into_iter()
+                .map(|(seq, st)| json!({ "seq": seq, "state": st }))
+                .collect();
             Ok((
                 json!({
                     "state": state,
                     "positionMs": position_ms,
                     "durationMs": duration_ms,
+                    "stateSeq": state_seq,
+                    "transitions": transitions,
                 }),
                 vec![],
             ))
