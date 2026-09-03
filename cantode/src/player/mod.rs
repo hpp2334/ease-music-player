@@ -187,8 +187,25 @@ impl Player {
     /// metadata is available (or an error occurs). Does not start
     /// playback — call [`Player::play`] afterwards.
     pub fn load(&self, source: Box<dyn AudioSource>) -> crate::Result<Metadata> {
+        self.load_impl(source, false)
+    }
+
+    /// Load a fresh source and start playing it the moment the load
+    /// completes. Identical blocking semantics to [`Player::load`]; the
+    /// only difference is the post-load phase — `Playing` instead of
+    /// `Paused` — so a poller never observes a parked `Paused` between
+    /// load completion and a separate play command.
+    pub fn load_and_play(&self, source: Box<dyn AudioSource>) -> crate::Result<Metadata> {
+        self.load_impl(source, true)
+    }
+
+    fn load_impl(&self, source: Box<dyn AudioSource>, autoplay: bool) -> crate::Result<Metadata> {
         let (tx, rx) = mpsc::channel();
-        self.send(Command::Load { source, reply: tx })?;
+        self.send(Command::Load {
+            source,
+            reply: tx,
+            autoplay,
+        })?;
         match rx.recv() {
             Ok(LoadResult::Ok(m)) => Ok(m),
             Ok(LoadResult::Err(e)) => Err(e),
@@ -239,6 +256,16 @@ impl Player {
     /// Current externally-observable state. Lock-free read.
     pub fn state(&self) -> PlayerState {
         self.shared.state()
+    }
+
+    /// Current transition seq + the transitions recorded after `after`,
+    /// in order. Lets a sampling client recover sub-sample excursions —
+    /// e.g. a fast `Loading → Playing` that completed between two polls
+    /// (the state cell alone would only ever show the final state).
+    /// If the first returned entry's seq is not `after + 1`, entries
+    /// were lost to log overrun; trust the current state instead.
+    pub fn transitions_since(&self, after: u64) -> (u64, Vec<(u64, PlayerState)>) {
+        self.shared.transitions_since(after)
     }
 
     /// Current playback position — the media time of the audio currently

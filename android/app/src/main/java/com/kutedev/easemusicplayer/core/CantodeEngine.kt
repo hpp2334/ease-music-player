@@ -3,6 +3,7 @@ package com.kutedev.easemusicplayer.core
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.BridgeMethods
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
+import com.kutedev.easemusicplayer.singleton.types.ArgPollState
 import com.kutedev.easemusicplayer.singleton.types.MusicId
 import com.kutedev.easemusicplayer.singleton.types.PlayerStateRecord
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +52,12 @@ class CantodeEngine(
     @Volatile private var endedHandledForCurrent: Boolean = false
     @Volatile private var released: Boolean = false
 
+    /** Last transition seq drained from `player.pollState` — the engine's
+     * monotonic state-history counter. Seeded at 0: the player handle (and
+     * its log) are created together with this engine, so the first poll
+     * drains at most the handful of transitions since setup. */
+    @Volatile private var lastTransitionSeq: ULong = 0u
+
     init {
         pollJob = scope.launch(Dispatchers.Default) {
             while (true) {
@@ -74,13 +81,59 @@ class CantodeEngine(
     }
 
     private suspend fun pollOnce() {
-        // Single batched call: state + positionMs + durationMs.
-        val poll = bridge.call(BridgeMethods.Player.POLL_STATE).unwrapOrNull()?.payload ?: return
+        // Single batched call: state + positionMs + durationMs + the
+        // transitions recorded since our last poll.
+        val poll = bridge.call(
+            BridgeMethods.Player.POLL_STATE,
+            ArgPollState(sinceSeq = lastTransitionSeq),
+        ).unwrapOrNull()?.payload ?: return
 
-        val newState = poll.state
         val newPos = poll.positionMs
         val newDuration = poll.durationMs
 
+        // Replay the drained transitions in order — a sub-tick excursion
+        // (fast `Loading → Playing` between two polls) is applied exactly
+        // as if it had been observed live. If the log overran (first
+        // entry's seq isn't lastTransitionSeq + 1), the history is
+        // partial: trust only the current state.
+        val entries = poll.transitions
+        val contiguous = entries.isEmpty() ||
+            entries.first().seq == lastTransitionSeq + 1u
+        lastTransitionSeq = poll.stateSeq
+
+        if (contiguous) {
+            for (entry in entries) {
+                applyObservedState(entry.state, newPos, newDuration)
+            }
+        }
+        // The current state is the freshest read — normally identical to
+        // the last drained transition; if one landed between the reads,
+        // the next poll drains it.
+        applyObservedState(poll.state, newPos, newDuration)
+
+        // One-tick visibility hold (presentation policy over engine
+        // truth): a Loading/Buffering excursion that already completed
+        // between polls is surfaced for this one tick, so every track
+        // start shows the loading feedback even on instant sources.
+        if (contiguous && poll.state == PlayerStateRecord.PLAYING) {
+            val loadishExcursion = entries.any {
+                it.state == PlayerStateRecord.LOADING ||
+                    it.state == PlayerStateRecord.BUFFERING
+            }
+            if (loadishExcursion) {
+                playerRepository.setIsLoading(true)
+            }
+        }
+    }
+
+    /** Apply one observed engine state to the repository mirror (and fire
+     * the once-per-track [endedEvent]). Called once per drained
+     * transition plus once for the current state. */
+    private fun applyObservedState(
+        newState: PlayerStateRecord,
+        newPos: ULong,
+        newDuration: ULong?,
+    ) {
         // ENDED detection — fire once per track.
         val mid = currentMusicId
         if (newState == PlayerStateRecord.ENDED

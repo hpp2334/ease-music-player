@@ -163,9 +163,9 @@ impl Worker {
     fn handle_command(&mut self, cmd: Command) -> bool {
         match cmd {
             Command::Shutdown => return true,
-            Command::Load { source, reply } => {
+            Command::Load { source, reply, autoplay } => {
                 self.drain = None;
-                let result = self.do_load(source);
+                let result = self.do_load(source, autoplay);
                 let _ = reply.send(match &result {
                     Ok(m) => LoadResult::Ok(m.clone()),
                     Err(e) => LoadResult::Err(e.clone()),
@@ -202,7 +202,7 @@ impl Worker {
         false
     }
 
-    fn do_load(&mut self, source: Box<dyn AudioSource>) -> crate::Result<Metadata> {
+    fn do_load(&mut self, source: Box<dyn AudioSource>, autoplay: bool) -> crate::Result<Metadata> {
         // Discard any existing session (old sink stops, session-scoped
         // observables reset) and publish `Loading` — in that order, per
         // `Machine::begin_load`.
@@ -245,9 +245,10 @@ impl Worker {
         self.shared.set_duration(meta.duration);
         self.sinks.emit(PlayerEvent::MetadataReady(meta.clone()));
 
-        // Commit the fresh session as `Paused` (validated against the
+        // Commit the fresh session as `Paused` — or straight into
+        // `Playing` for an autoplay load (validated against the
         // transition table inside the machine).
-        self.machine.complete_load(loaded);
+        self.machine.complete_load(loaded, autoplay);
         Ok(meta)
     }
 

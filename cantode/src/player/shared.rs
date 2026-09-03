@@ -14,8 +14,11 @@
 //! [`Machine`](super::phase::Machine) alone, `set_position` by the
 //! [`Loaded`](super::session::Loaded) session alone, `set_duration` by
 //! the worker's load path alone, and
-//! `reset_session_observables` by `Loaded::drop` alone.
+//! `reset_session_observables` by `Loaded::drop` alone. The transition
+//! log is likewise appended by `set_state` alone — one entry per real
+//! state change.
 
+use std::collections::VecDeque;
 use std::sync::{
     Mutex,
     atomic::{AtomicU64, Ordering},
@@ -23,6 +26,12 @@ use std::sync::{
 use std::time::Duration;
 
 use crate::state::PlayerState;
+
+/// How many recent transitions the log keeps. The poller drains at 10 Hz
+/// and transitions are rare (a handful per track), so 16 is generous; if
+/// a client ever falls further behind, it detects the seq discontinuity
+/// and trusts the current state instead.
+const TRANSITION_LOG_CAP: usize = 16;
 
 pub(super) struct SharedStatus {
     /// Mirrored by the machine's commit — its only writer.
@@ -32,6 +41,14 @@ pub(super) struct SharedStatus {
     /// Duration of the loaded source; set by the worker on load success,
     /// reset by `Loaded::drop`.
     duration: Mutex<Option<Duration>>,
+    /// Monotonic transition counter — bumped once per real state change
+    /// (the machine only commits on change), never reset.
+    transition_seq: AtomicU64,
+    /// Ring of recent `(seq, state)` transitions, appended by
+    /// [`SharedStatus::set_state`]. Lets a sampling client (10 Hz UI
+    /// poll) recover sub-tick excursions — e.g. a fast
+    /// `Loading → Playing` that completed between two samples.
+    transitions: Mutex<VecDeque<(u64, PlayerState)>>,
 }
 
 impl SharedStatus {
@@ -40,6 +57,8 @@ impl SharedStatus {
             state: AtomicState::new(PlayerState::Idle),
             position: AtomicPosition::new(),
             duration: Mutex::new(None),
+            transition_seq: AtomicU64::new(0),
+            transitions: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -48,9 +67,31 @@ impl SharedStatus {
         self.state.load()
     }
 
-    /// Mirror a committed phase. [`Machine::commit`] only.
+    /// Mirror a committed phase. [`Machine::commit`] only. Called exactly
+    /// once per real state change, so this is also the single append
+    /// point of the transition log.
     pub(super) fn set_state(&self, s: PlayerState) {
         self.state.store(s);
+        let seq = self.transition_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut log = self.transitions.lock().unwrap();
+        if log.len() == TRANSITION_LOG_CAP {
+            log.pop_front();
+        }
+        log.push_back((seq, s));
+    }
+
+    /// Current transition seq + the transitions with `seq > after`, in
+    /// order. If the first returned entry's seq is not `after + 1`, the
+    /// caller missed entries (log overrun) and should trust the current
+    /// state rather than replay the partial history.
+    pub(super) fn transitions_since(&self, after: u64) -> (u64, Vec<(u64, PlayerState)>) {
+        let log = self.transitions.lock().unwrap();
+        let entries = log
+            .iter()
+            .filter(|(seq, _)| *seq > after)
+            .copied()
+            .collect();
+        (self.transition_seq.load(Ordering::Relaxed), entries)
     }
 
     /// Last decoded-frame timestamp. Lock-free.
@@ -125,5 +166,48 @@ impl AtomicPosition {
     }
     fn load(&self) -> Duration {
         Duration::from_nanos(self.nanos.load(Ordering::Relaxed))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transition_log_records_seq_and_drains_since() {
+        let shared = SharedStatus::new();
+        shared.set_state(PlayerState::Loading);
+        shared.set_state(PlayerState::Playing);
+
+        let (seq, entries) = shared.transitions_since(0);
+        assert_eq!(seq, 2);
+        assert_eq!(
+            entries,
+            vec![(1, PlayerState::Loading), (2, PlayerState::Playing)]
+        );
+
+        // Incremental drain: only the newer entry comes back.
+        let (_, entries) = shared.transitions_since(1);
+        assert_eq!(entries, vec![(2, PlayerState::Playing)]);
+
+        // Nothing new: empty, not a repeat.
+        let (seq, entries) = shared.transitions_since(2);
+        assert_eq!(seq, 2);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn transition_log_evicts_oldest_beyond_cap() {
+        let shared = SharedStatus::new();
+        for _ in 0..(TRANSITION_LOG_CAP + 4) {
+            shared.set_state(PlayerState::Paused);
+            shared.set_state(PlayerState::Playing);
+        }
+        let (seq, entries) = shared.transitions_since(0);
+        // Seq keeps counting; the ring kept only the newest CAP entries.
+        assert_eq!(entries.len(), TRANSITION_LOG_CAP);
+        assert_eq!(entries.last().copied().unwrap().0, seq);
+        // Overrun is detectable: the oldest surviving seq is not 1.
+        assert_ne!(entries.first().copied().unwrap().0, 1);
     }
 }

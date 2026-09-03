@@ -19,10 +19,16 @@ pub(super) const COMMAND_CHANNEL_CAP: usize = 32;
 pub(crate) enum Command {
     /// Load a fresh source. The worker rebuilds the decoder and primes the
     /// sink. The `SyncSender` lets the worker report the resulting
-    /// [`Metadata`] (or error) back to the caller of `load`.
+    /// [`Metadata`] (or error) back to the caller of `load`. When
+    /// `autoplay` is set, the load completes straight into `Playing`
+    /// instead of parking in `Paused` — the load caller's follow-up play
+    /// would otherwise be observable as a `Paused` blip (and, worse, a
+    /// sub-command-latency window in which a poller flips the UI to the
+    /// paused look).
     Load {
         source: Box<dyn AudioSource>,
         reply: mpsc::Sender<LoadResult>,
+        autoplay: bool,
     },
     Play,
     Pause,
@@ -41,7 +47,10 @@ pub(crate) enum Command {
 impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Command::Load { .. } => f.debug_struct("Command::Load").finish_non_exhaustive(),
+            Command::Load { autoplay, .. } => f
+                .debug_struct("Command::Load")
+                .field("autoplay", autoplay)
+                .finish_non_exhaustive(),
             Command::Play => write!(f, "Command::Play"),
             Command::Pause => write!(f, "Command::Pause"),
             Command::Stop => write!(f, "Command::Stop"),

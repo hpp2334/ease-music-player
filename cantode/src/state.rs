@@ -58,6 +58,10 @@ pub(crate) enum WorkerEvent {
     LoadRequested,
     /// Source opened, decoder ready, sink primed.
     LoadCompleted,
+    /// Source opened, decoder ready, sink primed — and the load was
+    /// requested with autoplay (`Player::load_and_play`), so the fresh
+    /// session starts playing instead of parking in `Paused`.
+    LoadCompletedAutoPlay,
     /// `Player::play` was called.
     PlayRequested,
     /// `Player::pause` was called.
@@ -95,7 +99,12 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         // Load/Play/Pause are illegal before any source is loaded.
         (
             Idle,
-            LoadCompleted | PlayRequested | PauseRequested | BufferUnderrun | BufferRefilled
+            LoadCompleted
+            | LoadCompletedAutoPlay
+            | PlayRequested
+            | PauseRequested
+            | BufferUnderrun
+            | BufferRefilled
             | EndOfStream,
         ) => {
             return Err(CantodeError::InvalidState(format!(
@@ -106,6 +115,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
 
         // ---- Loading ----
         (Loading, LoadCompleted) => Paused,
+        (Loading, LoadCompletedAutoPlay) => Playing,
         (Loading, StopRequested) => Idle,
         (Loading, Failed) => Error,
         // User can pre-empt a slow load with play/pause requests; we
@@ -127,7 +137,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         (Paused, EndOfStream) => Ended, // a 0-length source
         (Paused, Failed) => Error,
         (Paused, LoadRequested) => Loading,
-        (Paused, LoadCompleted | BufferUnderrun | BufferRefilled) => {
+        (Paused, LoadCompleted | LoadCompletedAutoPlay | BufferUnderrun | BufferRefilled) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Paused"
             )));
@@ -141,7 +151,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         (Playing, Failed) => Error,
         (Playing, LoadRequested) => Loading,
         (Playing, PlayRequested) => Playing, // no-op
-        (Playing, LoadCompleted | BufferRefilled) => {
+        (Playing, LoadCompleted | LoadCompletedAutoPlay | BufferRefilled) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Playing"
             )));
@@ -156,7 +166,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         (Buffering, LoadRequested) => Loading,
         (Buffering, PlayRequested) => Buffering, // stays; worker picks up on refill
         (Buffering, BufferUnderrun) => Buffering, // no-op
-        (Buffering, LoadCompleted) => {
+        (Buffering, LoadCompleted | LoadCompletedAutoPlay) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Buffering"
             )));
@@ -167,7 +177,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         (Ended, PlayRequested | PauseRequested) => Ended, // stuck until load/seek
         (Ended, StopRequested) => Idle,
         (Ended, Failed) => Error,
-        (Ended, LoadCompleted | BufferUnderrun | BufferRefilled | EndOfStream) => {
+        (Ended, LoadCompleted | LoadCompletedAutoPlay | BufferUnderrun | BufferRefilled | EndOfStream) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Ended"
             )));
@@ -230,6 +240,7 @@ mod tests {
     fn idle_illegal() {
         for ev in [
             WorkerEvent::LoadCompleted,
+            WorkerEvent::LoadCompletedAutoPlay,
             WorkerEvent::PlayRequested,
             WorkerEvent::PauseRequested,
             WorkerEvent::BufferUnderrun,
@@ -246,6 +257,14 @@ mod tests {
             PlayerState::Loading,
             WorkerEvent::LoadCompleted,
             PlayerState::Paused,
+        );
+        // Autoplay load: the fresh session starts playing directly — no
+        // observable `Paused` park between load completion and the
+        // (now unnecessary) play command.
+        legal(
+            PlayerState::Loading,
+            WorkerEvent::LoadCompletedAutoPlay,
+            PlayerState::Playing,
         );
         legal(
             PlayerState::Loading,
@@ -437,6 +456,7 @@ mod tests {
     fn error_illegal() {
         for ev in [
             WorkerEvent::LoadCompleted,
+            WorkerEvent::LoadCompletedAutoPlay,
             WorkerEvent::PlayRequested,
             WorkerEvent::PauseRequested,
             WorkerEvent::BufferUnderrun,
