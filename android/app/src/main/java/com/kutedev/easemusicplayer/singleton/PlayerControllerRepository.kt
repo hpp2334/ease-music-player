@@ -1,7 +1,8 @@
 package com.kutedev.easemusicplayer.singleton
 
 import android.content.Context
-import com.kutedev.easemusicplayer.core.CantodeEngine
+import com.kutedev.cantode.Cantode
+import com.kutedev.cantode.PlayerState
 import com.kutedev.easemusicplayer.core.PlaybackService
 import com.kutedev.easemusicplayer.singleton.SleepModeState
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
@@ -9,7 +10,6 @@ import com.kutedev.easemusicplayer.singleton.types.Music
 import com.kutedev.easemusicplayer.singleton.types.Playlist
 import com.kutedev.easemusicplayer.singleton.types.MusicId
 import com.kutedev.easemusicplayer.singleton.types.PlaylistId
-import com.kutedev.easemusicplayer.singleton.types.PlayerStateRecord
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,7 +72,7 @@ class PlayerControllerRepository @Inject constructor(
 
     val sleepState = _sleep.asStateFlow()
 
-    private val _cantodeEngine = MutableStateFlow<CantodeEngine?>(null)
+    private val _cantodeEngine = MutableStateFlow<Cantode?>(null)
     val cantodeEngine = _cantodeEngine.asStateFlow()
 
     @Volatile private var playerContextId: Long = -1L
@@ -111,12 +111,15 @@ class PlayerControllerRepository @Inject constructor(
     }
 
     /**
-     * Constructs the cantode player context + player + [CantodeEngine].
+     * Constructs the cantode player context + player + the engine
+     * facade ([Cantode] — cantode's own Kotlin half, reached through
+     * cantode's JNI bridge under the same handle id).
      *
-     * [engineFactory] receives the player handle ID (opaque Long) and
-     * returns a [CantodeEngine] wrapping it.
+     * [engineFactory] receives the player handle ID (opaque Long — the
+     * bridge id `player.new` also registered with cantode's FFI) and
+     * returns a [Cantode] wrapping it.
      */
-    fun setupCantodeEngine(engineFactory: (Long) -> CantodeEngine) {
+    fun setupCantodeEngine(engineFactory: (Long) -> Cantode) {
         if (setupStarted) return
         setupStarted = true
         _scope.launch(Dispatchers.Main) {
@@ -137,15 +140,30 @@ class PlayerControllerRepository @Inject constructor(
 
                 val engine = engineFactory(pId)
                 _scope.launch {
-                    engine.endedEvent.collect { musicId ->
+                    engine.ended.collect {
                         _endedEvent.emit(Unit)
-                        _pluginEvents.tryEmit(
-                            PluginEvent.MusicComplete(
-                                musicId = musicId,
-                                title = _music.value?.meta?.title ?: "",
-                                timestamp = System.currentTimeMillis(),
+                        val m = _music.value
+                        if (m != null) {
+                            _pluginEvents.tryEmit(
+                                PluginEvent.MusicComplete(
+                                    musicId = m.meta.id,
+                                    title = m.meta.title,
+                                    timestamp = System.currentTimeMillis(),
+                                )
                             )
-                        )
+                        }
+                    }
+                }
+                // Engine truth → app state: the state mapping is app
+                // policy, so it lives here, not inside cantode.
+                _scope.launch {
+                    engine.state.collect { st ->
+                        playerRepository.setIsPlaying(st == PlayerState.PLAYING)
+                    }
+                }
+                _scope.launch {
+                    engine.loading.collect { loading ->
+                        playerRepository.setIsLoading(loading)
                     }
                 }
                 _cantodeEngine.value = engine
@@ -161,8 +179,7 @@ class PlayerControllerRepository @Inject constructor(
 
     /** Current position in ms (for the PlayerVM poll). */
     fun getCurrentPosition(): Long {
-        val engine = _cantodeEngine.value ?: return 0L
-        return engine.lastPositionMs.toLong()
+        return _cantodeEngine.value?.positionMs?.value ?: 0L
     }
 
     fun getBufferedPosition(): Long = getCurrentPosition()
@@ -176,9 +193,8 @@ class PlayerControllerRepository @Inject constructor(
         // A natural-end replay (repeat-one auto-replay, or re-tapping the
         // finished track) must go through the fresh-load branch below so it
         // emits a countable MusicPlay — only a PAUSED current track resumes
-        // in place. `lastState` is @Volatile and set before `endedEvent` is
-        // collected, so it reads ENDED by the time playOnComplete() runs.
-        val ended = engine.lastState == PlayerStateRecord.ENDED
+        // in place.
+        val ended = engine.state.value == PlayerState.ENDED
         if (!ended && _music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
             resume(); return
         }
@@ -192,7 +208,6 @@ class PlayerControllerRepository @Inject constructor(
             // UI stays visible until `setCurrent(new)` below — the engine
             // meanwhile reports Loading (spinner) once the load reaches
             // the worker, and the old audio keeps sounding until then.
-            _cantodeEngine.value?.clearMedia()
             _pluginEvents.tryEmit(
                 PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
             )
@@ -205,12 +220,10 @@ class PlayerControllerRepository @Inject constructor(
 
             if (inPlaylist) {
                 playerRepository.setCurrent(music!!, playlist!!)
-                engine.setCurrentMedia(id, music.meta.title)
-                // player.loadMusic stays on callRaw — cross-handle arg
-                // (backendHandle from Bridge state + musicId). `autoplay`
-                // completes the load straight into Playing — a separate
-                // `player.play` would park in Paused between the two and
-                // flash the paused/resume button.
+                // The load itself stays on the backend bridge — source
+                // construction (storage plugins) and the metadata→DB
+                // writeback are business logic. `autoplay` completes it
+                // straight into Playing; no follow-up `play` command.
                 bridge.callRaw(
                     "player.loadMusic",
                     buildJsonObject {
@@ -231,50 +244,42 @@ class PlayerControllerRepository @Inject constructor(
                 // Music/playlist gone: reset the UI (only now) and stop
                 // the engine — nothing to load.
                 playerRepository.resetCurrent()
-                _cantodeEngine.value?.clearMedia()
-                bridge.call(BridgeMethods.Player.STOP).unwrapOrNull()
+                engine.stop()
             }
         }
     }
 
     fun resume() {
-        if (playerId < 0) return
-        _scope.launch {
-            bridge.call(BridgeMethods.Player.PLAY).unwrapOrNull()
-            _pluginEvents.tryEmit(
-                PluginEvent.MusicResume(
-                    musicId = _music.value?.meta?.id,
-                    timestamp = System.currentTimeMillis(),
-                    positionMs = getCurrentPosition(),
-                )
+        val engine = _cantodeEngine.value ?: return
+        engine.play()
+        _pluginEvents.tryEmit(
+            PluginEvent.MusicResume(
+                musicId = _music.value?.meta?.id,
+                timestamp = System.currentTimeMillis(),
+                positionMs = getCurrentPosition(),
             )
-        }
+        )
     }
 
     fun pause() {
-        if (playerId < 0) return
-        _scope.launch {
-            bridge.call(BridgeMethods.Player.PAUSE).unwrapOrNull()
-            _pluginEvents.tryEmit(
-                PluginEvent.MusicPause(
-                    musicId = _music.value?.meta?.id,
-                    timestamp = System.currentTimeMillis(),
-                    positionMs = getCurrentPosition(),
-                )
+        val engine = _cantodeEngine.value ?: return
+        engine.pause()
+        _pluginEvents.tryEmit(
+            PluginEvent.MusicPause(
+                musicId = _music.value?.meta?.id,
+                timestamp = System.currentTimeMillis(),
+                positionMs = getCurrentPosition(),
             )
-        }
+        )
     }
 
     fun stop() {
-        if (playerId < 0) return
-        _scope.launch {
-            bridge.call(BridgeMethods.Player.STOP).unwrapOrNull()
-            playerRepository.resetCurrent()
-            _cantodeEngine.value?.clearMedia()
-            _pluginEvents.tryEmit(
-                PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
-            )
-        }
+        val engine = _cantodeEngine.value ?: return
+        engine.stop()
+        playerRepository.resetCurrent()
+        _pluginEvents.tryEmit(
+            PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
+        )
     }
 
     private fun playOnComplete() {
@@ -300,10 +305,8 @@ class PlayerControllerRepository @Inject constructor(
     }
 
     fun seek(ms: ULong) {
-        if (playerId < 0) return
-        _scope.launch {
-            bridge.call(BridgeMethods.Player.SEEK, ms.toLong()).unwrapOrNull()
-        }
+        val engine = _cantodeEngine.value ?: return
+        engine.seek(ms.toLong())
     }
 
     fun scheduleSleep(newExpiredMs: Long) {

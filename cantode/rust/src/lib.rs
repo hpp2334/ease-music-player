@@ -64,10 +64,15 @@
 //! [ease]: https://github.com/hpp2334/ease-music-player
 
 #![warn(missing_docs)]
-#![forbid(unsafe_code)]
+// `deny` (not `forbid`) so the `ffi` module — the JNI boundary, whose
+// export attributes are `unsafe(...)` attributes in edition 2024 — can
+// carry an explicit, audited `allow`. Every other module still denies.
+#![deny(unsafe_code)]
 
 pub mod context;
 pub mod decoder;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 pub mod error;
 pub mod events;
 pub mod metadata;

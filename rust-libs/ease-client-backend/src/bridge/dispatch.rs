@@ -34,12 +34,10 @@ use crate::{
         storage::{ct_list_storage, ct_list_storage_entry_children, ct_remove_storage},
     },
     error::{BError, BResult},
-    objects::music::{MetadataRecord, PlayerStateRecord},
+    objects::music::MetadataRecord,
     objects::player::{
-        ct_player_context_new, ct_player_duration_ms, ct_player_load_music, ct_player_new,
-        ct_player_pause, ct_player_play, ct_player_position_ms, ct_player_probe_duration_ms,
-        ct_player_seek, ct_player_set_volume, ct_player_state, ct_player_stop,
-        ct_player_transitions,
+        ct_player_context_new, ct_player_load_music, ct_player_new,
+        ct_player_probe_duration_ms, ct_player_register_ffi,
     },
     services::{
         app::ArgInitializeApp,
@@ -387,8 +385,12 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
         }
 
         // ====================================================================
-        // player.* — handle refers to the PlayerHandle (or PlayerContext
-        // for contextNew / Player for new + transport ops).
+        // player.* — creation + load stay on the backend bridge (source
+        // construction and the metadata→DB writeback are business logic).
+        // Transport commands (play/pause/stop/seek/setVolume) and the
+        // state/position/duration observables live on cantode's own FFI
+        // (`Java_com_kutedev_cantode_CantodeNative_*`), addressed by the
+        // same handle id `player.new` registers below.
         // ====================================================================
         "player.contextNew" => {
             let ctx = ct_player_context_new()?;
@@ -398,7 +400,10 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
         "player.new" => {
             let cx = must_player_context(handle)?;
             let player = ct_player_new(cx)?;
-            let id = register(HandleEntry::Player(player));
+            let id = register(HandleEntry::Player(player.clone()));
+            // One id, two bridges: the Kotlin cantode facade addresses
+            // this player through cantode's FFI registry under `id`.
+            ct_player_register_ffi(&player, id);
             Ok((json!({ "handle": id }), vec![]))
         }
         "player.loadMusic" => {
@@ -419,33 +424,6 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
                 ct_player_load_music(backend, player, args.musicId, args.autoplay).await?;
             Ok((serde_json::to_value(metadata)?, vec![]))
         }
-        "player.play" => {
-            let player = must_player(handle)?;
-            ct_player_play(player).await?;
-            Ok((Value::Null, vec![]))
-        }
-        "player.pause" => {
-            let player = must_player(handle)?;
-            ct_player_pause(player).await?;
-            Ok((Value::Null, vec![]))
-        }
-        "player.stop" => {
-            let player = must_player(handle)?;
-            ct_player_stop(player).await?;
-            Ok((Value::Null, vec![]))
-        }
-        "player.seek" => {
-            let pos_ms: u64 = serde_json::from_value(req.args)?;
-            let player = must_player(handle)?;
-            let actual = ct_player_seek(player, pos_ms).await?;
-            Ok((serde_json::to_value(actual)?, vec![]))
-        }
-        "player.setVolume" => {
-            let volume: f32 = serde_json::from_value(req.args)?;
-            let player = must_player(handle)?;
-            ct_player_set_volume(player, volume).await?;
-            Ok((Value::Null, vec![]))
-        }
         "player.probeDurationMs" => {
             #[derive(Deserialize)]
             struct Args {
@@ -458,42 +436,6 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let backend = must_backend(args.backendHandle)?;
             let dur = ct_player_probe_duration_ms(cx, backend, args.musicId).await?;
             Ok((serde_json::to_value(dur)?, vec![]))
-        }
-        "player.pollState" => {
-            // Batched: state + positionMs + durationMs in one shot.
-            // Hot path (10 Hz from CantodeEngine); combining three FFI
-            // calls into one cuts JSON overhead 3x.
-            //
-            // `sinceSeq` (optional): return the transitions recorded
-            // after that seq plus the current seq, so the poller can
-            // recover sub-tick state excursions it would otherwise miss
-            // (e.g. a fast `Loading → Playing` between two polls).
-            #[derive(Deserialize)]
-            struct Args {
-                #[serde(default)]
-                sinceSeq: Option<u64>,
-            }
-            let args: Args = serde_json::from_value(req.args)?;
-            let player = must_player(handle)?;
-            let state = ct_player_state(player.clone());
-            let position_ms = ct_player_position_ms(player.clone());
-            let duration_ms = ct_player_duration_ms(player.clone());
-            let (state_seq, transitions) =
-                ct_player_transitions(player, args.sinceSeq.unwrap_or(u64::MAX));
-            let transitions: Vec<_> = transitions
-                .into_iter()
-                .map(|(seq, st)| json!({ "seq": seq, "state": st }))
-                .collect();
-            Ok((
-                json!({
-                    "state": state,
-                    "positionMs": position_ms,
-                    "durationMs": duration_ms,
-                    "stateSeq": state_seq,
-                    "transitions": transitions,
-                }),
-                vec![],
-            ))
         }
 
         // ====================================================================

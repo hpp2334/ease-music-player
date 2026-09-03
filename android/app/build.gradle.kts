@@ -128,6 +128,9 @@ dependencies {
     implementation("androidx.media:media:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.4.0")
     implementation(libs.reorderable)
+    // cantode's Kotlin facade (cantode/kotlin) — engine transport +
+    // observables; the module owns no business logic.
+    implementation(project(":cantode-engine"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

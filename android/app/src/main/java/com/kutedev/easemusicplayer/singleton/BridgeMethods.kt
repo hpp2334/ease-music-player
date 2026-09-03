@@ -12,7 +12,6 @@ import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallFromRegistry
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallZipPath
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetEnable
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSourceAddCustom
-import com.kutedev.easemusicplayer.singleton.types.ArgPollState
 import com.kutedev.easemusicplayer.singleton.types.PluginListResult
 import com.kutedev.easemusicplayer.singleton.types.PluginMutationResult
 import com.kutedev.easemusicplayer.singleton.types.PluginSourcesResult
@@ -29,7 +28,6 @@ import com.kutedev.easemusicplayer.singleton.types.ListLogFiles
 import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
 import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
 import com.kutedev.easemusicplayer.singleton.types.MusicId
-import com.kutedev.easemusicplayer.singleton.types.PlayerPollState
 import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
 import com.kutedev.easemusicplayer.singleton.types.PlaylistId
 import com.kutedev.easemusicplayer.singleton.types.PlayMode
@@ -138,20 +136,15 @@ object BridgeMethods {
     }
 
     /**
-     * `player.*` — cantode transport ops. All methods resolve to the
-     * player handle (not the backend handle).
-     *
-     * Single-value args (SEEK, SET_VOLUME) are sent bare — Rust reads
-     * them via `let pos_ms: u64 = serde_json::from_value(req.args)?`.
+     * `player.*` — nothing typed remains: transport ops (play/pause/stop/
+     * seek/setVolume) and the state observables moved to cantode's own
+     * Kotlin half (`com.kutedev.cantode.Cantode`, via cantode's JNI
+     * bridge under the same handle id). The biz-owned player methods —
+     * `player.contextNew` / `player.new` (creation) and
+     * `player.loadMusic` (source construction + metadata writeback) —
+     * don't fit the typed catalog (raw `{handle}` / cross-handle args)
+     * and are called via [com.kutedev.easemusicplayer.singleton.Bridge.callRaw].
      */
-    object Player {
-        val PLAY = bridgeSpecNoArg<Unit>("player.play", HandleKind.PLAYER)
-        val PAUSE = bridgeSpecNoArg<Unit>("player.pause", HandleKind.PLAYER)
-        val STOP = bridgeSpecNoArg<Unit>("player.stop", HandleKind.PLAYER)
-        val SEEK = bridgeSpecArg<Long, Unit>("player.seek", HandleKind.PLAYER)
-        val SET_VOLUME = bridgeSpecArg<Float, Unit>("player.setVolume", HandleKind.PLAYER)
-        val POLL_STATE = bridgeSpecArg<ArgPollState, PlayerPollState>("player.pollState", HandleKind.PLAYER)
-    }
 
     /** `plugin.*` — plugin event dispatch + the Rust-side install layer. */
     object Plugin {

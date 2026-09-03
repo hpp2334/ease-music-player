@@ -634,6 +634,7 @@ name = "cantode"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "jni",
  "ringbuf",
  "symphonia",
  "thiserror 1.0.69",
