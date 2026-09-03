@@ -12,7 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
-import com.kutedev.easemusicplayer.core.CantodeEngine
+import com.kutedev.cantode.Cantode
 import com.kutedev.easemusicplayer.core.KeepBackendService
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.PermissionRepository
@@ -81,16 +81,16 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Build the cantode player context + player + CantodeEngine via
-     * [PlayerControllerRepository]. The CantodeEngine gets its own
-     * CoroutineScope for the 10Hz state poll loop.
+     * Build the cantode player context + player + the [Cantode] facade
+     * via [PlayerControllerRepository]. The facade is cantode's own
+     * Kotlin half (`:cantode-engine`) and talks to the engine through
+     * cantode's JNI bridge under the player handle id; it gets its own
+     * CoroutineScope for the 10 Hz poll loop.
      */
     private fun setupCantodeEngine() {
         playerControllerRepository.setupCantodeEngine { playerHandleId ->
-            CantodeEngine(
-                bridge = bridge,
-                playerRepository = playerRepository,
-                playerHandleId = playerHandleId,
+            Cantode(
+                playerHandle = playerHandleId,
                 scope = kotlinx.coroutines.CoroutineScope(
                     kotlinx.coroutines.Dispatchers.Default + SupervisorJob(),
                 ),

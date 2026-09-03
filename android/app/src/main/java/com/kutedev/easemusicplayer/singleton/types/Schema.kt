@@ -62,9 +62,6 @@ enum class PlayMode { SINGLE, SINGLE_LOOP, LIST, LIST_LOOP }
 enum class StorageEntryType { FOLDER, MUSIC, IMAGE, LYRIC, OTHER }
 
 @Serializable
-enum class PlayerStateRecord { IDLE, LOADING, PAUSED, PLAYING, BUFFERING, ENDED, ERROR }
-
-@Serializable
 enum class LyricLoadState { LOADING, MISSING, FAILED, LOADED }
 
 @Serializable
@@ -392,29 +389,7 @@ class BridgeException(val code: String, val detail: JsonElement?) :
 
 // ============================================================================
 // Player pollState batched response
+// — moved to cantode's Kotlin half (com.kutedev.cantode): the engine owns
+// its own wire (FfiPollSnapshot / PlayerState) and the app no longer
+// defines player-poll types here.
 // ============================================================================
-
-@Serializable
-data class PlayerPollState(
-    val state: PlayerStateRecord,
-    val positionMs: ULong,
-    val durationMs: ULong? = null,
-    /** Monotonic transition counter (never resets); pass it back as the
-     * next poll's [ArgPollState.sinceSeq]. */
-    val stateSeq: ULong = 0u,
-    /** State transitions recorded after the poll's `sinceSeq`, in order —
-     * lets the 10 Hz poller recover sub-tick excursions (e.g. a fast
-     * `Loading → Playing` that completed between two polls). */
-    val transitions: List<PlayerTransition> = emptyList(),
-)
-
-@Serializable
-data class PlayerTransition(
-    val seq: ULong,
-    val state: PlayerStateRecord,
-)
-
-@Serializable
-data class ArgPollState(
-    val sinceSeq: ULong = 0u,
-)

@@ -20,10 +20,7 @@
 //! `None`, a background tokio task writes the bytes via the existing
 //! [`services::update_music_cover`] path.
 
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use cantode::{AudioSource, BufferedSource, Pushed, RemoteAudioSource, StreamReply};
@@ -32,7 +29,7 @@ use ease_client_tokio::tokio_runtime;
 
 use crate::{
     error::BError,
-    objects::music::{MetadataRecord, PlayerStateRecord},
+    objects::music::MetadataRecord,
     services::{
         get_asset_file, get_music, update_music_cover, update_music_duration, ArgUpdateMusicCover,
         ArgUpdateMusicDuration,
@@ -281,7 +278,7 @@ impl PlayerContextHandle {
 /// `ct_player_pause` / `ct_player_stop` / `ct_player_seek` /
 /// `ct_player_set_volume`.
 pub struct PlayerHandle {
-    player: cantode::Player,
+    player: Arc<cantode::Player>,
 }
 
 impl PlayerHandle {
@@ -289,11 +286,21 @@ impl PlayerHandle {
         let player = cantode::Player::new(cx.context()).map_err(|e| BError::CustomError {
             message: format!("Player::new: {e:?}"),
         })?;
-        Ok(Self { player })
+        Ok(Self {
+            player: Arc::new(player),
+        })
     }
 
     pub(crate) fn with_player<R>(&self, f: impl FnOnce(&cantode::Player) -> R) -> R {
         f(&self.player)
+    }
+
+    /// The shared [`Arc<Player>`] — handed to cantode's own FFI registry
+    /// (feature `ffi`) so the Kotlin facade can address this player by the
+    /// same bridge handle id. The registry keeps a `Weak`; this handle
+    /// remains the owner.
+    pub(crate) fn player_arc(&self) -> &Arc<cantode::Player> {
+        &self.player
     }
 }
 
@@ -420,87 +427,20 @@ pub async fn ct_player_load_music(
     Ok(MetadataRecord::from_cantode(&metadata))
 }
 
-/// Begin or resume playback.
-pub async fn ct_player_play(player: Arc<PlayerHandle>) -> BResult<()> {
-    player.with_player(|p| {
-        p.play().map_err(|e| BError::CustomError {
-            message: format!("Player::play: {e:?}"),
-        })
-    })
+// Transport commands (play/pause/stop/seek/setVolume) and the state/
+// position/duration observables moved to cantode's own FFI surface
+// (`cantode::ffi`, feature `ffi`) — the Kotlin facade
+// (`com.kutedev.cantode.CantodeNative`) calls them directly by the same
+// bridge handle id (registered in `player.new` below). The load stays
+// here: source construction and the metadata→DB writeback are backend
+// (business) logic, per the cantode-owns-its-wire split.
+
+/// Register the freshly created player with cantode's FFI registry under
+/// `key`, so the Kotlin facade can address it. Idempotent.
+pub fn ct_player_register_ffi(player: &Arc<PlayerHandle>, key: u64) {
+    cantode::ffi::register_player(key, player.player_arc());
 }
 
-/// Pause playback.
-pub async fn ct_player_pause(player: Arc<PlayerHandle>) -> BResult<()> {
-    player.with_player(|p| {
-        p.pause().map_err(|e| BError::CustomError {
-            message: format!("Player::pause: {e:?}"),
-        })
-    })
-}
-
-/// Stop playback and drop the loaded source (back to Idle).
-pub async fn ct_player_stop(player: Arc<PlayerHandle>) -> BResult<()> {
-    player.with_player(|p| {
-        p.stop().map_err(|e| BError::CustomError {
-            message: format!("Player::stop: {e:?}"),
-        })
-    })
-}
-
-/// Seek to `pos_ms` milliseconds from source start. Returns the actual
-/// position seeked to (also in ms).
-pub async fn ct_player_seek(player: Arc<PlayerHandle>, pos_ms: u64) -> BResult<u64> {
-    let target = Duration::from_millis(pos_ms);
-    let actual = player.with_player(|p| {
-        p.seek(target).map_err(|e| BError::CustomError {
-            message: format!("Player::seek: {e:?}"),
-        })
-    })?;
-    Ok(actual.as_millis() as u64)
-}
-
-/// Set linear gain. `1.0` = unity, `0.0` = silent.
-pub async fn ct_player_set_volume(player: Arc<PlayerHandle>, volume: f32) -> BResult<()> {
-    player.with_player(|p| {
-        p.set_volume(volume).map_err(|e| BError::CustomError {
-            message: format!("Player::set_volume: {e:?}"),
-        })
-    })
-}
-
-/// Current externally-observable state.
-pub fn ct_player_state(player: Arc<PlayerHandle>) -> PlayerStateRecord {
-    player.with_player(|p| PlayerStateRecord::from_cantode(p.state()))
-}
-
-/// Current transition seq + the `(seq, state)` transitions recorded after
-/// `after`, in order. Lets the 10 Hz UI poll recover sub-tick excursions
-/// (e.g. a fast `Loading → Playing` that completed between two polls).
-pub fn ct_player_transitions(
-    player: Arc<PlayerHandle>,
-    after: u64,
-) -> (u64, Vec<(u64, PlayerStateRecord)>) {
-    player.with_player(|p| {
-        let (seq, entries) = p.transitions_since(after);
-        (
-            seq,
-            entries
-                .into_iter()
-                .map(|(s, st)| (s, PlayerStateRecord::from_cantode(st)))
-                .collect(),
-        )
-    })
-}
-
-/// Current playback position in milliseconds.
-pub fn ct_player_position_ms(player: Arc<PlayerHandle>) -> u64 {
-    player.with_player(|p| p.position().as_millis() as u64)
-}
-
-/// Total duration of the loaded source in milliseconds, if known.
-pub fn ct_player_duration_ms(player: Arc<PlayerHandle>) -> Option<u64> {
-    player.with_player(|p| p.duration().map(|d| d.as_millis() as u64))
-}
 
 /// Probe the duration (in ms) of a music WITHOUT playing it and WITHOUT
 /// opening any output device. Reuses the shared `PlayerContextHandle`'s

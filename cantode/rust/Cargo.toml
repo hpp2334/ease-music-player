@@ -9,6 +9,14 @@ keywords = ["audio", "player", "decoder", "symphonia", "cpal"]
 categories = ["multimedia::audio"]
 publish = false
 
+[features]
+# The JNI surface used by the Kotlin half (`cantode/kotlin`,
+# `com.kutedev.cantode`): opaque-handle registries + the
+# `Java_com_kutedev_cantode_CantodeNative_*` exports. Off by default so
+# plain library builds (tests, examples, other embedders) stay JNI-free;
+# the Android backend crate enables it.
+ffi = ["dep:jni"]
+
 [dependencies]
 thiserror = "1.0.57"
 tracing = "0.1"
@@ -27,5 +35,6 @@ symphonia = { version = "0.5", features = [
 ] }
 cpal = "0.17"
 ringbuf = "0.4"
+jni = { version = "0.21", optional = true }
 
 [dev-dependencies]
