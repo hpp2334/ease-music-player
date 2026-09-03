@@ -8,6 +8,19 @@ library.
 
 [ease]: https://github.com/hpp2334/ease-music-player
 
+## Layout
+
+The engine owns both of its halves:
+
+- [`rust/`](./rust) — the engine crate (decode + output + state machine).
+- [`kotlin/`](./kotlin) — the Kotlin facade (`com.kutedev.cantode`): a pure
+  JVM Gradle module wrapping the `ffi` JNI surface — 10 Hz poller,
+  transition replay, transport commands. Knows nothing about any app's
+  business logic.
+
+The `LICENSE-MIT` / `LICENSE-APACHE` pair at this directory's root covers
+both halves.
+
 ## Design
 
 - **Trait-based where it matters.** `AudioSource` and `Decoder` are
@@ -77,7 +90,7 @@ player.pause()?;
 
 ## Examples
 
-Runnable, end-to-end examples live in [`examples/`](./examples):
+Runnable, end-to-end examples live in [`rust/examples/`](./rust/examples):
 
 | Example | What it shows | Output device |
 |---|---|---|
@@ -97,14 +110,19 @@ same philosophy as the test suite (see [Testing requirements](#testing-requireme
 
 ## Feature flags
 
-There are none — the symphonia decoder and the cpal sink are both
+- `ffi` — the JNI surface used by the Kotlin half (`kotlin/`, `com.kutedev.cantode`):
+  opaque-handle registries + `Java_com_kutedev_cantode_CantodeNative_*` exports. Off by
+  default so plain library builds (tests, examples, other embedders) stay JNI-free; the
+  Android backend crate enables it.
+
+Otherwise there are none — the symphonia decoder and the cpal sink are both
 unconditional. To substitute a different decoder, implement `Decoder` +
 `DecoderFactory` and pass your factory to
 `PlayerContextConfig::decoder_factory`; no feature flag needed.
 
 ## Testing requirements
 
-Integration tests under `tests/` open the host's real audio output
+Integration tests under `rust/tests/` open the host's real audio output
 device (volume is set to 0.0 so the suite is silent). They panic via
 `common::require_audio_device()` when the host has no output device.
 On a headless CI runner, install a virtual loopback/null sink:
