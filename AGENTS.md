@@ -22,7 +22,7 @@ Features: WebDAV and OneDrive cloud storage (both JS plugin providers), playlist
 └──────────────────────────────┘                            └──────────────────────────────┘
 ```
 
-- **Rust side** ([`rust-libs/`](./rust-libs/)) exposes a UniFFI `Backend` object as a `cdylib`. It owns the database (SQLite via Sea-ORM), business logic, and controllers/services/repositories. Audio decode + output live in the separate [`cantode/`](./cantode/) repo-root crate (symphonia + cpal/AAudio), linked into the same `.so`.
+- **Rust side** ([`rust-libs/`](./rust-libs/)) exposes a UniFFI `Backend` object as a `cdylib`. It owns the database (SQLite via Sea-ORM), business logic, and controllers/services/repositories. Audio decode + output live in the separate [`cantode/`](./cantode/) repo-root engine (symphonia + cpal/AAudio; Rust crate in `cantode/rust/`, Kotlin facade in `cantode/kotlin/`), linked into the same `.so`.
 - **Kotlin side** ([`android/app/`](./android/app/)) talks to the backend through [`singleton/Bridge.kt`](./android/app/src/main/java/com/kutedev/easemusicplayer/singleton/Bridge.kt), which wraps the generated UniFFI bindings and exposes suspend + sync helpers.
 - **Playback**: [`cantode`](./cantode/) (Rust audio engine) decodes (symphonia: mp3/flac/vorbis/ogg/wav/aac/isomp4) and renders via cpal's AAudio backend, exposing a `PlayerHandle` over UniFFI. [`CantodeEngine`](./android/app/src/main/java/com/kutedev/easemusicplayer/core/CantodeEngine.kt) wraps the handle and polls state at ~10 Hz. [`PlaybackService`](./android/app/src/main/java/com/kutedev/easemusicplayer/core/MusicPlayer.kt) is a plain `android.app.Service` (no longer `MediaSessionService`) that owns a `MediaSessionCompat` from `androidx.media:media` for notification / lock-screen / Bluetooth / Auto integration. No media3 / ExoPlayer dependency remains.
 
@@ -77,7 +77,7 @@ Workspace root: [`rust-libs/Cargo.toml`](./rust-libs/Cargo.toml) (resolver = `"2
 | `ease-client-android-ffi-builder` | Binary wrapping `uniffi bindgen` to generate the Kotlin bindings used by `build-jni-libs.ts`. |
 | `ease-order-key` | Standalone orderable-key utility. **Dual MIT OR Apache-2.0 license** (different from the rest). |
 | `ease-remote-storage` (path dep, not a workspace member) | Storage backend trait + `LocalBackend` (the native WebDAV client was removed when WebDAV became a JS plugin). GPL-3.0. |
-| [`cantode/`](./cantode/) (repo root, **not** in `rust-libs/` workspace) | Standalone cross-platform audio engine: symphonia decode + cpal/AAudio output behind a trait-based API. Exposes `PlayerHandle` over UniFFI to the Android app; linked into the same `.so` as `ease-client-backend`. Edition 2024, **dual MIT OR Apache-2.0 license** (matches `ease-order-key`, different from the GPL-3.0 main app). |
+| [`cantode/`](./cantode/) (repo root, **not** in `rust-libs/` workspace) | Standalone cross-platform audio engine owning both halves: `cantode/rust/` (symphonia decode + cpal/AAudio output behind a trait-based API; `ffi` feature adds the JNI surface) and `cantode/kotlin/` (pure-JVM Gradle module `:cantode-engine`, package `com.kutedev.cantode` — the Kotlin facade; no biz logic). Linked into the same `.so` as `ease-client-backend`. Edition 2024, **dual MIT OR Apache-2.0 license** (matches `ease-order-key`, different from the GPL-3.0 main app). |
 
 Notable Rust constraints: UniFFI pinned to `=0.28.3` with the `tokio` feature; SQLite is force-bundled (`libsqlite3-sys` `bundled`) for cross-compilation; Sea-ORM 1.1 with sqlx-sqlite + runtime-tokio-rustls.
 
