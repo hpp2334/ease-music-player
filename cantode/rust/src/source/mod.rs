@@ -43,6 +43,26 @@ pub enum Readiness {
     NeedsData,
 }
 
+/// The contiguous buffered byte window of a buffering source.
+///
+/// Reported by [`AudioSource::buffered_range`] — sources that maintain a
+/// readahead window (see [`BufferedSource`](crate::BufferedSource))
+/// describe it in absolute byte offsets so an embedder can render
+/// "buffered amount" UI. Non-buffering sources report `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BufferedRange {
+    /// Absolute byte offset where the contiguous window starts. Only
+    /// moves forward (consumed-prefix eviction); a seek resets it to the
+    /// seek target.
+    pub start: u64,
+    /// Absolute byte offset of the window's end (exclusive) — the
+    /// buffered frontier.
+    pub end: u64,
+    /// Total resource length in bytes, when known (`Content-Length`,
+    /// ...). `None` for streams of unknown length.
+    pub total: Option<u64>,
+}
+
 /// A seekable byte source feeding the decoder.
 ///
 /// `AudioSource` is intentionally **synchronous**. symphonia — cantode's
@@ -88,6 +108,14 @@ pub trait AudioSource: Read + Seek + Send + Sync {
     /// `Buffering` behavior.
     fn readiness(&self) -> Readiness {
         Readiness::Ready
+    }
+
+    /// The contiguous buffered window around the read cursor, for
+    /// embedder "buffered amount" UI. See [`BufferedRange`]. Default
+    /// `None` — sources that maintain a readahead window
+    /// ([`BufferedSource`](crate::BufferedSource)) override this.
+    fn buffered_range(&self) -> Option<BufferedRange> {
+        None
     }
 
     /// Bound the parks of subsequent `Read` calls: while

@@ -45,4 +45,7 @@ internal data class FfiPollSnapshot(
     val transitions: List<FfiTransition> = emptyList(),
     val positionMs: Long = 0,
     val durationMs: Long? = null,
+    /** Buffered frontier in media time; `null` for non-buffering
+     *  sources or while total length / duration is unknown. */
+    val bufferedMs: Long? = null,
 )

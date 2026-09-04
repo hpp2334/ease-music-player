@@ -35,7 +35,8 @@ import kotlin.math.max
  * Transport control surface for the player.
  *
  * Owns the cantode player handle IDs (registered on the Rust side) and
- * the [CantodeEngine] wrapper.
+ * the [Cantode] engine facade (cantode's own Kotlin half, reached
+ * through cantode's JNI bridge under the same handle id).
  *
  * Lifecycle:
  * 1. [com.kutedev.easemusicplayer.MainActivity.onCreate] runs `bridge.initialize()`,
@@ -182,7 +183,17 @@ class PlayerControllerRepository @Inject constructor(
         return _cantodeEngine.value?.positionMs?.value ?: 0L
     }
 
-    fun getBufferedPosition(): Long = getCurrentPosition()
+    /**
+     * Buffered frontier in ms (media time) — how far ahead of playback
+     * contiguous data is buffered, from the engine facade's 10 Hz poll.
+     * Falls back to the duration for sources the engine can't map to
+     * media time (non-buffering sources like local files are effectively
+     * fully buffered), then to 0.
+     */
+    fun getBufferedPosition(): Long {
+        val engine = _cantodeEngine.value ?: return 0L
+        return engine.bufferedMs.value ?: engine.durationMs.value ?: 0L
+    }
 
     fun play(id: MusicId, playlistId: PlaylistId) {
         if (playerId < 0) {

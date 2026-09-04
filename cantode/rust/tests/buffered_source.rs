@@ -467,6 +467,54 @@ fn demand_rises_as_reads_drain() {
 }
 
 #[test]
+fn buffered_range_tracks_the_window() {
+    // `buffered_range` is the embedder-facing projection of the window:
+    // start/end in absolute bytes plus the reported total. It fills to
+    // cursor+readahead, keeps its start below the retention cap, and
+    // resets with the window on an out-of-window seek.
+    let data = pattern(128 * 1024, |i| (i * 5) as u8);
+    let (fake, _h) = fake(Arc::clone(&data)).finish();
+    let mut src = BufferedSource::with_readahead(8 * 1024, fake);
+
+    // The construction-time session fills the window at cursor 0.
+    assert!(
+        wait_until(Duration::from_secs(2), || {
+            src.buffered_range()
+                .is_some_and(|r| r.start == 0 && r.end == 8 * 1024)
+        }),
+        "window must fill to readahead: {:?}",
+        src.buffered_range()
+    );
+    assert_eq!(src.buffered_range().unwrap().total, Some(data.len() as u64));
+
+    // Reads advance the cursor; the window refills to cursor+readahead.
+    read_n(&mut src, 4 * 1024).unwrap();
+    assert!(
+        wait_until(Duration::from_secs(2), || {
+            src.buffered_range().is_some_and(|r| r.end == 12 * 1024)
+        }),
+        "window must refill to cursor+readahead: {:?}",
+        src.buffered_range()
+    );
+    assert_eq!(
+        src.buffered_range().unwrap().start,
+        0,
+        "no consumed-prefix eviction below the retention cap"
+    );
+
+    // An out-of-window seek resets the window to the target.
+    src.seek(SeekFrom::Start(60_000)).unwrap();
+    assert!(
+        wait_until(Duration::from_secs(2), || {
+            src.buffered_range()
+                .is_some_and(|r| r.start == 60_000 && r.end == 60_000 + 8 * 1024)
+        }),
+        "window must restart at the seek target: {:?}",
+        src.buffered_range()
+    );
+}
+
+#[test]
 fn seek_inside_window_hits_no_network() {
     // Readahead ≥ resource: one session covers everything, and its EOF
     // means no top-ups — so any second open would have to come from the
@@ -895,4 +943,38 @@ fn persistent_error_stays_playing_silent() {
     }
     assert!(!saw_ended, "persistent session errors must not emit Ended");
     assert_eq!(errors, 1, "expected exactly one Error event, got {errors}");
+}
+
+#[test]
+fn buffered_position_tracks_the_window_in_media_time() {
+    // `Player::buffered_position` is the bytes→media-time projection of
+    // the mirrored window: `Some` and inside (0, duration] once the
+    // readahead fills, and exactly the duration once everything has been
+    // delivered (decode reached EOF, the window spans the tail).
+    let data = wav(2.0);
+    let (fake, _h) = fake(Arc::clone(&data)).chunk(4 * 1024).finish();
+    let harness = harness_with(fake, 16 * 1024);
+    let duration = harness.player.duration().expect("wav carries a duration");
+
+    harness.player.play().unwrap();
+    assert!(
+        wait_until(Duration::from_secs(5), || harness
+            .player
+            .buffered_position()
+            .is_some_and(|p| p > Duration::ZERO && p <= duration)),
+        "buffered position must land inside (0, duration]: {:?}",
+        harness.player.buffered_position()
+    );
+
+    assert!(
+        wait_for_ended(&harness.events, Duration::from_secs(10)),
+        "play-through must end"
+    );
+    // Everything delivered: the buffered frontier is the whole track.
+    assert_eq!(
+        harness.player.buffered_position(),
+        Some(duration),
+        "frontier must reach the duration at EOF (window: {:?})",
+        harness.player.buffered_range()
+    );
 }

@@ -15,10 +15,14 @@
 //! The loop parks in `recv_timeout`: **5 ms while `Playing` or
 //! `Buffering`** (so decode work / refill polls interleave with command
 //! handling — a command arriving mid-wait wakes the loop instantly; the
-//! timeout is the idle fallback, not added latency), and one hour
-//! otherwise (pure event-driven idling, with the timeout acting only as
-//! a watchdog). Each timeout tick pumps exactly one frame while playing,
-//! or polls the source's readiness while buffering. The pump loop is a
+//! timeout is the idle fallback, not added latency), **250 ms while
+//! `Paused` with a buffering source** (keeping the buffered-window
+//! observable live while the source's session thread fills the readahead
+//! window in the background), and one hour otherwise (pure event-driven
+//! idling, with the timeout acting only as a watchdog). Each timeout tick
+//! pumps exactly one frame while playing, polls the source's readiness
+//! while buffering, and refreshes the buffered-window mirror while
+//! paused. The pump loop is a
 //! buffer-*filler*, not the pacer: the sink's blocking write matches
 //! decode speed to playback speed once its ring is full, and the 5 ms
 //! quantum just guarantees the worker re-enters `recv_timeout` between
@@ -56,6 +60,13 @@ const POSITION_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 /// (device stalled or paused mid-drain) before giving up and ending
 /// anyway. Generous compared to the sink ring buffer's ~3 s capacity.
 const DRAIN_MAX_STALL: Duration = Duration::from_secs(8);
+
+/// How often the worker refreshes the buffered-window observable while
+/// `Paused` with a buffering source. The 5 ms playing/buffering ticks
+/// refresh it on every pass anyway; this slow tick exists so a paused
+/// player still reports a window that keeps filling in the background
+/// (the source's session thread is independent of transport state).
+const BUFFERED_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Tail-drain state: decode reached EOF, but the sink still holds up to
 /// its full ring buffer (~3 s) of decoded-but-unheard audio.
@@ -128,16 +139,7 @@ impl Worker {
 
     pub(super) fn run(&mut self) {
         loop {
-            // If we're playing (or buffering, waiting on the source), use
-            // a short timeout so decode work / refill polls interleave
-            // with command handling; otherwise block on commands.
-            let timeout = if self.machine.is_playing() || self.machine.is_buffering() {
-                // Short timeout so we can interleave decode work.
-                Duration::from_millis(5)
-            } else {
-                Duration::from_secs(60 * 60)
-            };
-
+            let timeout = self.next_timeout();
             match self.cmd_rx.recv_timeout(timeout) {
                 Ok(cmd) => {
                     if self.handle_command(cmd) {
@@ -149,6 +151,11 @@ impl Worker {
                         self.pump_once();
                     } else if self.machine.is_buffering() {
                         self.poll_refill();
+                    } else if self.machine.is_paused() {
+                        // No pipeline work while paused — just keep the
+                        // buffered-window mirror live while the source's
+                        // session thread fills the readahead window.
+                        self.refresh_buffered();
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -156,6 +163,46 @@ impl Worker {
                     return;
                 }
             }
+        }
+    }
+
+    /// The park duration for the next `recv_timeout` iteration.
+    ///
+    /// - 5 ms while `Playing` or `Buffering`, so decode work / refill
+    ///   polls interleave with command handling — a command arriving
+    ///   mid-wait wakes the loop instantly; the timeout is the idle
+    ///   fallback, not added latency.
+    /// - [`BUFFERED_REFRESH_INTERVAL`] while `Paused` **with a buffering
+    ///   source**: its session thread keeps filling the readahead window
+    ///   in the background, and the observable mirror must follow.
+    /// - One hour otherwise (pure event-driven idling, with the timeout
+    ///   acting only as a watchdog).
+    fn next_timeout(&mut self) -> Duration {
+        if self.machine.is_playing() || self.machine.is_buffering() {
+            // Short timeout so we can interleave decode work.
+            Duration::from_millis(5)
+        } else if self.machine.is_paused() && self.session_reports_buffered() {
+            BUFFERED_REFRESH_INTERVAL
+        } else {
+            Duration::from_secs(60 * 60)
+        }
+    }
+
+    /// Whether the live session's source maintains a buffered window
+    /// (`AudioSource::buffered_range`). Non-buffering sources (memory,
+    /// local files) keep the worker's pure event-driven idle.
+    fn session_reports_buffered(&mut self) -> bool {
+        self.machine
+            .loaded_mut()
+            .is_some_and(|loaded| loaded.buffered_range().is_some())
+    }
+
+    /// Mirror the session source's buffered window into the shared
+    /// observables. Called from the playing/buffering ticks and the slow
+    /// paused tick — the read is a cheap lock on the source's state.
+    fn refresh_buffered(&mut self) {
+        if let Some(loaded) = self.machine.loaded_mut() {
+            self.shared.set_buffered_range(loaded.buffered_range());
         }
     }
 
@@ -284,6 +331,8 @@ impl Worker {
     /// Playing-loop body — also while a tail drain is pending, in which
     /// case the tick drives [`Worker::drain_tick`] instead of a decode.
     fn pump_once(&mut self) {
+        // Every playing tick refreshes the buffered-window mirror.
+        self.refresh_buffered();
         if self.drain.is_some() {
             self.drain_tick();
             return;
@@ -408,6 +457,9 @@ impl Worker {
     /// live — the pump is parked, but the device keeps draining its ring,
     /// so the audible position keeps advancing until the ring runs dry.
     fn poll_refill(&mut self) {
+        // Every buffering tick refreshes the buffered-window mirror —
+        // this is the state where it visibly grows.
+        self.refresh_buffered();
         let live = self
             .machine
             .loaded_mut()
@@ -444,9 +496,12 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::AudioFormat;
     use crate::CantodeError;
     use crate::decoder::DecodedFrame;
-    use crate::player::stubs::{FrameDecoder, StubFactory, loaded_session, loaded_session_with};
+    use crate::player::stubs::{
+        FrameDecoder, StubDecoder, StubFactory, loaded_session, loaded_session_with,
+    };
     use crate::state::PlayerState;
 
     fn worker_with(machine: Machine, shared: Arc<SharedStatus>) -> Worker {
@@ -603,5 +658,79 @@ mod tests {
         assert_eq!(worker.machine.state(), PlayerState::Playing);
         worker.pump_once(); // drain completes instantly (target 0 = pos 0)
         assert_eq!(worker.machine.state(), PlayerState::Ended);
+    }
+
+    #[test]
+    fn refresh_buffered_mirrors_the_session_range() {
+        // A paused session whose source reports a window: one tick
+        // publishes it into the shared observables.
+        let range = crate::BufferedRange {
+            start: 0,
+            end: 1024,
+            total: Some(4096),
+        };
+        let (loaded, fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: None,
+                buffered: Some(range),
+            },
+            2,
+            2,
+        );
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        assert_eq!(fx.shared.buffered_range(), None);
+
+        worker.refresh_buffered();
+
+        assert_eq!(fx.shared.buffered_range(), Some(range));
+    }
+
+    #[test]
+    fn paused_with_a_buffering_source_uses_the_slow_refresh_tick() {
+        let range = crate::BufferedRange {
+            start: 0,
+            end: 1,
+            total: Some(2),
+        };
+        let (loaded, fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: None,
+                buffered: Some(range),
+            },
+            2,
+            2,
+        );
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        assert_eq!(worker.machine.state(), PlayerState::Paused);
+        assert_eq!(worker.next_timeout(), BUFFERED_REFRESH_INTERVAL);
+
+        // Playing keeps the fast decode tick.
+        worker.machine.play();
+        assert_eq!(worker.next_timeout(), Duration::from_millis(5));
+
+        // And back to paused — still the slow tick.
+        worker.machine.pause();
+        assert_eq!(worker.next_timeout(), BUFFERED_REFRESH_INTERVAL);
+    }
+
+    #[test]
+    fn paused_without_a_buffering_source_keeps_the_idle_park() {
+        // Non-buffering sources (memory, local files) must not keep the
+        // worker waking: the pure event-driven 1 h idle is preserved.
+        let (loaded, fx) = loaded_session(2, 2); // buffered: None
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        assert_eq!(worker.machine.state(), PlayerState::Paused);
+        assert_eq!(worker.next_timeout(), Duration::from_secs(60 * 60));
     }
 }

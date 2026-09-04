@@ -91,8 +91,8 @@ pub use metadata::{CoverArt, Metadata, Tag, probe_metadata};
 pub use output::{AudioSink, AudioSinkFactory};
 pub use player::{Player, PlayerConfig};
 pub use source::{
-    AudioSource, BufferedSource, MemoryAudioSource, Pushed, Readiness, RemoteAudioSource,
-    StreamReply,
+    AudioSource, BufferedRange, BufferedSource, MemoryAudioSource, Pushed, Readiness,
+    RemoteAudioSource, StreamReply,
 };
 pub use state::PlayerState;
 

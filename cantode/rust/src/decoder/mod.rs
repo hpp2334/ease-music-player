@@ -130,6 +130,14 @@ pub trait Decoder: Send {
         crate::Readiness::Ready
     }
 
+    /// The contiguous buffered window of the underlying source, for
+    /// embedder "buffered amount" UI. Forwards
+    /// [`AudioSource::buffered_range`] when the decoder can still reach
+    /// its source; default `None`.
+    fn buffered_range(&self) -> Option<crate::BufferedRange> {
+        None
+    }
+
     /// Arm/clear the play-path read deadline on the underlying source
     /// (see [`AudioSource::set_read_deadline`]).
     /// The player's pump arms a short deadline around each decode step so
