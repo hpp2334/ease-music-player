@@ -24,7 +24,7 @@ use crate::{
     controllers::{
         asset::ct_get_asset,
         debug::{cts_list_log_files, cts_trigger_error, cts_trigger_panic},
-        music::{ct_get_music, ct_update_music_lyric},
+        music::{ct_get_music, ct_load_music_lyric, ct_update_music_lyric},
         playlist::{
             ct_add_musics_to_playlist, ct_create_playlist, ct_get_playlist, ct_list_playlist,
             ct_remove_music_from_playlist, ct_remove_playlist, ct_update_playlist,
@@ -128,6 +128,12 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let id: MusicId = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
             let result = ct_get_music(cx, id).await?;
+            Ok((serde_json::to_value(result)?, vec![]))
+        }
+        "music.loadLyric" => {
+            let id: MusicId = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let result = ct_load_music_lyric(cx, id).await?;
             Ok((serde_json::to_value(result)?, vec![]))
         }
         "music.getAbstract" => {

@@ -62,6 +62,7 @@ class PlayerControllerRepository @Inject constructor(
     private val _sleep = MutableStateFlow(SleepModeState())
 
     private var _sleepJob: Job? = null
+    private var lyricJob: Job? = null
     private val nextMusic = playerRepository.nextMusic
     private val previousMusic = playerRepository.previousMusic
 
@@ -212,13 +213,21 @@ class PlayerControllerRepository @Inject constructor(
 
         runCatching { PlaybackService.start(cx) }
 
+        // Stop the old track at tap time — its audio must not keep
+        // sounding while the new track's metadata is read and its source
+        // buffers. The engine reports Loading (spinner) as soon as
+        // `player.loadMusic` below reaches the worker; the optimistic
+        // flag keeps the UI in its loading state until then.
+        engine.stop()
+        playerRepository.setIsLoading(true)
+
         _scope.launch(Dispatchers.Main) {
             // No early `resetCurrent()` here: blanking the current music
             // first makes the title vanish, the mini bar disappear and the
-            // slider go stale for the whole load window. The old track's
-            // UI stays visible until `setCurrent(new)` below — the engine
-            // meanwhile reports Loading (spinner) once the load reaches
-            // the worker, and the old audio keeps sounding until then.
+            // slider go stale for the whole load window. `music.get` is
+            // DB-only (the lyric arrives via the `lyricJob` follow-up
+            // below), so `setCurrent(new)` lands within milliseconds —
+            // until then the old track's UI stays visible, silent.
             _pluginEvents.tryEmit(
                 PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
             )
@@ -231,6 +240,21 @@ class PlayerControllerRepository @Inject constructor(
 
             if (inPlaylist) {
                 playerRepository.setCurrent(music!!, playlist!!)
+
+                // Lyric follow-up: fetch + parse over the storage seam in
+                // the background and patch the result into the current
+                // music — the pane shows its LOADING spinner meanwhile.
+                // Superseded by each new play() and id-guarded at apply
+                // time, so a stale fetch can't land on a newer track.
+                lyricJob?.cancel()
+                lyricJob = _scope.launch {
+                    val lyric = bridge.call(BridgeMethods.Music.LOAD_LYRIC, id)
+                        .unwrapOrNull()?.payload
+                    if (_music.value?.meta?.id == id) {
+                        playerRepository.updateMusicLyric(id, lyric)
+                    }
+                }
+
                 // The load itself stays on the backend bridge — source
                 // construction (storage plugins) and the metadata→DB
                 // writeback are business logic. `autoplay` completes it
@@ -252,10 +276,10 @@ class PlayerControllerRepository @Inject constructor(
                     )
                 )
             } else {
-                // Music/playlist gone: reset the UI (only now) and stop
-                // the engine — nothing to load.
+                // Music/playlist gone: reset the UI and the loading flag —
+                // the engine was already stopped above; nothing to load.
+                playerRepository.setIsLoading(false)
                 playerRepository.resetCurrent()
-                engine.stop()
             }
         }
     }
