@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
 import com.kutedev.easemusicplayer.singleton.types.Music
+import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.MusicLyric
 import com.kutedev.easemusicplayer.singleton.types.Playlist
 import com.kutedev.easemusicplayer.singleton.types.PlayMode
 import javax.inject.Inject
@@ -108,6 +110,18 @@ class PlayerRepository @Inject constructor(
     fun setCurrent(music: Music, playlist: Playlist) {
         _music.value = music
         _playlist.value = playlist
+    }
+
+    /**
+     * Patch the lyric into the current music (the async follow-up to
+     * `music.get`, whose lyric arrives as a LOADING placeholder). No-op
+     * when the current music is not [id] — e.g. a stale fetch racing a
+     * subsequent track switch.
+     */
+    fun updateMusicLyric(id: MusicId, lyric: MusicLyric?) {
+        val m = _music.value ?: return
+        if (m.meta.id != id) return
+        _music.value = m.copy(lyric = lyric)
     }
 
     fun resetCurrent() {

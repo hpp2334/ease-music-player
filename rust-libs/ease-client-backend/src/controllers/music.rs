@@ -5,10 +5,10 @@ use ease_client_schema::MusicId;
 
 use crate::{
     error::BResult,
-    objects::Music,
+    objects::{Music, MusicLyric},
     services::{
-        get_music, get_music_abstract, update_music_cover, update_music_duration,
-        ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric,
+        get_music, get_music_abstract, load_music_lyric, update_music_cover,
+        update_music_duration, ArgUpdateMusicCover, ArgUpdateMusicDuration, ArgUpdateMusicLyric,
     },
     Backend, MusicAbstract,
 };
@@ -19,6 +19,19 @@ pub async fn ct_get_music(cx: Arc<Backend>, id: MusicId) -> BResult<Option<Music
         .spawn(async move {
             let cx = cx.get_context();
             get_music(cx, id).await
+        })
+        .await
+        .unwrap()
+}
+
+/// Fetch + parse the lyric for a music over the storage seam — the
+/// network-bound follow-up to the DB-only [`ct_get_music`].
+pub async fn ct_load_music_lyric(cx: Arc<Backend>, id: MusicId) -> BResult<Option<MusicLyric>> {
+    tokio_runtime()
+        .handle()
+        .spawn(async move {
+            let cx = cx.get_context();
+            load_music_lyric(cx, id).await
         })
         .await
         .unwrap()

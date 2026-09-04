@@ -28,6 +28,7 @@ import com.kutedev.easemusicplayer.singleton.types.ListLogFiles
 import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
 import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
 import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.MusicLyric
 import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
 import com.kutedev.easemusicplayer.singleton.types.PlaylistId
 import com.kutedev.easemusicplayer.singleton.types.PlayMode
@@ -125,6 +126,14 @@ object BridgeMethods {
     object Music {
         val GET = bridgeSpecArg<MusicId, TMusic?>("music.get")
         val GET_ABSTRACT = bridgeSpecArg<MusicId, MusicAbstract?>("music.getAbstract")
+
+        /**
+         * Network-bound lyric fetch — the follow-up to [GET]. [GET] is
+         * DB-only and returns the lyric as a `LOADING` placeholder; this
+         * loads + parses the bytes over the storage seam so the caller can
+         * patch the result in without gating the track switch on it.
+         */
+        val LOAD_LYRIC = bridgeSpecArg<MusicId, MusicLyric?>("music.loadLyric")
         val UPDATE_LYRIC = bridgeSpecArg<ArgUpdateMusicLyric, Unit>("music.updateLyric")
         val UPDATE_DURATION = bridgeSpecArg<ArgUpdateMusicDuration, Unit>("music.updateDuration")
     }
