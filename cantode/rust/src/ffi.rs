@@ -35,14 +35,17 @@
 //! ```json
 //! {"state":"LOADING","stateSeq":3,
 //!  "transitions":[{"seq":1,"state":"LOADING"},{"seq":2,"state":"PLAYING"}],
-//!  "positionMs":1234,"durationMs":210000}
+//!  "positionMs":1234,"durationMs":210000,"bufferedMs":15000}
 //! ```
 //!
 //! `transitions` are the engine's state-history entries after `sinceSeq`
 //! (see [`Player::transitions_since`]); replaying them lets a sampling
 //! poller recover sub-tick excursions. `durationMs` is `null` until a
-//! load completes. State names are `SCREAMING_SNAKE_CASE` — keep them in
-//! sync with the Kotlin `PlayerState` enum.
+//! load completes. `bufferedMs` is the buffered frontier in media time
+//! (see [`Player::buffered_position`]); `null` for non-buffering sources
+//! or while the total length / duration is unknown. State names are
+//! `SCREAMING_SNAKE_CASE` — keep them in sync with the Kotlin
+//! `PlayerState` enum.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -126,16 +129,17 @@ fn poll_json(p: &Player, since_seq: u64) -> String {
         .map(|(seq, st)| format!(r#"{{"seq":{seq},"state":"{}"}}"#, state_str(*st)))
         .collect();
     format!(
-        r#"{{"state":"{}","stateSeq":{state_seq},"transitions":[{}],"positionMs":{},"durationMs":{}}}"#,
+        r#"{{"state":"{}","stateSeq":{state_seq},"transitions":[{}],"positionMs":{},"durationMs":{},"bufferedMs":{}}}"#,
         state_str(p.state()),
         transitions.join(","),
         p.position().as_millis(),
         p.duration().map(|d| d.as_millis().to_string()).unwrap_or_else(|| "null".into()),
+        p.buffered_position().map(|d| d.as_millis().to_string()).unwrap_or_else(|| "null".into()),
     )
 }
 
 /// Batched engine snapshot: state + transition history since `sinceSeq`
-/// + position + duration. Call at ~10 Hz.
+/// + position + duration + buffered position. Call at ~10 Hz.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_cantode_CantodeNative_poll<'local>(
     mut env: JNIEnv<'local>,

@@ -60,7 +60,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{AudioSource, Readiness};
+use super::{AudioSource, BufferedRange, Readiness};
 
 /// Default readahead: the buffered-ahead bytes the session tries to
 /// maintain beyond the read cursor. Several seconds-to-a-minute of
@@ -308,8 +308,12 @@ impl BufferedSource {
     /// only moves forward (consumed-prefix eviction); a seek resets it to
     /// the seek target.
     pub fn loaded_window(&self) -> (u64, usize) {
-        let st = self.shared.st.lock().unwrap();
-        (st.window_start, st.window.len())
+        match self.buffered_range() {
+            Some(r) => (r.start, (r.end - r.start) as usize),
+            // `buffered_range` is total for this type; the arm exists
+            // only because the helper returns an Option.
+            None => (0, 0),
+        }
     }
 }
 
@@ -447,6 +451,15 @@ impl AudioSource for BufferedSource {
         } else {
             Readiness::Ready
         }
+    }
+
+    fn buffered_range(&self) -> Option<BufferedRange> {
+        let st = self.shared.st.lock().unwrap();
+        Some(BufferedRange {
+            start: st.window_start,
+            end: st.window_start + st.window.len() as u64,
+            total: st.total_len,
+        })
     }
 
     fn set_read_deadline(&mut self, deadline: Option<Duration>) {

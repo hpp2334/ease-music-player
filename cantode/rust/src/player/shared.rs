@@ -12,8 +12,8 @@
 //! Fields are private and access is method-only, which is also how the
 //! ownership split is enforced: `set_state` is called by the
 //! [`Machine`](super::phase::Machine) alone, `set_position` by the
-//! [`Loaded`](super::session::Loaded) session alone, `set_duration` by
-//! the worker's load path alone, and
+//! [`Loaded`](super::session::Loaded) session alone, `set_duration` and
+//! `set_buffered_range` by the worker alone, and
 //! `reset_session_observables` by `Loaded::drop` alone. The transition
 //! log is likewise appended by `set_state` alone — one entry per real
 //! state change.
@@ -26,6 +26,7 @@ use std::sync::{
 use std::time::Duration;
 
 use crate::state::PlayerState;
+use crate::BufferedRange;
 
 /// How many recent transitions the log keeps. The poller drains at 10 Hz
 /// and transitions are rare (a handful per track), so 16 is generous; if
@@ -41,6 +42,9 @@ pub(super) struct SharedStatus {
     /// Duration of the loaded source; set by the worker on load success,
     /// reset by `Loaded::drop`.
     duration: Mutex<Option<Duration>>,
+    /// Contiguous buffered window of the loaded source (when it maintains
+    /// one); mirrored by the worker on its ticks, reset by `Loaded::drop`.
+    buffered: Mutex<Option<BufferedRange>>,
     /// Monotonic transition counter — bumped once per real state change
     /// (the machine only commits on change), never reset.
     transition_seq: AtomicU64,
@@ -57,6 +61,7 @@ impl SharedStatus {
             state: AtomicState::new(PlayerState::Idle),
             position: AtomicPosition::new(),
             duration: Mutex::new(None),
+            buffered: Mutex::new(None),
             transition_seq: AtomicU64::new(0),
             transitions: Mutex::new(VecDeque::new()),
         }
@@ -114,11 +119,24 @@ impl SharedStatus {
         *self.duration.lock().unwrap() = d;
     }
 
-    /// Reset the session-scoped observables (position, duration).
-    /// `Loaded::drop` only — session death is the one reset point.
+    /// The source's contiguous buffered window, when it maintains one.
+    pub(super) fn buffered_range(&self) -> Option<BufferedRange> {
+        *self.buffered.lock().unwrap()
+    }
+
+    /// Mirror the source's buffered window (worker's periodic refresh —
+    /// see the worker's ticks). Worker only.
+    pub(super) fn set_buffered_range(&self, r: Option<BufferedRange>) {
+        *self.buffered.lock().unwrap() = r;
+    }
+
+    /// Reset the session-scoped observables (position, duration,
+    /// buffered window). `Loaded::drop` only — session death is the one
+    /// reset point.
     pub(super) fn reset_session_observables(&self) {
         self.position.store(Duration::ZERO);
         *self.duration.lock().unwrap() = None;
+        *self.buffered.lock().unwrap() = None;
     }
 }
 

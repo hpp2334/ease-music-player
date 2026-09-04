@@ -46,7 +46,7 @@ use std::{
 };
 
 use crate::{
-    AudioSource, CantodeError, Metadata, PlayerState,
+    AudioSource, BufferedRange, CantodeError, Metadata, PlayerState,
     context::{PlayerContext, PlayerHandle},
     events::{EventSink, PlayerEvent},
     output::AudioSinkFactory,
@@ -284,6 +284,32 @@ impl Player {
         self.shared.duration()
     }
 
+    /// The loaded source's contiguous buffered window, when it maintains
+    /// one (see [`AudioSource::buffered_range`]). Session-scoped: `None`
+    /// without a loaded source or for non-buffering sources (memory,
+    /// local files). Mirrored by the worker on its ticks — 5 ms while
+    /// playing/buffering, ~250 ms while paused with a buffering source —
+    /// so this trails the source by at most one tick.
+    pub fn buffered_range(&self) -> Option<BufferedRange> {
+        self.shared.buffered_range()
+    }
+
+    /// The buffered frontier in **media time**: how far ahead of (or
+    /// around) the read cursor contiguous data is buffered, derived from
+    /// [`Player::buffered_range`] by linear interpolation over the
+    /// source's total byte length (`duration × end / total`).
+    ///
+    /// `None` while any of the window, the total byte length, or the
+    /// duration is unknown (non-buffering sources, streams without a
+    /// reported length, containers without a duration). The linear
+    /// mapping is an approximation — exact for CBR containers, drifting
+    /// for VBR — which is the standard trade-off for buffered-amount UI.
+    pub fn buffered_position(&self) -> Option<Duration> {
+        let range = self.buffered_range()?;
+        let duration = self.duration()?;
+        buffered_media_time(&range, duration)
+    }
+
     // ---- internals ----
 
     fn send(&self, cmd: Command) -> crate::Result<()> {
@@ -307,5 +333,86 @@ impl Drop for Player {
         if let Some(join) = self.join.lock().unwrap().take() {
             let _ = join.join();
         }
+    }
+}
+
+/// Map a buffered byte window onto media time by linear interpolation
+/// over the source's total byte length: `duration × end / total`.
+///
+/// `None` when the inputs can't produce a meaningful result (unknown
+/// total, empty resource, zero duration). The result is clamped to the
+/// duration — defensive only, since the window can never legitimately
+/// reach past the total.
+fn buffered_media_time(range: &BufferedRange, duration: Duration) -> Option<Duration> {
+    let total = range.total?;
+    if total == 0 || duration.is_zero() {
+        return None;
+    }
+    let end = range.end.min(total);
+    let ms = (duration.as_millis() * end as u128 / total as u128).min(u64::MAX as u128);
+    Some(Duration::from_millis(ms as u64))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the bytes→media-time interpolation behind
+    //! [`Player::buffered_position`]. The full mirror path (worker ticks
+    //! → `SharedStatus`) is covered by the session/worker tests; the
+    //! engine-side integration lives in `tests/buffered_source.rs`.
+
+    use super::*;
+
+    fn range(start: u64, end: u64, total: Option<u64>) -> BufferedRange {
+        BufferedRange { start, end, total }
+    }
+
+    #[test]
+    fn half_the_bytes_is_half_the_duration() {
+        let got = buffered_media_time(
+            &range(0, 500, Some(1000)),
+            Duration::from_secs(200),
+        )
+        .unwrap();
+        assert_eq!(got, Duration::from_secs(100));
+    }
+
+    #[test]
+    fn full_window_reaches_the_duration() {
+        let got = buffered_media_time(
+            &range(400, 1000, Some(1000)),
+            Duration::from_secs(200),
+        )
+        .unwrap();
+        assert_eq!(got, Duration::from_secs(200));
+    }
+
+    #[test]
+    fn unknown_total_or_degenerate_inputs_are_none() {
+        assert!(buffered_media_time(&range(0, 500, None), Duration::from_secs(10)).is_none());
+        assert!(buffered_media_time(&range(0, 0, Some(0)), Duration::from_secs(10)).is_none());
+        assert!(buffered_media_time(&range(0, 500, Some(1000)), Duration::ZERO).is_none());
+    }
+
+    #[test]
+    fn end_beyond_the_total_clamps_to_the_duration() {
+        // Defensive: a (buggy) window past the reported total must not
+        // extrapolate past the duration.
+        let got = buffered_media_time(
+            &range(0, 2000, Some(1000)),
+            Duration::from_secs(200),
+        )
+        .unwrap();
+        assert_eq!(got, Duration::from_secs(200));
+    }
+
+    #[test]
+    fn interpolation_rounds_down() {
+        // 1000 ms × 1/3 byte → 333 ms.
+        let got = buffered_media_time(
+            &range(0, 1, Some(3)),
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert_eq!(got, Duration::from_millis(333));
     }
 }

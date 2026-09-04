@@ -184,6 +184,12 @@ impl Loaded {
         self.decoder.readiness()
     }
 
+    /// Forward of [`Decoder::buffered_range`]: the source's contiguous
+    /// buffered window, when it maintains one.
+    pub(super) fn buffered_range(&self) -> Option<crate::BufferedRange> {
+        self.decoder.buffered_range()
+    }
+
     /// Seek choreography in one place: decoder seek, flush the sink's
     /// buffered audio (it holds up to `buffer_secs` of pre-seek samples
     /// that would otherwise play out before the new position's audio
@@ -283,10 +289,35 @@ mod tests {
         let (loaded, fx) = loaded_session(2, 2);
         fx.shared.set_position(Duration::from_secs(1));
         fx.shared.set_duration(Some(Duration::from_secs(1)));
+        fx.shared.set_buffered_range(Some(crate::BufferedRange {
+            start: 0,
+            end: 64,
+            total: Some(4096),
+        }));
         drop(loaded);
         assert!(fx.log.recorded("stop"));
         assert_eq!(fx.shared.position(), Duration::ZERO);
         assert_eq!(fx.shared.duration(), None);
+        assert_eq!(fx.shared.buffered_range(), None);
+    }
+
+    #[test]
+    fn buffered_range_forwards_to_the_decoder() {
+        let range = crate::BufferedRange {
+            start: 128,
+            end: 512,
+            total: Some(4096),
+        };
+        let (loaded, _fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: None,
+                buffered: Some(range),
+            },
+            2,
+            2,
+        );
+        assert_eq!(loaded.buffered_range(), Some(range));
     }
 
     #[test]
@@ -409,6 +440,7 @@ mod tests {
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
                 fail_once: Some(crate::CantodeError::WouldBlock),
+                buffered: None,
             },
             2,
             2,
@@ -431,6 +463,7 @@ mod tests {
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
                 fail_once: Some(crate::CantodeError::Decode("corrupt".into())),
+                buffered: None,
             },
             2,
             2,

@@ -287,6 +287,10 @@ impl Decoder for SymphoniaDecoder {
         self.source.lock().unwrap().readiness()
     }
 
+    fn buffered_range(&self) -> Option<crate::BufferedRange> {
+        self.source.lock().unwrap().buffered_range()
+    }
+
     fn set_read_deadline(&mut self, deadline: Option<std::time::Duration>) {
         self.source.lock().unwrap().set_read_deadline(deadline);
     }

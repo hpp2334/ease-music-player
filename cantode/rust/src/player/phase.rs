@@ -185,6 +185,14 @@ impl Machine {
         matches!(self.phase, Phase::Buffering(_))
     }
 
+    /// Whether the player is parked in `Paused` with a live session. The
+    /// worker keeps a slow tick alive in this shape to refresh the
+    /// buffered-window observable — the source's session thread keeps
+    /// filling its readahead window in the background while paused.
+    pub(super) fn is_paused(&self) -> bool {
+        matches!(self.phase, Phase::Paused(_))
+    }
+
     /// The live session, if any. Session access is not a transition —
     /// the worker uses this to seek, set volume, and latch `Ended`.
     pub(super) fn loaded_mut(&mut self) -> Option<&mut Loaded> {

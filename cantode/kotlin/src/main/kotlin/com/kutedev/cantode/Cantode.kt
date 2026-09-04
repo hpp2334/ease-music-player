@@ -51,6 +51,16 @@ class Cantode(
     /** Duration of the loaded source in milliseconds, `null` until known. */
     val durationMs: StateFlow<Long?> = _durationMs.asStateFlow()
 
+    private val _bufferedMs = MutableStateFlow<Long?>(null)
+    /**
+     * Buffered frontier in milliseconds (media time) — how far ahead of
+     * the read cursor contiguous data is buffered. `null` when the
+     * engine can't compute it: non-buffering sources (local files) or
+     * unknown total length / duration. Linear byte→time approximation;
+     * see the engine's `Player::buffered_position`.
+     */
+    val bufferedMs: StateFlow<Long?> = _bufferedMs.asStateFlow()
+
     private val _ended = MutableSharedFlow<Unit>(extraBufferCapacity = 4)
     /**
      * Fired once per completed playthrough (one emission per `ENDED`
@@ -150,6 +160,10 @@ class Cantode(
         // the last drained transition; if one landed between the reads,
         // the next poll drains it.
         applyObserved(poll.state, poll.positionMs, poll.durationMs)
+
+        // The buffered frontier is a plain observable, not a
+        // transition-derived value: apply it once per poll.
+        _bufferedMs.value = poll.bufferedMs
 
         // One-tick visibility hold: surface a Loading/Buffering excursion
         // that already completed between polls for this single tick.

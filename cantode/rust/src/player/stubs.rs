@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::{
-    AudioSource, CantodeError, Metadata,
+    AudioSource, BufferedRange, CantodeError, Metadata,
     decoder::{AudioFormat, DecodedFrame, Decoder, DecoderFactory},
     output::AudioSink,
 };
@@ -22,6 +22,9 @@ pub(super) struct StubDecoder {
     /// When set, `next_frame` yields this error once (for the pump's
     /// outcome mapping tests) and returns to EOF afterwards.
     pub(super) fail_once: Option<crate::CantodeError>,
+    /// What `buffered_range` reports (for the buffered-mirror tests);
+    /// `None` = non-buffering source, the common default.
+    pub(super) buffered: Option<BufferedRange>,
 }
 
 impl Decoder for StubDecoder {
@@ -36,6 +39,9 @@ impl Decoder for StubDecoder {
     }
     fn format(&self) -> AudioFormat {
         self.fmt
+    }
+    fn buffered_range(&self) -> Option<BufferedRange> {
+        self.buffered
     }
     fn metadata(&self) -> &Metadata {
         // The worker never reads metadata from the stub (do_load is
@@ -196,6 +202,7 @@ pub(super) fn loaded_session(src: u16, device: u16) -> (Loaded, Fixture) {
         StubDecoder {
             fmt: AudioFormat::new(src, 48_000),
             fail_once: None,
+            buffered: None,
         },
         src,
         device,
