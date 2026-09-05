@@ -88,8 +88,8 @@
     <string name="plugin_enable_action">启用</string>
     <string name="plugin_disable_action">停用</string>
     <string name="plugin_uninstall_action">卸载</string>
-    <string name="plugin_uninstall_confirm">卸载插件 “E_NAME”？其数据会保留，重新安装后恢复。</string>
-    <string name="plugin_uninstall_storage_warning">有 E_COUNT 个存储依赖它，卸载后将无法访问。</string>
+    <string name="plugin_uninstall_confirm">卸载插件 “E_NAME”？其全部数据将被永久删除。</string>
+    <string name="plugin_uninstall_storage_warning">有 E_COUNT 个存储依赖它，将连同歌单中的相关音乐一起删除。</string>
     <string name="plugin_storage_removed">存储已移除</string>
     <string name="plugin_available_title">获取插件</string>
     <string name="plugin_source_label">插件源</string>

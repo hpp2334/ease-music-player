@@ -9,10 +9,12 @@
 //! capability (Stage 4) additionally binds the scope to the calling plugin, so
 //! a plugin cannot even express another principal's scope.
 
+use std::sync::Arc;
+
 use ease_client_schema::entities::secret;
-use ease_client_schema::{SecretId, SecretScope};
+use ease_client_schema::{PluginId, SecretId, SecretScope};
 use futures::future::BoxFuture;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::error::BResult;
 
@@ -69,5 +71,24 @@ impl SecretStore for DatabaseServer {
             }
             Ok(())
         })
+    }
+}
+
+impl DatabaseServer {
+    /// Host-level bulk wipe of every secret owned by `plugin_id`
+    /// (uninstall). The scope-string match leaves `internal` and other
+    /// plugins' rows untouched. Deliberately not on the [`SecretStore`]
+    /// trait — that stays owner-scoped, single-id access.
+    pub async fn secret_remove_all_for_plugin(
+        self: &Arc<Self>,
+        plugin_id: &str,
+    ) -> BResult<()> {
+        let db = self.db();
+        let scope = SecretScope::Plugin(PluginId::new(plugin_id.to_string())).to_scope_string();
+        secret::Entity::delete_many()
+            .filter(secret::Column::Scope.eq(scope))
+            .exec(&db)
+            .await?;
+        Ok(())
     }
 }

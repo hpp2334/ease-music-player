@@ -36,7 +36,8 @@ use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
 use ease_client_schema::entities::storage;
-use sea_orm::EntityTrait;
+use ease_client_schema::StorageId;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -1013,15 +1014,32 @@ pub async fn set_enabled(
     Ok(cx.plugin_manager().bump_generation())
 }
 
-/// Uninstall: delete the plugin folder + its enabled flag. The plugin's
-/// persisted data (`plugin_kv`, secrets) and any storage rows survive —
-/// storages whose provider is gone render as "removed" and come back if the
-/// plugin is reinstalled.
+/// Uninstall: delete the plugin folder + its enabled flag, and wipe all of
+/// the plugin's persisted data — its storage rows (cascading to their
+/// musics, playlist entries and cover blobs, exactly like removing the
+/// storage by hand), its `plugin_kv` store and its scoped secrets. Nothing
+/// survives a reinstall.
 pub async fn uninstall(
     cx: &crate::ctx::BackendContext,
     app_document_dir: &str,
     plugin_id: &str,
 ) -> BResult<i64> {
+    // Plugin-owned storage rows first: the remove_storage cascade drops the
+    // musics / playlist entries / cover blobs referencing them.
+    let db = cx.database_server().db();
+    let plugin_storages = storage::Entity::find()
+        .filter(storage::Column::PluginId.eq(plugin_id))
+        .all(&db)
+        .await?;
+    for row in plugin_storages {
+        crate::services::remove_storage(cx, StorageId::wrap(row.id)).await?;
+    }
+    // Then the plugin's own persisted data (KV + secrets).
+    cx.database_server().plugin_kv_delete_all(plugin_id).await?;
+    cx.database_server()
+        .secret_remove_all_for_plugin(plugin_id)
+        .await?;
+
     let root = plugins_root(app_document_dir);
     let target = root.join(plugin_id);
     let _ = tokio::task::spawn_blocking(move || {
@@ -1685,5 +1703,120 @@ mod tests {
             f.file_name().unwrap().to_str().unwrap(),
             format!("{:x}", md5::Md5::digest(b"https://example.com/reg")) + ".json"
         );
+    }
+
+    /// Uninstall must wipe all plugin data: storage rows, `plugin_kv` and
+    /// scoped secrets — while other plugins' and host-owned (`internal`)
+    /// rows survive.
+    #[test]
+    fn uninstall_wipes_plugin_data() {
+        use crate::repositories::secret::SecretStore;
+        use ease_client_schema::{PluginId, PluginStorageId, SecretScope, StorageHandle};
+
+        const A: &str = "com.ease.a";
+        const B: &str = "com.ease.b";
+
+        let (guard, root) = temp_root();
+        let app_document_dir = guard.path().to_str().unwrap().to_string();
+        install_zip_bytes_blocking(
+            &root,
+            make_zip(&[
+                ("manifest.json", &manifest_json(A, "1.0.0")),
+                ("backend.js", "export function start() {}"),
+            ]),
+        )
+        .unwrap();
+        install_zip_bytes_blocking(&root, make_zip(&[("manifest.json", &manifest_json(B, "1.0.0"))]))
+            .unwrap();
+
+        let cx = crate::ctx::BackendContext::new();
+        ease_client_tokio::tokio_runtime().block_on(async {
+            let db_server = cx.database_server();
+            db_server.init(app_document_dir.clone()).await.unwrap();
+
+            // Seed: KV (single + multi), one plugin-scoped secret and one
+            // storage row per plugin, plus one host-owned secret.
+            for p in [A, B] {
+                db_server.plugin_kv_single_set(p, "cfg", "v1").await.unwrap();
+                db_server
+                    .plugin_kv_multi_append(p, "events", "e1")
+                    .await
+                    .unwrap();
+            }
+            let a_secret = db_server
+                .secret_put(SecretScope::Plugin(PluginId::new(A)), "tok-a".into())
+                .await
+                .unwrap();
+            let b_secret = db_server
+                .secret_put(SecretScope::Plugin(PluginId::new(B)), "tok-b".into())
+                .await
+                .unwrap();
+            let internal_secret = db_server
+                .secret_put(SecretScope::Internal, "internal".into())
+                .await
+                .unwrap();
+            for (p, instance) in [(A, "a:1"), (B, "b:1")] {
+                db_server
+                    .obtain_storage(&StorageHandle::Plugin {
+                        plugin_id: PluginId::new(p),
+                        plugin_storage_id: PluginStorageId::new(instance),
+                    })
+                    .await
+                    .unwrap();
+            }
+
+            // Uninstall A.
+            let generation = uninstall(&cx, &app_document_dir, A).await.unwrap();
+
+            // A's data is gone…
+            assert!(db_server.plugin_kv_single_get(A, "cfg").await.unwrap().is_none());
+            assert!(db_server.plugin_kv_list_keys(A, "").await.unwrap().is_empty());
+            assert!(
+                db_server
+                    .secret_get(SecretScope::Plugin(PluginId::new(A)), a_secret)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            let db = db_server.db();
+            let a_storages = storage::Entity::find()
+                .filter(storage::Column::PluginId.eq(A))
+                .all(&db)
+                .await
+                .unwrap();
+            assert!(a_storages.is_empty());
+            assert!(!is_installed(&root, A));
+
+            // …B's and the host's data survives.
+            assert_eq!(
+                db_server.plugin_kv_single_get(B, "cfg").await.unwrap().as_deref(),
+                Some("v1")
+            );
+            assert_eq!(db_server.plugin_kv_list_keys(B, "").await.unwrap().len(), 2);
+            assert_eq!(
+                db_server
+                    .secret_get(SecretScope::Plugin(PluginId::new(B)), b_secret)
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some("tok-b")
+            );
+            assert_eq!(
+                db_server
+                    .secret_get(SecretScope::Internal, internal_secret)
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some("internal")
+            );
+            let b_storages = storage::Entity::find()
+                .filter(storage::Column::PluginId.eq(B))
+                .all(&db)
+                .await
+                .unwrap();
+            assert_eq!(b_storages.len(), 1);
+            assert!(is_installed(&root, B));
+            assert!(generation > 0);
+        });
     }
 }
