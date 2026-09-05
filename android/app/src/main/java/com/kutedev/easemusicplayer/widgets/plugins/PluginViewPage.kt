@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.singleton.resolve
 import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
 import com.kutedev.easemusicplayer.turintegration.TurView
 import com.kutedev.easemusicplayer.viewmodels.DashboardVM
@@ -89,7 +90,7 @@ fun PluginViewPage(
             )
             Box(modifier = Modifier.width(16.dp))
             Text(
-                text = item?.title ?: pluginId,
+                text = item?.title?.resolve() ?: pluginId,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,

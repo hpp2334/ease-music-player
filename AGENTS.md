@@ -116,14 +116,18 @@ Plugins live under [`plugins/`](./plugins/) (TS sources, rspack bundles into `pl
 ```json
 {
   "id": "com.ease.onedrive",
+  "name": { "en-US": "OneDrive", "zh-CN": "OneDrive" },   // string | { "<tag>": string } (localized text)
   "backend": "backend.js",                    // optional; long-lived module (headless tur instance)
   "events": ["music:play"],
   "contributions": {
-    "storages":  [{ "id": "onedrive", "view": "view.js" }], // per-storage config view (short-lived)
-    "dashboard": [{ "id": "main", "title": "…", "view": "view.js" }]  // dashboard entry cards → standalone view page
+    "storages":  [{ "id": "onedrive", "title": "…", "desc": "…", "view": "view.js" }], // per-storage config view (short-lived)
+    "dashboard": [{ "id": "main", "title": "…", "desc": "…", "icon": "icon.png", "view": "view.js" }]  // dashboard entry cards → standalone view page
   }
 }
 ```
+
+- **Localized text**: `name` / `description` and contribution `title` / `desc` accept a plain string (the base/default text) or a tag→string map (`{"en-US": …, "zh-CN": …}`). Rust normalizes both into `{base, locales}` over the wire; **Kotlin resolves at render time** (`LocalizedText.resolve()`: exact tag → language prefix → base) against the activity locale, so the language-switch recreate flow just works and `SYSTEM` mode needs no Rust knowledge. Missing contribution `title` falls back to the plugin `name`.
+- **Contribution icons**: `"icon": "icon.png"` names a raster file (`.png`/`.webp`/`.jpg`, ≤128 KiB) in the plugin root; the Rust scan base64s it into the `plugin.list` payload (`iconData`) and Kotlin decodes with `BitmapFactory` (built-in glyph fallback). `package-plugin.ts` copies manifest-referenced icons into the zip (missing icon = packaging error).
 
 - **`backend`** — one per plugin; all contributions share it. Loaded once by `KeepBackendService` into a headless tur instance stamped with `PluginId`; registers `tur:rpc` handlers, **split by caller**: `hostRpc` for ops the Rust host invokes — **contract literals, identical names for every provider**, with identity riding the payload (`storage:list` / `storage:get` `{ pluginId, storageId, … }`, `storage:removeInstance`, `oauth:url` / `oauth:exchange` `{ pluginId, oauthId, … }`; `registerStream` openers resolve `{ meta, body, release?, mapError? }`, no stream ids in plugin code; plus `onEvent` for host-fired event subscriptions like `music:play` in `com.ease.playcount`'s backend) — and `viewRpc` (`registerHandler` only) for ops the plugin's own view reaches via `ease.rpc.call` (e.g. `webdav:test` / `webdav:connect`, plugin-private names). The dispatcher routes strictly by the request envelope's `scope` — a mis-registered op is a `no host/view handler` error at the first call. The host composes no op names and derives no provider prefixes: `pluginId` comes from the storage row or the instance data slot, `storageId` is the `plugin_storage_id`, and `oauthId` is a host-minted flow token (`ease.oauth.new()`). Backend modules load by **module-source handle** (see below), never as JS strings across JNI.
 - **`view`** — per contribution; loaded into a `TurView` when the page opens (add-storage form, plugin page) and destroyed on leave.

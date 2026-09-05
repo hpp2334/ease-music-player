@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.widgets.dashboard
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -38,10 +41,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.singleton.resolve
 import com.kutedev.easemusicplayer.viewmodels.DashboardVM
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.viewmodels.SleepModeLeftTime
@@ -223,9 +230,10 @@ private fun DevicesBlock(
 }
 
 /**
- * One plugin dashboard **entry card**: the contribution's title + plugin
- * id. Not the view itself — tapping pushes [PluginViewPage], the
- * standalone full-screen page that renders the plugin's view JS.
+ * One plugin dashboard **entry card**: the contribution's icon + title +
+ * desc (or the plugin id when no desc was declared). Not the view itself —
+ * tapping pushes [PluginViewPage], the standalone full-screen page that
+ * renders the plugin's view JS.
  */
 @Composable
 private fun DashboardCard(
@@ -249,25 +257,42 @@ private fun DashboardCard(
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                modifier = Modifier.size(28.dp),
-                painter = painterResource(id = R.drawable.icon_extension),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            val icon = rememberPluginIcon(item.iconData)
+            if (icon != null) {
+                // 28dp viewport, same footprint as the fallback glyph below —
+                // a plugin icon must not out-shout the app's own icon
+                // language whatever resolution it ships. `Fit` letterboxes
+                // non-square art safely inside the fixed viewport.
+                Image(
+                    bitmap = icon.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(28.dp),
+                )
+            } else {
+                Icon(
+                    modifier = Modifier.size(28.dp),
+                    painter = painterResource(id = R.drawable.icon_extension),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
         Box(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = item.title,
+                text = item.title.resolve(),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+            val desc = item.desc?.resolve().orEmpty()
             Text(
-                text = item.pluginId,
+                text = desc.ifBlank { item.pluginId },
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Icon(
@@ -276,6 +301,26 @@ private fun DashboardCard(
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+/**
+ * Decode a contribution icon (`iconData` base64 from the Rust scan) into a
+ * bitmap, memoized per payload. `null` → caller shows the built-in glyph
+ * (missing icon, failed validation, or undecodable bytes).
+ */
+@Composable
+private fun rememberPluginIcon(iconData: String?): Bitmap? {
+    if (iconData == null) {
+        return null
+    }
+    return remember(iconData) {
+        try {
+            val bytes = Base64.decode(iconData, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
     }
 }
 

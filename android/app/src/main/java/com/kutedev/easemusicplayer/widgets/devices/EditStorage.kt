@@ -47,6 +47,7 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.FormWidget
 import com.kutedev.easemusicplayer.singleton.StorageProvider
+import com.kutedev.easemusicplayer.singleton.resolve
 import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
 import com.kutedev.easemusicplayer.turintegration.TurView
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
@@ -301,7 +302,7 @@ fun EditStoragesPage(
                             editPluginView?.pluginId == p.pluginId
                         }
                         StorageBlock(
-                            title = p.displayName,
+                            title = p.displayName.resolve(),
                             isActive = active,
                             disabled = !isCreated && !active,
                             onSelect = { if (isCreated) selectedProvider = p }

@@ -29,7 +29,7 @@
 //! existing caches survive.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{OnceLock, RwLock};
@@ -53,6 +53,10 @@ pub const BUNDLED_PLUGIN_ID: &str = "com.ease.webdav";
 
 const MAX_ENTRIES: usize = 200;
 const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Cap for contribution icons read during the scan (base64 into the
+/// `plugin.list` payload — keep small).
+const MAX_ICON_BYTES: u64 = 128 * 1024;
 
 // TODO: switch REPO_REF to `main` once feat/v0.4 merges.
 const REPO: &str = "hpp2334/ease-music-player";
@@ -346,6 +350,78 @@ pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<Manife
 }
 
 // ============================================================================
+// Localized manifest text
+// ============================================================================
+
+/// Manifest text that may be localized per locale tag.
+///
+/// A localizable manifest field (`name`, `description`, contribution
+/// `title` / `desc`) accepts either a plain string (the default/base text —
+/// all pre-intl manifests) or a tag→string map
+/// (`{"en-US": "Play Counts", "zh-CN": "播放计数"}`); this is the normalized
+/// form both parse into. Kotlin resolves against the activity locale at
+/// render time (exact tag → language prefix → base) — the Rust side never
+/// picks a locale.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct LocalizedString {
+    /// Fallback text: the plain string, or the map's `en-US` → `en` →
+    /// lexicographically-first entry (maps are expected to carry `en-US`).
+    pub base: String,
+    /// tag → text overrides (`"zh-CN"` → `"播放计数"`); empty for plain
+    /// strings.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub locales: BTreeMap<String, String>,
+}
+
+impl LocalizedString {
+    pub fn plain(base: String) -> Self {
+        LocalizedString {
+            base,
+            locales: BTreeMap::new(),
+        }
+    }
+}
+
+/// The shapes [`LocalizedString`] deserializes from. Variant order matters:
+/// the normalized object must be tried before the tag map (a tag map would
+/// otherwise swallow `{"base": …, "locales": …}`).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LocalizedRaw {
+    Plain(String),
+    Normalized {
+        base: String,
+        #[serde(default)]
+        locales: BTreeMap<String, String>,
+    },
+    Map(BTreeMap<String, String>),
+}
+
+impl From<LocalizedRaw> for LocalizedString {
+    fn from(raw: LocalizedRaw) -> Self {
+        match raw {
+            LocalizedRaw::Plain(base) => LocalizedString::plain(base),
+            LocalizedRaw::Normalized { base, locales } => LocalizedString { base, locales },
+            LocalizedRaw::Map(locales) => {
+                let base = locales
+                    .get("en-US")
+                    .or_else(|| locales.get("en"))
+                    .or_else(|| locales.values().next())
+                    .cloned()
+                    .unwrap_or_default();
+                LocalizedString { base, locales }
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LocalizedString {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        LocalizedRaw::deserialize(deserializer).map(LocalizedString::from)
+    }
+}
+
+// ============================================================================
 // Manifest scan
 // ============================================================================
 
@@ -353,9 +429,9 @@ pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<Manife
 #[derive(Clone, Debug)]
 pub struct ManifestRaw {
     pub id: String,
-    pub name: String,
+    pub name: LocalizedString,
     pub version: String,
-    pub description: String,
+    pub description: LocalizedString,
     pub backend: Option<String>,
     pub events: Vec<String>,
     pub dashboard: Vec<ContributionRaw>,
@@ -365,8 +441,17 @@ pub struct ManifestRaw {
 #[derive(Clone, Debug)]
 pub struct ContributionRaw {
     pub id: String,
-    pub title: String,
+    /// Contribution title; `None` when the manifest omitted it (the UI then
+    /// falls back to the plugin name — NOT the contribution id).
+    pub title: Option<LocalizedString>,
+    /// Short one-liner (dashboard card subtitle / chooser subtitle).
+    pub desc: Option<LocalizedString>,
     pub view: Option<String>,
+    /// Icon file name relative to the plugin root (raster only).
+    pub icon: Option<String>,
+    /// Base64 icon bytes — never parsed from the manifest; filled in by the
+    /// scan ([`load_icon_base64`]).
+    pub icon_data: Option<String>,
 }
 
 fn opt_str(v: &Value, key: &str) -> Option<String> {
@@ -374,6 +459,17 @@ fn opt_str(v: &Value, key: &str) -> Option<String> {
         .and_then(|x| x.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// Parse a localizable field (`string | { "<tag>": string }`); `None` when
+/// absent, not a string/map, or entirely empty (mirrors `opt_str`).
+fn opt_localized(v: &Value, key: &str) -> Option<LocalizedString> {
+    let x = v.get(key).filter(|x| !x.is_null())?;
+    let parsed = serde_json::from_value::<LocalizedString>(x.clone()).ok()?;
+    if parsed.base.is_empty() && parsed.locales.is_empty() {
+        return None;
+    }
+    Some(parsed)
 }
 
 pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
@@ -395,20 +491,23 @@ pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
                         }
                         Some(ContributionRaw {
                             id: cid.to_string(),
-                            title: opt_str(c, "title").unwrap_or_else(|| cid.to_string()),
+                            title: opt_localized(c, "title"),
+                            desc: opt_localized(c, "desc"),
                             view: opt_str(c, "view"),
+                            icon: opt_str(c, "icon"),
+                            icon_data: None,
                         })
                     })
                     .collect()
             })
             .unwrap_or_default()
     };
-    let name = opt_str(&v, "name").unwrap_or_else(|| id.clone());
+    let name = opt_localized(&v, "name").unwrap_or_else(|| LocalizedString::plain(id.clone()));
     Ok(ManifestRaw {
         id,
         name,
         version: opt_str(&v, "version").unwrap_or_else(|| "0.0.0".into()),
-        description: opt_str(&v, "description").unwrap_or_default(),
+        description: opt_localized(&v, "description").unwrap_or_default(),
         backend: opt_str(&v, "backend"),
         events: v
             .get("events")
@@ -426,6 +525,44 @@ pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
 
 pub fn is_installed(root: &Path, plugin_id: &str) -> bool {
     root.join(plugin_id).join("manifest.json").is_file()
+}
+
+/// Read + base64 a contribution icon (raster only: PNG/WebP/JPEG, ≤
+/// [`MAX_ICON_BYTES`]). Name rules mirror zip-entry sanitization, so a
+/// hand-edited manifest can't escape the plugin dir. Any violation logs a
+/// warning and drops the icon — the UI falls back to the built-in glyph.
+/// File IO stays here on the scan's blocking thread.
+fn load_icon_base64(plugin_dir: &Path, icon: &str) -> Option<String> {
+    if unsafe_entry_name(icon) {
+        tracing::warn!("plugin icon: unsafe name '{icon}' — dropped");
+        return None;
+    }
+    let lower = icon.to_ascii_lowercase();
+    if !["png", "webp", "jpg", "jpeg"]
+        .iter()
+        .any(|e| lower.ends_with(&format!(".{e}")))
+    {
+        tracing::warn!("plugin icon: unsupported type '{icon}' — dropped");
+        return None;
+    }
+    let file = plugin_dir.join(icon);
+    let Ok(meta) = std::fs::metadata(&file) else {
+        tracing::warn!("plugin icon: '{icon}' not found — dropped");
+        return None;
+    };
+    if !meta.is_file() {
+        tracing::warn!("plugin icon: '{icon}' is not a file — dropped");
+        return None;
+    }
+    if meta.len() > MAX_ICON_BYTES {
+        tracing::warn!(
+            "plugin icon: '{icon}' exceeds {MAX_ICON_BYTES} bytes — dropped"
+        );
+        return None;
+    }
+    let bytes = std::fs::read(&file).ok()?;
+    use base64::Engine as _;
+    Some(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 /// Walk `<root>/*/manifest.json` and parse each. Folders starting with `.`
@@ -453,12 +590,19 @@ fn scan_manifests_blocking(root: &Path) -> Vec<(PathBuf, ManifestRaw)> {
         let Ok(text) = std::fs::read_to_string(&manifest_file) else {
             continue;
         };
-        if let Ok(m) = parse_manifest(&text) {
+        if let Ok(mut m) = parse_manifest(&text) {
             let id = if m.id.is_empty() {
                 name.to_string()
             } else {
                 m.id
             };
+            // Contribution icons: read here (blocking thread), regardless of
+            // enabled state — the management page shows disabled plugins too.
+            for c in m.dashboard.iter_mut().chain(m.storages.iter_mut()) {
+                if let Some(icon) = c.icon.as_deref() {
+                    c.icon_data = load_icon_base64(&path, icon);
+                }
+            }
             out.push((path, ManifestRaw { id, ..m }));
         }
     }
@@ -519,6 +663,9 @@ fn contribution_infos(
             },
             id: c.id,
             title: c.title,
+            desc: c.desc,
+            icon: c.icon,
+            icon_data: c.icon_data,
             view: c.view,
         })
         .collect()
@@ -530,14 +677,17 @@ fn contribution_infos(
 
 /// One entry of a registry `plugins.json`. `installed_version` /
 /// `update_available` are stamped at fetch time by comparing against the
-/// installed tree (Kotlin never compares versions).
+/// installed tree (Kotlin never compares versions). `name` / `description`
+/// accept the localized forms (plain string or tag map) — old registries
+/// with plain strings parse unchanged, and the normalized shape round-trips
+/// when Kotlin sends the entry back via `plugin.installFromRegistry`.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RegistryEntry {
     pub id: String,
-    pub name: String,
+    pub name: LocalizedString,
     pub version: String,
-    pub description: String,
+    pub description: LocalizedString,
     /// Zip path relative to the source base URL (e.g. `zips/<id>-<v>.zip`),
     /// or an absolute http(s) URL.
     pub zip: String,
@@ -620,9 +770,10 @@ pub fn parse_registry(body: &str) -> BResult<Vec<RegistryEntry>> {
                     }
                     Some(RegistryEntry {
                         id: id.to_string(),
-                        name: opt_str(e, "name").unwrap_or_else(|| id.to_string()),
+                        name: opt_localized(e, "name")
+                            .unwrap_or_else(|| LocalizedString::plain(id.to_string())),
                         version: opt_str(e, "version").unwrap_or_else(|| "0.0.0".into()),
-                        description: opt_str(e, "description").unwrap_or_default(),
+                        description: opt_localized(e, "description").unwrap_or_default(),
                         zip: opt_str(e, "zip").unwrap_or_default(),
                         sha256: opt_str(e, "sha256").unwrap_or_default(),
                         size: e.get("size").and_then(|x| x.as_u64()).unwrap_or(0),
@@ -1070,9 +1221,9 @@ async fn collect_storage_plugin_ids(cx: &crate::ctx::BackendContext) -> Vec<Stri
 #[serde(rename_all = "camelCase")]
 pub struct PluginScanInfo {
     pub id: String,
-    pub name: String,
+    pub name: LocalizedString,
     pub version: String,
-    pub description: String,
+    pub description: LocalizedString,
     pub backend: Option<String>,
     pub backend_source_handle: i64,
     pub events: Vec<String>,
@@ -1085,7 +1236,14 @@ pub struct PluginScanInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ContributionInfo {
     pub id: String,
-    pub title: String,
+    /// `None` when the manifest omitted `title` (UI falls back to the
+    /// plugin name).
+    pub title: Option<LocalizedString>,
+    pub desc: Option<LocalizedString>,
+    /// Icon file name (informational).
+    pub icon: Option<String>,
+    /// Base64 icon bytes (present only when the file passed validation).
+    pub icon_data: Option<String>,
     pub view: Option<String>,
     pub source_handle: i64,
 }
@@ -1351,8 +1509,8 @@ mod tests {
         ]}"#;
         let mut entries = parse_registry(body).unwrap();
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "A");
-        assert_eq!(entries[1].name, "com.ease.b");
+        assert_eq!(entries[0].name, LocalizedString::plain("A".into()));
+        assert_eq!(entries[1].name, LocalizedString::plain("com.ease.b".into()));
 
         let (_guard, root) = temp_root();
         install_zip_bytes_blocking(
@@ -1365,6 +1523,94 @@ mod tests {
         assert!(entries[0].update_available);
         assert!(entries[1].installed_version.is_none());
         assert!(!entries[1].update_available);
+    }
+
+    #[test]
+    fn localized_registry_entries_parse() {
+        // New registries may carry tag maps; the normalized shape must also
+        // round-trip (Kotlin sends the entry back via installFromRegistry).
+        let body = r#"{"plugins":[
+            {"id":"com.ease.a",
+             "name":{"en-US":"A","zh-CN":"甲"},
+             "description":"plain desc"}
+        ]}"#;
+        let entries = parse_registry(body).unwrap();
+        assert_eq!(entries[0].name.base, "A");
+        assert_eq!(entries[0].name.locales.get("zh-CN").map(String::as_str), Some("甲"));
+        assert_eq!(entries[0].description, LocalizedString::plain("plain desc".into()));
+
+        // Round-trip through the normalized wire shape.
+        let json = serde_json::to_value(&entries[0]).unwrap();
+        let back: RegistryEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(back.name, entries[0].name);
+    }
+
+    #[test]
+    fn localized_manifest_fields_parse() {
+        let text = r#"{
+            "id": "com.ease.test",
+            "name": {"en-US": "Test", "zh-CN": "测试"},
+            "description": {"zh-CN": "只有中文"},
+            "contributions": {
+                "dashboard": [
+                    {"id": "main",
+                     "title": {"en-US": "Main", "zh-CN": "主页"},
+                     "desc": "plain subtitle"}
+                ]
+            }
+        }"#;
+        let m = parse_manifest(text).unwrap();
+        assert_eq!(m.name.base, "Test");
+        assert_eq!(m.name.locales.get("zh-CN").map(String::as_str), Some("测试"));
+        // Map without en-US/en: base falls back to the lexicographically
+        // first tag.
+        assert_eq!(m.description.base, "只有中文");
+        let d = &m.dashboard[0];
+        assert_eq!(d.title.as_ref().unwrap().base, "Main");
+        assert_eq!(
+            d.title.as_ref().unwrap().locales.get("zh-CN").map(String::as_str),
+            Some("主页")
+        );
+        assert_eq!(d.desc.as_ref().unwrap().base, "plain subtitle");
+        assert!(d.icon.is_none());
+    }
+
+    #[test]
+    fn icon_scan_rules() {
+        let (_guard, root) = temp_root();
+        let dir = root.join("com.ease.test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = [0x89u8, b'P', b'N', b'G', 1, 2, 3, 4];
+        std::fs::write(dir.join("icon.png"), png).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            r#"{"id":"com.ease.test",
+                "contributions":{"dashboard":[{"id":"a","icon":"icon.png"},
+                             {"id":"b","icon":"../escape.png"},
+                             {"id":"c","icon":"logo.svg"},
+                             {"id":"d","icon":"missing.png"}]}}"#,
+        )
+        .unwrap();
+
+        let scanned = scan_manifests_blocking(&root);
+        assert_eq!(scanned.len(), 1);
+        let m = &scanned[0].1;
+        use base64::Engine as _;
+        let expect = base64::engine::general_purpose::STANDARD.encode(png);
+        assert_eq!(m.dashboard[0].icon_data.as_deref(), Some(expect.as_str()));
+        // Unsafe / unsupported / missing → dropped, never an install failure.
+        assert!(m.dashboard[1].icon_data.is_none());
+        assert!(m.dashboard[2].icon_data.is_none());
+        assert!(m.dashboard[3].icon_data.is_none());
+
+        // Oversized → dropped.
+        std::fs::write(dir.join("big.png"), vec![0u8; (MAX_ICON_BYTES + 1) as usize]).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            r#"{"id":"com.ease.test","contributions":{"dashboard":[{"id":"a","icon":"big.png"}]}}"#,
+        )
+        .unwrap();
+        assert!(scan_manifests_blocking(&root)[0].1.dashboard[0].icon_data.is_none());
     }
 
     #[test]

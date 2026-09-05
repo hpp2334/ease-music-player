@@ -54,6 +54,7 @@ import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RoutePluginAvailable
 import com.kutedev.easemusicplayer.singleton.PluginManifest
 import com.kutedev.easemusicplayer.singleton.PluginManager
+import com.kutedev.easemusicplayer.singleton.resolve
 import com.kutedev.easemusicplayer.viewmodels.PluginManagementVM
 
 private val pluginsPaddingX = 24.dp
@@ -231,7 +232,7 @@ fun PluginManagementPage(
         ) {
             Text(
                 text = stringResource(id = R.string.plugin_uninstall_confirm)
-                    .replace("E_NAME", pending.plugin.name),
+                    .replace("E_NAME", pending.plugin.name.resolve()),
                 fontSize = 14.sp,
             )
             if (pending.storageCount > 0) {
@@ -292,7 +293,7 @@ private fun InstalledPluginRow(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = plugin.name,
+                        text = plugin.name.resolve(),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -315,10 +316,11 @@ private fun InstalledPluginRow(
                         )
                     }
                 }
-                if (plugin.description.isNotBlank()) {
+                val description = plugin.description.resolve()
+                if (description.isNotBlank()) {
                     Box(modifier = Modifier.height(2.dp))
                     Text(
-                        text = plugin.description,
+                        text = description,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

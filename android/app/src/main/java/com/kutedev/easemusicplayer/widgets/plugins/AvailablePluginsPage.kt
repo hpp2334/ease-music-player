@@ -47,6 +47,7 @@ import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.singleton.resolve
 import com.kutedev.easemusicplayer.singleton.types.PluginSource
 import com.kutedev.easemusicplayer.viewmodels.AvailableListState
 import com.kutedev.easemusicplayer.viewmodels.AvailablePluginRow
@@ -428,7 +429,7 @@ private fun AvailablePluginRowItem(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = row.entry.name,
+                    text = row.entry.name.resolve(),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -441,10 +442,11 @@ private fun AvailablePluginRowItem(
                     fontSize = 12.sp,
                 )
             }
-            if (row.entry.description.isNotBlank()) {
+            val description = row.entry.description.resolve()
+            if (description.isNotBlank()) {
                 Box(modifier = Modifier.height(2.dp))
                 Text(
-                    text = row.entry.description,
+                    text = description,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     maxLines = 1,

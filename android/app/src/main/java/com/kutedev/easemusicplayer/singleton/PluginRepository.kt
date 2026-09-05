@@ -27,9 +27,9 @@ import javax.inject.Singleton
  */
 data class PluginManifest(
     val id: String,
-    val name: String,
+    val name: LocalizedText,
     val version: String,
-    val description: String = "",
+    val description: LocalizedText = LocalizedText(""),
     val backend: String? = null,
     val backendSourceHandle: Long = 0L,
     val events: List<String> = emptyList(),
@@ -44,7 +44,14 @@ data class PluginManifest(
  * Dashboard. [viewSourceHandle] loads the standalone view page. */
 data class DashboardContribution(
     val id: String,
-    val title: String,
+    /** Falls back to the plugin name when the manifest omitted `title`. */
+    val title: LocalizedText? = null,
+    /** Short card subtitle. */
+    val desc: LocalizedText? = null,
+    /** Icon file name (informational; rendering goes through [iconData]). */
+    val icon: String? = null,
+    /** Base64 icon bytes, or `null` when the file failed validation. */
+    val iconData: String? = null,
     val view: String? = null,
     val viewSourceHandle: Long = 0L,
 )
@@ -54,6 +61,11 @@ data class StorageContribution(
     /** The storage provider id (e.g. `"onedrive"`); used as the `provider`
      * argument to `pluginOAuthUrl` / `pluginOAuthExchange`. */
     val id: String,
+    /** Falls back to the plugin name when the manifest omitted `title`. */
+    val title: LocalizedText? = null,
+    val desc: LocalizedText? = null,
+    val icon: String? = null,
+    val iconData: String? = null,
     /** The storage view JS filename (informational; loading goes through
      * [viewSourceHandle]). */
     val view: String? = null,
@@ -68,7 +80,9 @@ data class StorageContribution(
 data class StorageProvider(
     val pluginId: String,
     val storageId: String,
-    val displayName: String,
+    val displayName: LocalizedText,
+    val desc: LocalizedText? = null,
+    val iconData: String? = null,
     /** Module-source handle of the view JS, or `0` if none. */
     val viewSourceHandle: Long,
 )
@@ -81,9 +95,13 @@ data class StorageProvider(
  */
 data class DashboardItem(
     val pluginId: String,
-    val pluginName: String,
+    val pluginName: LocalizedText,
     val contributionId: String,
-    val title: String,
+    val title: LocalizedText,
+    /** Card subtitle; the raw plugin id shows when absent. */
+    val desc: LocalizedText? = null,
+    /** Base64 icon bytes; the built-in extension glyph shows when absent. */
+    val iconData: String? = null,
     /** Module-source handle of the view JS, or `0` if none. */
     val viewSourceHandle: Long,
 )
@@ -174,6 +192,9 @@ class PluginRepository @Inject constructor(
             DashboardContribution(
                 id = it.id,
                 title = it.title,
+                desc = it.desc,
+                icon = it.icon,
+                iconData = it.iconData,
                 view = it.view,
                 viewSourceHandle = it.sourceHandle,
             )
@@ -181,6 +202,10 @@ class PluginRepository @Inject constructor(
         storages = info.storages.map {
             StorageContribution(
                 id = it.id,
+                title = it.title,
+                desc = it.desc,
+                icon = it.icon,
+                iconData = it.iconData,
                 view = it.view,
                 viewSourceHandle = it.sourceHandle,
             )
@@ -197,7 +222,10 @@ class PluginRepository @Inject constructor(
                         pluginId = p.id,
                         pluginName = p.name,
                         contributionId = d.id,
-                        title = d.title,
+                        // No explicit contribution title → the plugin's name.
+                        title = d.title ?: p.name,
+                        desc = d.desc,
+                        iconData = d.iconData,
                         viewSourceHandle = d.viewSourceHandle,
                     )
                 )
@@ -214,7 +242,10 @@ class PluginRepository @Inject constructor(
                     StorageProvider(
                         pluginId = p.id,
                         storageId = s.id,
-                        displayName = p.name,
+                        // No explicit contribution title → the plugin's name.
+                        displayName = s.title ?: p.name,
+                        desc = s.desc,
+                        iconData = s.iconData,
                         viewSourceHandle = s.viewSourceHandle,
                     )
                 )
