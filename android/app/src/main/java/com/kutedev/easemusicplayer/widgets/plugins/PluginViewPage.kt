@@ -68,7 +68,12 @@ fun PluginViewPage(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = scaffoldPadding.calculateTopPadding())
+            .padding(
+                top = scaffoldPadding.calculateTopPadding(),
+                // Clear the gesture-navigation area so the plugin's list
+                // content is never clipped under the nav bar pill.
+                bottom = scaffoldPadding.calculateBottomPadding(),
+            )
     ) {
         // Top bar
         Row(

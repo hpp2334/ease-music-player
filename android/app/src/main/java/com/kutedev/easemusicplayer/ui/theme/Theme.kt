@@ -84,6 +84,8 @@ fun EaseMusicPlayerTheme(
                 put("surfaceVariant", colorScheme.surfaceVariant.hex())
                 put("onSurfaceVariant", colorScheme.onSurfaceVariant.hex())
                 put("surfaceContainer", colorScheme.surfaceContainer.hex())
+                put("surfaceContainerHigh", colorScheme.surfaceContainerHigh.hex())
+                put("surfaceContainerHighest", colorScheme.surfaceContainerHighest.hex())
                 put("outline", colorScheme.outline.hex())
                 put("outlineVariant", colorScheme.outlineVariant.hex())
                 put("error", colorScheme.error.hex())

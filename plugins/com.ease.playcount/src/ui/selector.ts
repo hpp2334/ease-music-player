@@ -41,6 +41,12 @@ export interface SelectorStyle {
     textMuted: Color;
     divider: Color;
     shadow: Color;
+    /** Optional tonal trigger restyle: when `triggerBg` is set, the pill
+     * drops its keyline border and uses this fill (typically a low-alpha
+     * brand tint) with `triggerText` for BOTH the label and the caret —
+     * a colored-on-tint control instead of text-on-surface. */
+    triggerBg?: Color;
+    triggerText?: Color;
 }
 
 export interface SelectorHandle<T> {
@@ -93,9 +99,9 @@ export function createSelector<T>(
             onClick: mutate((ctx) => ctx.set(open$, !ctx.get(open$))),
             child: Container({
                 height: triggerHeight,
-                color: style.surface,
+                color: style.triggerBg ?? style.surface,
                 borderColor: style.divider,
-                borderWidth: 1,
+                borderWidth: style.triggerBg ? 0 : 1,
                 borderRadius: chipRadius,
                 children: [
                     Row({
@@ -107,7 +113,7 @@ export function createSelector<T>(
                             Text({
                                 text: label$,
                                 fontSize: 13,
-                                color: style.text,
+                                color: style.triggerText ?? style.text,
                                 maxLines: 1,
                                 overflow: "ellipsis",
                             }),
@@ -117,7 +123,7 @@ export function createSelector<T>(
                                     ctx.get(open$) ? "▲" : "▼",
                                 ),
                                 fontSize: 10,
-                                color: style.primary,
+                                color: style.triggerText ?? style.primary,
                             }),
                             SizedBox({ width: 14 }),
                         ],

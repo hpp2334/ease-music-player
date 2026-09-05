@@ -21,14 +21,14 @@
         "en-US": "Play Counts",
         "zh-CN": "播放计数"
       },
-      "version": "0.0.2",
+      "version": "0.0.3",
       "description": {
         "en-US": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
         "zh-CN": "统计每首歌的播放次数，覆盖今天、昨天、最近 3 天、最近一周、最近一月和最近一年。"
       },
-      "zip": "zips/com.ease.playcount-0.0.2.zip",
-      "sha256": "6f7983e6b5d00ec91d60f01399c0e09c509af2adb9a0cdcb2a8a4140450684f2",
-      "size": 51157
+      "zip": "zips/com.ease.playcount-0.0.3.zip",
+      "sha256": "6b6a40d152ebd210f77c22190fcfbc1e36ad69d59305ac51f52894f47c678329",
+      "size": 53761
     },
     {
       "id": "com.ease.webdav",

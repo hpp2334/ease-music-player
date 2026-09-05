@@ -40,6 +40,7 @@ import {
     Switch,
     Expanded,
     Stack,
+    Condition,
     LazyList,
     view,
     source,
@@ -101,6 +102,11 @@ const maxCount$: Readable<number> = derive((ctx) => {
     for (const e of ctx.get(entries$)) if (e.count > m) m = e.count;
     return m;
 });
+
+// Total plays in the current range — the header stat.
+const total$: Readable<number> = derive((ctx) =>
+    ctx.get(entries$).reduce((n, e) => n + e.count, 0),
+);
 
 // ---------------------------------------------------------------------------
 // Date helpers (local time, so the day-key matches what the Kotlin appender
@@ -202,33 +208,65 @@ export const refresh$ = mutate((ctx: StoreCtx): void => {
 //
 // Design rule: ONE tier accent per card, expressed ONLY by the medal.
 // Gold / silver / bronze are semantic tier colors and stay fixed; the
-// long-tail badge uses theme roles. Everything else (page, card, border,
-// bar, text, count pill) is identical across ranks, so each card reads as
-// one coherent object rather than a collection of colored parts.
+// long-tail badge uses theme roles. Everything else (page, card, bar, text,
+// count pill) is identical across ranks, so each card reads as one
+// coherent object rather than a collection of colored parts. Cards rely on
+// TONAL elevation (a container step above the page bg + a soft shadow) —
+// no hard keyline border — and repeated accents (chips, the range trigger)
+// are low-alpha tints with colored text so they never out-shout the medals.
 // ---------------------------------------------------------------------------
 
 const COLOR_PRIMARY: Color = Color.hex(themes.color("primary"));
 // The app's `secondary` is the soft tint of `primary` (the former
-// "primarySoft"); the count pill keeps `primary`-on-`secondary` text,
-// which is legible in both schemes.
+// "primarySoft").
 const COLOR_PRIMARY_SOFT: Color = Color.hex(themes.color("secondary"));
 const COLOR_PAGE_BG: Color = Color.hex(themes.color("background"));
-const COLOR_CARD: Color = Color.hex(themes.color("surfaceContainer"));
+// One container step above the page background — cards read as raised
+// surfaces without a border keyline.
+const COLOR_CARD: Color = Color.hex(themes.color("surfaceContainerHigh"));
 const COLOR_TEXT: Color = Color.hex(themes.color("onSurface"));
 const COLOR_TEXT_MUTED: Color = Color.hex(themes.color("onSurfaceVariant"));
 const COLOR_DIVIDER: Color = Color.hex(themes.color("outlineVariant"));
-const COLOR_BAR_TRACK: Color = Color.hex(themes.color("outlineVariant"));
+// Near the card tone — the track must recede; the fill + count carry the
+// data (a full-width `outlineVariant` track was the loudest gray on screen).
+const COLOR_BAR_TRACK: Color = Color.hex(
+    themes.color("surfaceContainerHighest"),
+);
 // Translucent near-black in both schemes — barely visible on dark, which is
 // the conventional treatment (dark UIs get their elevation from surfaces).
 const COLOR_SHADOW: Color = Color.rgba(15, 23, 42, 28);
 
+// Scheme flag + alpha helper. `themes.color` returns "#RRGGBBAA" hex; this
+// derives translucent brand tints at runtime so accents follow the theme.
+const IS_DARK: boolean = themes.isDark();
+
+function withAlpha(hex: string, alpha: number): Color {
+    const h = hex.replace("#", "");
+    return Color.rgba(
+        parseInt(h.slice(0, 2), 16),
+        parseInt(h.slice(2, 4), 16),
+        parseInt(h.slice(4, 6), 16),
+        alpha,
+    );
+}
+
+// Count chips — a quiet tint of the brand blue with colored text. Dark:
+// bright `secondary` text on a faint fill; light: near-solid soft fill with
+// the steel-blue text (the legacy look, slightly softened). Either way the
+// repeated chip stops being the brightest element on every row.
+const COLOR_CHIP_BG: Color = IS_DARK
+    ? withAlpha(themes.color("secondary"), 38)
+    : withAlpha(themes.color("secondary"), 235);
+const COLOR_CHIP_TEXT: Color = IS_DARK ? COLOR_PRIMARY_SOFT : COLOR_PRIMARY;
+
 // Medal fills — the SINGLE tier signal (gold / silver / bronze for the
-// podium; a themed muted disc for the long tail).
+// podium; a themed muted disc for the long tail). Numerals stay dark on
+// gold/silver (legibility) and white on the darker bronze.
 const COLOR_GOLD: Color = Color.hex("#F5C400");
 const COLOR_GOLD_RING: Color = Color.hex("#E2B400");
 const COLOR_GOLD_NUM: Color = Color.hex("#3D2E00");
-const COLOR_SILVER: Color = Color.hex("#C4CBD5");
-const COLOR_SILVER_RING: Color = Color.hex("#9AA3AF");
+const COLOR_SILVER: Color = Color.hex("#C6CDD6");
+const COLOR_SILVER_RING: Color = Color.hex("#98A3B3");
 const COLOR_SILVER_NUM: Color = Color.hex("#2F3640");
 const COLOR_BRONZE: Color = Color.hex("#CD7F32");
 const COLOR_BRONZE_RING: Color = Color.hex("#A05A1E");
@@ -272,6 +310,12 @@ const rangeSel = createSelector<string>({
         textMuted: COLOR_TEXT_MUTED,
         divider: COLOR_DIVIDER,
         shadow: COLOR_SHADOW,
+        // Tonal trigger: brand-tinted pill, no keyline, accent-colored label
+        // (ties the control to the bars instead of white-on-gray).
+        triggerBg: IS_DARK
+            ? withAlpha(themes.color("primary"), 46)
+            : withAlpha(themes.color("secondary"), 200),
+        triggerText: IS_DARK ? COLOR_PRIMARY_SOFT : COLOR_PRIMARY,
     },
 });
 
@@ -279,26 +323,25 @@ const rangeSel = createSelector<string>({
 // Header
 // ---------------------------------------------------------------------------
 
+// Header stat. The Compose top bar already carries the page title (the
+// plugin's localized manifest name), so the in-view header is just the
+// headline number + a muted unit — no duplicated H1, and the range context
+// lives in the selector pill right next to it.
 function HeaderSummary() {
-    return Column({
-        crossAlignment: CrossAxisAlignment.Start,
+    return Row({
+        crossAlignment: CrossAxisAlignment.Center,
         mainAxisSize: MainAxisSize.Min,
         children: [
             Text({
-                text: "Play Counts",
+                text: derive((ctx) => String(ctx.get(total$))),
                 fontSize: 22,
                 color: COLOR_TEXT,
             }),
-            SizedBox({ height: 4 }),
+            SizedBox({ width: 6 }),
             Text({
-                text: derive((ctx) => {
-                    const range = RANGES[ctx.get(selectedRange$)];
-                    const total = ctx.get(entries$).reduce(
-                        (n, e) => n + e.count,
-                        0,
-                    );
-                    return `${range.label} · ${total} play${total === 1 ? "" : "s"}`;
-                }),
+                text: derive((ctx) =>
+                    ctx.get(total$) === 1 ? "play" : "plays",
+                ),
                 fontSize: 13,
                 color: COLOR_TEXT_MUTED,
             }),
@@ -306,9 +349,9 @@ function HeaderSummary() {
     });
 }
 
-// Header row: title + subtitle on the left, range trigger pill on the
-// right. The trigger is a CompositedTransform target; the menu (follower)
-// anchors to its bottom-left from the page-level `Stack` in `rootView`.
+// Header row: stat on the left, range trigger pill on the right. The
+// trigger is a CompositedTransform target; the menu (follower) anchors to
+// its bottom-left from the page-level `Stack` in `rootView`.
 function HeaderRow() {
     return Row({
         mainAlignment: MainAxisAlignment.SpaceBetween,
@@ -373,15 +416,16 @@ function RankBadge(props: { rank: number }): Element {
 // data-dependent value below is a `derive`, so switching range updates the
 // title / count / bar in place without remounting.
 //
-// Visual system (cohesive): the medal is the single tier signal. Card
-// border, shadow, and the brand-blue bar are identical for every rank, so
-// the podium reads as one family of cards (distinguished by medal + bolder
-// title + slightly taller padding) rather than four colored echoes.
+// Visual system (cohesive): the medal is the single tier signal. Card fill
+// and the brand-blue bar are identical for every rank, so the podium reads
+// as one family of cards (distinguished by medal + slightly taller padding)
+// rather than four colored echoes. Cards float on a tonal container step
+// with a soft shadow — no keyline border.
 function RankedRow(props: RankedRowProps): Element {
     const { rank, index } = props;
     const tierA = rank <= 3;
     const m = medalSpec(rank);
-    const barHeight = tierA ? 8 : 6;
+    const barHeight = 6;
     const pad = tierA ? 16 : 12;
 
     const entry$ = derive((ctx) => ctx.get(entries$)[index]);
@@ -416,23 +460,21 @@ function RankedRow(props: RankedRowProps): Element {
     });
 
     const countBadge = Container({
-        color: COLOR_PRIMARY_SOFT,
+        color: COLOR_CHIP_BG,
         borderRadius: CHIP_RADIUS,
         padding: tierA ? 6 : 5,
         children: [
             Text({
                 text: derive((ctx) => String(ctx.get(count$))),
                 fontSize: tierA ? 13 : 12,
-                color: COLOR_PRIMARY,
+                color: COLOR_CHIP_TEXT,
             }),
         ],
     });
 
     return Container({
         color: COLOR_CARD,
-        borderColor: COLOR_DIVIDER,
-        borderWidth: 1,
-        borderRadius: tierA ? 12 : 10,
+        borderRadius: 12,
         shadowColor: COLOR_SHADOW,
         shadowBlur: 6,
         shadowOffset: [0, 2],
@@ -455,7 +497,7 @@ function RankedRow(props: RankedRowProps): Element {
                                     countBadge,
                                 ],
                             }),
-                            SizedBox({ height: tierA ? 10 : 8 }),
+                            SizedBox({ height: 8 }),
                             Container({
                                 height: barHeight,
                                 children: [
@@ -484,18 +526,37 @@ function ReadyBody() {
         builder: (index: number) => {
             const rank = index + 1;
             const children: Element[] = [];
-            if (index > 0) {
-                if (index <= 2) {
-                    // within the top-3 podium cluster
-                    children.push(SizedBox({ height: 10 }));
-                } else if (index === 3) {
-                    // boundary between podium (1–3) and the tail (4+)
-                    children.push(SizedBox({ height: 20 }));
-                    children.push(Container({ height: 1, color: COLOR_DIVIDER }));
-                    children.push(SizedBox({ height: 14 }));
-                } else {
-                    children.push(SizedBox({ height: 10 }));
-                }
+            if (index === 0) {
+                // Section label over the podium (the top bar carries the
+                // page title, so this is the only heading in the view).
+                // Gated so a single-entry range shows just the card — an
+                // empty `Text` would still reserve its line box.
+                children.push(
+                    Condition({
+                        condition: derive(
+                            (ctx) => ctx.get(entries$).length > 1,
+                        ),
+                        child: () =>
+                            Text({
+                                text: derive((ctx) => {
+                                    const n = ctx.get(entries$).length;
+                                    return `TOP ${Math.min(3, n)}`;
+                                }),
+                                fontSize: 11,
+                                color: COLOR_TEXT_MUTED,
+                            }),
+                    }),
+                );
+                children.push(SizedBox({ height: 8 }));
+            } else if (index <= 2) {
+                // within the top-3 podium cluster
+                children.push(SizedBox({ height: 12 }));
+            } else if (index === 3) {
+                // boundary between podium (1–3) and the tail (4+): the
+                // density change IS the separator — no hairline divider
+                children.push(SizedBox({ height: 24 }));
+            } else {
+                children.push(SizedBox({ height: 12 }));
             }
             children.push(RankedRow({ rank, index }));
             // Trailing bottom inset on the last item. The builder runs only
@@ -542,7 +603,7 @@ function EmptyBody() {
                     Text({
                         text: "♪",
                         fontSize: 32,
-                        color: COLOR_DIVIDER,
+                        color: withAlpha(themes.color("primary"), 150),
                     }),
                     SizedBox({ height: 12 }),
                     Text({
