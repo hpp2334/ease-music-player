@@ -14,6 +14,7 @@
 
 #![cfg(target_os = "android")]
 
+use tur_engine::core::render::brush::Color;
 use tur_engine::core::scheduler::WorkerPoolHandle;
 
 /// The two capped worker pools all plugin instances share, registered on
@@ -183,7 +184,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     tur_android::ops::destroy_settled(handle)
 }
 
-/// `TurNative.createInstance(runtimeHandle, poolsHandle, frameLoop, pluginId, instance): long`
+/// `TurNative.createInstance(runtimeHandle, poolsHandle, frameLoop, pluginId, instance, baseColorArgb): long`
 ///
 /// Spawns an isolated **renderer-less** instance for the given `pluginId`
 /// — the INITIALIZE half of tur's two-phase lifecycle (#215). The plugin
@@ -201,6 +202,15 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
 /// `instance` is the storage's `plugin_storage_id` for edit-mode views
 /// (stamped as [`PluginInstance::Some`]); pass an empty string for
 /// create-mode setup views (stamped as [`PluginInstance::None`]).
+///
+/// `baseColorArgb` is the renderer's base (background) color (Android
+/// ARGB int — tur #217). It is applied at build and colors every surface
+/// this instance attaches, i.e. it is what shows in any frame whose
+/// content doesn't cover the viewport — notably the first post-attach
+/// present of the pre-attach render batch (recorded at the bootstrap 0×0
+/// viewport, so its content has zero extent). The Kotlin caller passes
+/// the Compose theme's surface color, making that frame pixel-identical
+/// to the loading panel instead of the engine-default white flash.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative_createInstance(
     mut env: tur_android::JNIEnv,
@@ -210,6 +220,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     frame_loop: tur_android::JObject,
     plugin_id: tur_android::JString,
     instance: tur_android::JString,
+    base_color_argb: tur_android::jint,
 ) -> tur_android::jlong {
     let pid: String = match env.get_string(&plugin_id) {
         Ok(s) => s.into(),
@@ -230,21 +241,33 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     } else {
         Some(instance_str)
     };
+    let base_color = Color::rgba(
+        ((base_color_argb >> 16) & 0xFF) as u8,
+        ((base_color_argb >> 8) & 0xFF) as u8,
+        (base_color_argb & 0xFF) as u8,
+        ((base_color_argb >> 24) & 0xFF) as u8,
+    );
     let view_pool = borrow_pools(pools_handle).map(|pools| pools.view.clone());
-    tur_android::ops::create_instance(&mut env, runtime_handle, frame_loop, move |builder| {
-        let builder = match view_pool {
-            Some(ref pool) => builder.worker_pool(pool.clone()),
-            None => builder,
-        };
-        builder.instance_data(move |cx| {
-            cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
-                pid.clone(),
-            ));
-            cx.define::<crate::plugin_runtime::PluginInstance>(
-                crate::plugin_runtime::PluginInstance(instance_opt.clone()),
-            );
-        })
-    })
+    tur_android::ops::create_instance(
+        &mut env,
+        runtime_handle,
+        frame_loop,
+        move |builder| {
+            let builder = match view_pool {
+                Some(ref pool) => builder.worker_pool(pool.clone()),
+                None => builder,
+            };
+            builder.instance_data(move |cx| {
+                cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
+                    pid.clone(),
+                ));
+                cx.define::<crate::plugin_runtime::PluginInstance>(
+                    crate::plugin_runtime::PluginInstance(instance_opt.clone()),
+                );
+            })
+        },
+        base_color,
+    )
 }
 
 /// `TurNative.createHeadlessInstance(runtimeHandle, poolsHandle, frameLoop, pluginId): long`
@@ -273,20 +296,28 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
         }
     };
     let backend_pool = borrow_pools(pools_handle).map(|pools| pools.backend.clone());
-    tur_android::ops::create_instance(&mut env, runtime_handle, frame_loop, move |builder| {
-        let builder = match backend_pool {
-            Some(ref pool) => builder.worker_pool(pool.clone()),
-            None => builder,
-        };
-        builder.instance_data(move |cx| {
-            cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
-                pid.clone(),
-            ));
-            cx.define::<crate::plugin_runtime::PluginInstance>(
-                crate::plugin_runtime::PluginInstance(None),
-            );
-        })
-    })
+    // Never attached to a surface, so the base color is moot — pass the
+    // engine default explicitly (tur #217 made it a required argument).
+    tur_android::ops::create_instance(
+        &mut env,
+        runtime_handle,
+        frame_loop,
+        move |builder| {
+            let builder = match backend_pool {
+                Some(ref pool) => builder.worker_pool(pool.clone()),
+                None => builder,
+            };
+            builder.instance_data(move |cx| {
+                cx.define::<crate::plugin_runtime::PluginId>(crate::plugin_runtime::PluginId::new(
+                    pid.clone(),
+                ));
+                cx.define::<crate::plugin_runtime::PluginInstance>(
+                    crate::plugin_runtime::PluginInstance(None),
+                );
+            })
+        },
+        Color::WHITE,
+    )
 }
 
 /// `TurNative.attachInstance(handle, surface, width, height, dpr)` — the

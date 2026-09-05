@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -99,6 +100,13 @@ fun TurView(
 
     val surfaceView = remember { TurSurfaceView(context) }
 
+    // The renderer's base (background) color — resolved in composition so it
+    // is exactly the loading panel's color below (same colorScheme read).
+    // Captured by the bind below: fixed at instance creation, so a theme
+    // change mid-session only takes effect on re-entry (the plugin's own
+    // content re-themes live via `ease.themes`).
+    val baseColorArgb = MaterialTheme.colorScheme.surface.toArgb()
+
     Box(modifier = modifier.fillMaxSize()) {
         // The tur surface is z-order-on-top — it composites ABOVE the whole
         // window — so this indicator can never draw over it. It works the
@@ -127,7 +135,7 @@ fun TurView(
     }
 
     DisposableEffect(surfaceView) {
-        surfaceView.bind(runtime, sourceHandle, pluginId, instance, resolvedDpr) { ready = true }
+        surfaceView.bind(runtime, sourceHandle, pluginId, instance, resolvedDpr, baseColorArgb) { ready = true }
         onDispose { surfaceView.unbind() }
     }
 
@@ -230,16 +238,18 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
     }
 
     /** Stash the dpr, spawn the renderer-less instance (stamped with
-     *  [pluginId]/[instanceId]), load the module, and register the surface
-     *  callback; attach the surface when it's ready. [onFirstFrame] fires
-     *  (once, on the main looper) when the surface composites its first
-     *  buffer — used by [TurView] to drop its loading indicator. */
+     *  [pluginId]/[instanceId], base-colored [baseColorArgb]), load the
+     *  module, and register the surface callback; attach the surface when
+     *  it's ready. [onFirstFrame] fires (once, on the main looper) when
+     *  the surface composites its first buffer — used by [TurView] to drop
+     *  its loading indicator. */
     fun bind(
         runtime: TurRuntime,
         sourceHandle: Long,
         pluginId: String,
         instanceId: String?,
         dpr: Double,
+        baseColorArgb: Int,
         onFirstFrame: (() -> Unit)? = null,
     ) {
         dprValue = dpr
@@ -255,8 +265,12 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
             // tur-host thread, and the loadModule below is queued behind
             // it (FIFO). The TurPerf timings therefore cover queueing, not
             // the build; `markBoot`→`markFirstPump` spans the whole async
-            // build + module eval + first render.
-            runtime.createInstance(pluginId, instanceId).also {
+            // build + module eval + first render. The base color colors
+            // every frame whose content doesn't cover the viewport — most
+            // visibly the first post-attach present of the pre-attach
+            // (0×0-viewport) render batch, which would otherwise flash
+            // the engine-default white (tur #217).
+            runtime.createInstance(pluginId, instanceId, baseColorArgb).also {
                 val t1 = android.os.SystemClock.elapsedRealtime()
                 if (sourceHandle != 0L) it.loadModule(sourceHandle)
                 val t2 = android.os.SystemClock.elapsedRealtime()
