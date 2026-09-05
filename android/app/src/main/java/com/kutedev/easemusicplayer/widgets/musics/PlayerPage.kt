@@ -176,7 +176,11 @@ private fun MusicSlider(
 ) {
     val handleSize = 12.dp
     val sliderHeight = 4.dp
-    val sliderContainerHeight = 16.dp
+    // 48dp gesture band (Material touch-target size) centered around the
+    // 4dp visual bar — the bar itself is far too thin to tap reliably.
+    // The bar and thumb are offset to the band's center, so the visuals
+    // are unchanged; only the tap/drag surface grows.
+    val sliderContainerHeight = 48.dp
 
     var isDragging by remember { mutableStateOf(false) }
     var draggingCurrentDurationMS by remember { mutableStateOf(_currentDurationMS) }
