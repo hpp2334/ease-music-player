@@ -1,9 +1,5 @@
 package com.kutedev.easemusicplayer.widgets.devices
 
-import android.content.Intent
-import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,9 +22,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,29 +40,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
 import com.kutedev.easemusicplayer.components.EaseIconButton
-import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
-import com.kutedev.easemusicplayer.components.EaseTextButton
-import com.kutedev.easemusicplayer.components.EaseTextButtonSize
-import com.kutedev.easemusicplayer.components.EaseTextButtonType
-import com.kutedev.easemusicplayer.components.FormSwitch
-import com.kutedev.easemusicplayer.components.FormText
 import com.kutedev.easemusicplayer.components.FormWidget
+import com.kutedev.easemusicplayer.singleton.StorageProvider
+import com.kutedev.easemusicplayer.singleton.resolve
+import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
+import com.kutedev.easemusicplayer.turintegration.TurView
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.core.LocalNavController
-import kotlinx.coroutines.flow.update
-import uniffi.ease_client_backend.StorageConnectionTestResult
-import uniffi.ease_client_backend.ctOnedriveOauthUrl
-import uniffi.ease_client_schema.StorageType
-import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
-import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.ArgUpsertStorage
 
 
 private fun buildStr(s: String): AnnotatedString {
@@ -129,170 +115,83 @@ private fun RemoveDialog(
     }
 }
 
+/** Storage-provider card in the chooser. Non-selectable cards (other
+ *  providers in edit mode — a storage can't change its type) render dimmed. */
 @Composable
 private fun StorageBlock(
     title: String,
     isActive: Boolean,
+    disabled: Boolean = false,
     onSelect: () -> Unit
 ) {
-    val bgColor = if (isActive) { MaterialTheme.colorScheme.primary } else { MaterialTheme.colorScheme.surfaceVariant }
-    val tint = if (isActive) { MaterialTheme.colorScheme.surface } else { MaterialTheme.colorScheme.onSurface }
+    val bgColor = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val tint = if (isActive) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface
+    val dim = if (disabled) 0.4f else 1f
 
     Box(
         modifier = Modifier
             .size(100.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(bgColor)
-            .clickable { onSelect() }
+            .background(bgColor.copy(alpha = dim))
+            .clickable(enabled = !disabled) { onSelect() }
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .align(Alignment.Center)
+            modifier = Modifier.align(Alignment.Center)
         ) {
             Icon(
                 painter = painterResource(id = R.drawable.icon_cloud),
                 contentDescription = null,
-                tint = tint,
+                tint = tint.copy(alpha = dim),
             )
             Text(
                 text = title,
-                color = tint,
+                color = tint.copy(alpha = dim),
             )
         }
     }
 }
 
-
+/**
+ * Hosts a plugin storage's view JS in a [TurView]. The plugin owns all
+ * config UI (alias / connection fields, "Connect your account", test +
+ * save buttons, edit-view disconnect, ...). Providers with an OAuth flow
+ * trigger it via `ease.oauth.new()` + `ease.oauth.start(oauthId)` (business
+ * data like the alias stays in the plugin, keyed by the flow id);
+ * non-OAuth providers (e.g. WebDAV) persist their instance from the view
+ * via a backend RPC + `ease.context.createStorage`.
+ *
+ * [pluginId] is stamped into the instance's per-instance data slot so
+ * `ease:*` bridge fns resolve the calling plugin from Rust. [sourceHandle]
+ * is the view's module-source handle (registered Rust-side by the
+ * `plugin.list` scan — the JS bytes never cross JNI). [instance] is the
+ * storage's `plugin_storage_id` for edit views (non-null →
+ * `ease.context.storageId$` reports the id; null = create-mode setup
+ * view).
+ */
 @Composable
-private fun WebdavConfig(
-    editStorageVM: EditStorageVM = hiltViewModel()
-) {
-    val form by editStorageVM.form.collectAsState()
-    val validated by editStorageVM.validated.collectAsState()
-    val isAnonymous = form.isAnonymous;
-
-    FormSwitch(
-        label = stringResource(id = R.string.storage_edit_anonymous),
-        value = isAnonymous,
-        onChange = { editStorageVM.updateForm { storage ->
-            storage.isAnonymous = !storage.isAnonymous
-            storage
-        }}
-    )
-    FormText(
-        label = stringResource(id = R.string.storage_edit_alias),
-        value = form.alias,
-        onChange = { value -> editStorageVM.updateForm { storage ->
-            storage.alias = value
-            storage
-        } },
-    )
-    FormText(
-        label = stringResource(id = R.string.storage_edit_addr),
-        value = form.addr,
-        onChange = { value -> editStorageVM.updateForm { storage ->
-            storage.addr = value
-            storage
-        } },
-        error = if (validated.addrEmpty) {
-            R.string.storage_edit_form_address
-        } else {
-            null
-        }
-    )
-    if (!isAnonymous) {
-        FormText(
-            label = stringResource(id = R.string.storage_edit_username),
-            value = form.username,
-            onChange = { value -> editStorageVM.updateForm { storage ->
-                storage.username = value
-                storage
-            } },
-            error = if (validated.usernameEmpty) {
-                R.string.storage_edit_form_username
-            } else {
-                null
-            }
-        )
-        FormText(
-            label = stringResource(id = R.string.storage_edit_password),
-            value = form.password,
-            isPassword = true,
-            onChange = { value -> editStorageVM.updateForm { storage ->
-                storage.password = value
-                storage
-            } },
-            error = if (validated.passwordEmpty) {
-                R.string.storage_edit_form_password
-            } else {
-                null
-            }
-        )
-    }
-}
-
-@Composable
-private fun OneDriveConfig(
-    editStorageVM: EditStorageVM = hiltViewModel()
+private fun PluginStorageView(
+    pluginId: String,
+    sourceHandle: Long,
+    instance: String?,
 ) {
     val context = LocalContext.current
-    val form by editStorageVM.form.collectAsState()
-    val validated by editStorageVM.validated.collectAsState()
-    val connected = form.password.isNotEmpty()
 
-    FormText(
-        label = stringResource(id = R.string.storage_edit_alias),
-        value = form.alias,
-        onChange = { value -> editStorageVM.updateForm { storage ->
-            storage.alias = value
-            storage
-        } },
-        error = if (validated.aliasEmpty) {
-            R.string.storage_edit_onedrive_alias_not_empty
-        } else {
-            null
-        }
-    )
-    FormWidget(
-        label = stringResource(R.string.storage_edit_oauth)
-    ) {
-        if (!connected) {
-            EaseTextButton(
-                text = stringResource(R.string.storage_edit_onedrive_connect),
-                type = EaseTextButtonType.PrimaryVariant,
-                size = EaseTextButtonSize.Medium,
-                onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW, ctOnedriveOauthUrl().toUri())
-                    intent.flags = FLAG_ACTIVITY_NEW_TASK
-                    context.startActivity(intent)
-                },
-            )
-            if (validated.passwordEmpty) {
-                Text(
-                    modifier = Modifier.padding(
-                        horizontal = 0.dp,
-                        vertical = 2.dp,
-                    ),
-                    text = stringResource(R.string.storage_edit_onedrive_should_auth),
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 11.sp,
-                )
-            }
-        }
-        if (connected) {
-            EaseTextButton(
-                text = stringResource(R.string.storage_edit_onedrive_disconnect),
-                type = EaseTextButtonType.Error,
-                size = EaseTextButtonSize.Medium,
-                onClick = {
-                    editStorageVM.updateForm { storage ->
-                        storage.password = ""
-                        storage
-                    }
-                },
-            )
-        }
+    when {
+        sourceHandle == 0L -> Text(
+            text = "Plugin view load failed: no source handle",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.error,
+        )
+        else -> TurView(
+            runtime = EasePluginBridge.runtime(context),
+            sourceHandle = sourceHandle,
+            pluginId = pluginId,
+            instance = instance,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(480.dp),
+        )
     }
 }
 
@@ -301,28 +200,49 @@ fun EditStoragesPage(
     editStorageVM: EditStorageVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
-    val coroutineScope = rememberCoroutineScope()
-    val form by editStorageVM.form.collectAsState();
-    val isCreated by editStorageVM.isCreated.collectAsState();
-    val testing by editStorageVM.testResult.collectAsState()
+    val isCreated by editStorageVM.isCreated.collectAsState()
+    val pluginMode by editStorageVM.pluginMode.collectAsState()
+    val providers by editStorageVM.storageProviders.collectAsState()
+    val editPluginView by editStorageVM.editPluginView.collectAsState()
+    val title by editStorageVM.title.collectAsState()
 
-    val storageType = form.typ;
-
-    val testingColors = when (testing) {
-        StorageConnectionTestResult.NONE -> null
-        StorageConnectionTestResult.TESTING -> EaseIconButtonColors(
-            buttonBg = Color.Transparent,
-            iconTint = MaterialTheme.colorScheme.tertiary,
-        )
-        StorageConnectionTestResult.SUCCESS -> EaseIconButtonColors(
-            buttonBg = Color.Transparent,
-            iconTint = MaterialTheme.colorScheme.primary,
-        )
-        else -> EaseIconButtonColors(
-            buttonBg = Color.Transparent,
-            iconTint = MaterialTheme.colorScheme.error,
-        )
+    // When a plugin registers a new storage instance (the OAuth redirect
+    // handled by `MainActivity`, or a non-OAuth backend RPC followed by
+    // `ease.context.createStorage`), pop back from the setup form.
+    //
+    // The short delay lets the setup view's engine quiesce (pending rpc
+    // replies + pump posts drain) before disposal — destroying the TurView
+    // mid-pump races the engine's loop driver (use-after-free in
+    // `pump_loop`, see the crash repro'd during the WebDAV connect test).
+    LaunchedEffect(Unit) {
+        editStorageVM.pluginConnectedEvent.collect {
+            kotlinx.coroutines.delay(250)
+            navController.popBackStack()
+        }
     }
+    // Pop back when the edited storage is removed (view-side disconnect via
+    // the plugin backend, or the top-bar trash).
+    LaunchedEffect(Unit) {
+        editStorageVM.removedEvent.collect { navController.popBackStack() }
+    }
+
+    // Create-mode chooser selection: one card per discovered plugin
+    // storage provider (WebDAV, OneDrive, ...). In edit mode the provider
+    // is fixed by the loaded storage's handle (`pluginMode`).
+    var selectedProvider by remember { mutableStateOf<StorageProvider?>(null) }
+
+    // Entering the create view pre-selects the first discovered provider,
+    // so the setup form is visible right away (no extra tap). Providers
+    // arrive async from `scanPlugins`, so this fires when the list first
+    // becomes non-empty; once set (by us or the user) it never overrides.
+    LaunchedEffect(isCreated, providers) {
+        if (isCreated && selectedProvider == null && providers.isNotEmpty()) {
+            selectedProvider = providers.first()
+        }
+    }
+
+    val activeProvider = if (isCreated) selectedProvider else null
+    val showPlugin = if (isCreated) selectedProvider != null else pluginMode
 
     Column(
         modifier = Modifier
@@ -357,29 +277,6 @@ fun EditStoragesPage(
                         }
                     )
                 }
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Medium,
-                    buttonType = EaseIconButtonType.Default,
-                    disabled = testing == StorageConnectionTestResult.TESTING,
-                    painter = painterResource(id = R.drawable.icon_wifitethering),
-                    overrideColors = testingColors,
-                    onClick = {
-                        editStorageVM.test()
-                    }
-                )
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Medium,
-                    buttonType = EaseIconButtonType.Default,
-                    painter = painterResource(id = R.drawable.icon_ok),
-                    onClick = {
-                        coroutineScope.launch {
-                            val finished = editStorageVM.finish()
-                            if (finished) {
-                                navController.popBackStack()
-                            }
-                        }
-                    }
-                )
             }
         }
         Box(
@@ -392,30 +289,68 @@ fun EditStoragesPage(
                     .imePadding()
                     .padding(30.dp, 12.dp)
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    StorageBlock(
-                        title = "WebDAV",
-                        isActive = storageType == StorageType.WEBDAV,
-                        onSelect = {
-                            editStorageVM.changeType(StorageType.WEBDAV)
+                // Storage-type chooser: one card per discovered plugin
+                // storage provider (WebDAV, OneDrive, ...). Shown in both
+                // modes — create picks the provider to set up; edit marks
+                // the storage's own provider (fixed — a storage can't
+                // change its type).
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (p in providers) {
+                        val active = if (isCreated) {
+                            selectedProvider?.storageId == p.storageId
+                        } else {
+                            editPluginView?.pluginId == p.pluginId
                         }
-                    )
-                    StorageBlock(
-                        title = "OneDrive",
-                        isActive = storageType == StorageType.ONE_DRIVE,
-                        onSelect = {
-                            editStorageVM.changeType(StorageType.ONE_DRIVE)
+                        StorageBlock(
+                            title = p.displayName.resolve(),
+                            isActive = active,
+                            disabled = !isCreated && !active,
+                            onSelect = { if (isCreated) selectedProvider = p }
+                        )
+                    }
+                }
+                Box(modifier = Modifier.size(0.dp, 20.dp))
+                if (showPlugin) {
+                    if (isCreated) {
+                        // Create-mode chooser selection.
+                        val handle = activeProvider?.viewSourceHandle ?: 0L
+                        val pid = activeProvider?.pluginId
+                        if (pid != null) {
+                            // Keyed on the provider: a TurView keeps its
+                            // instance while composed, so switching
+                            // providers must rebuild it (dispose + fresh
+                            // bind) instead of reusing the old instance.
+                            // Disposal needs no timing guards anymore —
+                            // tur's two-phase lifecycle builds instances
+                            // renderer-less, so a fire-and-forget close()
+                            // racing an in-flight build is safe.
+                            key(activeProvider?.storageId) {
+                                PluginStorageView(pid, handle, instance = null)
+                            }
                         }
-                    )
-                }
-                Box(modifier = Modifier.height(30.dp))
-                if (storageType == StorageType.WEBDAV) {
-                    WebdavConfig()
-                }
-                if (storageType == StorageType.ONE_DRIVE) {
-                    OneDriveConfig()
+                    } else {
+                        // Edit mode: render the storage's plugin view,
+                        // stamped with its plugin_storage_id so
+                        // `ease.context.storageId$` is non-null (edit branch).
+                        val epv = editPluginView
+                        if (epv != null) {
+                            PluginStorageView(
+                                pluginId = epv.pluginId,
+                                sourceHandle = epv.viewSourceHandle,
+                                instance = epv.pluginStorageId,
+                            )
+                        } else {
+                            // Provider not resolved yet (scanPlugins pending)
+                            // — show the alias as a static fallback.
+                            FormWidget(label = stringResource(R.string.storage_edit_oauth)) {
+                                Text(
+                                    text = title.ifBlank { "Plugin" },
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

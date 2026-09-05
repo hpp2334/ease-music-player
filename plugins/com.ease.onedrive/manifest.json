@@ -1,0 +1,25 @@
+{
+  "id": "com.ease.onedrive",
+  "name": { "en-US": "OneDrive", "zh-CN": "OneDrive" },
+  "version": "0.0.2",
+  "description": {
+    "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless JS plugin.",
+    "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
+  },
+  "author": "ease",
+  "backend": "backend.js",
+  "events": [],
+  "contributions": {
+    "storages": [
+      {
+        "id": "onedrive",
+        "title": { "en-US": "OneDrive", "zh-CN": "OneDrive" },
+        "desc": {
+          "en-US": "Connect to your personal OneDrive",
+          "zh-CN": "连接你的个人 OneDrive"
+        },
+        "view": "view.js"
+      }
+    ]
+  }
+}

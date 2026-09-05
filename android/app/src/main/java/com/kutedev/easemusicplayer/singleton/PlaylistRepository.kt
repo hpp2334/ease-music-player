@@ -1,45 +1,28 @@
 package com.kutedev.easemusicplayer.singleton
 
-import android.content.Context
-import androidx.annotation.OptIn
-import androidx.lifecycle.viewModelScope
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import com.kutedev.easemusicplayer.core.BuildMediaContext
-import com.kutedev.easemusicplayer.core.MusicPlayerDataSource
-import com.kutedev.easemusicplayer.core.buildMediaItem
-import com.kutedev.easemusicplayer.core.syncMetadataUtil
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.time.debounce
-import uniffi.ease_client_backend.AddedMusic
-import uniffi.ease_client_backend.ArgCreatePlaylist
-import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ArgReorderPlaylist
-import uniffi.ease_client_backend.ArgUpdatePlaylist
-import uniffi.ease_client_backend.PlaylistAbstract
-import uniffi.ease_client_backend.ctCreatePlaylist
-import uniffi.ease_client_backend.ctListPlaylist
-import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ctRemovePlaylist
-import uniffi.ease_client_backend.ctUpdatePlaylist
-import uniffi.ease_client_backend.ctsGetMusicAbstract
-import uniffi.ease_client_backend.ctsReorderPlaylist
-import uniffi.ease_client_backend.easeError
-import uniffi.ease_client_schema.MusicId
-import uniffi.ease_client_schema.PlaylistId
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import com.kutedev.easemusicplayer.singleton.types.AddedMusic
+import com.kutedev.easemusicplayer.singleton.types.ArgCreatePlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicDuration
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
+import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
+import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.PlaylistId
+import com.kutedev.easemusicplayer.singleton.types.RetCreatePlaylist
 import java.time.Duration
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -49,9 +32,8 @@ import javax.inject.Singleton
 class PlaylistRepository @Inject constructor(
     private val bridge: Bridge,
     private val storageRepository: StorageRepository,
-    private val _scope: CoroutineScope
+    private val _scope: CoroutineScope,
 ) {
-    private val _requestSemaphore = Semaphore(4)
     private val _playlists = MutableStateFlow(persistentListOf<PlaylistAbstract>())
     private val _syncedTotalDuration = MutableSharedFlow<MusicId>()
     private val _debouncedReloadEvent = MutableSharedFlow<Unit>()
@@ -76,11 +58,12 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
-    fun createPlaylist(context: Context, arg: ArgCreatePlaylist) {
+    fun createPlaylist(arg: ArgCreatePlaylist) {
         _scope.launch {
-            val created = bridge.run { ctCreatePlaylist(it, arg) }
+            val created = bridge.call(BridgeMethods.Playlist.CREATE, arg)
+                .unwrapOrNull()?.payload
             if ((created?.musicIds?.size ?: 0) > 0) {
-                requestTotalDuration(context, created!!.musicIds)
+                requestTotalDuration(created!!.musicIds)
             }
             reload()
         }
@@ -88,7 +71,7 @@ class PlaylistRepository @Inject constructor(
 
     fun editPlaylist(arg: ArgUpdatePlaylist) {
         _scope.launch {
-            bridge.run { ctUpdatePlaylist(it, arg) }
+            bridge.call(BridgeMethods.Playlist.UPDATE, arg).unwrapOrNull()
             reload()
         }
     }
@@ -96,15 +79,15 @@ class PlaylistRepository @Inject constructor(
     fun removePlaylist(id: PlaylistId) {
         _scope.launch {
             _preRemovePlaylistEvent.emit(id)
-            bridge.run { ctRemovePlaylist(it, id) }
+            bridge.call(BridgeMethods.Playlist.REMOVE, id).unwrapOrNull()
             reload()
         }
     }
 
-    fun requestTotalDuration(context: Context, added: List<AddedMusic>) {
+    fun requestTotalDuration(added: List<AddedMusic>) {
         for (item in added) {
             if (!item.existed) {
-                requestTotalDuration(context, item.id)
+                _scope.launch { probeAndPersistDuration(item.id) }
             }
         }
     }
@@ -120,11 +103,12 @@ class PlaylistRepository @Inject constructor(
         val b = _playlists.value.getOrNull(toIndex + 1)
 
         _scope.launch {
-            bridge.runSync { ctsReorderPlaylist(it, ArgReorderPlaylist(
+            val arg = ArgReorderPlaylist(
                 id = from.meta.id,
                 a = a?.meta?.id,
-                b = b?.meta?.id))
-            }
+                b = b?.meta?.id,
+            )
+            bridge.call(BridgeMethods.Playlist.REORDER, arg).unwrapOrNull()
             scheduleReload()
         }
     }
@@ -133,64 +117,41 @@ class PlaylistRepository @Inject constructor(
     suspend fun removeMusic(playlistId: PlaylistId, musicId: MusicId) {
         val arg = ArgRemoveMusicFromPlaylist(
             playlistId = playlistId,
-            musicId = musicId
+            musicId = musicId,
         )
         _preRemoveMusicEvent.emit(arg)
-        bridge.run { backend -> ctRemoveMusicFromPlaylist(backend, arg)}
-
+        bridge.call(BridgeMethods.Playlist.REMOVE_MUSIC, arg).unwrapOrNull()
         reload()
     }
 
-    @OptIn(UnstableApi::class)
-    private fun requestTotalDuration(context: Context, id: MusicId) {
-        val musicAbstract = bridge.runSync { ctsGetMusicAbstract(it, id) } ?: return
-        if (musicAbstract.meta.duration != null) {
-            return
+    /**
+     * Probes [id]'s duration via `player.probeDurationMs` (no playback,
+     * no output device — uses [cantode::probe_metadata]) and persists
+     * the result via `music.updateDuration`. Emits
+     * [_syncedTotalDuration] so [PlaylistVM] reloads.
+     *
+     * Silently no-ops if the cantode player context isn't set up yet
+     * (early in app startup) or the probe fails — the existing
+     * `player.loadMusic` writeback hook will fill in the duration on
+     * first play as a fallback.
+     */
+    private suspend fun probeAndPersistDuration(id: MusicId) {
+        val contextHandle = bridge.getPlayerContextId()
+        if (contextHandle < 0L) return
+        val args = buildJsonObject {
+            put("contextHandle", contextHandle)
+            put("backendHandle", bridge.getBackendId())
+            put("musicId", id.value)
         }
-
-        _scope.launch(Dispatchers.Main) {
-            _requestSemaphore.acquire()
-
-            try {
-                val player = ExoPlayer.Builder(context)
-                    .setMediaSourceFactory(ProgressiveMediaSource.Factory(DataSource.Factory { MusicPlayerDataSource(bridge, _scope) }) )
-                    .build()
-                player.addListener(object : Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_READY) {
-                            syncMetadataUtil(
-                                scope = _scope,
-                                bridge = bridge,
-                                player = player
-                            ) {
-                                _scope.launch {
-                                    _syncedTotalDuration.emit(id)
-                                    reload()
-                                }
-                            }
-                            player.release()
-                            _requestSemaphore.release()
-
-                        }
-                    }
-
-                    override fun onPlayerError(error: PlaybackException) {
-                        player.release()
-                        _requestSemaphore.release()
-                        easeError("request total duration failed: $error")
-                    }
-                })
-
-                val mediaItem = buildMediaItem(BuildMediaContext(
-                    bridge = bridge,
-                    scope = _scope,
-                ), musicAbstract)
-                player.setMediaItem(mediaItem)
-                player.prepare()
-            } catch (error: Exception) {
-                easeError("request total duration failed: $error")
-            }
-        }
+        val payload = bridge.callRaw("player.probeDurationMs", args)
+            .unwrapOrNull()?.rawPayloadJson ?: return
+        if (payload is JsonNull) return
+        val durMs = payload.jsonPrimitive.content.toLong()
+        bridge.call(
+            BridgeMethods.Music.UPDATE_DURATION,
+            ArgUpdateMusicDuration(id = id, duration = durMs),
+        ).unwrapOrNull()
+        _syncedTotalDuration.emit(id)
     }
 
     fun scheduleReload() {
@@ -200,6 +161,7 @@ class PlaylistRepository @Inject constructor(
     }
 
     suspend fun reload() {
-        _playlists.value = bridge.run { ctListPlaylist(it).toPersistentList() } ?: persistentListOf()
+        val list: List<PlaylistAbstract>? = bridge.call(BridgeMethods.Playlist.LIST).unwrapOrNull()?.payload
+        _playlists.value = list?.toPersistentList() ?: persistentListOf()
     }
 }

@@ -4,12 +4,12 @@ import androidx.lifecycle.ViewModel
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import uniffi.ease_client_backend.StorageEntry
-import uniffi.ease_client_backend.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.StorageEntry
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
 
 @HiltViewModel
 class StoragesVM @Inject constructor(
-    private val storageRepository: StorageRepository
+    private val storageRepository: StorageRepository,
 ) : ViewModel() {
     val storages = storageRepository.storages
 

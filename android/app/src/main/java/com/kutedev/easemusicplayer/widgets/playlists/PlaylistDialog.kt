@@ -44,8 +44,8 @@ import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
-import uniffi.ease_client_backend.CreatePlaylistMode
-import uniffi.ease_client_schema.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.CreatePlaylistMode
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
 
 @Composable
 private fun Tab(
@@ -275,7 +275,7 @@ fun CreatePlaylistsDialog(
                         size = EaseTextButtonSize.Medium,
                         disabled = !canSubmit,
                         onClick = {
-                            createPlaylistVM.finish(context)
+                            createPlaylistVM.finish()
                             onDismissRequest()
                         }
                     )

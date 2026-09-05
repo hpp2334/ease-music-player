@@ -1,0 +1,24 @@
+{
+    "name": "com.ease.webdav",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "rspack build",
+        "typecheck": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "@rspack/cli": "^1.2.0",
+        "@rspack/core": "^1.2.0",
+        "@tur-ng/core": "^0.0.7",
+        "@tur-ng/net": "^0.0.5",
+        "@tur-ng/std": "^0.0.9",
+        "typescript": "^5.7.0"
+    },
+    "dependencies": {
+        "fast-xml-parser": "^5.11.1",
+        "js-base64": "^3.9.3",
+        "js-md5": "^0.9.2",
+        "uuid": "^14.0.2"
+    }
+}

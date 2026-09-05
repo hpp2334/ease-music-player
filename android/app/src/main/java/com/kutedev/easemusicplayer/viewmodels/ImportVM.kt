@@ -1,12 +1,19 @@
 package com.kutedev.easemusicplayer.viewmodels
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.BridgeMethods
 import com.kutedev.easemusicplayer.singleton.ImportRepository
 import com.kutedev.easemusicplayer.singleton.PermissionRepository
 import com.kutedev.easemusicplayer.singleton.StorageRepository
+import com.kutedev.easemusicplayer.singleton.ToastRepository
+import com.kutedev.easemusicplayer.utils.SafUri
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.collections.immutable.persistentHashSetOf
 import kotlinx.collections.immutable.persistentListOf
 import javax.inject.Inject
@@ -18,14 +25,14 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.CurrentStorageStateType
-import uniffi.ease_client_backend.ListStorageEntryChildrenResp
-import uniffi.ease_client_backend.Storage
-import uniffi.ease_client_backend.StorageEntry
-import uniffi.ease_client_backend.ctListStorageEntryChildren
-import uniffi.ease_client_schema.StorageEntryLoc
-import uniffi.ease_client_schema.StorageId
-import uniffi.ease_client_schema.StorageType
+import com.kutedev.easemusicplayer.singleton.types.CurrentStorageStateType
+import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
+import com.kutedev.easemusicplayer.singleton.types.Storage
+import com.kutedev.easemusicplayer.singleton.types.StorageEntry
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.StorageHandle
+import com.kutedev.easemusicplayer.singleton.types.StorageId
 import java.net.URLDecoder
 
 data class SplitPathItem(
@@ -42,6 +49,8 @@ class ImportVM @Inject constructor(
     private val storageRepository: StorageRepository,
     private val importRepository: ImportRepository,
     private val permissionRepository: PermissionRepository,
+    private val toastRepository: ToastRepository,
+    @ApplicationContext private val appContext: Context,
     private val bridge: Bridge
 ) : ViewModel() {
     private val _currentPath = MutableStateFlow("/")
@@ -70,9 +79,13 @@ class ImportVM @Inject constructor(
     private val _entries = MutableStateFlow(listOf<StorageEntry>())
     private val _selectedStorageId = MutableStateFlow(storageRepository.storages.value.firstOrNull()?.id)
     private val _loadState = MutableStateFlow(CurrentStorageStateType.LOADING)
-    private val _disabledToggleAll = _entries.map { entries ->
-        entries.all { it.isDir }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, true)
+    // Toggle-all is disabled when there is nothing *selectable* — entries
+    // whose type the current import accepts (dirs and mismatched files,
+    // e.g. a .wma during a music import, are never selectable).
+    private val _disabledToggleAll =
+        combine(_entries, importRepository.allowTypes) { entries, types ->
+            selectableEntries(entries, types).isEmpty()
+        }.stateIn(viewModelScope, SharingStarted.Lazily, true)
     private val _undoStack = MutableStateFlow(persistentListOf<String>())
 
     val splitPaths = _splitPaths
@@ -84,6 +97,15 @@ class ImportVM @Inject constructor(
     val allowTypes = importRepository.allowTypes
     val selectedStorageId = _selectedStorageId.asStateFlow()
     val loadState = _loadState.asStateFlow()
+    val isLocalSelected = combine(_selectedStorageId, storageRepository.storages) { selectedId, storages ->
+        val storage = storages.find { storage -> storage.id == selectedId }
+        storage?.handle is StorageHandle.Local
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Lazily,
+        storageRepository.storages.value.find { storage -> storage.id == _selectedStorageId.value }
+            ?.handle is StorageHandle.Local
+    )
     val disabledToggleAll = _disabledToggleAll
     val canUndo =
         _undoStack.map {
@@ -146,6 +168,75 @@ class ImportVM @Inject constructor(
         permissionRepository.requestStoragePermission()
     }
 
+    /**
+     * MIME types for the native system file picker, derived from the prepared
+     * import types. `OpenMultipleDocuments` passes them as `EXTRA_MIME_TYPES`.
+     */
+    fun allowMimeTypes(): List<String> {
+        val types = allowTypes.value
+        val mimes = mutableListOf<String>()
+        if (types.contains(StorageEntryType.MUSIC)) {
+            mimes.add("audio/*")
+        }
+        if (types.contains(StorageEntryType.IMAGE)) {
+            mimes.add("image/*")
+        }
+        if (mimes.isEmpty() || types.contains(StorageEntryType.LYRIC)) {
+            // `.lrc` has no stable MIME type — accept everything and rely on
+            // the extension filter in [onPickedUris].
+            return listOf("*/*")
+        }
+        return mimes
+    }
+
+    /**
+     * Handle results of the native system file picker for the Local storage:
+     * resolve each URI to a real path under /storage/emulated/0, map it to a
+     * [StorageEntry] and hand the batch to the prepared import callback.
+     * Unresolvable or type-mismatched picks are skipped with a toast.
+     *
+     * @return true when the import finished and the caller should leave the page.
+     */
+    fun onPickedUris(uris: List<Uri>): Boolean {
+        if (uris.isEmpty()) {
+            return false
+        }
+        val storage = currentStorage() ?: return false
+        if (storage.handle !is StorageHandle.Local) {
+            return false
+        }
+
+        val entries = mutableListOf<StorageEntry>()
+        var skipped = 0
+        for (uri in uris) {
+            val path = SafUri.resolveLocalPath(appContext, uri)
+            if (path == null) {
+                skipped += 1
+                continue
+            }
+            val entry = StorageEntry(
+                storageId = storage.id,
+                name = SafUri.queryDisplayName(appContext, uri) ?: path.substringAfterLast('/'),
+                path = path,
+                size = SafUri.querySize(appContext, uri),
+                isDir = false,
+            )
+            if (allowTypes.value.contains(entry.entryTyp())) {
+                entries.add(entry)
+            } else {
+                skipped += 1
+            }
+        }
+        if (skipped > 0) {
+            toastRepository.emitToastRes(R.string.import_local_skipped)
+        }
+        if (entries.isEmpty()) {
+            return false
+        }
+        importRepository.onFinish(entries)
+        return true
+    }
+
     fun selectStorage(storageId: StorageId) {
         _selectedStorageId.value = storageId
         _undoStack.value = persistentListOf()
@@ -154,23 +245,43 @@ class ImportVM @Inject constructor(
     }
 
     fun toggleAll() {
-        val allSelected = _selected.value.size == _entries.value.size
-        if (allSelected) {
-            _selected.update { selected ->
+        // Only selectable entries participate: dirs and entries whose type
+        // the current import does not accept (e.g. a .wma during a music
+        // import) have no checkbox and must neither be selected nor counted.
+        val selectable = selectableEntries(_entries.value, allowTypes.value).map { it.path }
+        if (selectable.isEmpty()) {
+            return
+        }
+        val allSelected = _selected.value.containsAll(selectable)
+        _selected.update { selected ->
+            if (allSelected) {
                 selected.clear()
-            }
-        } else {
-            _selected.update { selected ->
-                selected.clear().addAll(_entries.value.map { it.path })
+            } else {
+                selected.clear().addAll(selectable)
             }
         }
+    }
+
+    private fun selectableEntries(
+        entries: List<StorageEntry>,
+        types: List<StorageEntryType>
+    ): List<StorageEntry> {
+        return entries.filter { entry -> !entry.isDir && types.contains(entry.entryTyp()) }
     }
 
     fun reload() {
         val storage = currentStorage() ?: return
 
-        if (storage.typ == StorageType.LOCAL && !permissionRepository.havePermission.value) {
-            _loadState.value = CurrentStorageStateType.NEED_PERMISSION
+        if (storage.handle is StorageHandle.Local) {
+            // Local files are picked through the native system file picker —
+            // there is nothing to browse. Reading the picked files (and
+            // playing them) still requires the storage permission.
+            if (!permissionRepository.havePermission.value) {
+                _loadState.value = CurrentStorageStateType.NEED_PERMISSION
+            } else {
+                _entries.value = emptyList()
+                _loadState.value = CurrentStorageStateType.OK
+            }
             return
         }
 
@@ -178,19 +289,23 @@ class ImportVM @Inject constructor(
         _entries.value = emptyList()
 
         viewModelScope.launch {
-            val resp = bridge.runRaw {
-                ctListStorageEntryChildren(
-                    it, StorageEntryLoc(
-                        storageId = storage.id,
-                        path = currentPath()
-                    )
-                )
+            val loc = StorageEntryLoc(
+                storageId = storage.id,
+                path = currentPath(),
+            )
+            val resp: ListStorageEntryChildrenResp? = try {
+                bridge.call(BridgeMethods.Storage.LIST_ENTRY_CHILDREN, loc).unwrapOrThrow().payload
+            } catch (e: Throwable) {
+                null
             }
 
             when (resp) {
+                null -> {
+                    _loadState.value = CurrentStorageStateType.UNKNOWN_ERROR
+                }
                 is ListStorageEntryChildrenResp.Ok -> {
                     _loadState.value = CurrentStorageStateType.OK
-                    _entries.value = resp.v1
+                    _entries.value = resp.data
                 }
 
                 ListStorageEntryChildrenResp.AuthenticationFailed -> {
@@ -261,21 +376,15 @@ class VImportStorageEntry(private val storage: Storage) {
         get() = storage.id
 
     val isLocal: Boolean
-        get() = storage.typ == StorageType.LOCAL
+        get() = storage.handle is StorageHandle.Local
 
     val name: String
-        get() {
-            if (storage.alias != "") {
-                return storage.alias
-            }
-            return storage.addr
-        }
+        get() = storage.alias
 
+    /** Provider name for plugin storages (e.g. "webdav" / "onedrive"). */
     val subtitle: String
-        get() {
-            if (storage.alias != "") {
-                return storage.addr
-            }
-            return ""
+        get() = when (val handle = storage.handle) {
+            is StorageHandle.Plugin -> handle.pluginStorageId.id.substringBefore(':')
+            else -> ""
         }
 }

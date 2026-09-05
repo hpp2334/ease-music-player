@@ -1,0 +1,477 @@
+//! One decode session: everything that exists only while a source is
+//! loaded and its sink is open.
+//!
+//! The session moves as a unit between the payload-carrying `Phase`
+//! variants (`Paused` ↔ `Playing` ↔ `Buffering` → `Ended`); those
+//! variant-to-variant moves destructure the session out rather than
+//! dropping it. True session exit — stop, replace by a new load,
+//! `Failed`, or worker teardown — happens in exactly one place:
+//! [`Loaded::drop`]. Because the sink lives inside the session, "sink
+//! open ⟹ decoder open" holds by construction instead of by discipline.
+//!
+//! The session owns the decode→render step (`pump`) and the
+//! position observable: it writes the position when decoding (the sink's
+//! realtime output clock when available, the decode timestamp otherwise),
+//! seeking, and when the session dies. It emits no events — it returns
+//! decisions ([`PumpOutcome`], seek results) and lets the worker do the
+//! emission.
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use crate::decoder::{AudioFormat, DecodedFrame, Decoder};
+use crate::output::AudioSink;
+use crate::{CantodeError, Readiness};
+
+use super::shared::SharedStatus;
+
+/// The play-path read deadline armed around each decode step in
+/// [`Loaded::pump`]: a starved source surfaces as
+/// [`CantodeError::WouldBlock`] (→ [`PumpOutcome::NeedsData`]) after this
+/// long instead of parking the worker indefinitely. Reads outside the
+/// pump (probe at load, seek) keep the unbounded park.
+const PLAY_READ_DEADLINE: Duration = Duration::from_millis(250);
+
+pub(super) struct Loaded {
+    decoder: Box<dyn Decoder>,
+    sink: Box<dyn AudioSink>,
+    /// Channel count of the currently-loaded source, captured at
+    /// construction from `decoder.format()`. Zero means "no source
+    /// loaded" / "no conversion needed yet".
+    src_channels: u16,
+    /// Sample rate of the loaded source (frames → duration math for
+    /// `decoded_through`).
+    src_rate: u32,
+    /// Media time just past the last decoded frame — the drain target
+    /// when decode reaches EOF. Reset by seek.
+    decoded_through: Duration,
+    /// Channel count the device stream actually opened with (the format
+    /// `sink.start` negotiated). When this differs from `src_channels`,
+    /// `write_frame` runs each decoded frame through `remux_channels`
+    /// before writing it to the sink. The mismatch is rare but real —
+    /// see `CpalSink::start` / `pick_supported_config`.
+    device_channels: u16,
+    /// Reusable scratch buffer for the channel-conversion path. Empty when
+    /// `src_channels == device_channels`.
+    remix_buf: Vec<f32>,
+    /// Latch: `PlayerEvent::Ended` has been emitted for this load already.
+    ended: bool,
+    /// The shared observables. The session writes `position` and resets
+    /// both session-scoped observables on drop; `duration` is published
+    /// by the worker after a successful open.
+    shared: Arc<SharedStatus>,
+}
+
+/// What one [`Loaded::pump`] produced. The decode work happens under the
+/// playing borrow in the worker; the worker acts on the emission
+/// decisions after that borrow ends.
+pub(super) enum PumpOutcome {
+    /// A frame was decoded and written; `emit` says the position-event
+    /// throttle elapsed for it.
+    Frame { position: Duration, emit: bool },
+    /// The decoder reached end of stream.
+    EndOfStream,
+    /// The source is starved but alive (a bounded read expired or the
+    /// readiness pre-check tripped). The worker morphs to `Buffering`.
+    NeedsData,
+    /// A (non-fatal) decode error; the frame was skipped. Carries the
+    /// error so the worker can surface it (deduplicated) as
+    /// `PlayerEvent::Error`.
+    Skipped(Option<CantodeError>),
+}
+
+impl Loaded {
+    /// Assemble a session from an opened decoder and a started sink.
+    ///
+    /// Captures the channel counts from `decoder.format()` and the
+    /// negotiated `device_fmt` (the value `sink.start` returned), and
+    /// logs when they differ. The sink must already be started.
+    pub(super) fn new(
+        decoder: Box<dyn Decoder>,
+        sink: Box<dyn AudioSink>,
+        device_fmt: AudioFormat,
+        shared: Arc<SharedStatus>,
+    ) -> Self {
+        let src_format = decoder.format();
+        let src_channels = src_format.channels;
+        let src_rate = src_format.sample_rate;
+        let device_channels = device_fmt.channels;
+        if src_channels != device_channels {
+            tracing::info!(
+                src = src_channels,
+                device = device_channels,
+                "device channel count differs from source; \
+                 enabling channel conversion in worker"
+            );
+        }
+        Self {
+            decoder,
+            sink,
+            src_channels,
+            src_rate,
+            decoded_through: Duration::ZERO,
+            device_channels,
+            remix_buf: Vec::new(),
+            ended: false,
+            shared,
+        }
+    }
+
+    /// Decode one frame and render it: track the decode frontier, write
+    /// the samples (with channel conversion when the device insisted on a
+    /// different layout), and publish the **audible** position — the
+    /// sink's realtime output clock when it tracks one, the decode
+    /// timestamp otherwise (which leads the audio by the sink's whole
+    /// buffer). `interval` is passed in — event cadence is the worker's
+    /// policy, not the session's.
+    ///
+    /// The read is bounded by [`PLAY_READ_DEADLINE`]: a starved source
+    /// yields [`PumpOutcome::NeedsData`] rather than parking the worker.
+    pub(super) fn pump(&mut self, last_emit: &mut Instant, interval: Duration) -> PumpOutcome {
+        self.decoder.set_read_deadline(Some(PLAY_READ_DEADLINE));
+        let decoded = self.decoder.next_frame();
+        self.decoder.set_read_deadline(None);
+        match decoded {
+            Ok(Some(frame)) => {
+                // The decode frontier's end — the drain target on EOF.
+                let frame_end = if self.src_rate > 0 {
+                    frame.timestamp
+                        + Duration::from_secs_f64(frame.frames as f64 / self.src_rate as f64)
+                } else {
+                    frame.timestamp
+                };
+                self.decoded_through = frame_end;
+                self.write_frame(&frame);
+                let reported = self.sink.output_position().unwrap_or(frame.timestamp);
+                self.shared.set_position(reported);
+                let now = Instant::now();
+                let emit = now.duration_since(*last_emit) >= interval;
+                if emit {
+                    *last_emit = now;
+                }
+                PumpOutcome::Frame {
+                    position: reported,
+                    emit,
+                }
+            }
+            Ok(None) => PumpOutcome::EndOfStream,
+            Err(CantodeError::WouldBlock) => PumpOutcome::NeedsData,
+            Err(e) => {
+                // Non-fatal: skip. Surfaced (once per episode) by the
+                // worker as `PlayerEvent::Error` via `Skipped`.
+                tracing::debug!("decode error in pump; skipping frame: {e:?}");
+                PumpOutcome::Skipped(Some(e))
+            }
+        }
+    }
+
+    /// The sink's realtime output position — media time of the sample the
+    /// device is mixing right now — when the sink tracks one. `None` for
+    /// sinks without tracking (the worker then falls back to the decode
+    /// frontier and ends at EOF without a tail drain).
+    pub(super) fn output_position(&self) -> Option<Duration> {
+        self.sink.output_position()
+    }
+
+    /// Media time just past the last decoded frame (the EOF drain target).
+    pub(super) fn decoded_through(&self) -> Duration {
+        self.decoded_through
+    }
+
+    /// Forward of [`Decoder::readiness`]: can the source satisfy a read
+    /// at the cursor without parking?
+    pub(super) fn readiness(&self) -> Readiness {
+        self.decoder.readiness()
+    }
+
+    /// Forward of [`Decoder::buffered_range`]: the source's contiguous
+    /// buffered window, when it maintains one.
+    pub(super) fn buffered_range(&self) -> Option<crate::BufferedRange> {
+        self.decoder.buffered_range()
+    }
+
+    /// Seek choreography in one place: decoder seek, flush the sink's
+    /// buffered audio (it holds up to `buffer_secs` of pre-seek samples
+    /// that would otherwise play out before the new position's audio
+    /// arrives — without the flush the listener hears ~2s of stale audio
+    /// mixed with the new position), clear the `ended` latch, and
+    /// publish the new position. Returns the actual position for the
+    /// caller's event emission.
+    pub(super) fn seek(&mut self, target: Duration) -> crate::Result<Duration> {
+        let actual = self.decoder.seek(target)?;
+        let _ = self.sink.flush();
+        self.ended = false;
+        // The frontier jumps with the seek; the next empty-ring write
+        // re-anchors the sink's output clock at `actual`.
+        self.decoded_through = actual;
+        self.shared.set_position(actual);
+        Ok(actual)
+    }
+
+    /// Linear gain on the sink. `1.0` is unity; `0.0` is silent.
+    pub(super) fn set_volume(&mut self, vol: f32) {
+        let _ = self.sink.set_volume(vol);
+    }
+
+    /// Gate output off without closing the stream (phase side effect on
+    /// entering `Paused` / `Ended`).
+    pub(super) fn pause(&mut self) {
+        let _ = self.sink.pause();
+    }
+
+    /// Reopen output (phase side effect on entering `Playing`).
+    pub(super) fn resume(&mut self) {
+        let _ = self.sink.resume();
+    }
+
+    /// Whether the `Ended` latch is set for this load.
+    pub(super) fn has_ended(&self) -> bool {
+        self.ended
+    }
+
+    /// Set the `Ended` latch (the worker does this when it emits
+    /// `PlayerEvent::Ended`, so the event fires exactly once per load).
+    pub(super) fn mark_ended(&mut self) {
+        self.ended = true;
+    }
+
+    /// Push one decoded frame to the sink, converting the channel layout
+    /// when the device insisted on a count other than the source's. The
+    /// common case (`src_channels == device_channels`) skips the scratch
+    /// buffer entirely.
+    fn write_frame(&mut self, frame: &DecodedFrame) {
+        if self.src_channels != 0
+            && self.device_channels != 0
+            && self.src_channels != self.device_channels
+        {
+            let n_frames = frame.data.len() / self.src_channels as usize;
+            let out_samples = n_frames * self.device_channels as usize;
+            if self.remix_buf.len() < out_samples {
+                self.remix_buf.resize(out_samples, 0.0);
+            }
+            let written = crate::output::remux_channels(
+                &frame.data,
+                self.src_channels,
+                &mut self.remix_buf[..out_samples],
+                self.device_channels,
+            );
+            let _ = self.sink.write(&self.remix_buf[..written], frame.timestamp);
+        } else {
+            let _ = self.sink.write(&frame.data, frame.timestamp);
+        }
+    }
+}
+
+impl Drop for Loaded {
+    fn drop(&mut self) {
+        // Session teardown in exactly one place. Variant-to-variant moves
+        // (which destructure the session out rather than dropping it)
+        // never run this — only true session exit does: stop, replace by
+        // a new load, `Failed`, or worker teardown.
+        let _ = self.sink.stop();
+        self.shared.reset_session_observables();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the decode session — teardown, channel conversion,
+    //! the pump, and the seek choreography — using the stub doubles from
+    //! `super::super::stubs`.
+
+    use std::time::Duration;
+
+    use super::*;
+    use crate::player::stubs::{FrameDecoder, StubDecoder, loaded_session, loaded_session_with};
+
+    #[test]
+    fn loaded_drop_is_the_single_teardown_point() {
+        let (loaded, fx) = loaded_session(2, 2);
+        fx.shared.set_position(Duration::from_secs(1));
+        fx.shared.set_duration(Some(Duration::from_secs(1)));
+        fx.shared.set_buffered_range(Some(crate::BufferedRange {
+            start: 0,
+            end: 64,
+            total: Some(4096),
+        }));
+        drop(loaded);
+        assert!(fx.log.recorded("stop"));
+        assert_eq!(fx.shared.position(), Duration::ZERO);
+        assert_eq!(fx.shared.duration(), None);
+        assert_eq!(fx.shared.buffered_range(), None);
+    }
+
+    #[test]
+    fn buffered_range_forwards_to_the_decoder() {
+        let range = crate::BufferedRange {
+            start: 128,
+            end: 512,
+            total: Some(4096),
+        };
+        let (loaded, _fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: None,
+                buffered: Some(range),
+            },
+            2,
+            2,
+        );
+        assert_eq!(loaded.buffered_range(), Some(range));
+    }
+
+    #[test]
+    fn write_frame_passes_through_when_channels_match() {
+        let (mut loaded, fx) = loaded_session(2, 2);
+        let frame = DecodedFrame {
+            data: vec![0.1, 0.2, 0.3, 0.4],
+            frames: 2,
+            timestamp: Duration::ZERO,
+        };
+        loaded.write_frame(&frame);
+        assert_eq!(*fx.log.samples(), frame.data);
+        assert!(loaded.remix_buf.is_empty());
+    }
+
+    #[test]
+    fn write_frame_remuxes_when_channels_differ() {
+        let (mut loaded, fx) = loaded_session(2, 1);
+        let frame = DecodedFrame {
+            // (0.2, 0.6) → 0.4 ; (1.0, -1.0) → 0.0
+            data: vec![0.2, 0.6, 1.0, -1.0],
+            frames: 2,
+            timestamp: Duration::ZERO,
+        };
+        loaded.write_frame(&frame);
+        let samples = fx.log.samples().clone();
+        assert_eq!(samples.len(), 2);
+        assert!((samples[0] - 0.4).abs() < 1e-6);
+        assert!(samples[1].abs() < 1e-6);
+    }
+
+    #[test]
+    fn seek_flushes_publishes_position_and_clears_the_latch() {
+        let (mut loaded, fx) = loaded_session(2, 2);
+        loaded.mark_ended();
+
+        let actual = loaded.seek(Duration::from_secs(5)).unwrap();
+
+        assert_eq!(actual, Duration::from_secs(5));
+        assert!(fx.log.recorded("flush"));
+        assert!(!loaded.has_ended());
+        assert_eq!(fx.shared.position(), Duration::from_secs(5));
+        // The decode frontier jumps with the seek (EOF-drain target).
+        assert_eq!(loaded.decoded_through(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn pump_publishes_the_sink_output_position_when_tracked() {
+        // One frame at ts 10 s (480 frames @ 48 kHz = 10 ms). With
+        // tracking enabled, the stub sink's instant-play model reports
+        // the write's end — and that is what the observable carries.
+        let (mut loaded, fx) = loaded_session_with(
+            FrameDecoder {
+                frame: DecodedFrame {
+                    data: vec![0.0; 2 * 480],
+                    frames: 480,
+                    timestamp: Duration::from_secs(10),
+                },
+                yielded: false,
+            },
+            2,
+            2,
+        );
+        fx.enable_output_tracking();
+        let mut last = Instant::now();
+        let PumpOutcome::Frame { position, .. } =
+            loaded.pump(&mut last, Duration::from_millis(100))
+        else {
+            panic!("expected Frame");
+        };
+        assert_eq!(position, Duration::from_millis(10_010));
+        assert_eq!(fx.shared.position(), Duration::from_millis(10_010));
+        // The decode frontier sits at the frame's end.
+        assert_eq!(loaded.decoded_through(), Duration::from_millis(10_010));
+    }
+
+    #[test]
+    fn pump_falls_back_to_the_decode_ts_without_tracking() {
+        let (mut loaded, fx) = loaded_session_with(
+            FrameDecoder {
+                frame: DecodedFrame {
+                    data: vec![0.0; 2 * 480],
+                    frames: 480,
+                    timestamp: Duration::from_secs(10),
+                },
+                yielded: false,
+            },
+            2,
+            2,
+        );
+        let mut last = Instant::now();
+        let PumpOutcome::Frame { position, .. } =
+            loaded.pump(&mut last, Duration::from_millis(100))
+        else {
+            panic!("expected Frame");
+        };
+        assert_eq!(position, Duration::from_secs(10));
+        assert_eq!(fx.shared.position(), Duration::from_secs(10));
+    }
+
+    #[test]
+    fn pump_end_of_stream_touches_nothing() {
+        // The stub decoder yields no frames, so a pump is an EOF.
+        let (mut loaded, fx) = loaded_session(2, 2);
+        let mut last = Instant::now();
+        assert!(matches!(
+            loaded.pump(&mut last, Duration::from_millis(100)),
+            PumpOutcome::EndOfStream
+        ));
+        assert!(fx.log.samples().is_empty());
+        assert_eq!(fx.shared.position(), Duration::ZERO);
+    }
+
+    #[test]
+    fn pump_maps_would_block_to_needs_data() {
+        // A bounded-read expiry is "starved, not broken": the pump must
+        // surface NeedsData (the worker morphs to Buffering), not an
+        // error and not EOF.
+        let (mut loaded, _fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: Some(crate::CantodeError::WouldBlock),
+                buffered: None,
+            },
+            2,
+            2,
+        );
+        let mut last = Instant::now();
+        assert!(matches!(
+            loaded.pump(&mut last, Duration::from_millis(100)),
+            PumpOutcome::NeedsData
+        ));
+        // And the very next pump behaves normally (no sticky state).
+        assert!(matches!(
+            loaded.pump(&mut last, Duration::from_millis(100)),
+            PumpOutcome::EndOfStream
+        ));
+    }
+
+    #[test]
+    fn pump_carries_decode_errors_for_event_surfacing() {
+        let (mut loaded, _fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: Some(crate::CantodeError::Decode("corrupt".into())),
+                buffered: None,
+            },
+            2,
+            2,
+        );
+        let mut last = Instant::now();
+        let PumpOutcome::Skipped(err) = loaded.pump(&mut last, Duration::from_millis(100)) else {
+            panic!("expected Skipped");
+        };
+        assert!(matches!(err, Some(crate::CantodeError::Decode(_))));
+    }
+}

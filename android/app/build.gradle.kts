@@ -30,8 +30,8 @@ android {
         minSdk = 29
         //noinspection OldTargetApi
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.3.0"
+        versionCode = 2
+        versionName = "0.4.0-beta.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -104,7 +104,6 @@ android {
 
 dependencies {
     val nav_version = "2.8.3"
-    val media3_version = "1.5.0"
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -122,11 +121,16 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:$nav_version")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    implementation("androidx.media3:media3-exoplayer:$media3_version")
-    implementation("androidx.media3:media3-exoplayer-dash:$media3_version")
-    implementation("androidx.media3:media3-session:$media3_version")
+    // MediaSession + MediaButtonReceiver + NotificationCompat.MediaStyle.
+    // This is the legacy media compat lib (NOT media3) — pairs with the
+    // platform android.media.session.MediaSession and lets us drop
+    // the media3 SimpleBasePlayer / MediaSessionService adapter entirely.
+    implementation("androidx.media:media:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.4.0")
     implementation(libs.reorderable)
+    // cantode's Kotlin facade (cantode/kotlin) — engine transport +
+    // observables; the module owns no business logic.
+    implementation(project(":cantode-engine"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

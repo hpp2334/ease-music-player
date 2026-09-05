@@ -1,0 +1,40 @@
+[package]
+name = "cantode"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "A cross-platform audio engine: decode, output, and metadata probing behind a pluggable trait-based API."
+repository = "https://github.com/hpp2334/ease-music-player"
+keywords = ["audio", "player", "decoder", "symphonia", "cpal"]
+categories = ["multimedia::audio"]
+publish = false
+
+[features]
+# The JNI surface used by the Kotlin half (`cantode/kotlin`,
+# `com.kutedev.cantode`): opaque-handle registries + the
+# `Java_com_kutedev_cantode_CantodeNative_*` exports. Off by default so
+# plain library builds (tests, examples, other embedders) stay JNI-free;
+# the Android backend crate enables it.
+ffi = ["dep:jni"]
+
+[dependencies]
+thiserror = "1.0.57"
+tracing = "0.1"
+# symphonia is the sole built-in decoder and is unconditional. To
+# substitute a different decoder, implement the `Decoder` / `DecoderFactory`
+# traits and pass your factory to `PlayerContextConfig::decoder_factory`;
+# you don't need a feature flag to bypass symphonia.
+symphonia = { version = "0.5", features = [
+    "mp3",
+    "flac",
+    "vorbis",
+    "ogg",
+    "wav",
+    "aac",
+    "isomp4",
+] }
+cpal = "0.17"
+ringbuf = "0.4"
+jni = { version = "0.21", optional = true }
+
+[dev-dependencies]

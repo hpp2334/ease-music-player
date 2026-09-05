@@ -9,15 +9,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ArgUpdateMusicLyric
-import uniffi.ease_client_backend.Music
-import uniffi.ease_client_backend.Playlist
-import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ctUpdateMusicLyric
-import uniffi.ease_client_backend.ctsGetPreferencePlaymode
-import uniffi.ease_client_backend.ctsSavePreferencePlaymode
-import uniffi.ease_client_schema.PlayMode
+import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
+import com.kutedev.easemusicplayer.singleton.types.Music
+import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.MusicLyric
+import com.kutedev.easemusicplayer.singleton.types.Playlist
+import com.kutedev.easemusicplayer.singleton.types.PlayMode
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -114,6 +112,18 @@ class PlayerRepository @Inject constructor(
         _playlist.value = playlist
     }
 
+    /**
+     * Patch the lyric into the current music (the async follow-up to
+     * `music.get`, whose lyric arrives as a LOADING placeholder). No-op
+     * when the current music is not [id] — e.g. a stale fetch racing a
+     * subsequent track switch.
+     */
+    fun updateMusicLyric(id: MusicId, lyric: MusicLyric?) {
+        val m = _music.value ?: return
+        if (m.meta.id != id) return
+        _music.value = m.copy(lyric = lyric)
+    }
+
     fun resetCurrent() {
         _music.value = null
         _playlist.value = null
@@ -124,50 +134,42 @@ class PlayerRepository @Inject constructor(
         val p = _playlist.value
         _scope.launch {
             if (m != null && p != null) {
-                bridge.run { it ->
-                    ctRemoveMusicFromPlaylist(it, ArgRemoveMusicFromPlaylist(
+                bridge.call(
+                    BridgeMethods.Playlist.REMOVE_MUSIC,
+                    ArgRemoveMusicFromPlaylist(
                         playlistId = p.abstr.meta.id,
-                        musicId = m.meta.id
-                    ))
-                }
+                        musicId = m.meta.id,
+                    ),
+                ).unwrapOrNull()
             }
         }
     }
 
     fun changePlayModeToNext() {
         val nextPlayMode = when (playMode.value) {
-            PlayMode.SINGLE -> {
-                PlayMode.SINGLE_LOOP
-            }
-            PlayMode.SINGLE_LOOP -> {
-                PlayMode.LIST
-            }
-            PlayMode.LIST -> {
-                PlayMode.LIST_LOOP
-            }
-            PlayMode.LIST_LOOP -> {
-                PlayMode.SINGLE
-            }
+            PlayMode.SINGLE -> PlayMode.SINGLE_LOOP
+            PlayMode.SINGLE_LOOP -> PlayMode.LIST
+            PlayMode.LIST -> PlayMode.LIST_LOOP
+            PlayMode.LIST_LOOP -> PlayMode.SINGLE
         }
-
         savePlayMode(nextPlayMode)
     }
 
     fun removeLyric() {
-        val m = _music.value
-        if (m == null) {
-            return
-        }
-
+        val m = _music.value ?: return
         _scope.launch {
-            bridge.run { ctUpdateMusicLyric(it, ArgUpdateMusicLyric(id = m.meta.id, lyricLoc = null)) }
+            bridge.call(
+                BridgeMethods.Music.UPDATE_LYRIC,
+                ArgUpdateMusicLyric(id = m.meta.id, lyricLoc = null),
+            ).unwrapOrNull()
             reload()
         }
     }
 
     private fun savePlayMode(playMode: PlayMode) {
-        bridge.runSync { ctsSavePreferencePlaymode(it, playMode) }
-
+        kotlinx.coroutines.runBlocking {
+            bridge.call(BridgeMethods.Preference.SAVE_PLAY_MODE, playMode).unwrapOrNull()
+        }
         reload()
     }
 
@@ -184,7 +186,10 @@ class PlayerRepository @Inject constructor(
     }
 
     fun reload() {
-        bridge.runSync { ctsGetPreferencePlaymode(it) }?.let { _playMode.value = it }
+        val mode = kotlinx.coroutines.runBlocking {
+            bridge.call(BridgeMethods.Preference.GET_PLAY_MODE).unwrapOrNull()?.payload
+        }
+        mode?.let { _playMode.value = it }
         _scope.launch {
             _durationChanged.emit(Unit)
         }

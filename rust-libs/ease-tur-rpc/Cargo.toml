@@ -1,0 +1,21 @@
+[package]
+name = "ease-tur-rpc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Private tur plugin wrapping the event bus into a typed request/response RPC (host↔JS), for JS storage-provider plugins."
+
+[dependencies]
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "a651850cd5f11f1ef0e19df8d3d6d810a7bb7778" }
+tokio = { version = "1", features = ["sync"] }
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "a651850cd5f11f1ef0e19df8d3d6d810a7bb7778" }
+tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "a651850cd5f11f1ef0e19df8d3d6d810a7bb7778" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "93a9e31a83bbaa15bbd8b687e61639ffc53bbef1" }

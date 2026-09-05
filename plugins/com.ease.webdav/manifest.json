@@ -1,0 +1,25 @@
+{
+  "id": "com.ease.webdav",
+  "name": { "en-US": "WebDAV", "zh-CN": "WebDAV" },
+  "version": "0.0.2",
+  "description": {
+    "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless JS plugin.",
+    "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
+  },
+  "author": "ease",
+  "backend": "backend.js",
+  "events": [],
+  "contributions": {
+    "storages": [
+      {
+        "id": "webdav",
+        "title": { "en-US": "WebDAV", "zh-CN": "WebDAV" },
+        "desc": {
+          "en-US": "Connect to any WebDAV server",
+          "zh-CN": "连接任意 WebDAV 服务器"
+        },
+        "view": "view.js"
+      }
+    ]
+  }
+}

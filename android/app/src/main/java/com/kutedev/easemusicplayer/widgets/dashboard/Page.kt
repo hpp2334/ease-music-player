@@ -1,11 +1,11 @@
 package com.kutedev.easemusicplayer.widgets.dashboard
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,26 +29,40 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.singleton.resolve
+import com.kutedev.easemusicplayer.viewmodels.DashboardVM
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.viewmodels.SleepModeLeftTime
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.core.LocalNavController
-import com.kutedev.easemusicplayer.core.RouteAddDevices
-import uniffi.ease_client_backend.Storage
-import uniffi.ease_client_schema.StorageType
+import com.kutedev.easemusicplayer.core.RouteCreateStorage
+import com.kutedev.easemusicplayer.core.RouteEditStorage
+import com.kutedev.easemusicplayer.core.RoutePluginView
+import com.kutedev.easemusicplayer.singleton.DashboardItem
+import com.kutedev.easemusicplayer.singleton.types.Storage
+import com.kutedev.easemusicplayer.singleton.types.StorageHandle
+import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
+import com.kutedev.easemusicplayer.turintegration.TurView
 
 private val paddingX = 24.dp
 private val paddingY = 12.dp
@@ -122,16 +136,15 @@ private fun SleepModeBlock(vm: SleepModeVM = hiltViewModel()) {
 }
 
 @Composable
-private fun ColumnScope.DevicesBlock(
+private fun DevicesBlock(
     storageItems: List<Storage>,
+    enabledPluginIds: Set<String>,
     editStoragesVM: EditStorageVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
 
     Column(
         modifier = Modifier
-            .verticalScroll(rememberScrollState())
-            .weight(1f)
             .padding(paddingX, paddingY)
     ) {
         if (storageItems.isEmpty()) {
@@ -142,7 +155,7 @@ private fun ColumnScope.DevicesBlock(
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable {
-                        navController.navigate(RouteAddDevices((-1).toString()))
+                        navController.navigate(RouteCreateStorage())
                     }
             ) {
                 Row(
@@ -164,18 +177,25 @@ private fun ColumnScope.DevicesBlock(
             return
         }
         for (item in storageItems) {
+            val handle = item.handle as? StorageHandle.Plugin
+            val pluginAlive = handle == null || handle.pluginId.id in enabledPluginIds
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        navController.navigate(RouteAddDevices(item.id.value.toString()))
+                    .clickable(enabled = pluginAlive) {
+                        if (pluginAlive) {
+                            navController.navigate(RouteEditStorage(item.id.value.toString()))
+                        }
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val title = item.alias.ifBlank {
-                    item.addr
+                val title = item.alias.ifBlank { item.id.value.toString() }
+                val subTitle = when {
+                    handle != null && !pluginAlive ->
+                        stringResource(id = R.string.plugin_storage_removed)
+                    handle != null -> handle.pluginStorageId.id.substringBefore(':')
+                    else -> ""
                 }
-                val subTitle = item.addr
 
                 Box(modifier = Modifier.height(48.dp))
                 Icon(
@@ -209,14 +229,113 @@ private fun ColumnScope.DevicesBlock(
     }
 }
 
+/**
+ * One plugin dashboard **entry card**: the contribution's icon + title +
+ * desc (or the plugin id when no desc was declared). Not the view itself —
+ * tapping pushes [PluginViewPage], the standalone full-screen page that
+ * renders the plugin's view JS.
+ */
+@Composable
+private fun DashboardCard(
+    item: DashboardItem,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(paddingX, 0.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onClick() }
+            .padding(20.dp, 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val icon = rememberPluginIcon(item.iconData)
+            if (icon != null) {
+                // 28dp viewport, same footprint as the fallback glyph below —
+                // a plugin icon must not out-shout the app's own icon
+                // language whatever resolution it ships. `Fit` letterboxes
+                // non-square art safely inside the fixed viewport.
+                Image(
+                    bitmap = icon.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(28.dp),
+                )
+            } else {
+                Icon(
+                    modifier = Modifier.size(28.dp),
+                    painter = painterResource(id = R.drawable.icon_extension),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Box(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title.resolve(),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            val desc = item.desc?.resolve().orEmpty()
+            Text(
+                text = desc.ifBlank { item.pluginId },
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            modifier = Modifier.size(16.dp),
+            painter = painterResource(id = R.drawable.icon_forward),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+/**
+ * Decode a contribution icon (`iconData` base64 from the Rust scan) into a
+ * bitmap, memoized per payload. `null` → caller shows the built-in glyph
+ * (missing icon, failed validation, or undecodable bytes).
+ */
+@Composable
+private fun rememberPluginIcon(iconData: String?): Bitmap? {
+    if (iconData == null) {
+        return null
+    }
+    return remember(iconData) {
+        try {
+            val bytes = Base64.decode(iconData, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+    }
+}
+
 @Composable
 fun DashboardSubpage(
     storageVM: StoragesVM = hiltViewModel(),
-    editStoragesVM: EditStorageVM = hiltViewModel()
+    editStoragesVM: EditStorageVM = hiltViewModel(),
+    dashboardVM: DashboardVM = hiltViewModel(),
 ) {
     val navController = LocalNavController.current
     val storages by storageVM.storages.collectAsState()
-    val storageItems = storages.filter { v -> v.typ != StorageType.LOCAL }
+    val storageItems = storages.filter { v -> v.handle !is StorageHandle.Local }
+    val enabledPlugins by dashboardVM.enabledPlugins.collectAsState()
+    val dashboardItems by dashboardVM.dashboardItems.collectAsState()
+    val enabledPluginIds = enabledPlugins.map { it.id }.toSet()
 
     LaunchedEffect(Unit) {
         storageVM.reload()
@@ -227,7 +346,7 @@ fun DashboardSubpage(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
-        Box(modifier = Modifier.height(48.dp))
+        Box(modifier = Modifier.height(32.dp))
         Row(
             modifier = Modifier
                 .padding(paddingX, 4.dp)
@@ -236,7 +355,7 @@ fun DashboardSubpage(
             Title(title = stringResource(id = R.string.dashboard_sleep_mode))
         }
         SleepModeBlock()
-        Box(modifier = Modifier.height(48.dp))
+        Box(modifier = Modifier.height(32.dp))
         Row(
             modifier = Modifier
                 .padding(paddingX, 4.dp)
@@ -244,17 +363,39 @@ fun DashboardSubpage(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Title(title = stringResource(id = R.string.dashboard_devices))
-            if (storageItems.isNotEmpty()) {
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Small,
-                    buttonType = EaseIconButtonType.Primary,
-                    painter = painterResource(id = R.drawable.icon_plus),
-                    onClick = {
-                        navController.navigate(RouteAddDevices((-1).toString()))
-                    }
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (storageItems.isNotEmpty()) {
+                    EaseIconButton(
+                        sizeType = EaseIconButtonSize.Small,
+                        buttonType = EaseIconButtonType.Primary,
+                        painter = painterResource(id = R.drawable.icon_plus),
+                        onClick = {
+                            navController.navigate(RouteCreateStorage())
+                        }
+                    )
+                }
             }
         }
-        DevicesBlock(storageItems)
+        DevicesBlock(storageItems, enabledPluginIds)
+        if (dashboardItems.isNotEmpty()) {
+            Box(modifier = Modifier.height(32.dp))
+            Row(
+                modifier = Modifier
+                    .padding(paddingX, 4.dp)
+                    .fillMaxWidth(),
+            ) {
+                Title(title = stringResource(id = R.string.dashboard_plugins))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                for (item in dashboardItems) {
+                    DashboardCard(item) {
+                        navController.navigate(
+                            RoutePluginView(item.pluginId, item.contributionId)
+                        )
+                    }
+                }
+            }
+            Box(modifier = Modifier.height(24.dp))
+        }
     }
 }

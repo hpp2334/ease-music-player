@@ -1,0 +1,49 @@
+{
+  "plugins": [
+    {
+      "id": "com.ease.onedrive",
+      "name": {
+        "en-US": "OneDrive",
+        "zh-CN": "OneDrive"
+      },
+      "version": "0.0.2",
+      "description": {
+        "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless JS plugin.",
+        "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
+      },
+      "zip": "zips/com.ease.onedrive-0.0.2.zip",
+      "sha256": "3068d154648fab5541a82fc9051c70383de02244c65ef5b50eede65a0d46aa16",
+      "size": 46100
+    },
+    {
+      "id": "com.ease.playcount",
+      "name": {
+        "en-US": "Play Counts",
+        "zh-CN": "播放计数"
+      },
+      "version": "0.0.2",
+      "description": {
+        "en-US": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
+        "zh-CN": "统计每首歌的播放次数，覆盖今天、昨天、最近 3 天、最近一周、最近一月和最近一年。"
+      },
+      "zip": "zips/com.ease.playcount-0.0.2.zip",
+      "sha256": "6f7983e6b5d00ec91d60f01399c0e09c509af2adb9a0cdcb2a8a4140450684f2",
+      "size": 51157
+    },
+    {
+      "id": "com.ease.webdav",
+      "name": {
+        "en-US": "WebDAV",
+        "zh-CN": "WebDAV"
+      },
+      "version": "0.0.2",
+      "description": {
+        "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless JS plugin.",
+        "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
+      },
+      "zip": "zips/com.ease.webdav-0.0.2.zip",
+      "sha256": "216b9264251b347cbf687ff0fc758c52d74613d16116408360c9c37daab10527",
+      "size": 333847
+    }
+  ]
+}

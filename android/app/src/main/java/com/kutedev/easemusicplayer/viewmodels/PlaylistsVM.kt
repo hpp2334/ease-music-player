@@ -5,7 +5,7 @@ import com.kutedev.easemusicplayer.singleton.PlaylistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import uniffi.ease_client_backend.PlaylistAbstract
+import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
 import javax.inject.Inject
 
 data class PlaylistsState(

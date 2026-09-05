@@ -14,8 +14,16 @@ fun isRouteHome(route: String): Boolean {
     return route == "Home"
 }
 
-fun RouteAddDevices(id: String): String {
-    return "AddDevices/${id}"
+fun RouteCreateStorage(): String {
+    return "CreateStorage"
+}
+
+fun RouteEditStorage(id: String): String {
+    return "EditStorage/${id}"
+}
+
+fun isRouteEditStorage(route: String): Boolean {
+    return route.startsWith("EditStorage/")
 }
 
 fun RoutePlaylist(id: String): String {
@@ -40,6 +48,30 @@ fun RouteLog(): String {
 
 fun RouteDebugMore(): String {
     return "Debug/More"
+}
+
+fun RoutePluginManagement(): String {
+    return "PluginManagement"
+}
+
+fun isRoutePluginManagement(route: String): Boolean {
+    return route == "PluginManagement"
+}
+
+fun RoutePluginAvailable(): String {
+    return "PluginAvailable"
+}
+
+fun isRoutePluginAvailable(route: String): Boolean {
+    return route == "PluginAvailable"
+}
+
+fun RoutePluginView(pluginId: String, viewId: String): String {
+    return "PluginView/${pluginId}/${viewId}"
+}
+
+fun isRoutePluginView(route: String): Boolean {
+    return route.startsWith("PluginView/")
 }
 
 val LocalNavController = compositionLocalOf<NavHostController> {

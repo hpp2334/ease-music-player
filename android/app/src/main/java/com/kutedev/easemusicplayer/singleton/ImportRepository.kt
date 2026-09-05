@@ -2,8 +2,8 @@ package com.kutedev.easemusicplayer.singleton
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import uniffi.ease_client_backend.StorageEntry
-import uniffi.ease_client_backend.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.StorageEntry
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
 import javax.inject.Inject
 import javax.inject.Singleton
 

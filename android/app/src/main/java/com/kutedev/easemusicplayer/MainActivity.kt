@@ -2,7 +2,7 @@ package com.kutedev.easemusicplayer
 
 import android.Manifest.permission.POST_NOTIFICATIONS
 import android.app.Application
-import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,21 +13,20 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
-import com.google.common.util.concurrent.MoreExecutors
+import com.kutedev.cantode.Cantode
 import com.kutedev.easemusicplayer.core.KeepBackendService
-import com.kutedev.easemusicplayer.core.PlaybackService
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.LanguageSetting
 import com.kutedev.easemusicplayer.singleton.PermissionRepository
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
+import com.kutedev.easemusicplayer.singleton.PluginOAuthState
 import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.easeLog
 import javax.inject.Inject
 import kotlin.system.exitProcess
 
@@ -39,13 +38,34 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var playerControllerRepository: PlayerControllerRepository
     @Inject lateinit var playerRepository: PlayerRepository
     @Inject lateinit var permissionRepository: PermissionRepository
+    @Inject lateinit var pluginRepository: com.kutedev.easemusicplayer.singleton.PluginRepository
+    @Inject lateinit var pluginOAuthState: PluginOAuthState
+    @Inject lateinit var oauthHandler: com.kutedev.easemusicplayer.turintegration.OauthHandler
+    @Inject lateinit var storageHandler: com.kutedev.easemusicplayer.turintegration.StorageHandler
+
+    /**
+     * Apply the in-app language override (Settings → General → Language)
+     * before the activity's resources are created, so every
+     * `stringResource` resolves against the chosen locale. Uses the
+     * process cache (see [LanguageSetting]); if the async backend read
+     * lands after this, [observeLanguage] recreates the activity.
+     */
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LanguageSetting.attachBaseContext(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        observeLanguage()
 
         startService(Intent(this, KeepBackendService::class.java))
         bridge.initialize();
+        // Wire the `ease:oauth` + `ease:context` Rust→Kotlin upcall targets
+        // so plugin views can trigger OAuth (`ease:oauth.start`) and the
+        // edit view can disconnect (`ease:context.disconnect`).
+        com.kutedev.easemusicplayer.turintegration.EaseOauthHost.install(oauthHandler)
+        com.kutedev.easemusicplayer.turintegration.EaseStorageHost.install(storageHandler)
         setupExceptionHandler()
 
         val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -66,35 +86,54 @@ class MainActivity : ComponentActivity() {
             playerRepository.reload()
             storageRepository.reload()
             playlistRepository.reload()
-            setupMediaController()
+            setupCantodeEngine()
+            // Connect the plugin event bus after the player repo is wired
+            // so plugins begin receiving music:play / resume / pause / stop /
+            // complete.
+            pluginRepository.bindPlayerEvents(playerControllerRepository)
         }
     }
 
-    private fun setupMediaController() {
-        val factory = MediaController.Builder(
-            this,
-            SessionToken(this, ComponentName(this, PlaybackService::class.java))
-        ).buildAsync()
-        factory.addListener(
-            {
-                factory.let {
-                    if (it.isDone) {
-                        val controller = it.get()
-                        playerControllerRepository.setupMediaController(controller)
-                        controller
-                    } else {
-                        null
-                    }
+    /**
+     * Build the cantode player context + player + the [Cantode] facade
+     * via [PlayerControllerRepository]. The facade is cantode's own
+     * Kotlin half (`:cantode-engine`) and talks to the engine through
+     * cantode's JNI bridge under the player handle id; it gets its own
+     * CoroutineScope for the 10 Hz poll loop.
+     */
+    private fun setupCantodeEngine() {
+        playerControllerRepository.setupCantodeEngine { playerHandleId ->
+            Cantode(
+                playerHandle = playerHandleId,
+                scope = kotlinx.coroutines.CoroutineScope(
+                    kotlinx.coroutines.Dispatchers.Default + SupervisorJob(),
+                ),
+            )
+        }
+    }
+
+    /**
+     * Keep the activity's locale in sync with [LanguageSetting.language]:
+     * when the desired language disagrees with the one applied in
+     * [attachBaseContext] — the async backend load landing after the first
+     * frame, or the user changing the setting — recreate exactly once; the
+     * next `attachBaseContext` wraps with the new locale (which re-aligns
+     * the two values and stops the loop).
+     */
+    private fun observeLanguage() {
+        lifecycleScope.launch {
+            LanguageSetting.language.collect { language ->
+                if (language != LanguageSetting.appliedLanguage() && !isFinishing) {
+                    recreate()
                 }
-            },
-            MoreExecutors.directExecutor()
-        )
+            }
+        }
     }
 
     private fun setupExceptionHandler() {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            easeLog("on uncaught exception: $throwable")
-            easeLog("on uncaught exception stacktrace: ${throwable.stackTraceToString()}")
+            bridge.logRaw("error", "on uncaught exception: $throwable")
+            bridge.logRaw("error", "on uncaught exception stacktrace: ${throwable.stackTraceToString()}")
 
             android.os.Process.killProcess(android.os.Process.myPid())
             exitProcess(1)
@@ -103,7 +142,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        playerControllerRepository.destroyMediaController()
+        // No teardown needed: the cantode engine / context live in
+        // PlayerControllerRepository (singleton-scoped), not tied to this
+        // activity's lifetime. PlaybackService still owns the MediaSession.
     }
 
     override fun onDestroy() {
@@ -114,12 +155,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        intent?.data?.let { uri ->
-            val code = uri.getQueryParameter("code")
-            if (code != null) {
-                lifecycleScope.launch {
-                    storageRepository.updateRefreshToken(code)
-                }
+        // OneDrive (and other JS plugin) OAuth redirect, e.g.
+        // `easem://oauth2redirect/?code=...`. Take the pending
+        // (pluginId, oauthId) stashed when the browser was launched,
+        // exchange the code via the plugin (which consumes its own
+        // `oauth:<oauthId>` pending slot), and reload the storage list.
+        val data = intent?.data
+        val code = data?.getQueryParameter("code")
+        if (code.isNullOrBlank()) return
+        val pending = pluginOAuthState.take() ?: return
+        lifecycleScope.launch {
+            val id = storageRepository.pluginOAuthExchange(pending.first, pending.second, code)
+            if (id != null) {
+                bridge.logRaw("info", "plugin OAuth connected: plugin=${pending.first} id=$id")
+            } else {
+                bridge.logRaw("error", "plugin OAuth exchange failed: plugin=${pending.first}")
             }
         }
     }
@@ -140,4 +190,36 @@ class MainActivity : ComponentActivity() {
 }
 
 @HiltAndroidApp
-class EaseMusicPlayerApplication : Application() {  }
+class EaseMusicPlayerApplication : Application() {
+    companion object {
+        init {
+            System.loadLibrary("ease_client_backend")
+        }
+    }
+
+    @Inject
+    lateinit var bridge: Bridge
+
+    @Inject
+    lateinit var appScope: kotlinx.coroutines.CoroutineScope
+
+    /**
+     * JNI hook for cpal's AAudio backend: register the JavaVM + app Context
+     * into ndk-context. MUST be called before any cpal interaction.
+     * Idempotent on the Rust side (OnceLock guarded).
+     */
+    private external fun nativeInitAndroidContext(context: android.content.Context)
+
+    override fun onCreate() {
+        super.onCreate()
+        nativeInitAndroidContext(this)
+        // Bring the Rust backend up at process start: the in-app language
+        // preference lives backend-side and is read asynchronously from the
+        // earliest moment so the first activity can apply it with at most
+        // one recreate. MainActivity.onCreate's initialize() is an
+        // idempotent no-op after this.
+        LanguageSetting.bridge = bridge
+        bridge.initialize()
+        appScope.launch { LanguageSetting.load() }
+    }
+}
