@@ -82,6 +82,9 @@ fun PluginManagementPage(
 
     var pendingUninstall by remember { mutableStateOf<PendingUninstall?>(null) }
 
+    /** Accordion: at most one installed-plugin card expanded at a time. */
+    var expandedPluginId by remember { mutableStateOf<String?>(null) }
+
     val zipPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -171,6 +174,11 @@ fun PluginManagementPage(
                         plugin = plugin,
                         busy = plugin.id in busyIds,
                         storageCount = pluginsVM.storageCountFor(plugin.id, storages),
+                        expanded = expandedPluginId == plugin.id,
+                        onToggleExpand = {
+                            expandedPluginId =
+                                if (expandedPluginId == plugin.id) null else plugin.id
+                        },
                         onToggle = { pluginsVM.setEnabled(plugin.id, it) },
                         onUninstall = {
                             pendingUninstall = PendingUninstall(
@@ -252,18 +260,19 @@ private fun InstalledPluginRow(
     plugin: PluginManifest,
     busy: Boolean,
     storageCount: Int,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onUninstall: () -> Unit,
 ) {
     val dim = if (plugin.enabled) 1f else 0.45f
     val accent = pluginAccent(plugin.id)
-    var expanded by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { expanded = !expanded }
+            .clickable { onToggleExpand() }
             .padding(14.dp, 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -344,45 +353,56 @@ private fun InstalledPluginRow(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = stringResource(
+                PluginRowAction(
+                    label = stringResource(
                         id = if (plugin.enabled) R.string.plugin_disable_action else R.string.plugin_enable_action
                     ),
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Box(modifier = Modifier.width(8.dp))
-                IconButton(
-                    modifier = Modifier.size(40.dp),
+                    icon = if (plugin.enabled) R.drawable.icon_stop else R.drawable.icon_play,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     onClick = { onToggle(!plugin.enabled) },
-                ) {
-                    Icon(
-                        modifier = Modifier.size(20.dp),
-                        painter = painterResource(id = if (plugin.enabled) R.drawable.icon_stop else R.drawable.icon_play),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Box(modifier = Modifier.width(12.dp))
-                Text(
-                    text = stringResource(id = R.string.plugin_uninstall_action),
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.error,
                 )
-                Box(modifier = Modifier.width(8.dp))
-                IconButton(
-                    modifier = Modifier.size(40.dp),
+                Box(modifier = Modifier.width(12.dp))
+                PluginRowAction(
+                    label = stringResource(id = R.string.plugin_uninstall_action),
+                    icon = R.drawable.icon_deleteseep,
+                    tint = MaterialTheme.colorScheme.error,
                     onClick = onUninstall,
-                ) {
-                    Icon(
-                        modifier = Modifier.size(20.dp),
-                        painter = painterResource(id = R.drawable.icon_deleteseep),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                }
+                )
             }
         }
+    }
+}
+
+/**
+ * Label + icon acting as one tap target: the whole chip is clickable
+ * (the label is part of the touch area, not just the icon).
+ */
+@Composable
+private fun PluginRowAction(
+    label: String,
+    icon: Int,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            color = tint,
+        )
+        Box(modifier = Modifier.width(6.dp))
+        Icon(
+            modifier = Modifier.size(20.dp),
+            painter = painterResource(id = icon),
+            contentDescription = null,
+            tint = tint,
+        )
     }
 }
 
