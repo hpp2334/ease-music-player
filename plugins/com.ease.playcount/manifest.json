@@ -1,14 +1,26 @@
 {
   "id": "com.ease.playcount",
-  "name": "Play Counts",
-  "version": "0.0.1",
-  "description": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
+  "name": { "en-US": "Play Counts", "zh-CN": "播放计数" },
+  "version": "0.0.2",
+  "description": {
+    "en-US": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
+    "zh-CN": "统计每首歌的播放次数，覆盖今天、昨天、最近 3 天、最近一周、最近一月和最近一年。"
+  },
   "author": "ease",
   "backend": "backend.js",
   "events": ["music:play"],
   "contributions": {
     "dashboard": [
-      { "id": "main", "title": "Play Counts", "view": "view.js" }
+      {
+        "id": "main",
+        "title": { "en-US": "Play Counts", "zh-CN": "播放计数" },
+        "desc": {
+          "en-US": "Play statistics grouped by time period",
+          "zh-CN": "按时间段分组的播放统计"
+        },
+        "icon": "icon.png",
+        "view": "view.js"
+      }
     ]
   }
 }

@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.singleton.types
 
 import kotlinx.serialization.Serializable
+import com.kutedev.easemusicplayer.singleton.LocalizedText
 
 // ============================================================================
 // Plugin-manager wire types — mirror of Rust `services/plugin_manager.rs`
@@ -56,9 +57,9 @@ data class PluginListResult(
 @Serializable
 data class PluginScanInfo(
     val id: String,
-    val name: String,
+    val name: LocalizedText,
     val version: String = "0.0.0",
-    val description: String = "",
+    val description: LocalizedText = LocalizedText(""),
     val backend: String? = null,
     val backendSourceHandle: Long = 0,
     val events: List<String> = emptyList(),
@@ -70,7 +71,15 @@ data class PluginScanInfo(
 @Serializable
 data class PluginContributionInfo(
     val id: String,
-    val title: String,
+    /** `null` when the manifest omitted `title` — callers fall back to the
+     * plugin name (never the raw contribution id). */
+    val title: LocalizedText? = null,
+    /** Short one-liner (dashboard card / chooser subtitle). */
+    val desc: LocalizedText? = null,
+    /** Icon file name (informational; rendering goes through [iconData]). */
+    val icon: String? = null,
+    /** Base64 icon bytes, or `null` when the file failed validation. */
+    val iconData: String? = null,
     val view: String? = null,
     val sourceHandle: Long = 0,
 )
@@ -78,9 +87,9 @@ data class PluginContributionInfo(
 @Serializable
 data class RegistryPluginEntry(
     val id: String,
-    val name: String,
+    val name: LocalizedText,
     val version: String = "0.0.0",
-    val description: String = "",
+    val description: LocalizedText = LocalizedText(""),
     /** Zip path relative to the source base URL, or an absolute http(s) URL. */
     val zip: String = "",
     val sha256: String = "",

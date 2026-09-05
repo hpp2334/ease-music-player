@@ -25,9 +25,9 @@ const ASSET_BUNDLES_DIR = path.join(ROOT, "android/app/src/main/assets/plugin-bu
 
 interface RegistryEntry {
   id: string;
-  name: string;
+  name: string | Record<string, string>;
   version: string;
-  description: string;
+  description: string | Record<string, string>;
   zip: string;
   sha256: string;
   size: number;
@@ -50,6 +50,22 @@ function sha256(file: string): string {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
+/** Collect every `"icon": "<file>"` value in the parsed manifest (deep). */
+function collectIconFiles(node: unknown, out: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(node)) {
+    for (const item of node) collectIconFiles(item, out);
+  } else if (node && typeof node === "object") {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "icon" && typeof value === "string" && value) {
+        out.add(value);
+      } else {
+        collectIconFiles(value, out);
+      }
+    }
+  }
+  return out;
+}
+
 function packagePlugin(pluginDir: string): RegistryEntry {
   const manifestPath = path.join(pluginDir, "manifest.json");
   if (!existsSync(manifestPath)) {
@@ -66,15 +82,31 @@ function packagePlugin(pluginDir: string): RegistryEntry {
   // only targeted the removed assets dir).
   copyFileSync(manifestPath, path.join(distDir, "manifest.json"));
 
+  // Contribution icons are plain files (never bundled by rspack) — copy
+  // each manifest-referenced one into dist/ so it lands in the zip root.
+  // A missing icon is a packaging error: the runtime would silently drop
+  // the icon, so fail loudly here instead.
+  for (const icon of collectIconFiles(manifest)) {
+    const src = path.join(pluginDir, icon);
+    if (!existsSync(src)) {
+      throw new Error(`manifest icon not found: ${src}`);
+    }
+    copyFileSync(src, path.join(distDir, icon));
+    console.log(`icon: ${icon} -> ${path.join(distDir, icon)}`);
+  }
+
   mkdirSync(ZIPS_DIR, { recursive: true });
   const zipPath = path.join(ZIPS_DIR, `${id}-${version}.zip`);
-  // Zip the dist *contents* (manifest + bundles at zip root), stored-only
-  // entries (-X drops extra attrs; -0 avoids double compression of already-
-  // minified JS and keeps installs fast on-device). Source maps stay out —
-  // they double the payload for no runtime value. The zip is recreated
-  // from scratch (`zip` would otherwise merge into a stale archive).
+  // Zip the dist *contents* (manifest + icon(s) + bundles at zip root),
+  // stored-only entries (-X drops extra attrs; -0 avoids double compression
+  // of already-minified JS and keeps installs fast on-device). Source maps
+  // stay out — they double the payload for no runtime value. The zip is
+  // recreated from scratch (`zip` would otherwise merge into a stale
+  // archive).
   execSync(`rm -f "${zipPath}" && zip -rX -0 "${zipPath}" . -x "*.map"`, { cwd: distDir, stdio: "inherit" });
 
+  // `name` / `description` may be localized (`{ "en-US": …, "zh-CN": … }`) —
+  // pass them through as declared; the app normalizes on parse.
   const entry: RegistryEntry = {
     id,
     name: manifest.name ?? id,
