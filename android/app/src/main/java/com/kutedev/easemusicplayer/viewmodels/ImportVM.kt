@@ -79,9 +79,13 @@ class ImportVM @Inject constructor(
     private val _entries = MutableStateFlow(listOf<StorageEntry>())
     private val _selectedStorageId = MutableStateFlow(storageRepository.storages.value.firstOrNull()?.id)
     private val _loadState = MutableStateFlow(CurrentStorageStateType.LOADING)
-    private val _disabledToggleAll = _entries.map { entries ->
-        entries.all { it.isDir }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, true)
+    // Toggle-all is disabled when there is nothing *selectable* — entries
+    // whose type the current import accepts (dirs and mismatched files,
+    // e.g. a .wma during a music import, are never selectable).
+    private val _disabledToggleAll =
+        combine(_entries, importRepository.allowTypes) { entries, types ->
+            selectableEntries(entries, types).isEmpty()
+        }.stateIn(viewModelScope, SharingStarted.Lazily, true)
     private val _undoStack = MutableStateFlow(persistentListOf<String>())
 
     val splitPaths = _splitPaths
@@ -241,16 +245,28 @@ class ImportVM @Inject constructor(
     }
 
     fun toggleAll() {
-        val allSelected = _selected.value.size == _entries.value.size
-        if (allSelected) {
-            _selected.update { selected ->
+        // Only selectable entries participate: dirs and entries whose type
+        // the current import does not accept (e.g. a .wma during a music
+        // import) have no checkbox and must neither be selected nor counted.
+        val selectable = selectableEntries(_entries.value, allowTypes.value).map { it.path }
+        if (selectable.isEmpty()) {
+            return
+        }
+        val allSelected = _selected.value.containsAll(selectable)
+        _selected.update { selected ->
+            if (allSelected) {
                 selected.clear()
-            }
-        } else {
-            _selected.update { selected ->
-                selected.clear().addAll(_entries.value.map { it.path })
+            } else {
+                selected.clear().addAll(selectable)
             }
         }
+    }
+
+    private fun selectableEntries(
+        entries: List<StorageEntry>,
+        types: List<StorageEntryType>
+    ): List<StorageEntry> {
+        return entries.filter { entry -> !entry.isDir && types.contains(entry.entryTyp()) }
     }
 
     fun reload() {
