@@ -48,7 +48,7 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# tur engine integration (https://github.com/hpp2334/tur @ b63b03d).
+# tur engine integration (https://github.com/hpp2334/tur @ a651850).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
 # main↔worker threaded runtime (#178), the fully-wired bidirectional event
 # bus (#181 — host↔JS byte transport for the OneDrive service plugin), the
@@ -98,10 +98,10 @@ anyhow = { workspace = true }
 # (registered on the runtime builder) and for timer/sleep.
 # All crates live in the same repo; cargo clones once and resolves their
 # internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "b63b03de9d31522f93bf6992ec300f8b3543900a" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "a651850cd5f11f1ef0e19df8d3d6d810a7bb7778" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "a651850cd5f11f1ef0e19df8d3d6d810a7bb7778" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "a651850cd5f11f1ef0e19df8d3d6d810a7bb7778" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "a651850cd5f11f1ef0e19df8d3d6d810a7bb7778" }
 
 # Plugin install layer (`services/plugin_manager.rs`): zip extraction
 # (SAF/registry installs), sha256 registry verification, md5 registry-cache

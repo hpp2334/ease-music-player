@@ -41,7 +41,11 @@ object TurNative {
      * mode) — exposed to JS as `ease.context.instance()`. [poolsHandle]
      * (from [`EasePluginBridge.createPluginWorkerPools`]) assigns the
      * instance to the shared view worker pool; `0` keeps the engine
-     * default. A build failure logs to logcat (no exception) and turns
+     * default. [baseColorArgb] (Android ARGB int) is the renderer's base
+     * (background) color, applied to every surface the instance attaches —
+     * what shows in any frame whose content doesn't cover the viewport
+     * (pass the theme surface color; the engine default is opaque white).
+     * A build failure logs to logcat (no exception) and turns
      * later ops into no-ops. Returns `0` only for an invalid runtime
      * handle or if the host thread is gone.
      */
@@ -51,6 +55,7 @@ object TurNative {
         frameLoop: FrameLoop,
         pluginId: String,
         instance: String,
+        baseColorArgb: Int,
     ): Long
 
     /**

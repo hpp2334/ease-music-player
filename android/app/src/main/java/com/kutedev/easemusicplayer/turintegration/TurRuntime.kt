@@ -62,6 +62,11 @@ class TurRuntime(
      * calling plugin from Rust, not from a JS argument. [instance] is the
      * storage's `plugin_storage_id` for edit-mode views (`null` for create
      * mode) — exposed to JS as `ease.context.instance()`.
+     * [baseColorArgb] (Android ARGB int) is the renderer's base
+     * (background) color, applied to every surface this instance attaches
+     * — the color shown in any frame whose content doesn't cover the
+     * viewport (pass `MaterialTheme.colorScheme.surface` so it matches the
+     * loading panel).
      *
      * Returns as soon as the native handle exists — the heavy build
      * (worker handshake, plugin registration) runs on the native tur-host
@@ -72,6 +77,7 @@ class TurRuntime(
     fun createInstance(
         pluginId: String,
         instance: String? = null,
+        baseColorArgb: Int,
     ): TurInstance {
         check(handle != 0L) { "runtime destroyed" }
         val frameLoop = FrameLoop()
@@ -81,6 +87,7 @@ class TurRuntime(
             frameLoop,
             pluginId,
             instance ?: "",
+            baseColorArgb,
         )
         check(h != 0L) { "createInstance returned 0 (see logcat)" }
         return TurInstance(h, frameLoop)
