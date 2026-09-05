@@ -37,12 +37,14 @@ impl DatabaseServer {
             Some(row) => {
                 let mut am: preference::ActiveModel = row.into();
                 am.playmode = ActiveValue::Set(pm);
+                am.language = ActiveValue::Set(model.language);
                 am.update(&db).await?;
             }
             None => {
                 let am = preference::ActiveModel {
                     id: ActiveValue::Set(0),
                     playmode: ActiveValue::Set(pm),
+                    language: ActiveValue::Set(model.language),
                 };
                 am.insert(&db).await?;
             }

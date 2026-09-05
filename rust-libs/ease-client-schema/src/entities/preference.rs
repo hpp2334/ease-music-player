@@ -8,6 +8,9 @@ pub struct Model {
     pub id: i32,
     /// Discriminant of `PlayMode` enum (Single=0, SingleLoop=1, List=2, ListLoop=3).
     pub playmode: i32,
+    /// BCP-47 tag of the in-app language override (e.g. "zh-CN");
+    /// `None` = follow the system locale.
+    pub language: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -99,7 +99,7 @@ Repositories call backend functions through `bridge.run { }`. Backend function p
 The Rust backend spawns work on the shared tokio runtime via `ease_client_tokio::tokio_runtime()`; UniFFI async FFI controllers route through it (`tokio_runtime().handle().spawn(...).await`).
 
 ### Startup sequence
-`MainActivity.onStart()` launches a `lifecycleScope` coroutine that calls `reload()` on `playerRepository`, `storageRepository`, `playlistRepository` (in that order). `PlaybackService` is started lazily on first play via `PlayerControllerRepository` (it owns the `MediaSessionCompat`); `MainActivity` no longer wires a `MediaController`. `Bridge.initialize()` is called earlier in `MainActivity.onCreate()` (after starting `KeepBackendService`).
+`MainActivity.onStart()` launches a `lifecycleScope` coroutine that calls `reload()` on `playerRepository`, `storageRepository`, `playlistRepository` (in that order). `PlaybackService` is started lazily on first play via `PlayerControllerRepository` (it owns the `MediaSessionCompat`); `MainActivity` no longer wires a `MediaController`. `Bridge.initialize()` runs at process start in `EaseMusicApplication.onCreate()` (idempotent — `MainActivity` still calls it as a no-op) so the backend-owned in-app language preference can be loaded asynchronously before the first activity applies its locale (`LanguageSetting`).
 
 ### Repository pattern
 All in `singleton/`, constructed with `Bridge` + `CoroutineScope`, expose `StateFlow` / `SharedFlow`:

@@ -47,7 +47,10 @@ use crate::{
             ArgUpdateMusicDuration, ArgUpdateMusicLyric, ArgUpdatePlaylist,
         },
         plugin_manager,
-        preference::{get_preference_playmode, save_preference_playmode},
+        preference::{
+            get_preference_language, get_preference_playmode, save_preference_language,
+            save_preference_playmode,
+        },
     },
     Backend, PlayerContextHandle, PlayerHandle,
 };
@@ -459,6 +462,20 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx_cx = cx.get_context().clone();
             let mode = get_preference_playmode(&cx_cx).await?;
             Ok((serde_json::to_value(mode)?, vec![]))
+        }
+        "preference.saveLanguage" => {
+            // BCP-47 tag, or null to follow the system locale.
+            let tag: Option<String> = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            save_preference_language(&cx_cx, tag).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "preference.getLanguage" => {
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            let tag = get_preference_language(&cx_cx).await?;
+            Ok((serde_json::to_value(tag)?, vec![]))
         }
 
         // ====================================================================
