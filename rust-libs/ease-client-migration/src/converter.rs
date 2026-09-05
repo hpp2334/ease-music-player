@@ -127,12 +127,14 @@ pub fn preference_from(m: PreferenceModel) -> preference::ActiveModel {
     preference::ActiveModel {
         id: sea_orm::ActiveValue::Set(0),
         playmode: sea_orm::ActiveValue::Set(play_mode_index(m.playmode)),
+        language: sea_orm::ActiveValue::Set(m.language),
     }
 }
 
 pub fn preference_to_model(row: preference::Model) -> PreferenceModel {
     PreferenceModel {
         playmode: play_mode_from_index(row.playmode),
+        language: row.language,
     }
 }
 

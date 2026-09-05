@@ -138,10 +138,14 @@ object BridgeMethods {
         val UPDATE_DURATION = bridgeSpecArg<ArgUpdateMusicDuration, Unit>("music.updateDuration")
     }
 
-    /** `preference.*` — user preferences (currently just PlayMode). */
+    /** `preference.*` — user preferences (PlayMode, in-app language). */
     object Preference {
         val GET_PLAY_MODE = bridgeSpecNoArg<PlayMode>("preference.getPlayMode")
         val SAVE_PLAY_MODE = bridgeSpecArg<PlayMode, Unit>("preference.savePlayMode")
+
+        /** BCP-47 tag of the in-app language override; `null` = system default. */
+        val GET_LANGUAGE = bridgeSpecNoArg<String?>("preference.getLanguage")
+        val SAVE_LANGUAGE = bridgeSpecArg<String?, Unit>("preference.saveLanguage")
     }
 
     /**

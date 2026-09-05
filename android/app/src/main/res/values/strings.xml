@@ -72,6 +72,10 @@
     </plurals>
     <string name="debug_trigger_rs_panic">Trigger Rust panic!</string>
     <string name="setting_general">GENERAL</string>
+    <string name="setting_language">Language</string>
+    <string name="language_system_default">System Default</string>
+    <string name="language_english">English</string>
+    <string name="language_simplified_chinese">Simplified Chinese (简体中文)</string>
     <string name="setting_plugin_management">Plugins</string>
     <string name="dashboard_plugins">PLUGINS</string>
     <string name="plugin_management_title">Plugins</string>

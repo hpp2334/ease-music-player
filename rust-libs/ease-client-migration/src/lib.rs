@@ -44,6 +44,7 @@ impl MigratorTrait for Migrator {
             Box::new(migrations::PluginKvMigration),
             Box::new(migrations::StorageRegistryMigration),
             Box::new(migrations::WebdavPluginMigration),
+            Box::new(migrations::PreferenceLanguageMigration),
         ]
     }
 }

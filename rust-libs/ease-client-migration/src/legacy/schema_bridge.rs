@@ -97,6 +97,8 @@ impl From<v3::PreferenceModel> for schema::PreferenceModel {
     fn from(v: v3::PreferenceModel) -> Self {
         schema::PreferenceModel {
             playmode: v.playmode.into(),
+            // The legacy schemas predate the language override.
+            language: None,
         }
     }
 }
