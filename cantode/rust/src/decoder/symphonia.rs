@@ -97,6 +97,11 @@ pub struct SymphoniaDecoder {
     format: AudioFormat,
     time_base: TimeBase,
     metadata: Metadata,
+    /// A frame decoded during `open` to discover the signal spec (see
+    /// [`SymphoniaDecoder::open`]) and not yet returned to the caller;
+    /// packets cannot be pushed back into the reader, so it is held here
+    /// and yielded by the first [`Decoder::next_frame`] call.
+    pending: Option<DecodedFrame>,
     /// Reusable interleaved-f32 scratch buffer; grown as needed.
     sample_buf: SampleBuffer<f32>,
     /// Tracks how many frames the `sample_buf` is sized for so we can grow
@@ -165,30 +170,44 @@ impl SymphoniaDecoder {
             .ok_or_else(|| CantodeError::UnsupportedFormat("no decodable track".into()))?;
 
         let codec_params: CodecParameters = track_ref.codec_params.clone();
-        let sample_rate = codec_params
-            .sample_rate
-            .ok_or_else(|| CantodeError::UnsupportedFormat("unknown sample rate".into()))?;
-        let channels = codec_params
-            .channels
-            .map(|c| c.count() as u16)
-            .ok_or_else(|| CantodeError::UnsupportedFormat("unknown channel layout".into()))?;
+        let track_id = track_ref.id;
         let time_base = codec_params
             .time_base
             .ok_or_else(|| CantodeError::UnsupportedFormat("no time base".into()))?;
 
-        let decoder = get_codecs()
+        let mut decoder = get_codecs()
             .make(&codec_params, &DecoderOptions::default())
             .map_err(|e| CantodeError::Decode(format!("codec open failed: {e}")))?;
 
-        let track_id = track_ref.id;
-        let format = AudioFormat::new(channels, sample_rate);
+        // Resolve the signal spec. Some demuxers don't declare it up front:
+        // notably symphonia's isomp4 reader populates `channels` only for
+        // PCM/ALAC sample entries — for AAC tracks it leaves it `None`
+        // (the decoder derives the layout from the AudioSpecificConfig in
+        // `extra_data` instead). When the spec is undeclared, decode the
+        // first packet of the track and take it from the decoded buffer.
+        // Without this, every AAC-in-MP4 (.m4a) source fails to open with
+        // "unknown channel layout".
+        let (sample_rate, channels, pending): (u32, Channels, Option<DecodedFrame>) =
+            match (codec_params.sample_rate, codec_params.channels) {
+                (Some(rate), Some(channels)) => (rate, channels, None),
+                _ => {
+                    let (spec, frame) = Self::decode_first_frame(
+                        reader.as_mut(),
+                        decoder.as_mut(),
+                        track_id,
+                        time_base,
+                    )?;
+                    (spec.rate, spec.channels, Some(frame))
+                }
+            };
+
+        let format = AudioFormat::new(channels.count() as u16, sample_rate);
 
         // Size the sample buffer for 1s of audio (plenty for any normal
         // frame). It grows on demand in `next_frame`. symphonia's
         // `SampleBuffer::new` takes a frame-count duration (raw `u64`).
         let initial_capacity_frames = sample_rate as u64;
-        let chans = codec_params.channels.unwrap_or(Channels::FRONT_LEFT);
-        let spec = SignalSpec::new(sample_rate, chans);
+        let spec = SignalSpec::new(sample_rate, channels);
         let sample_buf = SampleBuffer::<f32>::new(initial_capacity_frames, spec);
 
         let metadata = build_metadata(metadata_rev.as_ref(), &codec_params, &format);
@@ -200,15 +219,84 @@ impl SymphoniaDecoder {
             format,
             time_base,
             metadata,
+            pending,
             sample_buf,
             sample_buf_capacity_frames: initial_capacity_frames as usize,
             source,
         })
     }
+
+    /// Decode the first non-empty packet of `track_id` to discover the
+    /// signal spec when the container doesn't declare it. Mirrors the
+    /// packet/decode handling of [`Decoder::next_frame`], but converts a
+    /// clean end-of-stream before any audio into an error — a source with
+    /// no decodable audio at all cannot yield a spec.
+    fn decode_first_frame(
+        reader: &mut dyn FormatReader,
+        decoder: &mut dyn SymDecoder,
+        track_id: u32,
+        time_base: TimeBase,
+    ) -> crate::Result<(SignalSpec, DecodedFrame)> {
+        loop {
+            let packet = match reader.next_packet() {
+                Ok(p) => p,
+                Err(SymError::ResetRequired) => continue,
+                Err(SymError::IoError(ref e))
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    return Err(CantodeError::UnsupportedFormat(
+                        "signal spec not declared and no decodable packet found".into(),
+                    ));
+                }
+                Err(e) => {
+                    return Err(CantodeError::UnsupportedFormat(format!(
+                        "reading first packet for signal spec: {e}"
+                    )));
+                }
+            };
+            if packet.track_id() != track_id {
+                continue;
+            }
+
+            let decoded = match decoder.decode(&packet) {
+                Ok(d) => d,
+                Err(SymError::DecodeError(_)) => continue, // skip corrupt packet
+                Err(e) => {
+                    return Err(CantodeError::Decode(format!(
+                        "decoding first packet for signal spec: {e}"
+                    )));
+                }
+            };
+
+            let frames = decoded.frames();
+            if frames == 0 {
+                continue;
+            }
+
+            let spec = *decoded.spec();
+            let mut buf = SampleBuffer::<f32>::new(frames as u64, spec);
+            buf.copy_interleaved_ref(decoded);
+            let data = buf.samples().to_vec();
+            return Ok((
+                spec,
+                DecodedFrame {
+                    data,
+                    frames,
+                    timestamp: ts_to_duration(packet.ts(), time_base),
+                },
+            ));
+        }
+    }
 }
 
 impl Decoder for SymphoniaDecoder {
     fn next_frame(&mut self) -> crate::Result<Option<DecodedFrame>> {
+        // Spec-discovery frame decoded during `open` (packets cannot be
+        // pushed back into the reader) — yield it before reading on.
+        if let Some(frame) = self.pending.take() {
+            return Ok(Some(frame));
+        }
+
         loop {
             let packet = match self.reader.next_packet() {
                 Ok(p) => p,
