@@ -466,6 +466,25 @@ impl DatabaseServer {
     }
 
     // -----------------------------------------------------------------------
+    // Uninstall wipe
+    // -----------------------------------------------------------------------
+
+    /// Delete every key + value owned by `plugin_id`. Removing the registry
+    /// rows cascades to the `plugin_kv_single` / `plugin_kv_multi` values via
+    /// FK `ON DELETE CASCADE` (same mechanism as the per-key deletes above).
+    pub async fn plugin_kv_delete_all(
+        self: &Arc<Self>,
+        plugin_id: &str,
+    ) -> BResult<()> {
+        let db = self.db();
+        plugin_kv_key::Entity::delete_many()
+            .filter(plugin_kv_key::Column::PluginId.eq(plugin_id))
+            .exec(&db)
+            .await?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Key listing
     // -----------------------------------------------------------------------
 

@@ -89,8 +89,8 @@
     <string name="plugin_enable_action">Enable</string>
     <string name="plugin_disable_action">Disable</string>
     <string name="plugin_uninstall_action">Uninstall</string>
-    <string name="plugin_uninstall_confirm">Uninstall plugin “E_NAME”? Its data is kept and restored if reinstalled.</string>
-    <string name="plugin_uninstall_storage_warning">E_COUNT storages depend on it and will stop working.</string>
+    <string name="plugin_uninstall_confirm">Uninstall plugin “E_NAME”? All of its data will be permanently deleted.</string>
+    <string name="plugin_uninstall_storage_warning">E_COUNT storages depend on it and will be removed, together with their musics in playlists.</string>
     <string name="plugin_storage_removed">storage removed</string>
     <string name="plugin_available_title">Get Plugins</string>
     <string name="plugin_source_label">Source</string>
