@@ -33,6 +33,8 @@ data class PluginManifest(
     val backend: String? = null,
     val backendSourceHandle: Long = 0L,
     val events: List<String> = emptyList(),
+    /** Base64 plugin icon bytes; the built-in extension glyph shows when absent. */
+    val iconData: String? = null,
     val dashboard: List<DashboardContribution> = emptyList(),
     val storages: List<StorageContribution> = emptyList(),
     /** `false` when the user disabled the plugin in plugin management. */
@@ -188,6 +190,7 @@ class PluginRepository @Inject constructor(
         backend = info.backend,
         backendSourceHandle = info.backendSourceHandle,
         events = info.events,
+        iconData = info.iconData,
         dashboard = info.dashboard.map {
             DashboardContribution(
                 id = it.id,

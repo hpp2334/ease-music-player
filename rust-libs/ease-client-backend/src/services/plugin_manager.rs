@@ -166,6 +166,34 @@ fn registry_cache_file(app_document_dir: &str, base_url: &str) -> PathBuf {
     registry_cache_dir(app_document_dir).join(format!("{hex}.json"))
 }
 
+/// Raw-bytes cache for one registry icon (offline rehydration in
+/// [`cached_registry`]), keyed by the resolved icon URL.
+fn icon_cache_file(app_document_dir: &str, icon_url: &str) -> PathBuf {
+    use md5::Md5;
+    let digest = Md5::digest(icon_url.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    registry_cache_dir(app_document_dir).join(format!("{hex}.icon"))
+}
+
+fn write_icon_cache(app_document_dir: &str, icon_url: &str, bytes: &[u8]) -> Option<()> {
+    let f = icon_cache_file(app_document_dir, icon_url);
+    std::fs::create_dir_all(f.parent()?).ok()?;
+    std::fs::write(f, bytes).ok()
+}
+
+fn read_icon_cache(app_document_dir: &str, icon_url: &str) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(icon_cache_file(app_document_dir, icon_url)).ok()?;
+    if bytes.len() as u64 > MAX_ICON_BYTES {
+        return None;
+    }
+    Some(bytes)
+}
+
+fn b64_encode(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
 // ============================================================================
 // State read/write
 // ============================================================================
@@ -435,6 +463,12 @@ pub struct ManifestRaw {
     pub description: LocalizedString,
     pub backend: Option<String>,
     pub events: Vec<String>,
+    /// Plugin-level icon file name relative to the plugin root (raster
+    /// only) — shown on the installed-plugins list.
+    pub icon: Option<String>,
+    /// Base64 icon bytes — never parsed from the manifest; filled in by
+    /// the scan ([`load_icon_base64`]).
+    pub icon_data: Option<String>,
     pub dashboard: Vec<ContributionRaw>,
     pub storages: Vec<ContributionRaw>,
 }
@@ -521,6 +555,8 @@ pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
             .unwrap_or_default(),
         dashboard: parse_list("dashboard"),
         storages: parse_list("storages"),
+        icon: opt_str(&v, "icon"),
+        icon_data: None,
     })
 }
 
@@ -562,8 +598,7 @@ fn load_icon_base64(plugin_dir: &Path, icon: &str) -> Option<String> {
         return None;
     }
     let bytes = std::fs::read(&file).ok()?;
-    use base64::Engine as _;
-    Some(base64::engine::general_purpose::STANDARD.encode(bytes))
+    Some(b64_encode(&bytes))
 }
 
 /// Walk `<root>/*/manifest.json` and parse each. Folders starting with `.`
@@ -597,8 +632,12 @@ fn scan_manifests_blocking(root: &Path) -> Vec<(PathBuf, ManifestRaw)> {
             } else {
                 m.id
             };
-            // Contribution icons: read here (blocking thread), regardless of
-            // enabled state — the management page shows disabled plugins too.
+            // Contribution + plugin-level icons: read here (blocking
+            // thread), regardless of enabled state — the management page
+            // shows disabled plugins too.
+            if let Some(icon) = m.icon.as_deref() {
+                m.icon_data = load_icon_base64(&path, icon);
+            }
             for c in m.dashboard.iter_mut().chain(m.storages.iter_mut()) {
                 if let Some(icon) = c.icon.as_deref() {
                     c.icon_data = load_icon_base64(&path, icon);
@@ -695,6 +734,18 @@ pub struct RegistryEntry {
     pub sha256: String,
     pub size: u64,
     pub min_app_version: Option<String>,
+    /// Icon path relative to the source base URL (e.g. `icons/<id>.png`),
+    /// or an absolute http(s) URL — Rust-side input only: resolved, fetched
+    /// and cached into `icon_data`; never serialized to Kotlin (Kotlin
+    /// renders the bytes, it has no use for the path).
+    #[serde(skip_serializing)]
+    pub icon: Option<String>,
+    /// Base64 icon bytes fetched during `fetch_registry` (or rehydrated
+    /// from the per-source icon cache by `cached_registry`). `None` when
+    /// the registry declared no icon or the fetch failed — the UI falls
+    /// back to the built-in glyph.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_data: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
     pub update_available: bool,
@@ -779,6 +830,8 @@ pub fn parse_registry(body: &str) -> BResult<Vec<RegistryEntry>> {
                         sha256: opt_str(e, "sha256").unwrap_or_default(),
                         size: e.get("size").and_then(|x| x.as_u64()).unwrap_or(0),
                         min_app_version: opt_str(e, "minAppVersion"),
+                        icon: opt_str(e, "icon"),
+                        icon_data: None,
                         installed_version: None,
                         update_available: false,
                     })
@@ -792,12 +845,28 @@ pub fn parse_registry(body: &str) -> BResult<Vec<RegistryEntry>> {
 pub async fn fetch_registry(app_document_dir: &str, base_url: &str) -> BResult<Vec<RegistryEntry>> {
     let url = format!("{}/plugins.json", base_url.trim_end_matches('/'));
     let body = http_get_text(&url).await?;
-    let entries = parse_registry(&body)?;
+    let mut entries = parse_registry(&body)?;
     let cache = registry_cache_file(app_document_dir, base_url);
     if let Some(parent) = cache.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::write(&cache, &body);
+    // Icons: fetched + validated + base64'd here, cached as raw bytes so
+    // `cached_registry` can rehydrate them offline. Failures are non-fatal
+    // (the entry keeps rendering with the built-in glyph).
+    for e in entries.iter_mut() {
+        if let Some(icon) = e.icon.clone() {
+            let icon_url = entry_asset_url(&icon, base_url);
+            match http_download(&icon_url).await {
+                Ok(bytes) if bytes.len() as u64 <= MAX_ICON_BYTES => {
+                    let _ = write_icon_cache(app_document_dir, &icon_url, &bytes);
+                    e.icon_data = Some(b64_encode(&bytes));
+                }
+                Ok(_) => tracing::warn!("registry icon too large: {icon_url}"),
+                Err(err) => tracing::warn!("registry icon fetch failed: {icon_url}: {err}"),
+            }
+        }
+    }
     Ok(entries)
 }
 
@@ -805,7 +874,16 @@ pub async fn fetch_registry(app_document_dir: &str, base_url: &str) -> BResult<V
 pub fn cached_registry(app_document_dir: &str, base_url: &str) -> Option<Vec<RegistryEntry>> {
     let f = registry_cache_file(app_document_dir, base_url);
     let body = std::fs::read_to_string(f).ok()?;
-    parse_registry(&body).ok()
+    let mut entries = parse_registry(&body).ok()?;
+    for e in entries.iter_mut() {
+        if let Some(icon) = e.icon.as_deref() {
+            let icon_url = entry_asset_url(icon, base_url);
+            if let Some(bytes) = read_icon_cache(app_document_dir, &icon_url) {
+                e.icon_data = Some(b64_encode(&bytes));
+            }
+        }
+    }
+    Some(entries)
 }
 
 /// Stamp `installed_version` + `update_available` against the installed tree.
@@ -825,17 +903,23 @@ pub fn stamp_entries(entries: Vec<RegistryEntry>, root: &Path) -> Vec<RegistryEn
         .collect()
 }
 
-/// Resolve an entry's zip URL against the source base URL.
-pub fn entry_zip_url(entry: &RegistryEntry, base_url: &str) -> String {
-    if entry.zip.starts_with("http") {
-        entry.zip.clone()
+/// Resolve a registry-relative asset path against the source base URL
+/// (shared by `zip` and `icon` fields).
+pub fn entry_asset_url(path: &str, base_url: &str) -> String {
+    if path.starts_with("http") {
+        path.to_string()
     } else {
         format!(
             "{}/{}",
             base_url.trim_end_matches('/'),
-            entry.zip.trim_start_matches('/')
+            path.trim_start_matches('/')
         )
     }
+}
+
+/// Resolve an entry's zip URL against the source base URL.
+pub fn entry_zip_url(entry: &RegistryEntry, base_url: &str) -> String {
+    entry_asset_url(&entry.zip, base_url)
 }
 
 // ============================================================================
@@ -1245,6 +1329,10 @@ pub struct PluginScanInfo {
     pub backend: Option<String>,
     pub backend_source_handle: i64,
     pub events: Vec<String>,
+    /// Base64 plugin icon bytes (present only when the manifest's
+    /// plugin-level icon file passed validation). The file name itself
+    /// stays Rust-side — Kotlin only renders the bytes.
+    pub icon_data: Option<String>,
     pub dashboard: Vec<ContributionInfo>,
     pub storages: Vec<ContributionInfo>,
     pub enabled: bool,
@@ -1297,6 +1385,8 @@ pub async fn scan(
                 description,
                 backend,
                 events,
+                icon: _,
+                icon_data,
                 dashboard,
                 storages,
             } = m;
@@ -1320,6 +1410,7 @@ pub async fn scan(
                 backend,
                 backend_source_handle,
                 events,
+                icon_data,
                 dashboard: dashboard_infos,
                 storages: storages_infos,
                 enabled,
@@ -1522,13 +1613,26 @@ mod tests {
     #[test]
     fn registry_parse_and_stamp() {
         let body = r#"{"plugins":[
-            {"id":"com.ease.a","name":"A","version":"1.0.0","zip":"zips/a.zip","sha256":"00","size":10},
+            {"id":"com.ease.a","name":"A","version":"1.0.0","zip":"zips/a.zip","sha256":"00","size":10,
+             "icon":"icons/com.ease.a.png"},
             {"id":"com.ease.b","version":"2.0.0"}
         ]}"#;
         let mut entries = parse_registry(body).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, LocalizedString::plain("A".into()));
         assert_eq!(entries[1].name, LocalizedString::plain("com.ease.b".into()));
+        assert_eq!(
+            entries[0].icon.as_deref(),
+            Some("icons/com.ease.a.png"),
+            "registry icon path parses Rust-side"
+        );
+        assert!(entries[1].icon.is_none());
+        assert!(entries[0].icon_data.is_none(), "icon bytes fill at fetch time");
+        // `icon` never serializes to Kotlin; `iconData` is omitted when None
+        // (round-trip parity with `plugin.installFromRegistry` echo).
+        let json = serde_json::to_value(&entries[0]).unwrap();
+        assert!(json.get("icon").is_none());
+        assert!(json.get("iconData").is_none());
 
         let (_guard, root) = temp_root();
         install_zip_bytes_blocking(
@@ -1629,6 +1733,39 @@ mod tests {
         )
         .unwrap();
         assert!(scan_manifests_blocking(&root)[0].1.dashboard[0].icon_data.is_none());
+    }
+
+    /// Plugin-level (root manifest) icons follow the same validation +
+    /// base64 path as contribution icons.
+    #[test]
+    fn root_icon_scan_rules() {
+        let (_guard, root) = temp_root();
+        let dir = root.join("com.ease.test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = [0x89u8, b'P', b'N', b'G', 9, 8, 7, 6];
+        std::fs::write(dir.join("icon.png"), png).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            r#"{"id":"com.ease.test","icon":"icon.png"}"#,
+        )
+        .unwrap();
+        let m = &scan_manifests_blocking(&root)[0].1;
+        assert_eq!(m.icon.as_deref(), Some("icon.png"));
+        use base64::Engine as _;
+        let expect = base64::engine::general_purpose::STANDARD.encode(png);
+        assert_eq!(m.icon_data.as_deref(), Some(expect.as_str()));
+
+        // Unsafe name → dropped; absent field → None. Neither is fatal.
+        std::fs::write(
+            dir.join("manifest.json"),
+            r#"{"id":"com.ease.test","icon":"../escape.png"}"#,
+        )
+        .unwrap();
+        assert!(scan_manifests_blocking(&root)[0].1.icon_data.is_none());
+        std::fs::write(dir.join("manifest.json"), r#"{"id":"com.ease.test"}"#).unwrap();
+        let m = &scan_manifests_blocking(&root)[0].1;
+        assert!(m.icon.is_none());
+        assert!(m.icon_data.is_none());
     }
 
     #[test]

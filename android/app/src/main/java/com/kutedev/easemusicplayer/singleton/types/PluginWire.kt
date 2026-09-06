@@ -63,6 +63,8 @@ data class PluginScanInfo(
     val backend: String? = null,
     val backendSourceHandle: Long = 0,
     val events: List<String> = emptyList(),
+    /** Base64 plugin icon bytes; the built-in extension glyph shows when absent. */
+    val iconData: String? = null,
     val dashboard: List<PluginContributionInfo> = emptyList(),
     val storages: List<PluginContributionInfo> = emptyList(),
     val enabled: Boolean = true,
@@ -95,6 +97,9 @@ data class RegistryPluginEntry(
     val sha256: String = "",
     val size: Long = 0,
     val minAppVersion: String? = null,
+    /** Base64 icon bytes fetched + cached Rust-side; `null` when the
+     * registry declared no icon or the fetch failed. */
+    val iconData: String? = null,
     /** Stamped by Rust at fetch time — Kotlin never compares versions. */
     val installedVersion: String? = null,
     val updateAvailable: Boolean = false,
