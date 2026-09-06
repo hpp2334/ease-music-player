@@ -28,6 +28,7 @@ import com.kutedev.easemusicplayer.core.RouteDebugMore
 import com.kutedev.easemusicplayer.core.RouteHome
 import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.core.RouteLog
+import com.kutedev.easemusicplayer.core.RouteLyricParser
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.core.RoutePlaylist
 import com.kutedev.easemusicplayer.core.RoutePluginAvailable
@@ -45,6 +46,7 @@ import com.kutedev.easemusicplayer.widgets.playlists.CreatePlaylistsDialog
 import com.kutedev.easemusicplayer.widgets.playlists.EditPlaylistsDialog
 import com.kutedev.easemusicplayer.widgets.playlists.PlaylistPage
 import com.kutedev.easemusicplayer.widgets.plugins.AvailablePluginsPage
+import com.kutedev.easemusicplayer.widgets.plugins.LyricParserPage
 import com.kutedev.easemusicplayer.widgets.plugins.PluginManagementPage
 import com.kutedev.easemusicplayer.widgets.plugins.PluginViewPage
 import com.kutedev.easemusicplayer.widgets.settings.DebugMorePage
@@ -153,6 +155,11 @@ fun Root() {
                             }
                             composable(RoutePluginAvailable()) {
                                 AvailablePluginsPage(
+                                    scaffoldPadding = scaffoldPadding,
+                                )
+                            }
+                            composable(RouteLyricParser()) {
+                                LyricParserPage(
                                     scaffoldPadding = scaffoldPadding,
                                 )
                             }

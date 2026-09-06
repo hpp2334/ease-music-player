@@ -11,6 +11,7 @@ import com.kutedev.easemusicplayer.singleton.types.ArgPluginId
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallFromRegistry
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallZipPath
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetEnable
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetLyricParserSelection
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSourceAddCustom
 import com.kutedev.easemusicplayer.singleton.types.PluginListResult
 import com.kutedev.easemusicplayer.singleton.types.PluginMutationResult
@@ -167,6 +168,8 @@ object BridgeMethods {
         val INSTALL_FROM_REGISTRY =
             bridgeSpecArg<ArgPluginInstallFromRegistry, PluginMutationResult>("plugin.installFromRegistry")
         val SET_ENABLE = bridgeSpecArg<ArgPluginSetEnable, PluginMutationResult>("plugin.setEnable")
+        val SET_LYRIC_PARSER_SELECTION =
+            bridgeSpecArg<ArgPluginSetLyricParserSelection, Map<String, String>>("plugin.setLyricParserSelection")
         val UNINSTALL = bridgeSpecArg<ArgPluginId, PluginMutationResult>("plugin.uninstall")
         val BOOTSTRAP = bridgeSpecNoArg<PluginMutationResult>("plugin.bootstrap")
         val REGISTRY_FETCH = bridgeSpecArg<ArgPluginBaseUrl, RegistryEntriesResult>("plugin.registryFetch")

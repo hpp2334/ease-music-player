@@ -27,6 +27,14 @@ data class ArgPluginSetEnable(
 )
 
 @Serializable
+data class ArgPluginSetLyricParserSelection(
+    /** File extension, lowercase without the dot (e.g. `"srt"`). */
+    val ext: String,
+    /** `"<pluginId>:<parserId>"`, or `null` to clear back to Auto. */
+    val parser: String? = null,
+)
+
+@Serializable
 data class ArgPluginId(
     val pluginId: String,
 )
@@ -52,6 +60,9 @@ data class PluginMutationResult(
 data class PluginListResult(
     val generation: Long = 0,
     val plugins: List<PluginScanInfo> = emptyList(),
+    /** User's per-extension lyric-parser picks (extension →
+     * `"<pluginId>:<parserId>"`); absent entry = Auto. */
+    val lyricParserSelection: Map<String, String> = emptyMap(),
 )
 
 @Serializable
@@ -67,7 +78,24 @@ data class PluginScanInfo(
     val iconData: String? = null,
     val dashboard: List<PluginContributionInfo> = emptyList(),
     val storages: List<PluginContributionInfo> = emptyList(),
+    val lyricParsers: List<LyricParserInfo> = emptyList(),
     val enabled: Boolean = true,
+)
+
+/** A `contributions.lyricParsers` entry — headless (no view/source
+ * handle): the plugin backend's single `lyric:parse` host-RPC handler
+ * serves all of its parsers. */
+@Serializable
+data class LyricParserInfo(
+    val id: String,
+    /** `null` when the manifest omitted `title` — callers fall back to the
+     * plugin name. */
+    val title: LocalizedText? = null,
+    val desc: LocalizedText? = null,
+    val icon: String? = null,
+    val iconData: String? = null,
+    /** Lowercase, dot-free extensions this parser claims. */
+    val extensions: List<String> = emptyList(),
 )
 
 @Serializable

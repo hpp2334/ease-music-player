@@ -10,7 +10,7 @@ use crate::{
     StorageEntry,
 };
 
-use super::{lyrics::parse_lrc, storage::load_storage_entry_data};
+use super::{lyrics::parse_lyric_content, storage::load_storage_entry_data};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,60 +56,62 @@ pub struct ArgUpdateMusicLyric {
     pub lyric_loc: Option<StorageEntryLoc>,
 }
 
+/// Try each candidate location in order: a fetch miss (missing file /
+/// mid-stream error — e.g. a missing sibling) moves on to the next
+/// candidate. The first successfully fetched file is parsed exactly once
+/// through the plugin chain ([`parse_lyric_content`]) — a parse failure
+/// is terminal (`Failed`), it does not retry further locations (the file
+/// exists but nothing can parse it). All candidates missing ⇒ `Missing`
+/// when every candidate was a fallback, `Failed` for the explicit pick.
 async fn load_lyric(
     cx: &BackendContext,
-    loc: Option<StorageEntryLoc>,
-    is_fallback: bool,
+    candidates: Vec<(StorageEntryLoc, bool)>,
 ) -> Option<MusicLyric> {
-    let loc = match loc {
-        Some(loc) => loc,
-        None => {
-            return None;
-        }
-    };
-    let data = load_storage_entry_data(cx, &loc).await;
-    if let Err(e) = &data {
-        tracing::error!("fail to load entry {:?}: {}", loc, e);
-        return Some(MusicLyric {
-            loc,
-            data: Default::default(),
-            loaded_state: if is_fallback {
-                LyricLoadState::Missing
-            } else {
-                LyricLoadState::Failed
+    if candidates.is_empty() {
+        return None;
+    }
+    for (loc, _) in candidates.iter() {
+        let data = load_storage_entry_data(cx, loc).await;
+        let bytes = match data {
+            Err(e) => {
+                tracing::error!("fail to load entry {loc:?}: {e}");
+                continue;
+            }
+            Ok(None) => continue,
+            Ok(Some(bytes)) => bytes,
+        };
+        let file_name = loc
+            .path
+            .rsplit('/')
+            .next()
+            .unwrap_or(loc.path.as_str())
+            .to_string();
+        return Some(match parse_lyric_content(cx, &file_name, &bytes).await {
+            Ok(data) => MusicLyric {
+                loc: loc.clone(),
+                data,
+                loaded_state: LyricLoadState::Loaded,
             },
+            Err(e) => {
+                tracing::error!("fail to parse lyric '{file_name}': {e}");
+                MusicLyric {
+                    loc: loc.clone(),
+                    data: Default::default(),
+                    loaded_state: LyricLoadState::Failed,
+                }
+            }
         });
     }
-    let data = data.unwrap();
-    if data.is_none() {
-        return Some(MusicLyric {
-            loc,
-            data: Default::default(),
-            loaded_state: if is_fallback {
-                LyricLoadState::Missing
-            } else {
-                LyricLoadState::Failed
-            },
-        });
-    }
-    let data = data.unwrap();
-    let data = String::from_utf8_lossy(&data).to_string();
-    let lyric = parse_lrc(data);
-    if lyric.is_err() {
-        let e = lyric.unwrap_err();
-        tracing::error!("fail to parse lyric: {}", e);
-        return Some(MusicLyric {
-            loc,
-            data: Default::default(),
-            loaded_state: LyricLoadState::Failed,
-        });
-    }
-    let lyric = lyric.unwrap();
-
+    // Every candidate missed.
+    let (loc, is_fallback) = candidates.into_iter().next().unwrap();
     Some(MusicLyric {
         loc,
-        data: lyric,
-        loaded_state: LyricLoadState::Loaded,
+        data: Default::default(),
+        loaded_state: if is_fallback {
+            LyricLoadState::Missing
+        } else {
+            LyricLoadState::Failed
+        },
     })
 }
 
@@ -191,29 +193,40 @@ pub(crate) async fn update_music_cover(
     Ok(())
 }
 
-/// Resolve a music's lyric location: the explicit `model.lyric` if set,
-/// else — when `lyric_default` is enabled — the sibling `.lrc` next to
-/// the audio file. Returns `(loc, is_fallback)`.
-fn resolve_lyric_loc(model: &MusicModel) -> (Option<StorageEntryLoc>, bool) {
+/// Resolve a music's candidate lyric locations: the explicit `model.lyric`
+/// if set, else — when `lyric_default` is enabled — one sibling per
+/// registered parser extension (`<audio-base>.<ext>`, registry order —
+/// `plugin_manager::PluginManagerShared::lyric_sibling_extensions`).
+/// Empty when nothing can parse (no parser plugin enabled and no explicit
+/// pick). Returns `(loc, is_fallback)` pairs; only the explicit pick is
+/// ever non-fallback.
+fn resolve_lyric_locs(
+    model: &MusicModel,
+    sibling_extensions: &[String],
+) -> Vec<(StorageEntryLoc, bool)> {
     if let Some(loc) = model.lyric.clone() {
-        return (Some(loc), false);
+        return vec![(loc, false)];
     }
-    if !model.lyric_default {
-        return (None, false);
+    if !model.lyric_default || sibling_extensions.is_empty() {
+        return Vec::new();
     }
     let audio = &model.loc;
-    let mut path = audio.path.clone();
-    if let Some(pos) = path.rfind('.') {
-        path.truncate(pos);
+    let mut base = audio.path.clone();
+    if let Some(pos) = base.rfind('.') {
+        base.truncate(pos);
     }
-    path.push_str(".lrc");
-    (
-        Some(StorageEntryLoc {
-            path,
-            storage_id: audio.storage_id,
-        }),
-        true,
-    )
+    sibling_extensions
+        .iter()
+        .map(|ext| {
+            (
+                StorageEntryLoc {
+                    path: format!("{base}.{ext}"),
+                    storage_id: audio.storage_id,
+                },
+                true,
+            )
+        })
+        .collect()
 }
 
 /// DB-only music fetch. The lyric arrives as a [`LyricLoadState::Loading`]
@@ -233,11 +246,14 @@ pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Optio
     } else {
         Default::default()
     };
-    let lyric = resolve_lyric_loc(&model).0.map(|loc| MusicLyric {
-        loc,
-        data: Default::default(),
-        loaded_state: LyricLoadState::Loading,
-    });
+    let lyric = resolve_lyric_locs(&model, &cx.plugin_manager().lyric_sibling_extensions())
+        .into_iter()
+        .next()
+        .map(|(loc, _)| MusicLyric {
+            loc,
+            data: Default::default(),
+            loaded_state: LyricLoadState::Loading,
+        });
     let loc = model.loc;
 
     Ok(Some(Music {
@@ -261,8 +277,8 @@ pub(crate) async fn load_music_lyric(
     let Some(model) = model else {
         return Ok(None);
     };
-    let (lyric_loc, using_fallback) = resolve_lyric_loc(&model);
-    Ok(load_lyric(cx, lyric_loc, using_fallback).await)
+    let candidates = resolve_lyric_locs(&model, &cx.plugin_manager().lyric_sibling_extensions());
+    Ok(load_lyric(cx, candidates).await)
 }
 
 pub(crate) async fn get_music_abstract(

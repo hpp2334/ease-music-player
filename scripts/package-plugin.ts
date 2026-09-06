@@ -10,13 +10,14 @@ import { ROOT } from "./base";
 //   plugins/registry/zips/<id>-<version>.zip   (manifest.json + *.js at zip root)
 //   plugins/registry/plugins.json              (index: id/name/version/zip/sha256/size)
 //
-// `--bundle <id>` additionally copies the zip into the APK assets
-// (`android/app/src/main/assets/plugin-bundles/<id>.zip`) for first-run
-// offline install (only WebDAV ships there).
+// `--bundle <id[,id…]>` (repeatable) additionally copies those zips into
+// the APK assets (`android/app/src/main/assets/plugin-bundles/<id>.zip`)
+// for offline ensure-install by the Rust bootstrap — WebDAV (storage) and
+// Lyric Formats (the only lyric parser; the app has no built-in one).
 //
 // Usage:
-//   npx tsx scripts/package-plugin.ts <pluginDir> [...] [--bundle <id>]
-//   npx tsx scripts/package-plugin.ts --all [--bundle <id>]
+//   npx tsx scripts/package-plugin.ts <pluginDir> [...] [--bundle <id[,id…]>]
+//   npx tsx scripts/package-plugin.ts --all [--bundle <id[,id…]>]
 
 const REGISTRY_DIR = path.join(ROOT, "plugins/registry");
 const ZIPS_DIR = path.join(REGISTRY_DIR, "zips");
@@ -141,8 +142,17 @@ function packagePlugin(pluginDir: string): RegistryEntry {
 }
 
 const argv = process.argv.slice(2);
-const bundleFlagIdx = argv.indexOf("--bundle");
-const bundleId = bundleFlagIdx >= 0 ? argv.splice(bundleFlagIdx, 2)[1] : undefined;
+const bundleIds = new Set<string>();
+for (let i = 0; i < argv.length; ) {
+  if (argv[i] === "--bundle") {
+    for (const id of (argv[i + 1] ?? "").split(",").map((s) => s.trim()).filter(Boolean)) {
+      bundleIds.add(id);
+    }
+    argv.splice(i, 2);
+  } else {
+    i += 1;
+  }
+}
 
 const pluginArgs = argv.filter((a) => !a.startsWith("--"));
 const useAll = argv.includes("--all");
@@ -155,7 +165,7 @@ const pluginDirs = useAll
   : pluginArgs.map((a) => path.resolve(ROOT, a));
 
 if (pluginDirs.length === 0) {
-  console.error("usage: npx tsx scripts/package-plugin.ts <pluginDir>... | --all [--bundle <id>]");
+  console.error("usage: npx tsx scripts/package-plugin.ts <pluginDir>... | --all [--bundle <id[,id…]>]");
   process.exit(1);
 }
 
@@ -168,7 +178,7 @@ for (const dir of pluginDirs) {
   } else {
     registry.plugins.push(entry);
   }
-  if (bundleId === entry.id) {
+  if (bundleIds.has(entry.id)) {
     mkdirSync(ASSET_BUNDLES_DIR, { recursive: true });
     const dest = path.join(ASSET_BUNDLES_DIR, `${entry.id}.zip`);
     copyFileSync(path.join(ZIPS_DIR, path.basename(entry.zip)), dest);

@@ -11,11 +11,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
+import com.kutedev.easemusicplayer.singleton.types.LyricLoadState
+import com.kutedev.easemusicplayer.singleton.types.Lyrics
 import com.kutedev.easemusicplayer.singleton.types.Music
 import com.kutedev.easemusicplayer.singleton.types.MusicId
 import com.kutedev.easemusicplayer.singleton.types.MusicLyric
 import com.kutedev.easemusicplayer.singleton.types.Playlist
 import com.kutedev.easemusicplayer.singleton.types.PlayMode
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -163,6 +166,31 @@ class PlayerRepository @Inject constructor(
                 ArgUpdateMusicLyric(id = m.meta.id, lyricLoc = null),
             ).unwrapOrNull()
             reload()
+        }
+    }
+
+    /**
+     * Attach an explicitly picked lyric file to the current music (the
+     * "Add lyric" flow): persist the location (`music.updateLyric` — Rust
+     * also flips `lyric_default` off, the explicit pick beats sibling
+     * pickup), show the pane as LOADING immediately, then fetch + parse
+     * via `music.loadLyric` and patch the result.
+     */
+    fun setLyric(loc: StorageEntryLoc) {
+        val m = _music.value ?: return
+        val id = m.meta.id
+        _scope.launch {
+            bridge.call(
+                BridgeMethods.Music.UPDATE_LYRIC,
+                ArgUpdateMusicLyric(id = id, lyricLoc = loc),
+            ).unwrapOrNull()
+            updateMusicLyric(
+                id,
+                MusicLyric(loc = loc, data = Lyrics(), loadedState = LyricLoadState.LOADING),
+            )
+            val lyric = bridge.call(BridgeMethods.Music.LOAD_LYRIC, id)
+                .unwrapOrNull()?.payload
+            updateMusicLyric(id, lyric)
         }
     }
 

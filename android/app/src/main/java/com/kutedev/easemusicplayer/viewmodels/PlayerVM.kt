@@ -2,6 +2,7 @@ package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kutedev.easemusicplayer.singleton.ImportRepository
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import com.kutedev.easemusicplayer.singleton.ToastRepository
@@ -17,12 +18,15 @@ import kotlinx.coroutines.launch
 import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
 import com.kutedev.easemusicplayer.singleton.types.MusicId
 import com.kutedev.easemusicplayer.singleton.types.PlaylistId
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
 import javax.inject.Inject
 
 @HiltViewModel
 class PlayerVM @Inject constructor(
     private val playerRepository: PlayerRepository,
     private val playerControllerRepository: PlayerControllerRepository,
+    private val importRepository: ImportRepository,
 ) : ViewModel() {
     // Position / buffered-position in milliseconds (Long, not java.time.Duration).
     private val _currentMs = MutableStateFlow(0L)
@@ -81,6 +85,22 @@ class PlayerVM @Inject constructor(
     fun play(id: MusicId, playlistId: PlaylistId) = playerControllerRepository.play(id, playlistId)
     fun changePlayModeToNext() = playerRepository.changePlayModeToNext()
     fun removeLyric() = playerRepository.removeLyric()
+
+    /**
+     * Prepare the import picker for an explicit lyric pick ("Add lyric"):
+     * the first selected entry is attached to the current music via
+     * [PlayerRepository.setLyric] when the picker finishes. The caller
+     * then navigates to `RouteImport(RouteImportType.Lyric)`.
+     */
+    fun prepareAddLyric() {
+        importRepository.prepare(listOf(StorageEntryType.LYRIC)) { entries ->
+            entries.firstOrNull()?.let { entry ->
+                playerRepository.setLyric(
+                    StorageEntryLoc(storageId = entry.storageId, path = entry.path)
+                )
+            }
+        }
+    }
 
     fun syncPosition() {
         _currentMs.value = playerControllerRepository.getCurrentPosition()

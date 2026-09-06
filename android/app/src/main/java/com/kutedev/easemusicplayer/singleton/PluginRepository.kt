@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginEvent
 import com.kutedev.easemusicplayer.singleton.types.PluginScanInfo
+import com.kutedev.easemusicplayer.viewmodels.setLyricExts
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,6 +38,7 @@ data class PluginManifest(
     val iconData: String? = null,
     val dashboard: List<DashboardContribution> = emptyList(),
     val storages: List<StorageContribution> = emptyList(),
+    val lyricParsers: List<LyricParserContribution> = emptyList(),
     /** `false` when the user disabled the plugin in plugin management. */
     val enabled: Boolean = true,
 )
@@ -72,6 +74,22 @@ data class StorageContribution(
      * [viewSourceHandle]). */
     val view: String? = null,
     val viewSourceHandle: Long = 0L,
+)
+
+/** A `contributions.lyricParsers` entry: one plugin-provided lyric
+ * format family (headless — parsing rides the backend's `lyric:parse`
+ * host-RPC handler). Rendered by the Lyric Parser settings page; the
+ * extensions also drive the import/browse lyric filters. */
+data class LyricParserContribution(
+    val pluginId: String,
+    val parserId: String,
+    /** The owning plugin's name — the parser-title fallback. */
+    val pluginName: LocalizedText,
+    /** Falls back to the plugin name when the manifest omitted `title`. */
+    val title: LocalizedText? = null,
+    val desc: LocalizedText? = null,
+    val iconData: String? = null,
+    val extensions: List<String> = emptyList(),
 )
 
 /**
@@ -145,6 +163,24 @@ class PluginRepository @Inject constructor(
      *  by [scanPlugins]. */
     val storageProviders = _storageProviders.asStateFlow()
 
+    private val _lyricParsers = MutableStateFlow<List<LyricParserContribution>>(emptyList())
+    /** Plugin-declared lyric parsers (enabled plugins only), populated by
+     *  [scanPlugins]. Empty until a parser plugin is installed + enabled —
+     *  there is no built-in parser. */
+    val lyricParsers = _lyricParsers.asStateFlow()
+
+    private val _lyricExtensions = MutableStateFlow<Set<String>>(emptySet())
+    /** Every extension claimable by an enabled plugin parser (no leading
+     *  dot); derived from [lyricParsers] by [scanPlugins]. Feeds the
+     *  import/browse lyric filters ([setLyricExts]). */
+    val lyricExtensions = _lyricExtensions.asStateFlow()
+
+    private val _lyricParserSelection = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** User's per-extension parser picks (extension →
+     *  `"<pluginId>:<parserId>"`); absent entry = Auto. Updated by
+     *  [scanPlugins] and [PluginManager.setLyricParserSelection]. */
+    val lyricParserSelection = _lyricParserSelection.asStateFlow()
+
     /**
      * Connects the player's plugin-event bus. Called once from
      * [com.kutedev.easemusicplayer.MainActivity] after both repositories
@@ -180,6 +216,8 @@ class PluginRepository @Inject constructor(
         _enabledPlugins.value = result.plugins.filter { it.enabled }.map(::toManifest)
         recomputeDashboardItems()
         recomputeStorageProviders()
+        recomputeLyricParsers()
+        _lyricParserSelection.value = result.lyricParserSelection
     }
 
     private fun toManifest(info: PluginScanInfo) = PluginManifest(
@@ -211,6 +249,17 @@ class PluginRepository @Inject constructor(
                 iconData = it.iconData,
                 view = it.view,
                 viewSourceHandle = it.sourceHandle,
+            )
+        },
+        lyricParsers = info.lyricParsers.map {
+            LyricParserContribution(
+                pluginId = info.id,
+                parserId = it.id,
+                pluginName = info.name,
+                title = it.title,
+                desc = it.desc,
+                iconData = it.iconData,
+                extensions = it.extensions,
             )
         },
         enabled = info.enabled,
@@ -255,5 +304,23 @@ class PluginRepository @Inject constructor(
             }
         }
         _storageProviders.value = out
+    }
+
+    private fun recomputeLyricParsers() {
+        // `toManifest` already maps wire → contribution (plugin names
+        // attached); flatten in scan order (plugins sorted by id,
+        // contributions in manifest order = default dispatch order).
+        val out = _enabledPlugins.value.flatMap { p -> p.lyricParsers }
+        _lyricParsers.value = out
+        _lyricExtensions.value = out.flatMap { it.extensions }.toSet()
+        // Feed the extension-classification helper used by the import /
+        // browse filters (see StoragesVM.kt).
+        setLyricExts(_lyricExtensions.value)
+    }
+
+    /** Merge a selection update from [PluginManager.setLyricParserSelection]
+     *  without a full rescan (selection changes never bump the revision). */
+    fun updateLyricParserSelection(selection: Map<String, String>) {
+        _lyricParserSelection.value = selection
     }
 }

@@ -45,6 +45,7 @@ import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteDebugMore
 import com.kutedev.easemusicplayer.core.RouteLog
+import com.kutedev.easemusicplayer.core.RouteLyricParser
 import com.kutedev.easemusicplayer.core.RoutePluginManagement
 import com.kutedev.easemusicplayer.singleton.AppLanguage
 import com.kutedev.easemusicplayer.singleton.LanguageSetting
@@ -160,6 +161,14 @@ fun SettingSubpage() {
             content = null,
             onClick = {
                 navController.navigate(RoutePluginManagement())
+            }
+        )
+        Item(
+            iconPainter = painterResource(R.drawable.icon_lyrics),
+            title = stringResource(id = R.string.setting_lyric_parser),
+            content = null,
+            onClick = {
+                navController.navigate(RouteLyricParser())
             }
         )
         Title(title = stringResource(id = R.string.setting_debug))

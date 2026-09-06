@@ -77,6 +77,11 @@
     <string name="language_english">English</string>
     <string name="language_simplified_chinese">Simplified Chinese (简体中文)</string>
     <string name="setting_plugin_management">Plugins</string>
+    <string name="setting_lyric_parser">Lyric Parsers</string>
+    <string name="lyric_parser_title">Lyric Parsers</string>
+    <string name="lyric_parser_auto">Auto (default order)</string>
+    <string name="lyric_parser_hint">Lyric files are parsed by plugins. Install a plugin with lyric parsers to support more formats.</string>
+    <string name="lyric_parser_get_plugins">Get plugins</string>
     <string name="dashboard_plugins">PLUGINS</string>
     <string name="plugin_management_title">Plugins</string>
     <string name="plugin_installed_section">INSTALLED</string>

@@ -561,6 +561,26 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             .await?;
             Ok((json!({ "generation": generation }), vec![]))
         }
+        "plugin.setLyricParserSelection" => {
+            #[derive(Deserialize)]
+            struct Args {
+                ext: String,
+                parser: Option<String>,
+            }
+            let args: Args = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            // Returns the updated selection map (NOT a
+            // PluginMutationResult — selection never bumps the
+            // generation; no backend teardown/reload is needed).
+            let selection = plugin_manager::set_lyric_parser_selection(
+                cx.get_context(),
+                &cx.arg.app_document_dir,
+                &args.ext,
+                args.parser.as_deref(),
+            )
+            .await?;
+            Ok((serde_json::to_value(selection)?, vec![]))
+        }
         "plugin.uninstall" => {
             #[derive(Deserialize)]
             struct Args {

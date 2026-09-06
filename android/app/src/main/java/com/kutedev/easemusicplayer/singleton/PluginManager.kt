@@ -17,6 +17,7 @@ import com.kutedev.easemusicplayer.singleton.types.ArgPluginId
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallFromRegistry
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallZipPath
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetEnable
+import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetLyricParserSelection
 import com.kutedev.easemusicplayer.singleton.types.RegistryPluginEntry
 
 /**
@@ -118,6 +119,24 @@ class PluginManager @Inject constructor(
         applyGeneration(ret?.generation)
         pluginRepository.scanPlugins()
     }
+
+    /**
+     * Set (or clear, with `parser = null`) the user's per-extension
+     * lyric-parser pick — the Lyric Parser settings page. Pure preference:
+     * Rust never bumps the generation (no backend teardown/reload), and
+     * dispatch reads the new pick at the next lyric load. Throws on an
+     * invalid pick (unknown plugin/parser, or a parser not claiming the
+     * extension) — callers toast.
+     */
+    suspend fun setLyricParserSelection(ext: String, parser: String?): Result<Map<String, String>> =
+        runCatching {
+            val selection = bridge.call(
+                BridgeMethods.Plugin.SET_LYRIC_PARSER_SELECTION,
+                ArgPluginSetLyricParserSelection(ext, parser),
+            ).unwrapOrThrow().payload
+            pluginRepository.updateLyricParserSelection(selection)
+            selection
+        }
 
     /**
      * Uninstall: Rust deletes the plugin folder + its enabled flag. The

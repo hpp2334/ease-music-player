@@ -66,6 +66,14 @@ fun isRoutePluginAvailable(route: String): Boolean {
     return route == "PluginAvailable"
 }
 
+fun RouteLyricParser(): String {
+    return "LyricParser"
+}
+
+fun isRouteLyricParser(route: String): Boolean {
+    return route == "LyricParser"
+}
+
 fun RoutePluginView(pluginId: String, viewId: String): String {
     return "PluginView/${pluginId}/${viewId}"
 }

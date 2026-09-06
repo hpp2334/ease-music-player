@@ -48,9 +48,12 @@ use crate::error::{BError, BResult};
 // Constants
 // ============================================================================
 
-/// The one plugin bundled into the APK (`assets/plugin-bundles/`), installed
-/// on first run so storage setup works offline.
-pub const BUNDLED_PLUGIN_ID: &str = "com.ease.webdav";
+/// Plugin zips shipped inside the APK (`assets/plugin-bundles/`),
+/// ensure-installed by [`bootstrap`] (fresh installs *and* upgrades —
+/// see `PluginState::bundled_installed`). `com.ease.lyricformats` is the
+/// lyric-parser provider (LRC/SRT/VTT/QRC/YRC/TTML); the built-in Rust
+/// LRC parser is gone, so it must ship offline.
+pub const BUNDLED_PLUGINS: &[&str] = &["com.ease.webdav", "com.ease.lyricformats"];
 
 const MAX_ENTRIES: usize = 200;
 const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
@@ -58,6 +61,13 @@ const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
 /// Cap for contribution icons read during the scan (base64 into the
 /// `plugin.list` payload — keep small).
 const MAX_ICON_BYTES: u64 = 128 * 1024;
+
+/// Cap on `lyricParsers` extensions accepted per parser contribution.
+const MAX_PARSER_EXTENSIONS: usize = 16;
+
+/// Cap on sibling-file extensions probed per lyric load (one storage GET
+/// each, worst case).
+const MAX_SIBLING_EXTENSIONS: usize = 8;
 
 // TODO: switch REPO_REF to `main` once feat/v0.4 merges.
 const REPO: &str = "hpp2334/ease-music-player";
@@ -97,6 +107,28 @@ pub struct PluginState {
     pub last_source_url: Option<String>,
     #[serde(rename = "customSources", default)]
     pub custom_sources: Vec<CustomSource>,
+    /// User's per-extension lyric-parser pick (Lyric Parser settings page):
+    /// extension (lowercase, no dot) → `"<pluginId>:<parserId>"`. Absent
+    /// entry = Auto (default dispatch order). Never a generation-bumping
+    /// mutation — dispatch reads it at call time.
+    #[serde(rename = "lyricParserSelection", default)]
+    pub lyric_parser_selection: BTreeMap<String, String>,
+    /// Bundled APK plugins this install has already received via
+    /// [`bootstrap`]'s ensure-installed pass (see [`BUNDLED_PLUGINS`]).
+    /// Appending a new bundled id reaches existing installs on upgrade;
+    /// a later user uninstall is never re-forced (the id stays recorded).
+    #[serde(rename = "bundledInstalled", default)]
+    pub bundled_installed: Vec<String>,
+}
+
+/// One plugin's `lyricParsers` contribution as held in the in-process
+/// registry snapshot consumed by the lyric dispatch
+/// ([`crate::services::lyrics`]).
+#[derive(Clone, Debug)]
+pub struct LyricParserEntry {
+    pub plugin_id: String,
+    pub enabled: bool,
+    pub parsers: Vec<LyricParserRaw>,
 }
 
 /// Per-process shared manager state, held by [`crate::ctx::BackendContext`].
@@ -108,12 +140,18 @@ pub struct PluginState {
 ///   (0 = not bound yet; scans then return zero module-source handles).
 /// - `asset_manager` — raw `*mut AAssetManager` (as usize) for reading
 ///   bundled APK assets during bootstrap. Android-only; 0 elsewhere.
+/// - `lyric_parsers` — the scan-populated lyric-parser registry (dispatch
+///   reads it per lyric load; empty before the first `plugin.list`).
+/// - `lyric_parser_selection` — the user's per-extension parser picks,
+///   mirrored from `plugin-state.json` (see [`PluginState`]).
 #[derive(Default)]
 pub struct PluginManagerShared {
     generation: AtomicU64,
     pub install_lock: tokio::sync::Mutex<()>,
     runtime_handle: RwLock<i64>,
     asset_manager: RwLock<usize>,
+    lyric_parsers: RwLock<std::sync::Arc<Vec<LyricParserEntry>>>,
+    lyric_parser_selection: RwLock<BTreeMap<String, String>>,
 }
 
 impl PluginManagerShared {
@@ -139,6 +177,52 @@ impl PluginManagerShared {
 
     pub fn set_asset_manager(&self, mgr: usize) {
         *self.asset_manager.write().unwrap() = mgr;
+    }
+
+    /// Snapshot of the lyric-parser registry (scan order: plugins sorted
+    /// by id, contributions in manifest order).
+    pub fn lyric_parser_snapshot(&self) -> std::sync::Arc<Vec<LyricParserEntry>> {
+        self.lyric_parsers.read().unwrap().clone()
+    }
+
+    /// Swap the lyric-parser registry (called by [`scan`]).
+    pub fn set_lyric_parser_snapshot(&self, entries: Vec<LyricParserEntry>) {
+        *self.lyric_parsers.write().unwrap() = std::sync::Arc::new(entries);
+    }
+
+    /// Current per-extension parser picks (cloned; small map).
+    pub fn lyric_parser_selection(&self) -> BTreeMap<String, String> {
+        self.lyric_parser_selection.read().unwrap().clone()
+    }
+
+    /// Mirror the persisted selection into the in-memory map (called by
+    /// [`scan`] and the selection setter — never bumps the generation).
+    pub fn set_lyric_parser_selection_map(&self, map: BTreeMap<String, String>) {
+        *self.lyric_parser_selection.write().unwrap() = map;
+    }
+
+    /// Sibling-file extensions probed by the lyric resolver: every
+    /// extension claimed by an enabled plugin's parser, scan order,
+    /// deduped, capped. Deliberately ignores the user selection —
+    /// selection only reorders parse candidates, not which sibling files
+    /// are probed.
+    pub fn lyric_sibling_extensions(&self) -> Vec<String> {
+        let snapshot = self.lyric_parser_snapshot();
+        let mut out: Vec<String> = Vec::new();
+        for entry in snapshot.iter() {
+            if !entry.enabled {
+                continue;
+            }
+            for parser in &entry.parsers {
+                for ext in &parser.extensions {
+                    if !out.contains(ext) {
+                        out.push(ext.clone());
+                    }
+                }
+            }
+        }
+        out.truncate(MAX_SIBLING_EXTENSIONS);
+        out
     }
 }
 
@@ -471,6 +555,7 @@ pub struct ManifestRaw {
     pub icon_data: Option<String>,
     pub dashboard: Vec<ContributionRaw>,
     pub storages: Vec<ContributionRaw>,
+    pub lyric_parsers: Vec<LyricParserRaw>,
 }
 
 #[derive(Clone, Debug)]
@@ -487,6 +572,36 @@ pub struct ContributionRaw {
     /// Base64 icon bytes — never parsed from the manifest; filled in by the
     /// scan ([`load_icon_base64`]).
     pub icon_data: Option<String>,
+}
+
+/// A `contributions.lyricParsers` entry. Headless-only (no `view`) — the
+/// plugin's backend registers a single `lyric:parse` host-RPC handler
+/// serving all of its parser contributions; `extensions` is what the
+/// host dispatches on (file extension, normalized).
+#[derive(Clone, Debug)]
+pub struct LyricParserRaw {
+    pub id: String,
+    /// Parser title (Lyric Parser settings page); `None` → plugin name.
+    pub title: Option<LocalizedString>,
+    pub desc: Option<LocalizedString>,
+    pub icon: Option<String>,
+    pub icon_data: Option<String>,
+    /// Lowercase, dot-free extensions this parser claims (e.g.
+    /// `["srt", "vtt"]`), deduped, ≤ [`MAX_PARSER_EXTENSIONS`].
+    pub extensions: Vec<String>,
+}
+
+/// Normalize one manifest extension entry: trim, strip a leading dot,
+/// lowercase. `Some` only for `^[a-z0-9]{1,12}$` results.
+fn normalize_extension(ext: &str) -> Option<String> {
+    let ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    if ext.is_empty() || ext.len() > 12 {
+        return None;
+    }
+    if !ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(ext)
 }
 
 fn opt_str(v: &Value, key: &str) -> Option<String> {
@@ -538,6 +653,50 @@ pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
             .unwrap_or_default()
     };
     let name = opt_localized(&v, "name").unwrap_or_else(|| LocalizedString::plain(id.clone()));
+    let lyric_parsers = contributions
+        .get("lyricParsers")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| {
+                    let pid = c.get("id").and_then(|x| x.as_str())?;
+                    if pid.is_empty() {
+                        return None;
+                    }
+                    let mut extensions: Vec<String> = Vec::new();
+                    if let Some(list) = c.get("extensions").and_then(|x| x.as_array()) {
+                        for e in list.iter().filter_map(|x| x.as_str()) {
+                            match normalize_extension(e) {
+                                Some(ext) => {
+                                    if !extensions.contains(&ext) {
+                                        extensions.push(ext);
+                                    }
+                                }
+                                None => tracing::warn!(
+                                    "lyricParsers '{pid}': bad extension '{e}' — dropped"
+                                ),
+                            }
+                        }
+                    }
+                    if extensions.is_empty() {
+                        tracing::warn!(
+                            "lyricParsers '{pid}': no valid extensions — contribution dropped"
+                        );
+                        return None;
+                    }
+                    extensions.truncate(MAX_PARSER_EXTENSIONS);
+                    Some(LyricParserRaw {
+                        id: pid.to_string(),
+                        title: opt_localized(c, "title"),
+                        desc: opt_localized(c, "desc"),
+                        icon: opt_str(c, "icon"),
+                        icon_data: None,
+                        extensions,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(ManifestRaw {
         id,
         name,
@@ -555,6 +714,7 @@ pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
             .unwrap_or_default(),
         dashboard: parse_list("dashboard"),
         storages: parse_list("storages"),
+        lyric_parsers,
         icon: opt_str(&v, "icon"),
         icon_data: None,
     })
@@ -641,6 +801,11 @@ fn scan_manifests_blocking(root: &Path) -> Vec<(PathBuf, ManifestRaw)> {
             for c in m.dashboard.iter_mut().chain(m.storages.iter_mut()) {
                 if let Some(icon) = c.icon.as_deref() {
                     c.icon_data = load_icon_base64(&path, icon);
+                }
+            }
+            for p in m.lyric_parsers.iter_mut() {
+                if let Some(icon) = p.icon.as_deref() {
+                    p.icon_data = load_icon_base64(&path, icon);
                 }
             }
             out.push((path, ManifestRaw { id, ..m }));
@@ -1098,6 +1263,57 @@ pub async fn set_enabled(
     Ok(cx.plugin_manager().bump_generation())
 }
 
+/// Set (or clear, with `key: None`) the user's parser pick for one
+/// extension — the Lyric Parser settings page. Validates `key` against
+/// the current scan snapshot, persists to `plugin-state.json` and mirrors
+/// into the in-memory map. **Never bumps the generation**: selection
+/// changes no backend lifecycle (a bump would tear down + reload every
+/// plugin backend for a pure preference change), and dispatch reads the
+/// in-memory map at call time. Returns the updated selection map.
+pub async fn set_lyric_parser_selection(
+    cx: &crate::ctx::BackendContext,
+    app_document_dir: &str,
+    ext: &str,
+    key: Option<&str>,
+) -> BResult<BTreeMap<String, String>> {
+    let ext = normalize_extension(ext).ok_or_else(|| BError::CustomError {
+        message: format!("bad lyric parser extension '{ext}'"),
+    })?;
+    if let Some(key) = key {
+        let valid = cx.plugin_manager().lyric_parser_snapshot().iter().any(|e| {
+            e.enabled
+                && e.parsers.iter().any(|p| {
+                    p.extensions.contains(&ext) && format!("{}:{}", e.plugin_id, p.id) == key
+                })
+        });
+        if !valid {
+            return Err(BError::CustomError {
+                message: format!("no enabled lyric parser '{key}' for '{ext}'"),
+            });
+        }
+    }
+    let ext_for_closure = ext.clone();
+    let key = key.map(str::to_string);
+    let next = mutate_state(app_document_dir, move |s| {
+        let mut selection = s.lyric_parser_selection.clone();
+        match &key {
+            Some(k) => {
+                selection.insert(ext_for_closure.clone(), k.clone());
+            }
+            None => {
+                selection.remove(&ext_for_closure);
+            }
+        }
+        PluginState {
+            lyric_parser_selection: selection,
+            ..s
+        }
+    })?;
+    cx.plugin_manager()
+        .set_lyric_parser_selection_map(next.lyric_parser_selection.clone());
+    Ok(next.lyric_parser_selection)
+}
+
 /// Uninstall: delete the plugin folder + its enabled flag, and wipe all of
 /// the plugin's persisted data — its storage rows (cascading to their
 /// musics, playlist entries and cover blobs, exactly like removing the
@@ -1137,14 +1353,28 @@ pub async fn uninstall(
     .map_err(|e| BError::CustomError {
         message: format!("uninstall task: {e}"),
     })?;
-    mutate_state(app_document_dir, |s| PluginState {
-        enabled: {
-            let mut enabled = s.enabled;
-            enabled.remove(plugin_id);
-            enabled
-        },
-        ..s
+    mutate_state(app_document_dir, |s| {
+        let prefix = format!("{plugin_id}:");
+        let lyric_parser_selection = s
+            .lyric_parser_selection
+            .iter()
+            .filter(|(_, v)| !v.starts_with(&prefix))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        PluginState {
+            enabled: {
+                let mut enabled = s.enabled;
+                enabled.remove(plugin_id);
+                enabled
+            },
+            lyric_parser_selection,
+            ..s
+        }
     })?;
+    // Mirror the selection cleanup into the in-memory dispatch map.
+    let state_after = read_state(app_document_dir);
+    cx.plugin_manager()
+        .set_lyric_parser_selection_map(state_after.lyric_parser_selection);
     tracing::info!("plugin uninstalled: {plugin_id}");
     Ok(cx.plugin_manager().bump_generation())
 }
@@ -1218,85 +1448,129 @@ pub(crate) fn read_bundled_asset(_mgr: usize, _path: &str) -> Option<Vec<u8>> {
     None
 }
 
-/// First-run defaults: install the bundled WebDAV plugin, then any plugin
-/// referenced by an existing storage row (upgrade path). Non-bundled
-/// referenced plugins are fetched from the default registry source
-/// best-effort. Idempotent (guarded by `firstRunDone`).
+/// Startup defaults, run on every `KeepBackendService` create:
+///
+/// 1. **Ensure-installed pass** for [`BUNDLED_PLUGINS`]: each bundled id
+///    not yet recorded in `PluginState::bundled_installed` is installed
+///    from its APK asset (offline-friendly). Recording happens after a
+///    successful install (or when the folder already exists — e.g. the
+///    user installed it from the registry first — which preserves their
+///    version + enabled flag), so adding a new bundled id reaches
+///    existing installs on upgrade while a later uninstall is never
+///    re-forced. A failed install stays unrecorded and retries next
+///    start.
+/// 2. **First-run pass** (guarded by `firstRunDone`): install any plugin
+///    referenced by an existing storage row (upgrade path); non-bundled
+///    referenced plugins are fetched from the default registry source
+///    best-effort.
 pub async fn bootstrap(cx: &crate::ctx::BackendContext, app_document_dir: &str) -> BResult<i64> {
     let shared = cx.plugin_manager();
+    let root = plugins_root(app_document_dir);
+    let mut mutated = false;
+
+    // 1) Bundled plugins — ensure-installed (fresh installs AND upgrades).
     {
         let state = read_state(app_document_dir);
-        if state.first_run_done {
-            return Ok(shared.generation());
-        }
-    }
-
-    let root = plugins_root(app_document_dir);
-
-    // 1) Bundled WebDAV (offline-friendly).
-    if !is_installed(&root, BUNDLED_PLUGIN_ID) {
-        let mgr = shared.asset_manager();
-        match read_bundled_asset(mgr, &format!("plugin-bundles/{BUNDLED_PLUGIN_ID}.zip")) {
-            Some(bytes) => {
-                if let Err(e) = install_bytes_and_enable(cx, app_document_dir, bytes).await {
-                    tracing::error!("plugin bootstrap: bundled install failed: {e}");
-                }
+        let mut recorded = state.bundled_installed.clone();
+        let mut changed = false;
+        for id in BUNDLED_PLUGINS {
+            if recorded.iter().any(|r| r == id) {
+                continue;
             }
-            None => {
-                tracing::error!("plugin bootstrap: bundled zip missing (asset manager not bound?)");
+            if is_installed(&root, id) {
+                // Already present (e.g. installed from the registry before
+                // this app version bundled it) — keep the user's copy.
+                recorded.push(id.to_string());
+                changed = true;
+                continue;
             }
-        }
-    }
-
-    // 2) Plugins referenced by existing storage rows.
-    let referenced: Vec<String> = collect_storage_plugin_ids(cx).await;
-    for id in referenced {
-        if id == BUNDLED_PLUGIN_ID || is_installed(&root, &id) {
-            continue;
-        }
-        // Best-effort bundled install first (none besides webdav today),
-        // then the default registry source.
-        let mgr = shared.asset_manager();
-        let bundled = read_bundled_asset(mgr, &format!("plugin-bundles/{id}.zip"));
-        if let Some(bytes) = bundled {
-            if let Err(e) = install_bytes_and_enable(cx, app_document_dir, bytes).await {
-                tracing::error!("plugin bootstrap: bundled install '{id}' failed: {e}");
-            }
-            continue;
-        }
-        let base = preset_sources()[0].0.clone();
-        match fetch_registry(app_document_dir, &base).await {
-            Ok(entries) => {
-                let entry = entries.iter().find(|e| e.id == id);
-                match entry {
-                    Some(entry) => {
-                        if let Err(e) =
-                            install_from_registry(cx, app_document_dir, entry, &base).await
-                        {
-                            tracing::error!(
-                                "plugin bootstrap: could not restore '{id}' ({e}); \
-                                 storage will show removed until user installs it"
-                            );
+            let mgr = shared.asset_manager();
+            match read_bundled_asset(mgr, &format!("plugin-bundles/{id}.zip")) {
+                Some(bytes) => {
+                    match install_bytes_and_enable(cx, app_document_dir, bytes).await {
+                        Ok(_) => {
+                            recorded.push(id.to_string());
+                            changed = true;
+                            mutated = true;
+                        }
+                        Err(e) => {
+                            tracing::error!("plugin bootstrap: bundled install '{id}' failed: {e}")
                         }
                     }
-                    None => tracing::error!(
-                        "plugin bootstrap: '{id}' not in registry; storage will show removed \
+                }
+                None => tracing::error!(
+                    "plugin bootstrap: bundled zip '{id}' missing (asset manager not bound?)"
+                ),
+            }
+        }
+        if changed {
+            mutate_state(app_document_dir, move |s| PluginState {
+                bundled_installed: recorded,
+                ..s
+            })?;
+        }
+    }
+
+    // 2) First-run-only: plugins referenced by existing storage rows.
+    {
+        let state = read_state(app_document_dir);
+        if !state.first_run_done {
+            let referenced: Vec<String> = collect_storage_plugin_ids(cx).await;
+            for id in referenced {
+                if BUNDLED_PLUGINS.contains(&id.as_str()) || is_installed(&root, &id) {
+                    continue;
+                }
+                // Best-effort bundled install first, then the default
+                // registry source.
+                let mgr = shared.asset_manager();
+                let bundled = read_bundled_asset(mgr, &format!("plugin-bundles/{id}.zip"));
+                if let Some(bytes) = bundled {
+                    if let Err(e) = install_bytes_and_enable(cx, app_document_dir, bytes).await {
+                        tracing::error!("plugin bootstrap: bundled install '{id}' failed: {e}");
+                    }
+                    continue;
+                }
+                let base = preset_sources()[0].0.clone();
+                match fetch_registry(app_document_dir, &base).await {
+                    Ok(entries) => {
+                        let entry = entries.iter().find(|e| e.id == id);
+                        match entry {
+                            Some(entry) => {
+                                if let Err(e) =
+                                    install_from_registry(cx, app_document_dir, entry, &base).await
+                                {
+                                    tracing::error!(
+                                        "plugin bootstrap: could not restore '{id}' ({e}); \
+                                         storage will show removed until user installs it"
+                                    );
+                                }
+                            }
+                            None => tracing::error!(
+                                "plugin bootstrap: '{id}' not in registry; storage will show removed \
+                                 until user installs it"
+                            ),
+                        }
+                    }
+                    Err(e) => tracing::error!(
+                        "plugin bootstrap: registry fetch failed ({e}); storage will show removed \
                          until user installs it"
                     ),
                 }
             }
-            Err(e) => tracing::error!(
-                "plugin bootstrap: registry fetch failed ({e}); storage will show removed \
-                 until user installs it"
-            ),
+
+            mutate_state(app_document_dir, |s| PluginState {
+                first_run_done: true,
+                ..s
+            })?;
+            mutated = true;
         }
     }
 
-    mutate_state(app_document_dir, |s| PluginState {
-        first_run_done: true,
-        ..s
-    })?;
-    Ok(shared.bump_generation())
+    if mutated {
+        Ok(shared.bump_generation())
+    } else {
+        Ok(shared.generation())
+    }
 }
 
 async fn collect_storage_plugin_ids(cx: &crate::ctx::BackendContext) -> Vec<String> {
@@ -1335,7 +1609,22 @@ pub struct PluginScanInfo {
     pub icon_data: Option<String>,
     pub dashboard: Vec<ContributionInfo>,
     pub storages: Vec<ContributionInfo>,
+    pub lyric_parsers: Vec<LyricParserInfo>,
     pub enabled: bool,
+}
+
+/// One `lyricParsers` contribution, wire-shaped for `plugin.list`. No
+/// `view`/source handle — parsing is headless-only (the plugin backend's
+/// `lyric:parse` handler).
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricParserInfo {
+    pub id: String,
+    pub title: Option<LocalizedString>,
+    pub desc: Option<LocalizedString>,
+    pub icon: Option<String>,
+    pub icon_data: Option<String>,
+    pub extensions: Vec<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -1356,7 +1645,9 @@ pub struct ContributionInfo {
 
 /// Scan the installed tree and register module sources for **enabled**
 /// plugins only (disabled plugins come back with zero handles; a re-enable
-/// bumps the generation and the service rescans).
+/// bumps the generation and the service rescans). Also swaps the
+/// in-process lyric-parser registry + selection mirror consumed by the
+/// lyric dispatch ([`crate::services::lyrics`]).
 pub async fn scan(
     cx: &crate::ctx::BackendContext,
     app_document_dir: &str,
@@ -1375,6 +1666,7 @@ pub async fn scan(
         message: format!("scan task: {e}"),
     })?;
 
+    let mut registry: Vec<LyricParserEntry> = Vec::with_capacity(scanned.len());
     let plugins = scanned
         .into_iter()
         .map(|(_, m)| {
@@ -1389,6 +1681,7 @@ pub async fn scan(
                 icon_data,
                 dashboard,
                 storages,
+                lyric_parsers,
             } = m;
             let enabled = state.enabled.get(&id).copied().unwrap_or(true);
             let backend_source_handle = if enabled {
@@ -1402,6 +1695,22 @@ pub async fn scan(
             let dashboard_infos =
                 contribution_infos(dashboard, enabled, &root, &id, runtime_handle);
             let storages_infos = contribution_infos(storages, enabled, &root, &id, runtime_handle);
+            registry.push(LyricParserEntry {
+                plugin_id: id.clone(),
+                enabled,
+                parsers: lyric_parsers.clone(),
+            });
+            let parser_infos = lyric_parsers
+                .into_iter()
+                .map(|p| LyricParserInfo {
+                    id: p.id,
+                    title: p.title,
+                    desc: p.desc,
+                    icon: p.icon,
+                    icon_data: p.icon_data,
+                    extensions: p.extensions,
+                })
+                .collect();
             PluginScanInfo {
                 id,
                 name,
@@ -1413,12 +1722,17 @@ pub async fn scan(
                 icon_data,
                 dashboard: dashboard_infos,
                 storages: storages_infos,
+                lyric_parsers: parser_infos,
                 enabled,
             }
         })
         .collect();
+    let shared = cx.plugin_manager();
+    shared.set_lyric_parser_snapshot(registry);
+    shared.set_lyric_parser_selection_map(state.lyric_parser_selection.clone());
     Ok(PluginListOut {
-        generation: cx.plugin_manager().generation(),
+        generation: shared.generation(),
+        lyric_parser_selection: state.lyric_parser_selection,
         plugins,
     })
 }
@@ -1427,6 +1741,10 @@ pub async fn scan(
 #[serde(rename_all = "camelCase")]
 pub struct PluginListOut {
     pub generation: i64,
+    /// User's per-extension parser picks (extension →
+    /// `"<pluginId>:<parserId>"`) — everything the Lyric Parser settings
+    /// page renders rides this one payload.
+    pub lyric_parser_selection: BTreeMap<String, String>,
     pub plugins: Vec<PluginScanInfo>,
 }
 
@@ -1831,6 +2149,98 @@ mod tests {
         )
         .unwrap();
         assert_eq!(scan_manifests_blocking(&root).len(), 1);
+    }
+
+    #[test]
+    fn lyric_parser_manifest_rules() {
+        let text = r#"{
+            "id": "com.ease.test",
+            "contributions": {"lyricParsers": [
+                {"id": "lrc", "title": {"en-US": "LRC", "zh-CN": "LRC"},
+                 "extensions": ["lrc"]},
+                {"id": "subtitle", "extensions": [".SRT", " vtt ", "vtt", "../x", "", "waytoolongextension"]},
+                {"id": "noext", "extensions": ["??"]},
+                {"extensions": ["lrc"]}
+            ]}
+        }"#;
+        let m = parse_manifest(text).unwrap();
+        assert_eq!(m.lyric_parsers.len(), 2, "entries without id or extensions drop");
+        let lrc = &m.lyric_parsers[0];
+        assert_eq!(lrc.id, "lrc");
+        assert_eq!(lrc.extensions, vec!["lrc".to_string()]);
+        assert_eq!(lrc.title.as_ref().unwrap().base, "LRC");
+        let subtitle = &m.lyric_parsers[1];
+        // Leading dot / case / surrounding whitespace normalize; dupes,
+        // unsafe and malformed entries drop.
+        assert_eq!(subtitle.extensions, vec!["srt".to_string(), "vtt".to_string()]);
+
+        // Absent section parses to empty.
+        let m = parse_manifest(&manifest_json("com.ease.plain", "1.0.0")).unwrap();
+        assert!(m.lyric_parsers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lyric_parser_scan_registry_and_selection() {
+        let (guard, root) = temp_root();
+        let app_document_dir = guard.path().to_str().unwrap().to_string();
+        install_zip_bytes_blocking(
+            &root,
+            make_zip(&[
+                (
+                    "manifest.json",
+                    r#"{"id":"com.ease.test","name":"Test","version":"1.0.0",
+                        "contributions":{"lyricParsers":[
+                            {"id":"lrc","extensions":["lrc"]},
+                            {"id":"subtitle","extensions":["srt","vtt"]}]}}"#,
+                ),
+                ("backend.js", "export function start() {}"),
+            ]),
+        )
+        .unwrap();
+
+        let cx = crate::ctx::BackendContext::new();
+        cx.database_server()
+            .init(app_document_dir.clone())
+            .await
+            .unwrap();
+        let out = scan(&cx, &app_document_dir).await.unwrap();
+        assert_eq!(out.plugins[0].lyric_parsers.len(), 2);
+        assert_eq!(
+            out.plugins[0].lyric_parsers[1].extensions,
+            vec!["srt".to_string(), "vtt".to_string()]
+        );
+        assert!(out.lyric_parser_selection.is_empty());
+
+        // Registry snapshot + sibling extensions (enabled by default).
+        let shared = cx.plugin_manager();
+        assert_eq!(
+            shared.lyric_sibling_extensions(),
+            vec!["lrc".to_string(), "srt".to_string(), "vtt".to_string()]
+        );
+
+        // Valid pick persists + mirrors; invalid pick errors; clear → Auto.
+        let sel = set_lyric_parser_selection(&cx, &app_document_dir, ".SRT", Some("com.ease.test:subtitle"))
+            .await
+            .unwrap();
+        assert_eq!(sel.get("srt").map(String::as_str), Some("com.ease.test:subtitle"));
+        assert_eq!(read_state(&app_document_dir).lyric_parser_selection.get("srt").map(String::as_str),
+            Some("com.ease.test:subtitle"));
+        assert!(set_lyric_parser_selection(&cx, &app_document_dir, "lrc", Some("com.ease.test:subtitle"))
+            .await
+            .is_err(), "parser must claim the extension");
+        assert!(set_lyric_parser_selection(&cx, &app_document_dir, "lrc", Some("com.ease.other:lrc"))
+            .await
+            .is_err(), "plugin must be installed");
+        let sel = set_lyric_parser_selection(&cx, &app_document_dir, "srt", None)
+            .await
+            .unwrap();
+        assert!(!sel.contains_key("srt"));
+
+        // Uninstall drops the plugin's selection entries. (The in-memory
+        // registry snapshot refreshes on the next `scan` — Kotlin rescans
+        // after every generation bump.)
+        uninstall(&cx, &app_document_dir, "com.ease.test").await.unwrap();
+        assert!(read_state(&app_document_dir).lyric_parser_selection.is_empty());
     }
 
     #[test]
