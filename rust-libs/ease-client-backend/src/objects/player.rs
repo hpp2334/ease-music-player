@@ -17,8 +17,9 @@
 //!
 //! The cover-art writeback hook lives in [`ct_player_load_music`]: if the
 //! probed metadata carries embedded artwork and the DB's `Music.cover` is
-//! `None`, a background tokio task writes the bytes via the existing
-//! [`services::update_music_cover`] path.
+//! `None`, the bytes are written inline (awaited before the call returns,
+//! so the caller's follow-up `music.get` already sees them) via the
+//! existing [`services::update_music_cover`] path.
 
 use std::sync::{Arc, Mutex};
 
@@ -372,56 +373,66 @@ pub async fn ct_player_load_music(
         message: format!("join: {e}"),
     })??;
 
-    // Metadata writeback: if the probe found embedded cover AND/OR a
-    // duration that the DB doesn't yet have, fire-and-forget a tokio task
-    // to fill them in. The UI reads duration from `music.meta.duration`
-    // (the DB column), so without this writeback newly-imported tracks
-    // show "--:--:--" until they're played for the first time. Cover
-    // writeback also goes through here. Best-effort — failures are
-    // logged, not surfaced.
-    let has_cover = metadata.cover_art.is_some();
+    // Metadata writeback: if the probe found embedded cover art AND/OR a
+    // duration that the DB doesn't yet have, fill them in now — inline,
+    // before this call resolves. The caller re-fetches the music right
+    // after `player.loadMusic` returns and patches the player UI, so the
+    // writeback must already be visible in the DB by then; the previous
+    // fire-and-forget spawn made freshly extracted covers linger
+    // invisibly until an unrelated reload re-read them. The UI reads
+    // duration from `music.meta.duration` (the DB column), so without
+    // this writeback newly-imported tracks show "--:--:--" until first
+    // play. The blob/DB writes are local and quick, and they run after
+    // the engine has already started (autoplay) — they never gate audio.
+    // Best-effort — failures are logged, not surfaced.
     let probed_duration = metadata.duration;
-    if has_cover || probed_duration.is_some() {
-        let backend_weak = backend.get_context().weak();
-        let mid = music_id;
-        let cover_bytes = metadata.cover_art.as_ref().map(|c| c.data.clone());
-        tokio_runtime().handle().spawn(async move {
-            let Some(cx) = backend_weak.upgrade() else {
-                return;
-            };
-            let Ok(Some(m)) = get_music(&cx, mid).await else {
-                return;
-            };
-            // Duration: only write if the DB column is currently null and
-            // the probe produced a non-zero duration. Overwriting an
-            // existing value would be surprising for users who manually
-            // fixed it.
-            if let Some(dur) = probed_duration {
-                if !dur.is_zero() && m.meta.duration.is_none() {
-                    let _ = update_music_duration(
-                        &cx,
-                        ArgUpdateMusicDuration {
-                            id: mid,
-                            duration: dur,
-                        },
-                    )
-                    .await;
+    if metadata.cover_art.is_some() || probed_duration.is_some() {
+        let cx = backend.get_context().clone();
+        match get_music(&cx, music_id).await {
+            Ok(Some(m)) => {
+                // Duration: only write if the DB column is currently null and
+                // the probe produced a non-zero duration. Overwriting an
+                // existing value would be surprising for users who manually
+                // fixed it.
+                if let Some(dur) = probed_duration {
+                    if !dur.is_zero() && m.meta.duration.is_none() {
+                        if let Err(e) = update_music_duration(
+                            &cx,
+                            ArgUpdateMusicDuration {
+                                id: music_id,
+                                duration: dur,
+                            },
+                        )
+                        .await
+                        {
+                            tracing::warn!("duration writeback for {music_id:?} failed: {e:?}");
+                        }
+                    }
+                }
+                // Cover: only write if the DB has no cover blob yet.
+                if let Some(cover) = metadata.cover_art.as_ref() {
+                    if m.cover.is_none() {
+                        if let Err(e) = update_music_cover(
+                            &cx,
+                            ArgUpdateMusicCover {
+                                id: music_id,
+                                cover: cover.data.clone(),
+                            },
+                        )
+                        .await
+                        {
+                            tracing::warn!("cover writeback for {music_id:?} failed: {e:?}");
+                        }
+                    }
                 }
             }
-            // Cover: only write if the DB has no cover blob yet.
-            if let Some(bytes) = cover_bytes {
-                if m.cover.is_none() {
-                    let _ = update_music_cover(
-                        &cx,
-                        ArgUpdateMusicCover {
-                            id: mid,
-                            cover: bytes,
-                        },
-                    )
-                    .await;
-                }
+            Ok(None) => {
+                tracing::warn!("metadata writeback: music {music_id:?} vanished from the DB");
             }
-        });
+            Err(e) => {
+                tracing::warn!("metadata writeback for {music_id:?} failed: {e:?}");
+            }
+        }
     }
 
     Ok(MetadataRecord::from_cantode(&metadata))

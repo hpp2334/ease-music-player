@@ -275,6 +275,19 @@ class PlayerControllerRepository @Inject constructor(
                         timestamp = System.currentTimeMillis(),
                     )
                 )
+
+                // The load's Rust-side writeback (embedded cover art +
+                // probed duration) is inline in `player.loadMusic`, so it
+                // has landed in the DB by now. Re-fetch and patch the
+                // current music so the player UI shows the extracted
+                // cover immediately; the debounced playlist reload
+                // refreshes the playlist cards' `showCover` (first music
+                // with a cover). Without this, first-play covers stayed
+                // invisible until an unrelated reload re-read them.
+                bridge.call(BridgeMethods.Music.GET, id).unwrapOrNull()?.payload?.let { extracted ->
+                    playerRepository.updateMusicExtractedMeta(id, extracted)
+                    playlistRepository.scheduleReload()
+                }
             } else {
                 // Music/playlist gone: reset the UI and the loading flag —
                 // the engine was already stopped above; nothing to load.
