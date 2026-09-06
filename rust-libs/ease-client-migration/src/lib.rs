@@ -32,20 +32,18 @@ use redb::{ReadableMultimapTable, ReadableTable};
 const ONEDRIVE_PLUGIN_ID: &str = "com.ease.onedrive";
 const WEBDAV_PLUGIN_ID: &str = "com.ease.webdav";
 
-/// The schema version produced by this crate.
-pub const SCHEMA_VERSION: u32 = 7;
+/// The schema version produced by this crate. v1–v3 are the legacy redb
+/// formats (upgraded in-place before import); v4 is the SQLite schema,
+/// created wholesale by the single init migration. The dev-era internal
+/// v4-line versions (5–7) were folded back into v4 — v0.4 never shipped,
+/// so the only supported upgrade path is v3 (redb) -> v4.
+pub const SCHEMA_VERSION: u32 = 4;
 
 pub struct Migrator;
 
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-        vec![
-            Box::new(migrations::InitMigration),
-            Box::new(migrations::PluginKvMigration),
-            Box::new(migrations::StorageRegistryMigration),
-            Box::new(migrations::WebdavPluginMigration),
-            Box::new(migrations::PreferenceLanguageMigration),
-        ]
+        vec![Box::new(migrations::InitMigration)]
     }
 }
 
