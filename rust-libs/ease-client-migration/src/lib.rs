@@ -43,7 +43,18 @@ pub struct Migrator;
 
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
-        vec![Box::new(migrations::InitMigration)]
+        vec![
+            Box::new(migrations::InitMigration),
+            // No-op tombstones of the collapsed v4-internal chain. Their
+            // module names must stay: databases that already applied the
+            // old chain record these versions in `seaql_migrations`, and
+            // sea-orm-migration errors when an applied version has no
+            // file in this list.
+            Box::new(migrations::PluginKvMigration),
+            Box::new(migrations::StorageRegistryMigration),
+            Box::new(migrations::WebdavPluginMigration),
+            Box::new(migrations::PreferenceLanguageMigration),
+        ]
     }
 }
 
