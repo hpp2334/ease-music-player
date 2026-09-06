@@ -1,3 +1,19 @@
+//! The single v4 init: creates the full SQLite schema in one step.
+//!
+//! Version lineage: v1–v3 are the legacy `redb` formats (upgraded in-place
+//! by the `legacy/` upgraders before `import_from_redb` streams rows into
+//! these tables); **v4 is the SQLite schema** produced here. The dev-era
+//! internal v4-line migrations (plugin-kv, storage-registry split,
+//! webdav-to-plugin, preference-language — schema versions 5–7) were folded
+//! back into this init: v0.4 never shipped, so the only supported upgrade
+//! path is v3 (redb) -> v4 (this schema).
+//!
+//! The migration name (`m20260715_000001_init`, derived from the module
+//! path) is deliberately kept from the original first migration, so
+//! databases that already ran the old chain have it recorded in
+//! `seaql_migrations`, skip this body, and keep working — their end state
+//! is byte-for-byte the schema below.
+
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -6,6 +22,7 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // ---------- storage registry ----------
         manager
             .create_table(
                 Table::create()
@@ -18,21 +35,27 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Storage::Addr).text().not_null().default(""))
-                    .col(ColumnDef::new(Storage::Alias).text().not_null().default(""))
-                    .col(ColumnDef::new(Storage::Username).text().not_null().default(""))
-                    .col(ColumnDef::new(Storage::Password).text().not_null().default(""))
-                    .col(
-                        ColumnDef::new(Storage::IsAnonymous)
-                            .integer()
-                            .not_null()
-                            .default(0),
-                    )
-                    .col(ColumnDef::new(Storage::Typ).integer().not_null().default(1))
+                    .col(ColumnDef::new(Storage::Typ).integer().not_null())
+                    .col(ColumnDef::new(Storage::PluginId).text().null())
+                    .col(ColumnDef::new(Storage::PluginStorageId).text().null())
                     .to_owned(),
             )
             .await?;
 
+        manager
+            .create_index(
+                Index::create()
+                    .if_not_exists()
+                    .name("idx_storage_plugin")
+                    .table(Storage::Table)
+                    .col(Storage::PluginId)
+                    .col(Storage::PluginStorageId)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        // ---------- playlists / musics ----------
         manager
             .create_table(
                 Table::create()
@@ -126,6 +149,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // ---------- preference ----------
         manager
             .create_table(
                 Table::create()
@@ -143,10 +167,12 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(0),
                     )
+                    .col(ColumnDef::new(Preference::Language).text().null())
                     .to_owned(),
             )
             .await?;
 
+        // ---------- bookkeeping ----------
         manager
             .create_table(
                 Table::create()
@@ -210,26 +236,86 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // ---------- plugin KV + secrets (raw SQL, same rationale as the
+        // statements folded in from the former migrations: statement shapes
+        // identical to what `sqlite3` would run) ----------
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "
+                CREATE TABLE IF NOT EXISTS plugin_kv_key (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plugin_id   TEXT    NOT NULL,
+                    key         TEXT    NOT NULL,
+                    kind        INTEGER NOT NULL,
+                    created_at  INTEGER NOT NULL,
+                    UNIQUE (plugin_id, key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_plugin_kv_key_plugin
+                    ON plugin_kv_key (plugin_id);
+
+                CREATE TABLE IF NOT EXISTS plugin_kv_single (
+                    key_id      INTEGER PRIMARY KEY,
+                    value       TEXT    NOT NULL,
+                    updated_at  INTEGER NOT NULL,
+                    FOREIGN KEY (key_id) REFERENCES plugin_kv_key(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS plugin_kv_multi (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_id      INTEGER NOT NULL,
+                    value       TEXT    NOT NULL,
+                    created_at  INTEGER NOT NULL,
+                    FOREIGN KEY (key_id) REFERENCES plugin_kv_key(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_plugin_kv_multi_key_id
+                    ON plugin_kv_multi (key_id, id);
+
+                CREATE TABLE IF NOT EXISTS secret (
+                    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope   TEXT    NOT NULL DEFAULT 'internal',
+                    secret  TEXT    NOT NULL DEFAULT ''
+                );
+                ",
+            )
+            .await?;
+
+        // ---------- seed the Local registry row ----------
+        // Guarded so re-running against an already-populated registry is a
+        // no-op (`import_from_redb` wipes and re-imports storage anyway).
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "INSERT INTO storage (type) \
+                 SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM storage WHERE type = 0)",
+            )
+            .await?;
+
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        use sea_query::IntoIden;
-        let tables: Vec<sea_query::DynIden> = vec![
-            BlobTbl::Table.into_iden(),
-            IdAlloc::Table.into_iden(),
-            SchemaVersion::Table.into_iden(),
-            Preference::Table.into_iden(),
-            PlaylistMusic::Table.into_iden(),
-            Music::Table.into_iden(),
-            Playlist::Table.into_iden(),
-            Storage::Table.into_iden(),
-        ];
-        for t in tables {
-            manager
-                .drop_table(Table::drop().table(t).if_exists().to_owned())
-                .await?;
-        }
+        // Children before parents (plugin_kv_* reference plugin_kv_key);
+        // dropping a table drops its indexes.
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "
+                DROP TABLE IF EXISTS plugin_kv_multi;
+                DROP TABLE IF EXISTS plugin_kv_single;
+                DROP TABLE IF EXISTS plugin_kv_key;
+                DROP TABLE IF EXISTS secret;
+                DROP TABLE IF EXISTS blob;
+                DROP TABLE IF EXISTS id_alloc;
+                DROP TABLE IF EXISTS schema_version;
+                DROP TABLE IF EXISTS preference;
+                DROP TABLE IF EXISTS playlist_music;
+                DROP TABLE IF EXISTS music;
+                DROP TABLE IF EXISTS playlist;
+                DROP TABLE IF EXISTS storage;
+                ",
+            )
+            .await?;
         Ok(())
     }
 }
@@ -238,12 +324,13 @@ impl MigrationTrait for Migration {
 enum Storage {
     Table,
     Id,
-    Addr,
-    Alias,
-    Username,
-    Password,
-    IsAnonymous,
+    /// Named `Typ` (not `Type`) to avoid colliding with the Rust keyword;
+    /// the `#[sea_orm(iden = "type")]` attribute makes the on-disk column
+    /// name match the SeaORM entity's `column_name = "type"`.
+    #[sea_orm(iden = "type")]
     Typ,
+    PluginId,
+    PluginStorageId,
 }
 
 #[derive(DeriveIden)]
@@ -284,6 +371,7 @@ enum Preference {
     Table,
     Id,
     Playmode,
+    Language,
 }
 
 #[derive(DeriveIden)]

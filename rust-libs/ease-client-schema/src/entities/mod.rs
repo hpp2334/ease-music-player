@@ -10,4 +10,3 @@ pub mod preference;
 pub mod schema_version;
 pub mod secret;
 pub mod storage;
-pub mod webdav_storage;
