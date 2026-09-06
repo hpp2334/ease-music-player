@@ -19,14 +19,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
+import com.kutedev.easemusicplayer.components.PluginIconBox
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RoutePluginAvailable
 import com.kutedev.easemusicplayer.singleton.PluginManifest
@@ -70,6 +73,7 @@ private data class PendingUninstall(
  * uninstall), the SAF install-from-zip entry, and the top-right button
  * pushing to [AvailablePluginsPage] (network registry).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PluginManagementPage(
     scaffoldPadding: PaddingValues,
@@ -99,44 +103,46 @@ fun PluginManagementPage(
             .padding(top = scaffoldPadding.calculateTopPadding())
     ) {
         // Top bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .padding(pluginsPaddingX, 0.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(
-                modifier = Modifier.size(40.dp),
-                onClick = { navController.popBackStack() },
+        CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(pluginsPaddingX, 0.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    modifier = Modifier.size(24.dp),
-                    painter = painterResource(id = R.drawable.icon_back),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            Box(modifier = Modifier.width(12.dp))
-            Text(
-                text = stringResource(id = R.string.plugin_management_title),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Box(modifier = Modifier.weight(1f))
-            IconButton(
-                modifier = Modifier.size(40.dp),
-                onClick = {
-                    navController.navigate(RoutePluginAvailable())
+                IconButton(
+                    modifier = Modifier.size(40.dp),
+                    onClick = { navController.popBackStack() },
+                ) {
+                    Icon(
+                        modifier = Modifier.size(20.dp),
+                        painter = painterResource(id = R.drawable.icon_back),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
                 }
-            ) {
-                Icon(
-                    modifier = Modifier.size(24.dp),
-                    painter = painterResource(id = R.drawable.icon_download),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
+                Box(modifier = Modifier.width(12.dp))
+                Text(
+                    text = stringResource(id = R.string.plugin_management_title),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
+                Box(modifier = Modifier.weight(1f))
+                IconButton(
+                    modifier = Modifier.size(40.dp),
+                    onClick = {
+                        navController.navigate(RoutePluginAvailable())
+                    }
+                ) {
+                    Icon(
+                        modifier = Modifier.size(20.dp),
+                        painter = painterResource(id = R.drawable.icon_download),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
         }
 
@@ -151,7 +157,7 @@ fun PluginManagementPage(
                     modifier = Modifier
                         .size(3.dp, 16.dp)
                         .clip(RoundedCornerShape(1.5.dp))
-                        .background(BadgeGreen)
+                        .background(MaterialTheme.colorScheme.primary)
                 )
                 Box(modifier = Modifier.width(8.dp))
                 Text(
@@ -190,7 +196,7 @@ fun PluginManagementPage(
                 }
             }
             Box(modifier = Modifier.height(16.dp))
-            val dashColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+            val dashColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -199,7 +205,7 @@ fun PluginManagementPage(
                             color = dashColor,
                             cornerRadius = CornerRadius(16.dp.toPx()),
                             style = Stroke(
-                                width = 1.5.dp.toPx(),
+                                width = 2.dp.toPx(),
                                 pathEffect = PathEffect.dashPathEffect(
                                     floatArrayOf(8.dp.toPx(), 6.dp.toPx())
                                 ),
@@ -276,28 +282,12 @@ private fun InstalledPluginRow(
             .padding(14.dp, 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .alpha(dim)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(accent.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Icon(
-                        modifier = Modifier.size(24.dp),
-                        painter = painterResource(id = R.drawable.icon_extension),
-                        contentDescription = null,
-                        tint = accent,
-                    )
-                }
-            }
+            PluginIconBox(
+                iconData = plugin.iconData,
+                tint = accent,
+                modifier = Modifier.alpha(dim),
+                loading = busy,
+            )
             Box(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -388,7 +378,9 @@ private fun PluginRowAction(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            // Start-only padding keeps the chip's right edge on the card's
+            // 14 dp content inset — the same line the chevron sits on.
+            .padding(start = 10.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -405,8 +397,6 @@ private fun PluginRowAction(
         )
     }
 }
-
-private val BadgeGreen = Color(0xFF34C759)
 
 internal fun pluginAccent(id: String): Color {
     val mixed = id.hashCode() * -0x61C88647 // golden-ratio scramble for hue spread

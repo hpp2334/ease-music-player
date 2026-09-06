@@ -20,6 +20,7 @@ import { ROOT } from "./base";
 
 const REGISTRY_DIR = path.join(ROOT, "plugins/registry");
 const ZIPS_DIR = path.join(REGISTRY_DIR, "zips");
+const ICONS_DIR = path.join(REGISTRY_DIR, "icons");
 const INDEX_PATH = path.join(REGISTRY_DIR, "plugins.json");
 const ASSET_BUNDLES_DIR = path.join(ROOT, "android/app/src/main/assets/plugin-bundles");
 
@@ -31,6 +32,9 @@ interface RegistryEntry {
   zip: string;
   sha256: string;
   size: number;
+  /** Registry-served plugin icon (path relative to the registry root);
+   *  absent when the plugin ships no icon. */
+  icon?: string;
 }
 
 interface Registry {
@@ -116,6 +120,22 @@ function packagePlugin(pluginDir: string): RegistryEntry {
     sha256: sha256(zipPath),
     size: statSync(zipPath).size,
   };
+
+  // Plugin-level icon: the zip already carries it (collectIconFiles walks
+  // the root key too); also publish it as a standalone registry file the
+  // app fetches for not-yet-installed entries.
+  if (typeof manifest.icon === "string" && manifest.icon) {
+    const iconSrc = path.join(pluginDir, manifest.icon);
+    if (!existsSync(iconSrc)) {
+      throw new Error(`manifest icon not found: ${iconSrc}`);
+    }
+    mkdirSync(ICONS_DIR, { recursive: true });
+    const iconName = `${id}${path.extname(manifest.icon) || ".png"}`;
+    copyFileSync(iconSrc, path.join(ICONS_DIR, iconName));
+    entry.icon = `icons/${iconName}`;
+    console.log(`registry icon: ${path.relative(ROOT, iconSrc)} -> ${entry.icon}`);
+  }
+
   console.log(`packaged ${id}@${version} -> ${path.relative(ROOT, zipPath)} (${entry.size} bytes)`);
   return entry;
 }
