@@ -1,6 +1,21 @@
 {
   "plugins": [
     {
+      "id": "com.ease.lyricformats",
+      "name": {
+        "en-US": "Lyric Formats",
+        "zh-CN": "歌词格式"
+      },
+      "version": "0.2.0",
+      "description": {
+        "en-US": "Lyric file parsers for LRC, SRT and WebVTT. The app's lyric pane is powered entirely by this plugin — there is no built-in parser.",
+        "zh-CN": "LRC、SRT、WebVTT 歌词文件解析器。应用的歌词显示完全由本插件驱动，应用内没有内置解析器。"
+      },
+      "zip": "zips/com.ease.lyricformats-0.2.0.zip",
+      "sha256": "a858164de4cd8d8e02ee2686432782a2e9ee4550c17d2da79ff369778dedbfc9",
+      "size": 33071
+    },
+    {
       "id": "com.ease.onedrive",
       "name": {
         "en-US": "OneDrive",
@@ -12,7 +27,7 @@
         "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
       },
       "zip": "zips/com.ease.onedrive-0.0.3.zip",
-      "sha256": "d0d72a37dadf521273d1930a7188216b7e2da039d0d468ba30fb7a12e53f85c6",
+      "sha256": "04aa556bf65fe2518f97f634ac8b8a8ddb24b59ba6f619fe908e95c6a5a7e470",
       "size": 51048,
       "icon": "icons/com.ease.onedrive.png"
     },
@@ -28,7 +43,7 @@
         "zh-CN": "统计每首歌的播放次数，覆盖今天、昨天、最近 3 天、最近一周、最近一月和最近一年。"
       },
       "zip": "zips/com.ease.playcount-0.0.4.zip",
-      "sha256": "1ff0b3f77b3cd69aef1d1438d21245fc8ba92bf7f6cc6ad4e353eb094eccae98",
+      "sha256": "b6f69b8a94a3d53d5bd53509ea594181e892425d61166b7d5f9d0dc7323307de",
       "size": 53783,
       "icon": "icons/com.ease.playcount.png"
     },
@@ -44,7 +59,7 @@
         "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
       },
       "zip": "zips/com.ease.webdav-0.0.3.zip",
-      "sha256": "3589918f7a6ccf5d7cc3fa6fda0e20e15140e01078f354d0ac7b57ab5f1d07d0",
+      "sha256": "2d9c9857740ed20212c118fd84cc43df021fd938931cb28b07dc0dfbeabde9a0",
       "size": 338764,
       "icon": "icons/com.ease.webdav.png"
     }

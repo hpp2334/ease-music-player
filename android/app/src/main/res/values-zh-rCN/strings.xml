@@ -76,6 +76,11 @@
     <string name="language_english">English</string>
     <string name="language_simplified_chinese">简体中文</string>
     <string name="setting_plugin_management">插件管理</string>
+    <string name="setting_lyric_parser">歌词解析</string>
+    <string name="lyric_parser_title">歌词解析</string>
+    <string name="lyric_parser_auto">自动（默认顺序）</string>
+    <string name="lyric_parser_hint">歌词文件由插件解析。安装提供歌词解析的插件以支持更多格式。</string>
+    <string name="lyric_parser_get_plugins">获取插件</string>
     <string name="dashboard_plugins">插件</string>
     <string name="plugin_management_title">插件管理</string>
     <string name="plugin_installed_section">已安装</string>

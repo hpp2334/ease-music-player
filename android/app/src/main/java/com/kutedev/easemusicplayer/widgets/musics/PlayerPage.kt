@@ -143,6 +143,7 @@ private fun MusicPlayerHeader(
                                 stringId = R.string.music_lyric_add,
                                 onClick = {
                                     if (currentPlaying?.meta?.id != null) {
+                                        playerVM.prepareAddLyric()
                                         navController.navigate(
                                             RouteImport(RouteImportType.Lyric)
                                         )
@@ -716,7 +717,9 @@ fun MusicPlayerPage(
     val bufferMs by playerVM.bufferMs.collectAsState()
     val loading by playerVM.loading.collectAsState()
     val currentLyricIndex by playerVM.lyricIndex.collectAsState()
-    val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.LOADING
+    // `lyric == null` (no parser plugin enabled / no resolvable location)
+    // renders the MISSING pane with its add CTA — not an eternal spinner.
+    val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.MISSING
     val lyrics = currentMusic?.lyric?.data?.lines ?: emptyList()
 
     val hasLyric = lyricLoadedState != LyricLoadState.MISSING
@@ -752,6 +755,7 @@ fun MusicPlayerPage(
                     lyrics = lyrics,
                     onClickAddLyric = {
                         if (currentMusic != null) {
+                            playerVM.prepareAddLyric()
                             navController.navigate(RouteImport(RouteImportType.Lyric))
                         }
                     }

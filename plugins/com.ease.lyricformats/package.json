@@ -1,0 +1,20 @@
+{
+    "name": "com.ease.lyricformats",
+    "version": "0.2.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "rspack build",
+        "typecheck": "tsc --noEmit",
+        "test": "node scripts/selftest.ts"
+    },
+    "devDependencies": {
+        "@rspack/cli": "^1.2.0",
+        "@rspack/core": "^1.2.0",
+        "@tur-ng/std": "^0.0.9",
+        "typescript": "^5.7.0"
+    },
+    "dependencies": {
+        "js-base64": "^3.9.3"
+    }
+}
