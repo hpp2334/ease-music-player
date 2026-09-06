@@ -6,7 +6,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import com.kutedev.easemusicplayer.core.DataSourceKeyH
 import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,9 +24,13 @@ class AssetRepository @Inject constructor(private val bridge: Bridge) {
         val keyH = DataSourceKeyH(key)
         bufCache[keyH]?.let { return it }
 
-        val args = buildJsonObject {
-            put("key", json.encodeToJsonElement(DataSourceKey.serializer(), key))
-        }
+        // The tagged enum IS the args object — the Rust `asset.get` arm
+        // deserializes `req.args` directly as `DataSourceKey` (same
+        // bare-value convention as `music.get`/`playlist.get`). Wrapping
+        // it in a `{"key": …}` object breaks the `#[serde(tag = "kind")]`
+        // deserialization ("missing field `kind`") and every cover fetch
+        // fails.
+        val args = json.encodeToJsonElement(DataSourceKey.serializer(), key)
         val buf = bridge.callRaw("asset.get", args).unwrapOrNull()?.getBuffer(0)
         if (buf != null) {
             bufCache[keyH] = buf
