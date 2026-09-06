@@ -7,7 +7,7 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "pre-v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+"
     branches:
-      - master
+      - main
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,6 +20,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Host-side `cargo nextest run` compiles the tur text stack
+      # (yeslogic-fontconfig-sys needs fontconfig.pc) and cantode's cpal
+      # ALSA backend (alsa-sys needs alsa.pc). The Android cross-compile
+      # cfg-gates both out, but the host test build links them.
+      - name: Install native build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libasound2-dev
       - name: Prepare cargo cache
         uses: actions/cache@v4
         continue-on-error: false

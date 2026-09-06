@@ -69,9 +69,8 @@ const MAX_PARSER_EXTENSIONS: usize = 16;
 /// each, worst case).
 const MAX_SIBLING_EXTENSIONS: usize = 8;
 
-// TODO: switch REPO_REF to `main` once feat/v0.4 merges.
 const REPO: &str = "hpp2334/ease-music-player";
-const REPO_REF: &str = "feat/v0.4";
+const REPO_REF: &str = "main";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const JSON_TIMEOUT: Duration = Duration::from_secs(15);
