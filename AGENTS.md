@@ -35,7 +35,7 @@ Features: WebDAV and OneDrive cloud storage (both JS plugin providers), playlist
 | [`rust-libs/`](./rust-libs/) | Cargo workspace of Rust crates (backend, schema, migration, FFI builder, etc.). |
 | [`scripts/`](./scripts/) | TypeScript build/test orchestration (run via `pnpm`/`tsx`). |
 | [`docs/`](./docs/) | `motivation.md` + screenshots. |
-| [`.github/workflows/`](./.github/workflows/) | CI: build JNI, run Rust tests, build APK on release tags. |
+| [`.github/workflows/`](./.github/workflows/) | CI (PRs + `main` pushes + release tags): build JNI, run Rust tests, build + upload the signed APK as an artifact; attach it to the GitHub release on `v*` tags. |
 | [`.opencode/`](./.opencode/) | OpenCode agent config (subagents for git/PR finalization, multimodal image reading + device operation). |
 
 Root Java package: `com.kutedev.easemusicplayer`. Namespace / applicationId: `com.kutedev.easemusicplayer`.
