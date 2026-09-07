@@ -94,151 +94,155 @@ export function createSelector<T>(
         });
 
     function TriggerPill(): Element {
-        return PointerInteract({
-            behavior: HitTestBehavior.Opaque,
-            onClick: mutate((ctx) => ctx.set(open$, !ctx.get(open$))),
-            child: Container({
-                height: triggerHeight,
-                color: style.triggerBg ?? style.surface,
-                borderColor: style.divider,
-                borderWidth: style.triggerBg ? 0 : 1,
-                borderRadius: chipRadius,
-                children: [
-                    Row({
-                        mainAlignment: MainAxisAlignment.Start,
-                        crossAlignment: CrossAxisAlignment.Center,
-                        mainAxisSize: MainAxisSize.Min,
-                        children: [
-                            SizedBox({ width: 14 }),
-                            Text({
-                                text: label$,
-                                fontSize: 13,
-                                color: style.triggerText ?? style.text,
-                                maxLines: 1,
-                                overflow: "ellipsis",
-                            }),
-                            SizedBox({ width: 8 }),
-                            Text({
-                                text: derive((ctx) =>
-                                    ctx.get(open$) ? "▲" : "▼",
-                                ),
-                                fontSize: 10,
-                                color: style.triggerText ?? style.primary,
-                            }),
-                            SizedBox({ width: 14 }),
-                        ],
-                    }),
-                ],
-            }),
-        });
+        return PointerInteract()
+            .behavior(HitTestBehavior.Opaque)
+            .onClick(mutate((ctx) => ctx.set(open$, !ctx.get(open$))))
+            .child(Container()
+                .height(triggerHeight)
+                .color(style.triggerBg ?? style.surface)
+                .borderColor(style.divider)
+                .borderWidth(style.triggerBg ? 0 : 1)
+                .borderRadius(chipRadius)
+                .children([
+                    Row()
+                        .mainAlignment(MainAxisAlignment.Start)
+                        .crossAlignment(CrossAxisAlignment.Center)
+                        .mainAxisSize(MainAxisSize.Min)
+                        .children([
+                            SizedBox()
+                                .width(14)
+                                .build(),
+                            Text({ text: label$ })
+                                .fontSize(13)
+                                .color(style.triggerText ?? style.text)
+                                .maxLines(1)
+                                .overflow("ellipsis")
+                                .build(),
+                            SizedBox()
+                                .width(8)
+                                .build(),
+                            Text({ text: derive((ctx) => (ctx.get(open$) ? "▲" : "▼")) })
+                                .fontSize(10)
+                                .color(style.triggerText ?? style.primary)
+                                .build(),
+                            SizedBox()
+                                .width(14)
+                                .build(),
+                        ])
+                        .build(),
+                ])
+                .build())
+            .build();
     }
 
     function OptionRow(option: SelectorOption<T>): Element {
         const selected$ = derive(
             (ctx) => ctx.get(opts.selectedValue$) === option.value,
         );
-        return PointerInteract({
-            behavior: HitTestBehavior.Opaque,
-            onClick: mutate((ctx) => {
+        return PointerInteract()
+            .behavior(HitTestBehavior.Opaque)
+            .onClick(mutate((ctx) => {
                 ctx.set(open$, false);
                 if (ctx.get(opts.selectedValue$) !== option.value) {
                     ctx.set(opts.onSelect$, option.value);
                 }
-            }),
-            child: Container({
-                color: derive((ctx) =>
+            }))
+            .child(Container()
+                .color(derive((ctx) =>
                     ctx.get(selected$) ? style.primarySoft : style.surface,
-                ),
-                borderRadius: 10,
-                padding: 10,
-                children: [
-                    Row({
-                        mainAlignment: MainAxisAlignment.SpaceBetween,
-                        crossAlignment: CrossAxisAlignment.Center,
-                        children: [
-                            Text({
-                                text: option.label,
-                                fontSize: 13,
-                                color: derive((ctx) =>
+                ))
+                .borderRadius(10)
+                .padding(10)
+                .children([
+                    Row()
+                        .mainAlignment(MainAxisAlignment.SpaceBetween)
+                        .crossAlignment(CrossAxisAlignment.Center)
+                        .children([
+                            Text({ text: option.label })
+                                .fontSize(13)
+                                .color(derive((ctx) =>
                                     ctx.get(selected$)
                                         ? style.primary
                                         : style.text,
-                                ),
-                                maxLines: 1,
-                                overflow: "ellipsis",
-                            }),
-                            Condition({
-                                condition: selected$,
-                                child: () =>
-                                    Text({
-                                        text: "✓",
-                                        fontSize: 13,
-                                        color: style.primary,
-                                    }),
-                            }),
-                        ],
-                    }),
-                ],
-            }),
-        });
+                                ))
+                                .maxLines(1)
+                                .overflow("ellipsis")
+                                .build(),
+                            Condition({ condition: selected$ })
+                                .child(() =>
+                                    Text({ text: "✓" })
+                                        .fontSize(13)
+                                        .color(style.primary)
+                                        .build())
+                                .build(),
+                        ])
+                        .build(),
+                ])
+                .build())
+            .build();
     }
 
     function MenuCard(): Element {
         const rows: Element[] = [];
         opts.options.forEach((o, i) => {
-            if (i > 0) rows.push(SizedBox({ height: 4 }));
+            if (i > 0) rows.push(SizedBox()
+                .height(4)
+                .build());
             rows.push(OptionRow(o));
         });
-        return Container({
-            width: menuWidth,
-            color: style.surface,
-            borderColor: style.divider,
-            borderWidth: 1,
-            borderRadius: cardRadius,
-            shadowColor: style.shadow,
-            shadowBlur: 16,
-            shadowOffset: [0, 6],
-            children: [
-                Container({
-                    padding: 6,
-                    children: [
-                        Column({
-                            mainAlignment: MainAxisAlignment.Start,
-                            crossAlignment: CrossAxisAlignment.Stretch,
-                            mainAxisSize: MainAxisSize.Min,
-                            children: rows,
-                        }),
-                    ],
-                }),
-            ],
-        });
+        return Container()
+            .width(menuWidth)
+            .color(style.surface)
+            .borderColor(style.divider)
+            .borderWidth(1)
+            .borderRadius(cardRadius)
+            .shadowColor(style.shadow)
+            .shadowBlur(16)
+            .shadowOffset([0, 6])
+            .children([
+                Container()
+                    .padding(6)
+                    .children([
+                        Column()
+                            .mainAlignment(MainAxisAlignment.Start)
+                            .crossAlignment(CrossAxisAlignment.Stretch)
+                            .mainAxisSize(MainAxisSize.Min)
+                            .children(rows)
+                            .build(),
+                    ])
+                    .build(),
+            ])
+            .build();
     }
 
     return {
         open$,
         SelectorTrigger: () =>
-            CompositedTransformTarget({ link, child: TriggerPill() }),
+            CompositedTransformTarget({ link })
+                .child(TriggerPill())
+                .build(),
         // Dismiss backdrop: Condition-gated (Condition OUTSIDE the Positioned)
         // so it only exists while open — an always-mounted fill `Positioned`
         // would steal taps from the trigger below it even with empty content.
         // It is fully transparent (no dim/mask over the page); it only captures
         // an outside tap to close. `right/bottom:0` fills the host page Stack.
         SelectorScrim: () =>
-            Condition({
-                condition: open$,
-                child: () =>
-                    Positioned({
-                        left: 0,
-                        top: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: PointerInteract({
-                            behavior: HitTestBehavior.Opaque,
-                            onClick: mutate((ctx) => ctx.set(open$, false)),
-                            child: Container({ color: Color.rgba(0, 0, 0, 0) }),
-                        }),
-                    }),
-            }),
+            Condition({ condition: open$ })
+                .child(() =>
+                    Positioned()
+                        .left(0)
+                        .top(0)
+                        .right(0)
+                        .bottom(0)
+                        .child(PointerInteract()
+                            .behavior(HitTestBehavior.Opaque)
+                            .onClick(mutate((ctx) => ctx.set(open$, false)))
+                            .child(Container()
+                                .color(Color.rgba(0, 0, 0, 0))
+                                .build())
+                            .build())
+                        .build())
+                .build(),
         // Menu: a DIRECT Stack child (always mounted) so the
         // CompositedTransformSubsystem tracks and repositions it; the
         // `Condition` gating open/close lives INSIDE so the follower stays
@@ -247,15 +251,13 @@ export function createSelector<T>(
         // bottom-right (`targetAnchor`), so the card extends leftward and
         // stays on-screen.
         SelectorMenu: () =>
-            CompositedTransformFollower({
-                link,
-                targetAnchor: Alignment.BottomRight,
-                followerAnchor: Alignment.TopRight,
-                targetOffset: { x: 0, y: gap },
-                child: Condition({
-                    condition: open$,
-                    child: () => MenuCard(),
-                }),
-            }),
+            CompositedTransformFollower({ link })
+                .targetAnchor(Alignment.BottomRight)
+                .followerAnchor(Alignment.TopRight)
+                .targetOffset({ x: 0, y: gap })
+                .child(Condition({ condition: open$ })
+                    .child(() => MenuCard())
+                    .build())
+                .build(),
     };
 }

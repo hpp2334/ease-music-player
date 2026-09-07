@@ -115,11 +115,10 @@ const setStatus$ = mutate(
 // --- widgets ---------------------------------------------------------------
 
 function FieldLabel({ text }: { text: string }) {
-    return Text({
-        text,
-        fontSize: 13,
-        color: COLOR_TEXT_MUTED,
-    });
+    return Text({ text })
+        .fontSize(13)
+        .color(COLOR_TEXT_MUTED)
+        .build();
 }
 
 function TextField(opts: {
@@ -127,61 +126,60 @@ function TextField(opts: {
     placeholder: Val<string>;
     obscure?: boolean;
 }) {
-    return Container({
-        color: COLOR_CARD,
-        borderColor: COLOR_DIVIDER,
-        borderWidth: 1,
-        borderRadius: 12,
-        padding: 10,
-        children: [
-            Input({
-                // The engine resolves a controller READABLE at build time
-                // (`editable_text/element.rs` falls back to `controller_atom`
-                // when no plain controller was given); the published typings
-                // only declare the plain form — hence the cast.
-                controller: opts.controller as TextController,
-                placeholder: opts.placeholder,
-                fontSize: 15,
-                color: COLOR_TEXT,
-                placeholderColor: COLOR_TEXT_MUTED,
-                cursorColor: COLOR_PRIMARY,
-                ...(opts.obscure ? { obscureText: true } : {}),
-            }),
-        ],
-    });
+    const input = Input()
+        // The builder typing accepts the controller as a plain
+        // `TextController` or as its readable (`controller_atom`) — the
+        // engine resolves a controller READABLE at build time
+        // (`editable_text/element.rs`).
+        .controller(opts.controller)
+        .placeholder(opts.placeholder)
+        .fontSize(15)
+        .color(COLOR_TEXT)
+        .placeholderColor(COLOR_TEXT_MUTED)
+        .cursorColor(COLOR_PRIMARY);
+    if (opts.obscure) input.obscureText(true);
+    return Container()
+        .color(COLOR_CARD)
+        .borderColor(COLOR_DIVIDER)
+        .borderWidth(1)
+        .borderRadius(12)
+        .padding(10)
+        .children([input.build()])
+        .build();
 }
 
 /** Tappable "anonymous sign-in" toggle row (a bordered box fills when on).
  *  The box / label colors are reactive `Val`s so they repaint without a
  *  root-view rebuild. */
 function AnonymousToggle() {
-    return PointerInteract({
-        behavior: HitTestBehavior.Opaque,
-        onClick: mutate((ctx) => {
+    return PointerInteract()
+        .behavior(HitTestBehavior.Opaque)
+        .onClick(mutate((ctx) => {
             ctx.set(anonymous, !ctx.get(anonymous));
-        }),
-        child: Row({
-            mainAlignment: MainAxisAlignment.Start,
-            crossAlignment: CrossAxisAlignment.Center,
-            mainAxisSize: MainAxisSize.Min,
-            children: [
-                Container({
-                    width: 18,
-                    height: 18,
-                    borderRadius: 5,
-                    borderWidth: 1,
-                    borderColor: checkBorder$,
-                    color: checkFill$,
-                }),
-                SizedBox({ width: 8 }),
-                Text({
-                    text: "匿名登录",
-                    fontSize: 14,
-                    color: checkText$,
-                }),
-            ],
-        }),
-    });
+        }))
+        .child(Row()
+            .mainAlignment(MainAxisAlignment.Start)
+            .crossAlignment(CrossAxisAlignment.Center)
+            .mainAxisSize(MainAxisSize.Min)
+            .children([
+                Container()
+                    .width(18)
+                    .height(18)
+                    .borderRadius(5)
+                    .borderWidth(1)
+                    .borderColor(checkBorder$)
+                    .color(checkFill$)
+                    .build(),
+                SizedBox()
+                    .width(8)
+                    .build(),
+                Text({ text: "匿名登录" })
+                    .fontSize(14)
+                    .color(checkText$)
+                    .build(),
+            ])
+            .build())
+        .build();
 }
 
 function ActionButton(opts: {
@@ -189,39 +187,25 @@ function ActionButton(opts: {
     primary: boolean;
     onClick$: Mutation<[PointerInteractEvent], void>;
 }) {
-    return PointerInteract({
-        behavior: HitTestBehavior.Opaque,
-        onClick: opts.onClick$,
-        child: Container(
-            opts.primary
-                ? {
-                      color: COLOR_PRIMARY,
-                      borderRadius: 24,
-                      padding: 14,
-                      children: [
-                          Text({
-                              text: opts.label,
-                              fontSize: 15,
-                              color: COLOR_WHITE,
-                          }),
-                      ],
-                  }
-                : {
-                      color: COLOR_CARD,
-                      borderColor: COLOR_PRIMARY,
-                      borderWidth: 1,
-                      borderRadius: 24,
-                      padding: 14,
-                      children: [
-                          Text({
-                              text: opts.label,
-                              fontSize: 15,
-                              color: COLOR_PRIMARY,
-                          }),
-                      ],
-                  },
-        ),
-    });
+    const button = Container()
+        .borderRadius(24)
+        .padding(14)
+        .children([
+            Text({ text: opts.label })
+                .fontSize(15)
+                .color(opts.primary ? COLOR_WHITE : COLOR_PRIMARY)
+                .build(),
+        ]);
+    if (opts.primary) {
+        button.color(COLOR_PRIMARY);
+    } else {
+        button.color(COLOR_CARD).borderColor(COLOR_PRIMARY).borderWidth(1);
+    }
+    return PointerInteract()
+        .behavior(HitTestBehavior.Opaque)
+        .onClick(opts.onClick$)
+        .child(button.build())
+        .build();
 }
 
 // --- actions ---------------------------------------------------------------
@@ -336,39 +320,54 @@ const rootView = view(() => {
     // the page tracks viewport changes (the thunk itself runs once at mount).
     const vp$ = viewportSize$ as unknown as Readable<{ width: number; height: number }>;
 
-    return Container({
-        color: COLOR_CARD,
-        width: derive((ctx) => ctx.get(vp$).width),
-        height: derive((ctx) => ctx.get(vp$).height),
-        padding: 4,
-        children: [
-            Column({
-                crossAlignment: CrossAxisAlignment.Stretch,
-                mainAxisSize: MainAxisSize.Min,
-                children: [
+    return Container()
+        .color(COLOR_CARD)
+        .width(derive((ctx) => ctx.get(vp$).width))
+        .height(derive((ctx) => ctx.get(vp$).height))
+        .padding(4)
+        .children([
+            Column()
+                .crossAlignment(CrossAxisAlignment.Stretch)
+                .mainAxisSize(MainAxisSize.Min)
+                .children([
                     FieldLabel({ text: "服务器名称 (别名)" }),
-                    SizedBox({ height: 6 }),
+                    SizedBox()
+                        .height(6)
+                        .build(),
                     TextField({ controller: aliasController$, placeholder: "WebDAV" }),
-                    SizedBox({ height: 16 }),
+                    SizedBox()
+                        .height(16)
+                        .build(),
                     FieldLabel({ text: "服务器地址" }),
-                    SizedBox({ height: 6 }),
+                    SizedBox()
+                        .height(6)
+                        .build(),
                     TextField({ controller: addrController$, placeholder: "https://example.com/dav" }),
-                    SizedBox({ height: 16 }),
+                    SizedBox()
+                        .height(16)
+                        .build(),
                     AnonymousToggle(),
-                    SizedBox({ height: 16 }),
-                    Condition({
-                        condition: showCreds$,
-                        child: () =>
-                            Column({
-                                crossAlignment: CrossAxisAlignment.Stretch,
-                                mainAxisSize: MainAxisSize.Min,
-                                children: [
+                    SizedBox()
+                        .height(16)
+                        .build(),
+                    Condition({ condition: showCreds$ })
+                        .child(() =>
+                            Column()
+                                .crossAlignment(CrossAxisAlignment.Stretch)
+                                .mainAxisSize(MainAxisSize.Min)
+                                .children([
                                     FieldLabel({ text: "用户名" }),
-                                    SizedBox({ height: 6 }),
+                                    SizedBox()
+                                        .height(6)
+                                        .build(),
                                     TextField({ controller: usernameController$, placeholder: "" }),
-                                    SizedBox({ height: 16 }),
+                                    SizedBox()
+                                        .height(16)
+                                        .build(),
                                     FieldLabel({ text: "密码" }),
-                                    SizedBox({ height: 6 }),
+                                    SizedBox()
+                                        .height(6)
+                                        .build(),
                                     TextField({
                                         controller: passwordController$,
                                         placeholder: derive((ctx) =>
@@ -376,37 +375,41 @@ const rootView = view(() => {
                                         ),
                                         obscure: true,
                                     }),
-                                    SizedBox({ height: 16 }),
-                                ],
-                            }),
-                    }),
-                    Row({
-                        mainAlignment: MainAxisAlignment.Start,
-                        crossAlignment: CrossAxisAlignment.Center,
-                        mainAxisSize: MainAxisSize.Min,
-                        children: [
+                                    SizedBox()
+                                        .height(16)
+                                        .build(),
+                                ])
+                                .build())
+                        .build(),
+                    Row()
+                        .mainAlignment(MainAxisAlignment.Start)
+                        .crossAlignment(CrossAxisAlignment.Center)
+                        .mainAxisSize(MainAxisSize.Min)
+                        .children([
                             ActionButton({ label: "测试", primary: false, onClick$: runTest$ }),
-                            SizedBox({ width: 12 }),
+                            SizedBox()
+                                .width(12)
+                                .build(),
                             ActionButton({
                                 label: derive((ctx) => (ctx.get(isEdit$) ? "保存" : "连接")),
                                 primary: true,
                                 onClick$: save$,
                             }),
-                        ],
-                    }),
-                    SizedBox({ height: 10 }),
-                    Condition({
-                        condition: statusVisible$,
-                        child: () => Text({
-                            text: statusText,
-                            fontSize: 13,
-                            color: statusColor$,
-                        }),
-                    }),
-                ],
-            }),
-        ],
-    });
+                        ])
+                        .build(),
+                    SizedBox()
+                        .height(10)
+                        .build(),
+                    Condition({ condition: statusVisible$ })
+                        .child(() => Text({ text: statusText })
+                            .fontSize(13)
+                            .color(statusColor$)
+                            .build())
+                        .build(),
+                ])
+                .build(),
+        ])
+        .build();
 });
 
 // Module lifecycle contract: mount inside `start({ store })` (the engine

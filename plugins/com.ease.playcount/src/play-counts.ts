@@ -328,36 +328,34 @@ const rangeSel = createSelector<string>({
 // headline number + a muted unit — no duplicated H1, and the range context
 // lives in the selector pill right next to it.
 function HeaderSummary() {
-    return Row({
-        crossAlignment: CrossAxisAlignment.Center,
-        mainAxisSize: MainAxisSize.Min,
-        children: [
-            Text({
-                text: derive((ctx) => String(ctx.get(total$))),
-                fontSize: 22,
-                color: COLOR_TEXT,
-            }),
-            SizedBox({ width: 6 }),
-            Text({
-                text: derive((ctx) =>
-                    ctx.get(total$) === 1 ? "play" : "plays",
-                ),
-                fontSize: 13,
-                color: COLOR_TEXT_MUTED,
-            }),
-        ],
-    });
+    return Row()
+        .crossAlignment(CrossAxisAlignment.Center)
+        .mainAxisSize(MainAxisSize.Min)
+        .children([
+            Text({ text: derive((ctx) => String(ctx.get(total$))) })
+                .fontSize(22)
+                .color(COLOR_TEXT)
+                .build(),
+            SizedBox()
+                .width(6)
+                .build(),
+            Text({ text: derive((ctx) => (ctx.get(total$) === 1 ? "play" : "plays")) })
+                .fontSize(13)
+                .color(COLOR_TEXT_MUTED)
+                .build(),
+        ])
+        .build();
 }
 
 // Header row: stat on the left, range trigger pill on the right. The
 // trigger is a CompositedTransform target; the menu (follower) anchors to
 // its bottom-left from the page-level `Stack` in `rootView`.
 function HeaderRow() {
-    return Row({
-        mainAlignment: MainAxisAlignment.SpaceBetween,
-        crossAlignment: CrossAxisAlignment.Center,
-        children: [HeaderSummary(), rangeSel.SelectorTrigger()],
-    });
+    return Row()
+        .mainAlignment(MainAxisAlignment.SpaceBetween)
+        .crossAlignment(CrossAxisAlignment.Center)
+        .children([HeaderSummary(), rangeSel.SelectorTrigger()])
+        .build();
 }
 
 // ---------------------------------------------------------------------------
@@ -393,22 +391,21 @@ function medalSpec(rank: number): MedalSpec {
 // Leading rank badge — a centered numeral on a colored disc.
 function RankBadge(props: { rank: number }): Element {
     const m = medalSpec(props.rank);
-    return Container({
-        width: m.diameter,
-        height: m.diameter,
-        alignment: Alignment.Center,
-        color: m.fill,
-        borderColor: m.ring,
-        borderWidth: m.bold ? 1.5 : 1,
-        borderRadius: m.diameter / 2,
-        children: [
-            Text({
-                text: String(props.rank),
-                spans: [{ content: String(props.rank), bold: m.bold, color: m.num }],
-                fontSize: m.fontSize,
-            }),
-        ],
-    });
+    return Container()
+        .width(m.diameter)
+        .height(m.diameter)
+        .alignment(Alignment.Center)
+        .color(m.fill)
+        .borderColor(m.ring)
+        .borderWidth(m.bold ? 1.5 : 1)
+        .borderRadius(m.diameter / 2)
+        .children([
+            Text({ text: String(props.rank) })
+                .spans([{ content: String(props.rank), weight: m.bold ? 700 : 400, color: m.num }])
+                .fontSize(m.fontSize)
+                .build(),
+        ])
+        .build();
 }
 
 // One ranked row. Reads `entries$` REACTIVELY by `index` (see the file-top
@@ -435,14 +432,20 @@ function RankedRow(props: RankedRowProps): Element {
     const trackFlex$ = derive((ctx) => Math.max(0, ctx.get(maxCount$) - ctx.get(count$)));
 
     const barChildren: Element[] = [
-        Expanded({
-            flex: fillFlex$,
-            child: Container({ color: COLOR_PRIMARY, borderRadius: barHeight / 2 }),
-        }),
-        Expanded({
-            flex: trackFlex$,
-            child: Container({ color: COLOR_BAR_TRACK, borderRadius: barHeight / 2 }),
-        }),
+        Expanded()
+            .flex(fillFlex$)
+            .child(Container()
+                .color(COLOR_PRIMARY)
+                .borderRadius(barHeight / 2)
+                .build())
+            .build(),
+        Expanded()
+            .flex(trackFlex$)
+            .child(Container()
+                .color(COLOR_BAR_TRACK)
+                .borderRadius(barHeight / 2)
+                .build())
+            .build(),
     ];
 
     // NOTE: tur `Text` has no `fontWeight` prop, and span `content` is parsed
@@ -451,79 +454,84 @@ function RankedRow(props: RankedRowProps): Element {
     // layout while the span byte-ranges stay frozen, desyncing. Hierarchy is
     // therefore expressed via size + color contrast (podium dark, tail muted)
     // plus the medal, not bold weight.
-    const title: Element = Text({
-        text: title$,
-        fontSize: tierA ? 16 : 14,
-        color: tierA ? COLOR_TEXT : COLOR_TEXT_MUTED,
-        maxLines: 1,
-        overflow: "ellipsis",
-    });
+    const title: Element = Text({ text: title$ })
+        .fontSize(tierA ? 16 : 14)
+        .color(tierA ? COLOR_TEXT : COLOR_TEXT_MUTED)
+        .maxLines(1)
+        .overflow("ellipsis")
+        .build();
 
-    const countBadge = Container({
-        color: COLOR_CHIP_BG,
-        borderRadius: CHIP_RADIUS,
-        padding: tierA ? 6 : 5,
-        children: [
-            Text({
-                text: derive((ctx) => String(ctx.get(count$))),
-                fontSize: tierA ? 13 : 12,
-                color: COLOR_CHIP_TEXT,
-            }),
-        ],
-    });
+    const countBadge = Container()
+        .color(COLOR_CHIP_BG)
+        .borderRadius(CHIP_RADIUS)
+        .padding(tierA ? 6 : 5)
+        .children([
+            Text({ text: derive((ctx) => String(ctx.get(count$))) })
+                .fontSize(tierA ? 13 : 12)
+                .color(COLOR_CHIP_TEXT)
+                .build(),
+        ])
+        .build();
 
-    return Container({
-        color: COLOR_CARD,
-        borderRadius: 12,
-        shadowColor: COLOR_SHADOW,
-        shadowBlur: 6,
-        shadowOffset: [0, 2],
-        children: [
-            Container({
-                padding: pad,
-                children: [
-                    Column({
-                        crossAlignment: CrossAxisAlignment.Stretch,
-                        mainAxisSize: MainAxisSize.Min,
-                        children: [
-                            Row({
-                                mainAlignment: MainAxisAlignment.Start,
-                                crossAlignment: CrossAxisAlignment.Center,
-                                children: [
+    return Container()
+        .color(COLOR_CARD)
+        .borderRadius(12)
+        .shadowColor(COLOR_SHADOW)
+        .shadowBlur(6)
+        .shadowOffset([0, 2])
+        .children([
+            Container()
+                .padding(pad)
+                .children([
+                    Column()
+                        .crossAlignment(CrossAxisAlignment.Stretch)
+                        .mainAxisSize(MainAxisSize.Min)
+                        .children([
+                            Row()
+                                .mainAlignment(MainAxisAlignment.Start)
+                                .crossAlignment(CrossAxisAlignment.Center)
+                                .children([
                                     RankBadge({ rank }),
-                                    SizedBox({ width: 12 }),
-                                    Expanded({ child: title }),
-                                    SizedBox({ width: 10 }),
+                                    SizedBox()
+                                        .width(12)
+                                        .build(),
+                                    Expanded()
+                                        .child(title)
+                                        .build(),
+                                    SizedBox()
+                                        .width(10)
+                                        .build(),
                                     countBadge,
-                                ],
-                            }),
-                            SizedBox({ height: 8 }),
-                            Container({
-                                height: barHeight,
-                                children: [
-                                    Row({
-                                        crossAlignment: CrossAxisAlignment.Stretch,
-                                        children: barChildren,
-                                    }),
-                                ],
-                            }),
-                        ],
-                    }),
-                ],
-            }),
-        ],
-    });
+                                ])
+                                .build(),
+                            SizedBox()
+                                .height(8)
+                                .build(),
+                            Container()
+                                .height(barHeight)
+                                .children([
+                                    Row()
+                                        .crossAlignment(CrossAxisAlignment.Stretch)
+                                        .children(barChildren)
+                                        .build(),
+                                ])
+                                .build(),
+                        ])
+                        .build(),
+                ])
+                .build(),
+        ])
+        .build();
 }
 
 function ReadyBody() {
     // Virtualized list: only visible items (+ overscan) are mounted. The
     // builder captures `index`; each row reads `entries$` reactively, so a
     // range switch updates mounted rows in place (no remount needed).
-    return LazyList({
-        axis: Axis.Vertical,
-        itemCount: derive((ctx) => ctx.get(entries$).length),
-        overscan: 6,
-        builder: (index: number) => {
+    return LazyList({ itemCount: derive((ctx) => ctx.get(entries$).length) })
+        .axis(Axis.Vertical)
+        .overscan(6)
+        .builder((index: number) => {
             const rank = index + 1;
             const children: Element[] = [];
             if (index === 0) {
@@ -532,89 +540,92 @@ function ReadyBody() {
                 // Gated so a single-entry range shows just the card — an
                 // empty `Text` would still reserve its line box.
                 children.push(
-                    Condition({
-                        condition: derive(
-                            (ctx) => ctx.get(entries$).length > 1,
-                        ),
-                        child: () =>
-                            Text({
-                                text: derive((ctx) => {
-                                    const n = ctx.get(entries$).length;
-                                    return `TOP ${Math.min(3, n)}`;
-                                }),
-                                fontSize: 11,
-                                color: COLOR_TEXT_MUTED,
-                            }),
-                    }),
+                    Condition({ condition: derive((ctx) => ctx.get(entries$).length > 1) })
+                        .child(() =>
+                            Text({ text: derive((ctx) => {
+                                const n = ctx.get(entries$).length;
+                                return `TOP ${Math.min(3, n)}`;
+                            }) })
+                                .fontSize(11)
+                                .color(COLOR_TEXT_MUTED)
+                                .build())
+                        .build(),
                 );
-                children.push(SizedBox({ height: 8 }));
+                children.push(SizedBox()
+                    .height(8)
+                    .build());
             } else if (index <= 2) {
                 // within the top-3 podium cluster
-                children.push(SizedBox({ height: 12 }));
+                children.push(SizedBox()
+                    .height(12)
+                    .build());
             } else if (index === 3) {
                 // boundary between podium (1–3) and the tail (4+): the
                 // density change IS the separator — no hairline divider
-                children.push(SizedBox({ height: 24 }));
+                children.push(SizedBox()
+                    .height(24)
+                    .build());
             } else {
-                children.push(SizedBox({ height: 12 }));
+                children.push(SizedBox()
+                    .height(12)
+                    .build());
             }
             children.push(RankedRow({ rank, index }));
             // Trailing bottom inset on the last item. The builder runs only
             // at mount, so the last-ness is a `derive` — a height-0 SizedBox
             // is invisible, and this also tracks list-length changes.
             children.push(
-                SizedBox({
-                    height: derive(
+                SizedBox()
+                    .height(derive(
                         (ctx) =>
                             ctx.get(entries$).length - 1 === index ? 24 : 0,
-                    ),
-                }),
+                    ))
+                    .build(),
             );
-            return Column({
-                crossAlignment: CrossAxisAlignment.Stretch,
-                mainAxisSize: MainAxisSize.Min,
-                children,
-            });
-        },
-    });
+            return Column()
+                .children(children)
+                .crossAlignment(CrossAxisAlignment.Stretch)
+                .mainAxisSize(MainAxisSize.Min)
+                .build();
+        })
+        .build();
 }
 
 function LoadingBody() {
-    return Container({
-        padding: 48,
-        children: [
-            Text({
-                text: "Loading…",
-                fontSize: 14,
-                color: COLOR_TEXT_MUTED,
-            }),
-        ],
-    });
+    return Container()
+        .padding(48)
+        .children([
+            Text({ text: "Loading…" })
+                .fontSize(14)
+                .color(COLOR_TEXT_MUTED)
+                .build(),
+        ])
+        .build();
 }
 
 function EmptyBody() {
-    return Container({
-        padding: 48,
-        children: [
-            Column({
-                crossAlignment: CrossAxisAlignment.Center,
-                mainAxisSize: MainAxisSize.Min,
-                children: [
-                    Text({
-                        text: "♪",
-                        fontSize: 32,
-                        color: withAlpha(themes.color("primary"), 150),
-                    }),
-                    SizedBox({ height: 12 }),
-                    Text({
-                        text: "No plays in this range.",
-                        fontSize: 14,
-                        color: COLOR_TEXT_MUTED,
-                    }),
-                ],
-            }),
-        ],
-    });
+    return Container()
+        .padding(48)
+        .children([
+            Column()
+                .crossAlignment(CrossAxisAlignment.Center)
+                .mainAxisSize(MainAxisSize.Min)
+                .children([
+                    Text({ text: "♪" })
+                        .fontSize(32)
+                        .color(withAlpha(themes.color("primary"), 150))
+                        .build(),
+                    SizedBox()
+                        .height(12)
+                        .build(),
+                    Text({ text: "No plays in this range." })
+                        .fontSize(14)
+                        .color(COLOR_TEXT_MUTED)
+                        .build(),
+                ])
+                .build(),
+        ])
+        .build();
 }
 
 // ---------------------------------------------------------------------------
@@ -632,33 +643,34 @@ function EmptyBody() {
 // the nested `Positioned`/follower directly. The follower lives in this
 // root `Stack` (the "root overlay slot") so it isn't clipped by ancestors.
 export const rootView = view(() =>
-    Stack({
-        children: [
-            Container({
-                color: COLOR_PAGE_BG,
-                padding: PAGE_PADDING,
-                children: [
-                    Column({
-                        crossAlignment: CrossAxisAlignment.Stretch,
-                        children: [
+    Stack()
+        .children([
+            Container()
+                .color(COLOR_PAGE_BG)
+                .padding(PAGE_PADDING)
+                .children([
+                    Column()
+                        .crossAlignment(CrossAxisAlignment.Stretch)
+                        .children([
                             HeaderRow(),
-                            SizedBox({ height: 14 }),
-                            Expanded({
-                                child: Switch({
-                                    value: status$,
-                                    cases: [
+                            SizedBox()
+                                .height(14)
+                                .build(),
+                            Expanded()
+                                .child(Switch({ value: status$ })
+                                    .cases([
                                         { key: "loading", child: LoadingBody },
                                         { key: "empty", child: EmptyBody },
                                         { key: "ready", child: ReadyBody },
-                                    ],
-                                }),
-                            }),
-                        ],
-                    }),
-                ],
-            }),
+                                    ])
+                                    .build())
+                                .build(),
+                        ])
+                        .build(),
+                ])
+                .build(),
             rangeSel.SelectorScrim(),
             rangeSel.SelectorMenu(),
-        ],
-    }),
+        ])
+        .build(),
 );
