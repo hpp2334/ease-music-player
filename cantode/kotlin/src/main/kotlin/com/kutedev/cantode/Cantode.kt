@@ -3,6 +3,7 @@ package com.kutedev.cantode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,6 +83,18 @@ class Cantode(
 
     private var pollJob: Job? = null
 
+    /**
+     * Single-lane dispatcher for [seek]: the JNI call blocks until the
+     * worker applies the seek (a network source may reopen its session
+     * inside it), so it must never run on the caller's thread — the app
+     * calls it from the UI thread. The single lane also preserves command
+     * order for rapid successive seeks. Daemon thread: idles for the
+     * process's lifetime.
+     */
+    private val seekDispatcher = java.util.concurrent.Executors
+        .newSingleThreadExecutor { r -> Thread(r, "cantode-seek").apply { isDaemon = true } }
+        .asCoroutineDispatcher()
+
     init {
         pollJob = scope.launch(Dispatchers.Default) {
             while (!isReleased) {
@@ -108,9 +121,16 @@ class Cantode(
         if (!isReleased) CantodeNative.stop(playerHandle)
     }
 
-    /** Seek to [ms] from source start (no-op without a loaded source). */
+    /**
+     * Seek to [ms] from source start (no-op without a loaded source).
+     * Asynchronous: posted on [seekDispatcher] and applied by the worker
+     * in order — observe the landed position through [positionMs].
+     */
     fun seek(ms: Long) {
-        if (!isReleased) CantodeNative.seek(playerHandle, ms)
+        if (isReleased) return
+        scope.launch(seekDispatcher) {
+            if (!isReleased) CantodeNative.seek(playerHandle, ms)
+        }
     }
 
     /** Set linear gain: `1.0` unity, `0.0` silent. */

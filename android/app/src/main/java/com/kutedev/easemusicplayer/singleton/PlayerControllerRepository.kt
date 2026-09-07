@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.singleton
 
 import android.content.Context
+import android.os.SystemClock
 import com.kutedev.cantode.Cantode
 import com.kutedev.cantode.PlayerState
 import com.kutedev.easemusicplayer.core.PlaybackService
@@ -29,6 +30,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -79,6 +81,12 @@ class PlayerControllerRepository @Inject constructor(
 
     @Volatile private var playerContextId: Long = -1L
     @Volatile private var playerId: Long = -1L
+
+    /**
+     * Optimistic seek target while the engine catches up — see [seek]
+     * and [getCurrentPosition].
+     */
+    @Volatile private var overridedSeek: OverridedSeek? = null
 
     private var setupStarted = false
 
@@ -179,9 +187,26 @@ class PlayerControllerRepository @Inject constructor(
         }
     }
 
-    /** Current position in ms (for the PlayerVM poll). */
+    /**
+     * Current position in ms (for the PlayerVM poll).
+     *
+     * Stateful: while an optimistic seek override is active (see
+     * [seek]), this returns the override target until the engine
+     * observable lands within [SEEK_SETTLE_TOLERANCE_MS] of it — or the
+     * override deadline passes (a seek the engine dropped/failed) — at
+     * which point it clears the override and returns engine truth again.
+     */
     fun getCurrentPosition(): Long {
-        return _cantodeEngine.value?.positionMs?.value ?: 0L
+        val engineMs = _cantodeEngine.value?.positionMs?.value ?: 0L
+        val overrided = overridedSeek ?: return engineMs
+        val settled = abs(engineMs - overrided.targetMs) <= SEEK_SETTLE_TOLERANCE_MS
+        val expired = SystemClock.elapsedRealtime() >= overrided.expiresAtMs
+        return if (settled || expired) {
+            overridedSeek = null
+            engineMs
+        } else {
+            overrided.targetMs
+        }
     }
 
     /**
@@ -219,6 +244,9 @@ class PlayerControllerRepository @Inject constructor(
         // `player.loadMusic` below reaches the worker; the optimistic
         // flag keeps the UI in its loading state until then.
         engine.stop()
+        // Position continuity breaks here — drop any live seek
+        // override so it can't pin the old position onto the new track.
+        overridedSeek = null
         playerRepository.setIsLoading(true)
 
         _scope.launch(Dispatchers.Main) {
@@ -324,6 +352,7 @@ class PlayerControllerRepository @Inject constructor(
     fun stop() {
         val engine = _cantodeEngine.value ?: return
         engine.stop()
+        overridedSeek = null
         playerRepository.resetCurrent()
         _pluginEvents.tryEmit(
             PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
@@ -354,6 +383,17 @@ class PlayerControllerRepository @Inject constructor(
 
     fun seek(ms: ULong) {
         val engine = _cantodeEngine.value ?: return
+        // Optimistic override: the engine applies the seek (decoder
+        // seek + sink flush, possibly an out-of-window source reopen)
+        // before its reply returns, but the new position only reaches
+        // the UI through the 10 Hz engine poll + the 1 Hz VM poll — up
+        // to ~1.1 s of stale position otherwise. Serve the target from
+        // [getCurrentPosition] until the engine observable settles on
+        // it (or the deadline gives up on a dropped seek).
+        overridedSeek = OverridedSeek(
+            targetMs = ms.toLong(),
+            expiresAtMs = SystemClock.elapsedRealtime() + SEEK_SETTLE_TIMEOUT_MS,
+        )
         engine.seek(ms.toLong())
     }
 
@@ -394,5 +434,19 @@ class PlayerControllerRepository @Inject constructor(
                 ).unwrapOrNull()
             }
         }
+    }
+
+    /** Optimistic seek target held until the engine position settles on it. */
+    private data class OverridedSeek(
+        val targetMs: Long,
+        val expiresAtMs: Long,
+    )
+
+    companion object {
+        /** Engine position within this window of the seek target counts as settled. */
+        private const val SEEK_SETTLE_TOLERANCE_MS = 500L
+
+        /** Give up on the override after this long (failed/unsupported seeks revert to engine truth). */
+        private const val SEEK_SETTLE_TIMEOUT_MS = 3_000L
     }
 }
