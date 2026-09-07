@@ -21,14 +21,14 @@
         "en-US": "OneDrive",
         "zh-CN": "OneDrive"
       },
-      "version": "0.0.3",
+      "version": "0.0.4",
       "description": {
         "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless JS plugin.",
         "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
       },
-      "zip": "zips/com.ease.onedrive-0.0.3.zip",
-      "sha256": "04aa556bf65fe2518f97f634ac8b8a8ddb24b59ba6f619fe908e95c6a5a7e470",
-      "size": 51048,
+      "zip": "zips/com.ease.onedrive-0.0.4.zip",
+      "sha256": "fdc1fed0319f1fa790a4588df2f3db61b2de92e8993cac61fd04efa133d58d92",
+      "size": 49955,
       "icon": "icons/com.ease.onedrive.png"
     },
     {
@@ -37,14 +37,14 @@
         "en-US": "Play Counts",
         "zh-CN": "播放计数"
       },
-      "version": "0.0.4",
+      "version": "0.0.5",
       "description": {
         "en-US": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
         "zh-CN": "统计每首歌的播放次数，覆盖今天、昨天、最近 3 天、最近一周、最近一月和最近一年。"
       },
-      "zip": "zips/com.ease.playcount-0.0.4.zip",
-      "sha256": "b6f69b8a94a3d53d5bd53509ea594181e892425d61166b7d5f9d0dc7323307de",
-      "size": 53783,
+      "zip": "zips/com.ease.playcount-0.0.5.zip",
+      "sha256": "63fdd749696cde8435fc258494ede04cdc51ca145efaa108d98296a05a29ee8d",
+      "size": 48710,
       "icon": "icons/com.ease.playcount.png"
     },
     {
@@ -53,14 +53,14 @@
         "en-US": "WebDAV",
         "zh-CN": "WebDAV"
       },
-      "version": "0.0.3",
+      "version": "0.0.4",
       "description": {
         "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless JS plugin.",
         "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
       },
-      "zip": "zips/com.ease.webdav-0.0.3.zip",
-      "sha256": "2d9c9857740ed20212c118fd84cc43df021fd938931cb28b07dc0dfbeabde9a0",
-      "size": 338764,
+      "zip": "zips/com.ease.webdav-0.0.4.zip",
+      "sha256": "80341834175ea9fc6a5e2b6ee29478c0e2436bd1512ad9185bcee6bc4f084950",
+      "size": 336096,
       "icon": "icons/com.ease.webdav.png"
     }
   ]

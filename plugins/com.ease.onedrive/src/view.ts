@@ -93,35 +93,30 @@ const hydrate$ = mutate((ctx: StoreCtx): void => {
 });
 
 function FieldLabel({ text }: { text: string }) {
-    return Text({
-        text,
-        fontSize: 13,
-        color: COLOR_TEXT_MUTED,
-    });
+    return Text({ text })
+        .fontSize(13)
+        .color(COLOR_TEXT_MUTED)
+        .build();
 }
 
 function AliasField() {
-    return Container({
-        color: COLOR_CARD,
-        borderColor: COLOR_DIVIDER,
-        borderWidth: 1,
-        borderRadius: 12,
-        padding: 10,
-        children: [
-            Input({
-                // The engine resolves a controller READABLE at build time
-                // (`editable_text/element.rs` falls back to `controller_atom`
-                // when no plain controller was given); the published typings
-                // only declare the plain form — hence the cast.
-                controller: aliasController$ as TextController,
-                placeholder: "OneDrive",
-                fontSize: 15,
-                color: COLOR_TEXT,
-                placeholderColor: COLOR_TEXT_MUTED,
-                cursorColor: COLOR_PRIMARY,
-            }),
-        ],
-    });
+    return Container()
+        .color(COLOR_CARD)
+        .borderColor(COLOR_DIVIDER)
+        .borderWidth(1)
+        .borderRadius(12)
+        .padding(10)
+        .children([
+            Input()
+                .controller(aliasController$ as TextController)
+                .placeholder("OneDrive")
+                .fontSize(15)
+                .color(COLOR_TEXT)
+                .placeholderColor(COLOR_TEXT_MUTED)
+                .cursorColor(COLOR_PRIMARY)
+                .build(),
+        ])
+        .build();
 }
 
 const connect$ = mutate((ctx: StoreCtx, _ev: PointerInteractEvent): void => {
@@ -138,22 +133,21 @@ const connect$ = mutate((ctx: StoreCtx, _ev: PointerInteractEvent): void => {
 });
 
 function ConnectButton() {
-    return PointerInteract({
-        behavior: HitTestBehavior.Opaque,
-        onClick: connect$,
-        child: Container({
-            color: COLOR_PRIMARY,
-            borderRadius: 24,
-            padding: 14,
-            children: [
-                Text({
-                    text: "连接你的账户",
-                    fontSize: 15,
-                    color: COLOR_WHITE,
-                }),
-            ],
-        }),
-    });
+    return PointerInteract()
+        .behavior(HitTestBehavior.Opaque)
+        .onClick(connect$)
+        .child(Container()
+            .color(COLOR_PRIMARY)
+            .borderRadius(24)
+            .padding(14)
+            .children([
+                Text({ text: "连接你的账户" })
+                    .fontSize(15)
+                    .color(COLOR_WHITE)
+                    .build(),
+            ])
+            .build())
+        .build();
 }
 
 const save$ = mutate((ctx: StoreCtx, _ev: PointerInteractEvent): void => {
@@ -170,22 +164,21 @@ const save$ = mutate((ctx: StoreCtx, _ev: PointerInteractEvent): void => {
 });
 
 function SaveButton() {
-    return PointerInteract({
-        behavior: HitTestBehavior.Opaque,
-        onClick: save$,
-        child: Container({
-            color: COLOR_PRIMARY,
-            borderRadius: 24,
-            padding: 14,
-            children: [
-                Text({
-                    text: "保存",
-                    fontSize: 15,
-                    color: COLOR_WHITE,
-                }),
-            ],
-        }),
-    });
+    return PointerInteract()
+        .behavior(HitTestBehavior.Opaque)
+        .onClick(save$)
+        .child(Container()
+            .color(COLOR_PRIMARY)
+            .borderRadius(24)
+            .padding(14)
+            .children([
+                Text({ text: "保存" })
+                    .fontSize(15)
+                    .color(COLOR_WHITE)
+                    .build(),
+            ])
+            .build())
+        .build();
 }
 
 const rootView = view(() => {
@@ -194,37 +187,40 @@ const rootView = view(() => {
     // documented `{ width, height }` shape. The reads are `derive` closures so
     // the page tracks viewport changes (the thunk itself runs once at mount).
     const vp$ = viewportSize$ as unknown as Readable<{ width: number; height: number }>;
-    const actionRow = Row({
-        mainAlignment: MainAxisAlignment.Start,
-        crossAlignment: CrossAxisAlignment.Center,
-        mainAxisSize: MainAxisSize.Min,
-        children: [
-            Condition({
-                condition: isEdit$,
-                child: () => SaveButton(),
-                elseChild: () => ConnectButton(),
-            }),
-        ],
-    });
-    return Container({
-        color: COLOR_CARD,
-        width: derive((ctx) => ctx.get(vp$).width),
-        height: derive((ctx) => ctx.get(vp$).height),
-        padding: 4,
-        children: [
-            Column({
-                crossAlignment: CrossAxisAlignment.Stretch,
-                mainAxisSize: MainAxisSize.Min,
-                children: [
+    const actionRow = Row()
+        .mainAlignment(MainAxisAlignment.Start)
+        .crossAlignment(CrossAxisAlignment.Center)
+        .mainAxisSize(MainAxisSize.Min)
+        .children([
+            Condition({ condition: isEdit$ })
+                .elseChild(() => ConnectButton())
+                .child(() => SaveButton())
+                .build(),
+        ])
+        .build();
+    return Container()
+        .color(COLOR_CARD)
+        .width(derive((ctx) => ctx.get(vp$).width))
+        .height(derive((ctx) => ctx.get(vp$).height))
+        .padding(4)
+        .children([
+            Column()
+                .crossAlignment(CrossAxisAlignment.Stretch)
+                .mainAxisSize(MainAxisSize.Min)
+                .children([
                     FieldLabel({ text: "服务器名称 (别名)" }),
-                    SizedBox({ height: 6 }),
+                    SizedBox()
+                        .height(6)
+                        .build(),
                     AliasField(),
-                    SizedBox({ height: 16 }),
+                    SizedBox()
+                        .height(16)
+                        .build(),
                     actionRow,
-                ],
-            }),
-        ],
-    });
+                ])
+                .build(),
+        ])
+        .build();
 });
 
 // Module lifecycle contract: mount inside `start({ store })` (the engine
