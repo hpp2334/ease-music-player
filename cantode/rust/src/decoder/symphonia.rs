@@ -350,17 +350,39 @@ impl Decoder for SymphoniaDecoder {
     }
 
     fn seek(&mut self, target: Duration) -> crate::Result<Duration> {
+        // Windowed (network) sources must NOT use Accurate mode: symphonia
+        // implements it for elementary streams (MP3) as "parse every frame
+        // between the current cursor and the target" — a forward seek
+        // re-streams the whole skipped span, a backward seek rewinds to
+        // byte 0 and re-parses the entire prefix. Over a buffered remote
+        // source that parks the worker mid-scan for seconds while it
+        // re-downloads megabytes (and thrashes the readahead window).
+        // Coarse does one proportional byte seek + a bounded resync scan;
+        // in-memory / local-file sources keep Accurate, where it is cheap
+        // and exact.
+        let mode = if self.source.lock().unwrap().buffered_range().is_some() {
+            SeekMode::Coarse
+        } else {
+            SeekMode::Accurate
+        };
         let seek_to = SeekTo::Time {
             time: Time::from(target),
             track_id: Some(self.track_id),
         };
         let sought = self
             .reader
-            .seek(SeekMode::Accurate, seek_to)
+            .seek(mode, seek_to)
             .map_err(|e| CantodeError::Decode(format!("seek: {e}")))?;
-        // Flush decoder state so the next packet starts cleanly.
+        // Flush decoder state so the next packet starts cleanly, and drop
+        // the spec-discovery frame held from `open` if it was never
+        // consumed — it belongs to the pre-seek position.
         self.decoder.reset();
-        Ok(ts_to_duration(sought.required_ts, self.time_base))
+        self.pending = None;
+        // Report where the cursor ACTUALLY landed. `required_ts` is just
+        // the request echoed back; a coarse seek on a VBR stream (or any
+        // packet-boundary rounding) may land elsewhere, and the player
+        // publishes the returned value as the new position.
+        Ok(ts_to_duration(sought.actual_ts, self.time_base))
     }
 
     fn format(&self) -> AudioFormat {

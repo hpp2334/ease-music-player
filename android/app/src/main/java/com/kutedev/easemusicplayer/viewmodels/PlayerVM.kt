@@ -81,7 +81,13 @@ class PlayerVM @Inject constructor(
     fun playNext() = playerControllerRepository.playNext()
     fun playPrevious() = playerControllerRepository.playPrevious()
     fun remove() = playerRepository.remove()
-    fun seek(ms: ULong) = playerControllerRepository.seek(ms)
+    fun seek(ms: ULong) {
+        playerControllerRepository.seek(ms)
+        // Pull the seek override into _currentMs now — not at the next
+        // 1 Hz tick — so the slider, the label and the lyric index flip
+        // to the target instantly.
+        syncPosition()
+    }
     fun play(id: MusicId, playlistId: PlaylistId) = playerControllerRepository.play(id, playlistId)
     fun changePlayModeToNext() = playerRepository.changePlayModeToNext()
     fun removeLyric() = playerRepository.removeLyric()

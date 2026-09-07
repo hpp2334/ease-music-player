@@ -198,7 +198,21 @@ pub extern "system" fn Java_com_kutedev_cantode_CantodeNative_seek(
     ms: jlong,
 ) {
     if let Some(p) = player(handle as u64) {
-        let _ = p.seek(std::time::Duration::from_millis(ms.max(0) as u64));
+        let target = std::time::Duration::from_millis(ms.max(0) as u64);
+        let started = std::time::Instant::now();
+        match p.seek(target) {
+            Ok(landed) => tracing::info!(
+                target_ms = target.as_millis() as u64,
+                landed_ms = landed.as_millis() as u64,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "ffi seek ok"
+            ),
+            Err(e) => tracing::warn!(
+                target_ms = target.as_millis() as u64,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "ffi seek failed: {e}"
+            ),
+        }
     }
 }
 
