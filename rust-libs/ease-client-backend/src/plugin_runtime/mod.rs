@@ -24,6 +24,7 @@
 
 pub mod context_bridge;
 pub mod db_bridge;
+pub mod fonts;
 pub mod host_cache;
 pub mod oauth_bridge;
 pub mod plugin;
