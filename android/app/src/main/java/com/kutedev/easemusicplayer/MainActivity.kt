@@ -78,6 +78,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Returning from the all-files-access settings screen (the R+
+        // storage permission is an appop, not a runtime dialog) must
+        // re-evaluate the gate the import page renders against.
+        permissionRepository.triggerPermissionChanged()
+    }
+
     override fun onStart() {
         super.onStart()
         ensurePostNotificationsPermission()

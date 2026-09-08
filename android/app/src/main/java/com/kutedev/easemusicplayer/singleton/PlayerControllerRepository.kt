@@ -287,7 +287,7 @@ class PlayerControllerRepository @Inject constructor(
                 // construction (storage plugins) and the metadata→DB
                 // writeback are business logic. `autoplay` completes it
                 // straight into Playing; no follow-up `play` command.
-                bridge.callRaw(
+                val loaded = bridge.callRaw(
                     "player.loadMusic",
                     buildJsonObject {
                         put("backendHandle", bridge.getBackendId())
@@ -296,6 +296,17 @@ class PlayerControllerRepository @Inject constructor(
                     },
                     handle = playerId,
                 ).unwrapOrNull()
+
+                if (loaded == null) {
+                    // The load failed (backend logged the error envelope) —
+                    // without this the UI sits on the optimistic loading
+                    // flag / BUFFERING spinner forever. Nothing is playing:
+                    // reset the state and surface a visible failure.
+                    playerRepository.setIsLoading(false)
+                    toastRepository.emitToast("play failed")
+                    return@launch
+                }
+
                 _pluginEvents.tryEmit(
                     PluginEvent.MusicPlay(
                         musicId = id,
