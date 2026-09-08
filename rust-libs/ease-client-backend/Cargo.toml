@@ -47,6 +47,12 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
+# CJK fallback fonts for the tur text pipeline (plugin_runtime/fonts.rs):
+# FallbackKey/Script/GenericFamily/Blob for the explicit script-fallback
+# registration that must not depend on the device's fonts.xml quirks.
+# Resolves to the same 0.9.0 instance tur's parley stack compiles against.
+fontique = "0.9"
+
 # tur engine integration (https://github.com/hpp2334/tur @ 51c27a0).
 # Brings the one-runtime multi-instance model (TurRuntime + TurApp), the
 # main↔worker threaded runtime (#178), the fully-wired bidirectional event

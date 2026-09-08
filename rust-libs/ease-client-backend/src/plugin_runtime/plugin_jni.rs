@@ -445,6 +445,13 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
             None => builder,
         };
         builder
+            // CJK fallback fonts: registered directly (see plugin_runtime::
+            // fonts.rs) so plugin-view text never depends on the device's
+            // fonts.xml quirks. Overrides tur's default NativeFontLoader
+            // (applied before this configure closure runs).
+            .font_loader(std::sync::Arc::new(
+                crate::plugin_runtime::fonts::EaseFontLoader,
+            ))
             .capability(move |_| Ok(Http::new(NativeHttp::new(handle.clone()))))
             .plugin(TurStdPlugin)
             .plugin(TurAnimationPlugin)
