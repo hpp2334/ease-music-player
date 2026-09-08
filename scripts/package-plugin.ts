@@ -188,3 +188,13 @@ for (const dir of pluginDirs) {
 registry.plugins.sort((a, b) => a.id.localeCompare(b.id));
 writeFileSync(INDEX_PATH, JSON.stringify(registry, null, 2) + "\n");
 console.log(`registry index updated: ${path.relative(ROOT, INDEX_PATH)}`);
+
+// The index is latest-only — prune zips it no longer references so
+// superseded versions don't accumulate in the committed registry
+// (the fetch flow only ever downloads indexed zips).
+const referenced = new Set(registry.plugins.map((p) => path.basename(p.zip)));
+for (const file of readdirSync(ZIPS_DIR)) {
+  if (!file.endsWith(".zip") || referenced.has(file)) continue;
+  execSync(`rm -f ${JSON.stringify(path.join(ZIPS_DIR, file))}`);
+  console.log(`pruned stale zip: zips/${file}`);
+}
