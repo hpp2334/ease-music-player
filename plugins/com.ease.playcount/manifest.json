@@ -1,10 +1,10 @@
 {
   "id": "com.ease.playcount",
   "name": { "en-US": "Play Counts", "zh-CN": "播放计数" },
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": {
-    "en-US": "Counts how many times each music has been played across Today, Yesterday, Last 3 Days, Last Week, Last Month, and Last Year.",
-    "zh-CN": "统计每首歌的播放次数，覆盖今天、昨天、最近 3 天、最近一周、最近一月和最近一年。"
+    "en-US": "Counts how many times each music has been played, filterable by time period (Today through Last Year) and by playlist membership.",
+    "zh-CN": "统计每首歌的播放次数，支持按时间段（今天到最近一年）和按播放列表成员过滤。"
   },
   "author": "ease",
   "icon": "icon.png",

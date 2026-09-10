@@ -10,11 +10,13 @@ import {
     createLayerLink,
     Alignment,
     Column,
-    Row,
     Container,
+    Row,
     SizedBox,
     Text,
     Condition,
+    Each,
+    Flexible,
     Positioned,
     PointerInteract,
     HitTestBehavior,
@@ -57,7 +59,10 @@ export interface SelectorHandle<T> {
 }
 
 export interface CreateSelectorOptions<T> {
-    options: SelectorOption<T>[];
+    /** Reactive option list — the menu rows re-render when it changes
+     * (`Each` rebuilds items), so the host data can flow in through an
+     * atom instead of a module-level snapshot. */
+    options$: Readable<SelectorOption<T>[]>;
     selectedValue$: Readable<T>;
     /** Dispatched when the user picks an option — a mutation handle, so it
      *  writes through the click's store ctx (`ctx.set(onSelect$, value)`);
@@ -67,6 +72,12 @@ export interface CreateSelectorOptions<T> {
     gap?: number;
     menuWidth?: number;
     triggerHeight?: number;
+    /** Which way the menu opens from the trigger: `"right"` (default)
+     * anchors the follower's top-RIGHT to the trigger's bottom-right, so
+     * the card extends leftward (for right-aligned triggers); `"left"`
+     * anchors top-LEFT to bottom-left, extending rightward (for
+     * left-aligned triggers, whose leftward card would clip off-screen). */
+    menuAlign?: "left" | "right";
     /** Full palette — required so every consumer passes its host-theme
      * colors; there is no built-in fallback palette. */
     style: SelectorStyle;
@@ -79,6 +90,7 @@ export function createSelector<T>(
     const gap = opts.gap ?? 6;
     const menuWidth = opts.menuWidth ?? 196;
     const triggerHeight = opts.triggerHeight ?? 36;
+    const menuAlign = opts.menuAlign ?? "right";
     const chipRadius = 999;
     const cardRadius = 14;
 
@@ -89,7 +101,7 @@ export function createSelector<T>(
         opts.label$ ??
         derive((ctx) => {
             const v = ctx.get(opts.selectedValue$);
-            const o = opts.options.find((x) => x.value === v);
+            const o = ctx.get(opts.options$).find((x) => x.value === v);
             return o ? o.label : "";
         });
 
@@ -112,11 +124,19 @@ export function createSelector<T>(
                             SizedBox()
                                 .width(14)
                                 .build(),
-                            Text({ text: label$ })
-                                .fontSize(13)
-                                .color(style.triggerText ?? style.text)
-                                .maxLines(1)
-                                .overflow("ellipsis")
+                            // `Flexible` (loose fit): the label shrink-wraps
+                            // when it fits the pill and ellipsizes at the
+                            // pill's true budget when it doesn't — the
+                            // Flutter-idiomatic shape (tur #227).
+                            Flexible()
+                                .child(
+                                    Text({ text: label$ })
+                                        .fontSize(13)
+                                        .color(style.triggerText ?? style.text)
+                                        .maxLines(1)
+                                        .overflow("ellipsis")
+                                        .build(),
+                                )
                                 .build(),
                             SizedBox()
                                 .width(8)
@@ -152,21 +172,30 @@ export function createSelector<T>(
                     ctx.get(selected$) ? style.primarySoft : style.surface,
                 ))
                 .borderRadius(10)
-                .padding(10)
+                .padding(12)
                 .children([
                     Row()
                         .mainAlignment(MainAxisAlignment.SpaceBetween)
                         .crossAlignment(CrossAxisAlignment.Center)
                         .children([
-                            Text({ text: option.label })
-                                .fontSize(13)
-                                .color(derive((ctx) =>
-                                    ctx.get(selected$)
-                                        ? style.primary
-                                        : style.text,
-                                ))
-                                .maxLines(1)
-                                .overflow("ellipsis")
+                            // `Flexible` (FlexFit.loose, tur #227) gives the
+                            // label a finite width budget: non-flex Row
+                            // children get an UNBOUNDED main axis (RenderFlex
+                            // parity — in Flutter too), where an ellipsizing
+                            // `Text` has no true budget at all.
+                            Flexible()
+                                .child(
+                                    Text({ text: option.label })
+                                        .fontSize(13)
+                                        .color(derive((ctx) =>
+                                            ctx.get(selected$)
+                                                ? style.primary
+                                                : style.text,
+                                        ))
+                                        .maxLines(1)
+                                        .overflow("ellipsis")
+                                        .build(),
+                                )
                                 .build(),
                             Condition({ condition: selected$ })
                                 .child(() =>
@@ -183,13 +212,6 @@ export function createSelector<T>(
     }
 
     function MenuCard(): Element {
-        const rows: Element[] = [];
-        opts.options.forEach((o, i) => {
-            if (i > 0) rows.push(SizedBox()
-                .height(4)
-                .build());
-            rows.push(OptionRow(o));
-        });
         return Container()
             .width(menuWidth)
             .color(style.surface)
@@ -207,7 +229,26 @@ export function createSelector<T>(
                             .mainAlignment(MainAxisAlignment.Start)
                             .crossAlignment(CrossAxisAlignment.Stretch)
                             .mainAxisSize(MainAxisSize.Min)
-                            .children(rows)
+                            .children([
+                                // Reactive rows: `Each` rebuilds an item when
+                                // the options atom changes (length or not),
+                                // so the menu follows host data that flows
+                                // in through an atom. A height-0 SizedBox
+                                // fronts every row after the first.
+                                Each({ items: opts.options$ })
+                                    .itemBuilder((o: SelectorOption<T>, i: number) =>
+                                        Column()
+                                            .crossAlignment(CrossAxisAlignment.Stretch)
+                                            .mainAxisSize(MainAxisSize.Min)
+                                            .children([
+                                                SizedBox()
+                                                    .height(i === 0 ? 0 : 4)
+                                                    .build(),
+                                                OptionRow(o),
+                                            ])
+                                            .build())
+                                    .build(),
+                            ])
                             .build(),
                     ])
                     .build(),
@@ -246,18 +287,24 @@ export function createSelector<T>(
         // Menu: a DIRECT Stack child (always mounted) so the
         // CompositedTransformSubsystem tracks and repositions it; the
         // `Condition` gating open/close lives INSIDE so the follower stays
-        // linked. The trigger sits top-right, so the menu opens right-aligned:
-        // the follower's top-right (`followerAnchor`) lands on the pill's
-        // bottom-right (`targetAnchor`), so the card extends leftward and
-        // stays on-screen.
-        SelectorMenu: () =>
-            CompositedTransformFollower({ link })
-                .targetAnchor(Alignment.BottomRight)
-                .followerAnchor(Alignment.TopRight)
+        // linked. Which corner pair anchors depends on `menuAlign`: the
+        // default extends the card LEFTWARD from a right-aligned trigger
+        // (stays on-screen); `"left"` extends it rightward from a
+        // left-aligned trigger's left edge.
+        SelectorMenu: () => {
+            const follower = CompositedTransformFollower({ link })
+                .targetAnchor(
+                    menuAlign === "left" ? Alignment.BottomLeft : Alignment.BottomRight,
+                )
+                .followerAnchor(
+                    menuAlign === "left" ? Alignment.TopLeft : Alignment.TopRight,
+                )
                 .targetOffset({ x: 0, y: gap })
                 .child(Condition({ condition: open$ })
                     .child(() => MenuCard())
                     .build())
-                .build(),
+                .build();
+            return follower;
+        },
     };
 }

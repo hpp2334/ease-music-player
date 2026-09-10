@@ -9,13 +9,14 @@
 //! calling plugin's identity from the per-instance data slot.
 //!
 //! ```js
-//! import { db, secret, oauth, themes, context, rpc } from "ease";
+//! import { db, secret, oauth, themes, context, rpc, library } from "ease";
 //! db.singleGet("key");              // ← plugin id resolved in Rust
 //! secret.put("refresh-token");
 //! oauth.start("onedrive", alias);
 //! themes.color("primary");
 //! rpc.call("webdav:test", { ... });    // view → its backend (viewRpc scope)
 //! store.get(context.storageId$);        // null = create, id = edit
+//! library.playlists();                  // read-only host playlist roster
 //! ```
 //!
 //! The `context` namespace additionally carries `storageId$` — a
@@ -39,7 +40,10 @@ use tur_engine::core::plugin::{Plugin, PluginRegisterContext};
 use tur_engine::error::TurError;
 
 use super::PluginInstance;
-use super::{context_bridge, db_bridge, oauth_bridge, rpc_bridge, secret_bridge, themes_bridge, webapi};
+use super::{
+    context_bridge, db_bridge, library_bridge, oauth_bridge, rpc_bridge, secret_bridge,
+    themes_bridge, webapi,
+};
 
 pub struct EaseMusicPlugin;
 
@@ -88,6 +92,7 @@ impl Plugin for EaseMusicPlugin {
         let themes_obj = build_namespace(boa, &js_ctx_value, themes_bridge::build_fns());
         let rpc_obj = build_namespace(boa, &js_ctx_value, rpc_bridge::build_fns());
         let context_obj = build_namespace(boa, &js_ctx_value, context_bridge::build_fns());
+        let library_obj = build_namespace(boa, &js_ctx_value, library_bridge::build_fns());
 
         // Attach the per-instance `storageId$` readable to the context
         // namespace object — JS reads it via `get(context.storageId$)`.
@@ -100,12 +105,13 @@ impl Plugin for EaseMusicPlugin {
             ("themes", JsValue::from(themes_obj)),
             ("rpc", JsValue::from(rpc_obj)),
             ("context", JsValue::from(context_obj)),
+            ("library", JsValue::from(library_obj)),
         ];
 
         ctx.register_module("ease", vec![], consts);
 
         tracing::info!(
-            "EaseMusicPlugin registered ease (unified: db + secret + oauth + themes + rpc + context)"
+            "EaseMusicPlugin registered ease (unified: db + secret + oauth + themes + rpc + context + library)"
         );
         Ok(())
     }

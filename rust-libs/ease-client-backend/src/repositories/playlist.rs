@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use ease_client_migration::converter;
 use ease_client_schema::entities::{music, playlist, playlist_music};
-use ease_client_schema::{BlobId, MusicId, PlaylistId, PlaylistModel, StorageEntryLoc};
+use ease_client_schema::{
+    BlobId, MusicId, PlaylistId, PlaylistModel, PlaylistMusicModel, StorageEntryLoc,
+};
 use ease_order_key::OrderKey;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -32,6 +34,23 @@ impl DatabaseServer {
             rows.into_iter().map(converter::playlist_to_model).collect();
         ret.sort_by_key(|v| OrderKey::wrap(v.order.clone()));
         Ok(ret)
+    }
+
+    /// Every playlist↔music edge in one query — the membership snapshot for
+    /// read-only library access (`ease.library.playlists()`), which groups
+    /// these per playlist instead of issuing one query per playlist.
+    pub async fn load_all_playlist_music_edges(
+        self: &Arc<Self>,
+    ) -> BResult<Vec<PlaylistMusicModel>> {
+        let db = self.db();
+        let rows = playlist_music::Entity::find().all(&db).await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| PlaylistMusicModel {
+                playlist_id: PlaylistId::wrap(row.playlist_id),
+                music_id: MusicId::wrap(row.music_id),
+            })
+            .collect())
     }
 
     pub async fn create_playlist(
