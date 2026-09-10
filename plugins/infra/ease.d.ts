@@ -3,7 +3,7 @@
 // Registered by the Rust plugin runtime (`plugin_runtime::plugin.rs`) as a
 // synthetic tur module with grouped namespace consts:
 //
-//     import { db, secret, oauth, themes, rpc, context } from "ease";
+//     import { db, secret, oauth, themes, rpc, context, library } from "ease";
 //     db.singleGet("key");               // identity resolved in Rust
 //     secret.put("refresh-token");
 //     const oauthId = oauth.new();
@@ -11,6 +11,7 @@
 //     themes.color("primary");           // throws on unknown names
 //     rpc.call("webdav:test", { ... });  // view → its backend handler
 //     store.get(context.storageId$);     // null = create, id = edit
+//     library.playlists();               // read-only host playlist roster
 //
 // Per-instance identity: the Kotlin host stamps a `PluginId` into each tur
 // instance at build time (via `TurAppBuilder::instance_data`). Bridge fns
@@ -148,6 +149,35 @@ declare module "ease" {
          * (`hostRpc.registerHandler` / `registerStream`) are out of reach.
          */
         call(op: string, args?: unknown): Promise<any>;
+    };
+
+    // ---- library namespace -----------------------------------------------
+
+    /** Playlist summary returned by [`library.playlists`]. */
+    export interface PlaylistInfo {
+        /**
+         * Stringified playlist row id — the same id form the app uses for
+         * playlists. Stable for the playlist's lifetime.
+         */
+        id: string;
+        title: string;
+        /**
+         * Stringified music ids of the playlist's members (unordered) —
+         * the same id form `music:play` event payloads carry, so members
+         * match stored play rows with plain string comparison.
+         */
+        musicIds: string[];
+    }
+
+    export const library: {
+        /**
+         * Snapshot of the host's playlists in the app's playlist order:
+         * `[{ id, title, musicIds }]`. Read-only host library info —
+         * synchronous (blocks the engine thread ~ms for the two SQLite
+         * reads). Membership is the host's CURRENT state: a snapshot taken
+         * at view load does not track later playlist edits.
+         */
+        playlists(): PlaylistInfo[];
     };
 
     // ---- context namespace ------------------------------------------------

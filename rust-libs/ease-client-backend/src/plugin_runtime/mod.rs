@@ -6,10 +6,11 @@
 //! process-wide [`crate::BACKEND_CONTEXT`] OnceLock. The bridge exposes
 //! one synthetic JS module to plugins:
 //!
-//! - `ease` — unified host module exporting four grouped namespace objects:
-//!   `db`, `secret`, `oauth`, `themes`. Each method is ctx-bound
-//!   (`extract_js_ctx`) so bridge fns can resolve the calling plugin's
-//!   identity from the per-instance data slot — never from a JS argument.
+//! - `ease` — unified host module exporting grouped namespace objects:
+//!   `db`, `secret`, `oauth`, `themes`, `rpc`, `context`, `library`. Each
+//!   method is ctx-bound (`extract_js_ctx`) so bridge fns can resolve the
+//!   calling plugin's identity from the per-instance data slot — never from
+//!   a JS argument.
 //!
 //! Per-instance identity: the Kotlin host stamps a [`PluginId`] into each
 //! tur instance at build time via `TurAppBuilder::instance_data(|cx|
@@ -26,6 +27,7 @@ pub mod context_bridge;
 pub mod db_bridge;
 pub mod fonts;
 pub mod host_cache;
+pub mod library_bridge;
 pub mod oauth_bridge;
 pub mod plugin;
 pub mod plugin_jni;
