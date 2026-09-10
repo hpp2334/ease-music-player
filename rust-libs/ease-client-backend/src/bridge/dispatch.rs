@@ -668,11 +668,11 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
         "plugin.sourceRemember" => {
             #[derive(Deserialize)]
             struct Args {
-                url: String,
+                baseUrl: String,
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            plugin_manager::remember_source(&cx.arg.app_document_dir, &args.url)?;
+            plugin_manager::remember_source(&cx.arg.app_document_dir, &args.baseUrl)?;
             Ok((Value::Null, vec![]))
         }
         "plugin.sourceAddCustom" => {
@@ -699,11 +699,11 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
         "plugin.sourceRemoveCustom" => {
             #[derive(Deserialize)]
             struct Args {
-                url: String,
+                baseUrl: String,
             }
             let args: Args = serde_json::from_value(req.args)?;
             let cx = must_backend(handle)?;
-            plugin_manager::remove_custom_source(&cx.arg.app_document_dir, &args.url)?;
+            plugin_manager::remove_custom_source(&cx.arg.app_document_dir, &args.baseUrl)?;
             Ok((Value::Null, vec![]))
         }
 

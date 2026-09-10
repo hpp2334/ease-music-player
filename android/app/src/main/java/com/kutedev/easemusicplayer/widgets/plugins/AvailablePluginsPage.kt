@@ -326,8 +326,9 @@ private fun SourceDialog(
                             )
                         }
                         if (!source.preset) {
+                            Box(modifier = Modifier.width(8.dp))
                             EaseIconButton(
-                                sizeType = EaseIconButtonSize.Small,
+                                sizeType = EaseIconButtonSize.Medium,
                                 buttonType = EaseIconButtonType.Error,
                                 painter = painterResource(id = R.drawable.icon_deleteseep),
                                 onClick = { onRemoveCustom(source.url) },
