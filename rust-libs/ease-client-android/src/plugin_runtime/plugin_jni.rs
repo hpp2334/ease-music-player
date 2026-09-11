@@ -513,7 +513,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
 /// reload (scan + spawn + wire, Rust-side).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_bindPluginRuntime(
-    mut env: tur_android::JNIEnv,
+    env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     backend_handle: tur_android::jlong,
     runtime_handle: tur_android::jlong,

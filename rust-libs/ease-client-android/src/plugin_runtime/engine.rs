@@ -195,7 +195,7 @@ impl PluginEngineHost for TurEngineHost {
         }
         #[cfg(not(target_os = "android"))]
         {
-            let _ = (plugin_id, source_handle);
+            let _ = plugin_id;
             anyhow::bail!("headless spawn requires Android")
         }
     }

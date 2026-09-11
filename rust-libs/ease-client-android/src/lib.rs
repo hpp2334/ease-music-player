@@ -51,7 +51,7 @@ static ANDROID_CONTEXT_CONFIGURED: OnceLock<()> = OnceLock::new();
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_EaseMusicPlayerApplication_nativeInitAndroidContext(
-    mut env: jni::JNIEnv,
+    env: jni::JNIEnv,
     _class: jni::objects::JClass,
     context: jni::objects::JObject,
 ) {
