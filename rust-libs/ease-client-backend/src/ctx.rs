@@ -104,12 +104,24 @@ impl BackendContext {
         self.internal.storage_path.read().unwrap().clone()
     }
 
-    pub(crate) fn storage_state(&self) -> &Arc<StorageState> {
+    pub fn storage_state(&self) -> &Arc<StorageState> {
         &self.internal.storage_state
     }
 
-    pub(crate) fn database_server(&self) -> &Arc<DatabaseServer> {
+    pub fn database_server(&self) -> &Arc<DatabaseServer> {
         &self.internal.database_server
+    }
+
+    /// The app documents directory the backend was initialized with (where
+    /// the DB, plugin tree and logs live). Empty before `backend.create`.
+    pub fn get_app_document_dir(&self) -> String {
+        self.internal.app_document_dir.read().unwrap().clone()
+    }
+
+    /// Set the app documents directory (during `backend.create` /
+    /// initialization).
+    pub fn set_app_document_dir(&self, dir: &str) {
+        *self.internal.app_document_dir.write().unwrap() = dir.to_string();
     }
 
     /// Publish the JS backend-plugin RPC handle for `plugin_id`. Called once

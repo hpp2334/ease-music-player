@@ -19,7 +19,9 @@
 //! side-channel — an `Array<ByteArray>` on the Kotlin side. The payload
 //! references elements by `bytesIndex: N`.
 
-pub(crate) mod dispatch;
-pub(crate) mod handle_table;
-pub(crate) mod jni;
-pub(crate) mod request;
+pub mod dispatch;
+pub mod handle_table;
+pub mod request;
+
+// The JNI entrypoint itself (`EaseBridge.call`) lives in the
+// `ease-client-android` crate — the cdylib the app loads.

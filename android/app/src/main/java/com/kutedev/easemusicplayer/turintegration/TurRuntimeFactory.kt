@@ -8,7 +8,7 @@ import android.content.Context
  *
  * Implemented as a thin wrapper around the app's own
  * `external fun createRuntime(...)` JNI function exported by
- * `libease_client_backend.so` (see
+ * `libease_client_android.so` (see
  * `Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createRuntime`).
  *
  * The runtime is created **once** (system-font discovery + plugin registration

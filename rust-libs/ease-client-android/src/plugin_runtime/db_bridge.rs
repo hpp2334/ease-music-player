@@ -19,7 +19,7 @@ use boa_engine::{js_string, JsArgs, JsError, JsNativeError, JsResult, JsValue};
 use ease_client_schema::PluginKvEntry;
 use tur_engine::core::js_runtime::helpers::{extract_js_ctx, FnEntry, Ptr};
 
-use crate::error::BResult;
+use ease_client_backend::error::BResult;
 use crate::plugin_runtime::PluginId;
 
 /// Build the `FnEntry` table for the `db` namespace object. Each entry
@@ -175,7 +175,7 @@ fn run_blocking<R>(description: &str, result: BResult<R>) -> JsResult<R> {
     })
 }
 
-fn db_clone(args: &[JsValue]) -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServer>> {
+fn db_clone(args: &[JsValue]) -> JsResult<std::sync::Arc<ease_client_backend::repositories::core::DatabaseServer>> {
     let cx = crate::plugin_runtime::backend_cx("db", args)?;
     Ok(cx.database_server().clone())
 }

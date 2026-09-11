@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicLong
  * isolated [TurInstance]s are spawned from.
  *
  * Built once via [EasePluginBridge.createRuntime] (which calls into
- * `libease_client_backend.so` with the Ease plugin set). From a runtime,
+ * `libease_client_android.so` with the Ease plugin set). From a runtime,
  * spawn isolated instances via [createInstance] (renderer-less; attach an
  * `android.view.Surface` later via [TurInstance.attach]) or headless
  * instances via [createHeadlessInstance]. Multiple instances share the

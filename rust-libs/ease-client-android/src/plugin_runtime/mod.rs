@@ -4,7 +4,7 @@
 //! This module wires the engine (linked as an rlib into
 //! `libease_client_backend.so`) to the ease backend's services. The
 //! backend binding is **instance-attached**: `createRuntime` resolves the
-//! [`crate::ctx::BackendContext`] from the backend handle the Kotlin host
+//! [`ease_client_backend::ctx::BackendContext`] from the backend handle the Kotlin host
 //! passes in, [`plugin::EaseMusicPlugin`] carries it and stamps it into
 //! every instance's plugin state at register time ([`PluginBackendCx`]),
 //! and the bridge fns read it back from their per-instance context — no
@@ -30,6 +30,7 @@
 
 pub mod context_bridge;
 pub mod db_bridge;
+pub mod engine;
 pub mod fonts;
 pub mod host_cache;
 pub mod library_bridge;
@@ -45,9 +46,6 @@ use boa_engine::{JsError, JsNativeError, JsResult, JsValue};
 use tur_engine::core::js_runtime::helpers::extract_js_ctx;
 
 pub use plugin::EaseMusicPlugin;
-
-#[cfg(target_os = "android")]
-pub(crate) use plugin_jni::read_asset_bytes;
 
 /// Per-instance plugin identity, stamped into the tur engine's
 /// `instance_data` slot at build time (via `TurAppBuilder::instance_data`)
@@ -95,19 +93,19 @@ pub struct PluginInstance(pub Option<String>);
 /// [`plugin::EaseMusicPlugin::register`]. Bridge fns resolve it via
 /// [`backend_cx`] — there is no process-wide backend singleton anymore.
 ///
-/// [`crate::ctx::BackendContext`] is itself an `Arc`-backed cheap clone, so
+/// [`ease_client_backend::ctx::BackendContext`] is itself an `Arc`-backed cheap clone, so
 /// bridge fns clone it out of the `Rc`-boxed (single-threaded boa side)
 /// plugin state without any lifetime gymnastics.
-pub struct PluginBackendCx(pub(crate) crate::ctx::BackendContext);
+pub struct PluginBackendCx(pub ease_client_backend::ctx::BackendContext);
 
-/// Resolve the [`crate::ctx::BackendContext`] bound to the calling plugin
+/// Resolve the [`ease_client_backend::ctx::BackendContext`] bound to the calling plugin
 /// instance ([`PluginBackendCx`]). `ns` names the `ease:<ns>` bridge for
 /// the error message. Fails loudly when the engine was built without a
 /// backend binding — previously this was a silent global miss.
 pub(crate) fn backend_cx(
     ns: &str,
     args: &[JsValue],
-) -> JsResult<crate::ctx::BackendContext> {
+) -> JsResult<ease_client_backend::ctx::BackendContext> {
     let js_ctx = extract_js_ctx(args)?;
     js_ctx
         .plugin_state::<PluginBackendCx>()

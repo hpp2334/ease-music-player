@@ -201,7 +201,7 @@ class MainActivity : ComponentActivity() {
 class EaseMusicPlayerApplication : Application() {
     companion object {
         init {
-            System.loadLibrary("ease_client_backend")
+            System.loadLibrary("ease_client_android")
         }
     }
 

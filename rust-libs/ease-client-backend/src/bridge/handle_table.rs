@@ -25,20 +25,20 @@ fn table() -> &'static Mutex<std::collections::HashMap<u64, HandleEntry>> {
 }
 
 /// Discriminated entry stored in the table. Matched by [`get`] helpers.
-pub(crate) enum HandleEntry {
+pub enum HandleEntry {
     Backend(std::sync::Arc<Backend>),
     PlayerContext(std::sync::Arc<PlayerContextHandle>),
     Player(std::sync::Arc<PlayerHandle>),
 }
 
 /// Register a new entry and return its handle ID.
-pub(crate) fn register(entry: HandleEntry) -> u64 {
+pub fn register(entry: HandleEntry) -> u64 {
     let id = NEXT_HANDLE_ID.fetch_add(1, Ordering::Relaxed);
     table().lock().unwrap().insert(id, entry);
     id
 }
 
-pub(crate) fn get_backend(id: u64) -> Option<std::sync::Arc<Backend>> {
+pub fn get_backend(id: u64) -> Option<std::sync::Arc<Backend>> {
     let guard = table().lock().unwrap();
     match guard.get(&id)? {
         HandleEntry::Backend(b) => Some(b.clone()),
@@ -46,7 +46,7 @@ pub(crate) fn get_backend(id: u64) -> Option<std::sync::Arc<Backend>> {
     }
 }
 
-pub(crate) fn get_player_context(id: u64) -> Option<std::sync::Arc<PlayerContextHandle>> {
+pub fn get_player_context(id: u64) -> Option<std::sync::Arc<PlayerContextHandle>> {
     let guard = table().lock().unwrap();
     match guard.get(&id)? {
         HandleEntry::PlayerContext(c) => Some(c.clone()),
@@ -54,7 +54,7 @@ pub(crate) fn get_player_context(id: u64) -> Option<std::sync::Arc<PlayerContext
     }
 }
 
-pub(crate) fn get_player(id: u64) -> Option<std::sync::Arc<PlayerHandle>> {
+pub fn get_player(id: u64) -> Option<std::sync::Arc<PlayerHandle>> {
     let guard = table().lock().unwrap();
     match guard.get(&id)? {
         HandleEntry::Player(p) => Some(p.clone()),
@@ -64,6 +64,6 @@ pub(crate) fn get_player(id: u64) -> Option<std::sync::Arc<PlayerHandle>> {
 
 /// Remove a handle from the table. Returns true if it was present.
 #[allow(dead_code)]
-pub(crate) fn remove(id: u64) -> bool {
+pub fn remove(id: u64) -> bool {
     table().lock().unwrap().remove(&id).is_some()
 }

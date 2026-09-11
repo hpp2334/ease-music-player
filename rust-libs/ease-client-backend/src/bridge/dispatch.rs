@@ -59,7 +59,7 @@ use crate::{
 pub(crate) type DispatchResult = BResult<(Value, Vec<Vec<u8>>)>;
 
 /// Top-level entry: builds the envelope around [`dispatch_inner`].
-pub(crate) async fn dispatch(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> (Value, Vec<Vec<u8>>) {
+pub async fn dispatch(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> (Value, Vec<Vec<u8>>) {
     match dispatch_inner(req, buffers).await {
         Ok((payload, bufs)) => (json!({ "success": true, "payload": payload }), bufs),
         Err(e) => {

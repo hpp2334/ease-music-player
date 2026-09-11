@@ -4,9 +4,11 @@ import path from "node:path";
 import { readdirSync, rmSync } from "node:fs";
 
 // Unified JSON+buffer bridge — no UniFFI bindgen step required.
-// The Rust cdylib is cross-compiled directly; the single JNI entrypoint
-// `Java_com_kutedev_easemusicplayer_singleton_EaseBridge_call` is
-// hand-written in `rust-libs/ease-client-backend/src/bridge/jni.rs`.
+// The Rust cdylib is cross-compiled directly; the JNI entrypoints
+// (`EaseBridge.call`, `TurNative.*`, `EasePluginBridge.*`) are hand-written
+// in `rust-libs/ease-client-android/src/` (bridge_jni.rs +
+// plugin_runtime/plugin_jni.rs) — the Android embedder crate that links
+// the platform-agnostic `ease-client-backend` as an rlib.
 
 // The only .so the app loads via System.loadLibrary. Upstream deps
 // (`boa_engine`, `redb`) declare `cdylib` crate-types, so cargo builds
@@ -14,16 +16,16 @@ import { readdirSync, rmSync } from "node:fs";
 // cargo-ndk blindly copies every `lib*.so` from the target dir into
 // jniLibs, from where AGP ships them in the APK. Filter everything
 // else back out.
-const JNI_LIB = "libease_client_backend.so";
+const JNI_LIB = "libease_client_android.so";
 
 for (const buildTarget of TARGETS) {
   // Wipe the ABI dir first: cargo ndk only *adds* files there, so stale
   // outputs would otherwise survive forever.
   const jniLibsAbiDir = path.resolve(ROOT, "android/app/src/main/jniLibs", buildTarget);
   rmSync(jniLibsAbiDir, { recursive: true, force: true });
-  console.log(`Cross-compiling ease-client-backend for ${buildTarget}`);
+  console.log(`Cross-compiling ease-client-android for ${buildTarget}`);
   execSync(
-    `cargo ndk --platform 30 --target ${buildTarget} -o ${path.resolve(ROOT, "android/app/src/main/jniLibs")} build -p ease-client-backend --release --lib`,
+    `cargo ndk --platform 30 --target ${buildTarget} -o ${path.resolve(ROOT, "android/app/src/main/jniLibs")} build -p ease-client-android --release --lib`,
     {
       stdio: "inherit",
       cwd: RUST_LIBS_ROOTS,
