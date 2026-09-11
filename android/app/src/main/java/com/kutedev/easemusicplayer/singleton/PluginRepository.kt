@@ -4,6 +4,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
@@ -148,7 +150,26 @@ class PluginRepository @Inject constructor(
     private val bridge: Bridge,
     private val _scope: CoroutineScope,
     @ApplicationContext private val context: Context,
+    easeBackend: EaseBackend,
 ) {
+    init {
+        // Rust-driven refresh: every backend reload (install / uninstall /
+        // enable / disable / bind) emits PLUGINS_CHANGED; rescan debounced
+        // (collectLatest + delay) so bursts coalesce into one `plugin.list`.
+        _scope.launch(Dispatchers.Default) {
+            easeBackend.signals.collectLatest {
+                if (it is BackendSignal.PluginsChanged) {
+                    delay(250)
+                    bridge.logRaw(
+                        "info",
+                        "plugins changed (generation ${it.generation}) — rescanning",
+                    )
+                    scanPlugins()
+                }
+            }
+        }
+    }
+
     private val _installedPlugins = MutableStateFlow<List<PluginManifest>>(emptyList())
     val installedPlugins = _installedPlugins.asStateFlow()
 
