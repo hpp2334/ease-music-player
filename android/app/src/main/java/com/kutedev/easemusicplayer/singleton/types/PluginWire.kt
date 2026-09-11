@@ -63,6 +63,10 @@ data class PluginListResult(
     /** User's per-extension lyric-parser picks (extension →
      * `"<pluginId>:<parserId>"`); absent entry = Auto. */
     val lyricParserSelection: Map<String, String> = emptyMap(),
+    /** Non-fatal scan problems (module-source registration failures,
+     * unreadable view files, …) — also logged Rust-side; surfaced here so
+     * future UI can render them. */
+    val warnings: List<String> = emptyList(),
 )
 
 @Serializable

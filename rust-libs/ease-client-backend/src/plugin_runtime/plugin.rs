@@ -27,8 +27,8 @@
 //! Installed alongside `TurStdPlugin` / `TurAnimationPlugin` /
 //! `TurClipboardPlugin` / `TurNetPlugin` (the standard tur set) by
 //! [`super::plugin_jni::create_ease_plugin_engine`]. Carries no per-instance
-//! state — every call resolves the active [`crate::BackendContext`] through
-//! the [`crate::BACKEND_CONTEXT`] OnceLock at call time.
+//! state — every fn resolves the backend bound to its instance through the
+//! [`PluginBackendCx`] plugin state stamped by [`EaseMusicPlugin::register`].
 
 use boa_engine::object::JsObject;
 use boa_engine::{js_string, JsValue};
@@ -42,19 +42,36 @@ use tur_engine::error::TurError;
 use super::PluginInstance;
 use super::{
     context_bridge, db_bridge, library_bridge, oauth_bridge, rpc_bridge, secret_bridge,
-    themes_bridge, webapi,
+    themes_bridge, webapi, PluginBackendCx,
 };
 
-pub struct EaseMusicPlugin;
+/// The `ease` host module plugin. Carries the [`crate::ctx::BackendContext`]
+/// this engine is bound to (resolved from the backend handle at
+/// `createRuntime`) and stamps it into every instance's plugin state at
+/// register time, so the `ease:*` bridge fns resolve their backend through
+/// the instance instead of a process-wide singleton.
+pub struct EaseMusicPlugin {
+    cx: crate::ctx::BackendContext,
+}
 
-impl Default for EaseMusicPlugin {
-    fn default() -> Self {
-        Self
+impl EaseMusicPlugin {
+    /// Bind the plugin set to `cx`. The context must outlive every instance
+    /// spawned from the runtime — it is held by a cheap clone here and by
+    /// each instance's [`PluginBackendCx`] plugin state.
+    pub fn new(cx: crate::ctx::BackendContext) -> Self {
+        Self { cx }
     }
 }
 
 impl Plugin for EaseMusicPlugin {
     fn register(&self, ctx: &mut PluginRegisterContext<'_>) -> Result<(), TurError> {
+        // Bind this instance to the plugin's backend context BEFORE anything
+        // else — every `ease:*` bridge fn reads it back via `backend_cx`.
+        // `define_plugin_state` is register-phase only and panics on a
+        // duplicate type, so a double registration fails fast instead of
+        // silently rebinding.
+        ctx.define_plugin_state(std::rc::Rc::new(PluginBackendCx(self.cx.clone())));
+
         // Read the per-instance storage identity + mint the `storageId$`
         // source BEFORE borrowing `boa_mut()` — `ctx.reactive()` and
         // `ctx.js_ctx.data::<PluginInstance>()` are shared borrows, while

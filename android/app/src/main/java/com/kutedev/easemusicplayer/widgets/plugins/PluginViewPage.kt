@@ -20,13 +20,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,7 +35,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.singleton.resolve
-import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
 import com.kutedev.easemusicplayer.turintegration.TurView
 import com.kutedev.easemusicplayer.viewmodels.DashboardVM
 
@@ -60,9 +59,9 @@ fun PluginViewPage(
     scaffoldPadding: PaddingValues,
     dashboardVM: DashboardVM = hiltViewModel(),
 ) {
-    val context = LocalContext.current
     val navController = LocalNavController.current
     val items by dashboardVM.dashboardItems.collectAsState()
+    val pluginRuntime = dashboardVM.pluginRuntime.collectAsState().value
     val item = items.find { it.pluginId == pluginId && it.contributionId == viewId }
 
     Column(
@@ -123,12 +122,27 @@ fun PluginViewPage(
                     fontSize = 14.sp,
                 )
             }
-            else -> TurView(
-                runtime = EasePluginBridge.runtime(context),
-                sourceHandle = item.viewSourceHandle,
-                pluginId = pluginId,
+            pluginRuntime == null -> Box(
                 modifier = Modifier.fillMaxSize(),
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "Plugin runtime not running — go back and retry after the backend service starts",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 14.sp,
+                )
+            }
+            // Keyed on the source handle: an in-process backend-service
+            // restart mints fresh handles on rescan; re-keying rebuilds the
+            // TurView instead of keeping a blank failed mount.
+            else -> key(item.viewSourceHandle) {
+                TurView(
+                    runtime = pluginRuntime,
+                    sourceHandle = item.viewSourceHandle,
+                    pluginId = pluginId,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 }

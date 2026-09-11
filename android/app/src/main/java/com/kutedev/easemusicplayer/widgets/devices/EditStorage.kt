@@ -30,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -48,7 +47,6 @@ import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.FormWidget
 import com.kutedev.easemusicplayer.singleton.StorageProvider
 import com.kutedev.easemusicplayer.singleton.resolve
-import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
 import com.kutedev.easemusicplayer.turintegration.TurView
 import com.kutedev.easemusicplayer.viewmodels.EditStorageVM
 import com.kutedev.easemusicplayer.core.LocalNavController
@@ -174,17 +172,21 @@ private fun PluginStorageView(
     pluginId: String,
     sourceHandle: Long,
     instance: String?,
+    runtime: com.kutedev.easemusicplayer.turintegration.TurRuntime?,
 ) {
-    val context = LocalContext.current
-
     when {
         sourceHandle == 0L -> Text(
             text = "Plugin view load failed: no source handle",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.error,
         )
+        runtime == null -> Text(
+            text = "Plugin runtime not running — pull to re-open after the backend service starts",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.error,
+        )
         else -> TurView(
-            runtime = EasePluginBridge.runtime(context),
+            runtime = runtime,
             sourceHandle = sourceHandle,
             pluginId = pluginId,
             instance = instance,
@@ -205,6 +207,7 @@ fun EditStoragesPage(
     val providers by editStorageVM.storageProviders.collectAsState()
     val editPluginView by editStorageVM.editPluginView.collectAsState()
     val title by editStorageVM.title.collectAsState()
+    val pluginRuntime by editStorageVM.pluginRuntime.collectAsState()
 
     // When a plugin registers a new storage instance (the OAuth redirect
     // handled by `MainActivity`, or a non-OAuth backend RPC followed by
@@ -316,16 +319,18 @@ fun EditStoragesPage(
                         val handle = activeProvider?.viewSourceHandle ?: 0L
                         val pid = activeProvider?.pluginId
                         if (pid != null) {
-                            // Keyed on the provider: a TurView keeps its
-                            // instance while composed, so switching
-                            // providers must rebuild it (dispose + fresh
-                            // bind) instead of reusing the old instance.
-                            // Disposal needs no timing guards anymore —
-                            // tur's two-phase lifecycle builds instances
-                            // renderer-less, so a fire-and-forget close()
-                            // racing an in-flight build is safe.
-                            key(activeProvider?.storageId) {
-                                PluginStorageView(pid, handle, instance = null)
+                            // Keyed on the provider AND its source handle: a
+                            // TurView keeps its instance while composed, so
+                            // switching providers — or the same provider
+                            // coming back with a fresh handle after a
+                            // service restart + rescan — must rebuild it
+                            // (dispose + fresh bind) instead of reusing the
+                            // old instance. Disposal needs no timing guards
+                            // anymore — tur's two-phase lifecycle builds
+                            // instances renderer-less, so a fire-and-forget
+                            // close() racing an in-flight build is safe.
+                            key(activeProvider?.storageId, handle) {
+                                PluginStorageView(pid, handle, instance = null, runtime = pluginRuntime)
                             }
                         }
                     } else {
@@ -334,11 +339,19 @@ fun EditStoragesPage(
                         // `ease.context.storageId$` is non-null (edit branch).
                         val epv = editPluginView
                         if (epv != null) {
-                            PluginStorageView(
-                                pluginId = epv.pluginId,
-                                sourceHandle = epv.viewSourceHandle,
-                                instance = epv.pluginStorageId,
-                            )
+                            // Keyed on the source handle: an in-process
+                            // backend-service restart mints fresh handles on
+                            // rescan, and the briefly-stale old handle can
+                            // produce a failed mount — re-keying rebuilds the
+                            // TurView as soon as the fresh handle lands.
+                            key(epv.viewSourceHandle) {
+                                PluginStorageView(
+                                    pluginId = epv.pluginId,
+                                    sourceHandle = epv.viewSourceHandle,
+                                    instance = epv.pluginStorageId,
+                                    runtime = pluginRuntime,
+                                )
+                            }
                         } else {
                             // Provider not resolved yet (scanPlugins pending)
                             // — show the alias as a static fallback.

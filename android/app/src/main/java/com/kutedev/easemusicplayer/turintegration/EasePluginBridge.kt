@@ -3,9 +3,9 @@ package com.kutedev.easemusicplayer.turintegration
 import android.content.Context
 
 /**
- * JNI bridge to the ease-specific tur **runtime** creation entry point.
+ * JNI bridge to the ease-specific tur **runtime** creation entry points.
  *
- * Mirrors `Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createRuntime`
+ * Mirrors `Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_*`
  * in `rust-libs/ease-client-backend/src/plugin_runtime/plugin_jni.rs`. The
  * standard instance-operation symbols (`TurNative.*`) live in the same `.so`.
  *
@@ -14,9 +14,13 @@ import android.content.Context
  * so the `external fun` resolves at first call without an explicit
  * `System.loadLibrary` here.
  *
- * The runtime is built **once** (system-font discovery + plugin registration
- * happen a single time); [runtime] caches it for the app lifetime and hands
- * it to [TurView], which spawns an isolated instance per surface.
+ * This object is a **stateless JNI surface only** — no cached runtime, no
+ * get-or-create. The runtime lifecycle (create → bind → instances → unbind →
+ * destroy) is owned explicitly by [PluginRuntimeHost], which logs every
+ * transition; the backend a runtime binds to is named by the backend handle
+ * passed into [createRuntime] / [bindPluginRuntime] (the same handle the
+ * JSON bridge uses — there is no process-wide "current backend" singleton on
+ * the Rust side anymore).
  */
 object EasePluginBridge {
     /**
@@ -43,23 +47,50 @@ object EasePluginBridge {
      * (TurStdPlugin + TurAnimationPlugin + TurClipboardPlugin + TurNetPlugin +
      * EaseMusicPlugin) and return its opaque native handle. A non-zero
      * [poolsHandle] also registers the shared plugin worker pools on the
-     * runtime; `0L` falls back to the engine default (one lane thread per
-     * instance). Returns `0L` on failure (the native side also throws).
+     * runtime; `0L` falls back to the engine default (one lane per instance).
+     *
+     * [backendHandle] binds the engine (and every instance spawned from it)
+     * to one backend instance — the `ease:*` bridge fns resolve their
+     * DB/KV/RPC services through it. An unknown handle fails the call
+     * (returns `0L` + a Rust-side error log). Returns `0L` on failure (the
+     * native side also throws).
      */
     @JvmStatic
-    external fun createRuntime(context: Context, poolsHandle: Long): Long
+    external fun createRuntime(context: Context, poolsHandle: Long, backendHandle: Long): Long
+
+    /**
+     * Hand the (already-created) tur runtime handle + the app `AssetManager`
+     * to the named backend instance, so the Rust-side plugin manager can
+     * register module sources on the runtime (`plugin.list`) and read
+     * bundled plugin zips natively (`plugin.bootstrap`). Only the handles
+     * cross JNI — never the JS or zip bytes. Call once right after
+     * [createRuntime], as part of [PluginRuntimeHost.start].
+     */
+    @JvmStatic
+    external fun bindPluginRuntime(backendHandle: Long, runtimeHandle: Long, assetManager: android.content.res.AssetManager)
+
+    /**
+     * The teardown counterpart of [bindPluginRuntime]: clears the stored
+     * runtime handle (compare-and-set — a stale stop can never clobber a
+     * newer binding) and drops the stashed `AAssetManager`. Call BEFORE
+     * `TurNative.destroyRuntime`, while [backendHandle] is still alive —
+     * afterwards every `plugin.list` module-source handle would silently
+     * come back 0.
+     */
+    @JvmStatic
+    external fun unbindPluginRuntime(backendHandle: Long, runtimeHandle: Long)
 
     /**
      * Connect a headless backend instance's event bus to ease-tur-rpc and
-     * stash the resulting `Send` `RpcClient` into the global backend context
-     * under [pluginId]. Call once per plugin, after `createHeadlessInstance`
-     * + `loadModule` (by source handle) so the JS dispatcher + backend
-     * handlers are registered — the native op queue is FIFO, so the wire
-     * round-trip lands behind both even though the instance build is async.
-     * Returns `true` on success.
+     * stash the resulting `Send` `RpcClient` into the named backend
+     * instance's context under [pluginId]. Call once per plugin, after
+     * `createHeadlessInstance` + `loadModule` (by source handle) so the JS
+     * dispatcher + backend handlers are registered — the native op queue is
+     * FIFO, so the wire round-trip lands behind both even though the
+     * instance build is async. Returns `true` on success.
      */
     @JvmStatic
-    external fun wireServiceRpc(instanceHandle: Long, pluginId: String): Boolean
+    external fun wireServiceRpc(backendHandle: Long, instanceHandle: Long, pluginId: String): Boolean
 
     /**
      * Drop the backend context's service `RpcClient` entry for [pluginId]
@@ -68,35 +99,5 @@ object EasePluginBridge {
      * plugin degrade gracefully until a fresh instance is wired.
      */
     @JvmStatic
-    external fun unwireServiceRpc(pluginId: String)
-
-    /**
-     * Hand the (already-created) tur runtime handle + the app
-     * `AssetManager` to the backend context, so the Rust-side plugin
-     * manager can register module sources on the runtime (`plugin.list`)
-     * and read bundled plugin zips natively (`plugin.bootstrap`). Only the
-     * handles cross JNI — never the JS or zip bytes. Idempotent.
-     */
-    @JvmStatic
-    external fun bindPluginRuntime(runtimeHandle: Long, assetManager: android.content.res.AssetManager)
-
-    private var cached: TurRuntime? = null
-
-    /**
-     * The app-lifetime [TurRuntime], created lazily on first call (using the
-     * application context so it is configuration-stable). Subsequent calls
-     * return the same instance. Creating the runtime also binds it to the
-     * backend context ([bindPluginRuntime]) — the Rust-side plugin scan
-     * depends on that registration for its module-source handles.
-     */
-    @Synchronized
-    fun runtime(context: Context): TurRuntime {
-        cached?.let { return it }
-        val pools = createPluginWorkerPools()
-        check(pools != 0L) { "createPluginWorkerPools returned 0 (see logcat)" }
-        val handle = createRuntime(context.applicationContext, pools)
-        check(handle != 0L) { "createRuntime returned 0 (see logcat)" }
-        bindPluginRuntime(handle, context.applicationContext.assets)
-        return TurRuntime(handle, pools).also { cached = it }
-    }
+    external fun unwireServiceRpc(backendHandle: Long, pluginId: String)
 }

@@ -64,13 +64,8 @@ fn require_i64(args: &[JsValue], idx: usize) -> JsResult<i64> {
     Ok(n as i64)
 }
 
-fn db_clone() -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServer>> {
-    let cx = crate::BACKEND_CONTEXT.get().ok_or_else(|| {
-        JsError::from(
-            JsNativeError::typ()
-                .with_message("ease:secret: backend not initialized (BACKEND_CONTEXT is unset)"),
-        )
-    })?;
+fn db_clone(args: &[JsValue]) -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServer>> {
+    let cx = crate::plugin_runtime::backend_cx("secret", args)?;
     Ok(cx.database_server().clone())
 }
 
@@ -99,7 +94,7 @@ fn secret_get(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let id = require_i64(args, 1)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let scope = plugin_scope(&pid);
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.secret_get(scope, SecretId::wrap(id)).await });
@@ -118,7 +113,7 @@ fn secret_put(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let secret = require_string(args, 1)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let scope = plugin_scope(&pid);
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.secret_put(scope, secret).await });
@@ -135,7 +130,7 @@ fn secret_remove(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let id = require_i64(args, 1)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let scope = plugin_scope(&pid);
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.secret_remove(scope, SecretId::wrap(id)).await });

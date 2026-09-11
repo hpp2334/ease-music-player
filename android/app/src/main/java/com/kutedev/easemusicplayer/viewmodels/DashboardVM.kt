@@ -15,9 +15,15 @@ import javax.inject.Inject
 @HiltViewModel
 class DashboardVM @Inject constructor(
     private val pluginRepository: PluginRepository,
+    pluginRuntimeHost: com.kutedev.easemusicplayer.turintegration.PluginRuntimeHost,
 ) : ViewModel() {
     val dashboardItems: StateFlow<List<DashboardItem>> = pluginRepository.dashboardItems
     val enabledPlugins: StateFlow<List<PluginManifest>> = pluginRepository.enabledPlugins
+
+    /** The shared tur runtime (null until `PluginRuntimeHost.start`) —
+     *  consumed by `PluginViewPage` to mount dashboard contribution views. */
+    val pluginRuntime: StateFlow<com.kutedev.easemusicplayer.turintegration.TurRuntime?> =
+        pluginRuntimeHost.runtime
 
     init {
         // Ensure the manifest scan has run (the backend service also calls

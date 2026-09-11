@@ -391,18 +391,43 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     }
 }
 
-/// `EasePluginBridge.createRuntime(env, context, poolsHandle): long` — builds the shared
-/// tur runtime once, with the Ease plugin set registered on it. Instances
-/// (one per TurView, or a headless one for a service plugin) are spawned from
-/// it via `TurNative.createInstance` / `createHeadlessInstance`. A non-zero
-/// `poolsHandle` also registers the shared plugin worker pools on the
-/// runtime; `0` falls back to the engine default (one lane per instance).
+/// Resolve the [`crate::ctx::BackendContext`] for a Kotlin-passed backend
+/// handle — the same opaque handle the JSON bridge's `{ handle }` envelope
+/// uses (`Bridge.getBackendId()`). Returns `None` (after logging) when the
+/// handle is unknown: a never-created or already-destroyed backend.
+fn backend_cx_for(
+    backend_handle: tur_android::jlong,
+    caller: &str,
+) -> Option<crate::ctx::BackendContext> {
+    let cx = crate::bridge::handle_table::get_backend(backend_handle as u64)
+        .map(|b| b.get_context().clone());
+    if cx.is_none() {
+        tracing::error!(
+            "{caller}: backend handle {backend_handle} not found — was Bridge.initialize() \
+             called (and not destroy()ed)?"
+        );
+    }
+    cx
+}
+
+/// `EasePluginBridge.createRuntime(env, context, poolsHandle, backendHandle): long` —
+/// builds the shared tur runtime once, with the Ease plugin set registered
+/// on it. Instances (one per TurView, or a headless one for a service
+/// plugin) are spawned from it via `TurNative.createInstance` /
+/// `createHeadlessInstance`. A non-zero `poolsHandle` also registers the
+/// shared plugin worker pools on the runtime; `0` falls back to the engine
+/// default (one lane per instance). `backendHandle` binds the engine to a
+/// specific backend instance — the `ease:*` bridge fns of every spawned
+/// instance resolve their DB/KV/RPC services through it (see
+/// [`crate::plugin_runtime::PluginBackendCx`]); an invalid handle fails the
+/// call (returns 0).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_createRuntime(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     context: tur_android::JObject,
     pools_handle: tur_android::jlong,
+    backend_handle: tur_android::jlong,
 ) -> tur_android::jlong {
     use tur_animation::TurAnimationPlugin;
     use tur_engine::{TurClipboardPlugin, TurStdPlugin};
@@ -410,6 +435,13 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
 
     use crate::plugin_runtime::EaseMusicPlugin;
     use ease_tur_rpc::TurRpcPlugin;
+
+    // Bind this engine (and every instance spawned from it) to the backend
+    // instance the Kotlin host named. Without it the `ease:*` bridges would
+    // be unbound, so an unknown handle is a hard failure.
+    let Some(ease_cx) = backend_cx_for(backend_handle, "createRuntime") else {
+        return 0;
+    };
 
     // Cache global refs to the Kotlin host classes (EaseOauthHost /
     // EaseThemesHost) so the tur worker thread can call static methods on
@@ -458,20 +490,21 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
             .plugin(TurClipboardPlugin)
             .plugin(TurNetPlugin)
             .plugin(TurRpcPlugin)
-            .plugin(EaseMusicPlugin)
+            .plugin(EaseMusicPlugin::new(ease_cx))
     })
 }
 
-/// `EasePluginBridge.wireServiceRpc(instanceHandle, pluginId): boolean` —
+/// `EasePluginBridge.wireServiceRpc(backendHandle, instanceHandle, pluginId): boolean` —
 /// connects the headless service instance's event bus to ease-tur-rpc and
-/// stashes the resulting `Send` [`RpcClient`] into the global backend
-/// context under `pluginId`. Called once per plugin, on the instance's own
-/// thread (the JNI thread) after `createHeadlessInstance` +
+/// stashes the resulting `Send` [`RpcClient`] into the named backend
+/// instance's context under `pluginId`. Called once per plugin, on the
+/// instance's own thread (the JNI thread) after `createHeadlessInstance` +
 /// `loadModule(backend.js)`. Returns `true` on success.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_wireServiceRpc(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
+    backend_handle: tur_android::jlong,
     instance_handle: tur_android::jlong,
     plugin_id: tur_android::JString,
 ) -> tur_android::jboolean {
@@ -489,16 +522,17 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         return 0;
     };
     match rpc {
-        Ok(client) => {
-            if let Some(cx) = crate::BACKEND_CONTEXT.get() {
+        Ok(client) => match backend_cx_for(backend_handle, "wireServiceRpc") {
+            Some(cx) => {
                 cx.set_service_rpc(&pid, client);
-                tracing::info!("wireServiceRpc: service RpcClient installed for {pid}");
+                tracing::info!(
+                    "wireServiceRpc: service RpcClient installed for {pid} \
+                     (backend handle {backend_handle})"
+                );
                 1
-            } else {
-                tracing::error!("wireServiceRpc: BACKEND_CONTEXT not set");
-                0
             }
-        }
+            None => 0,
+        },
         Err(e) => {
             tracing::error!("wireServiceRpc: RpcClient::wire failed: {e}");
             0
@@ -506,15 +540,17 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     }
 }
 
-/// `EasePluginBridge.unwireServiceRpc(pluginId)` — drop the backend
-/// context's service `RpcClient` entry for `plugin_id` (its headless
-/// instance is being torn down: the plugin was disabled / uninstalled /
-/// upgraded). Storage dispatch + event delivery for the plugin degrade
-/// gracefully (miss on `service_rpc_for`) until a fresh instance is wired.
+/// `EasePluginBridge.unwireServiceRpc(backendHandle, pluginId)` — drop the
+/// backend context's service `RpcClient` entry for `plugin_id` (its
+/// headless instance is being torn down: the plugin was disabled /
+/// uninstalled / upgraded). Storage dispatch + event delivery for the
+/// plugin degrade gracefully (miss on `service_rpc_for`) until a fresh
+/// instance is wired.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_unwireServiceRpc(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
+    backend_handle: tur_android::jlong,
     plugin_id: tur_android::JString,
 ) {
     let pid: String = match env.get_string(&plugin_id) {
@@ -524,11 +560,12 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
             return;
         }
     };
-    if let Some(cx) = crate::BACKEND_CONTEXT.get() {
-        cx.remove_service_rpc(&pid);
-        tracing::info!("unwireServiceRpc: service RpcClient removed for {pid}");
-    } else {
-        tracing::error!("unwireServiceRpc: BACKEND_CONTEXT not set");
+    match backend_cx_for(backend_handle, "unwireServiceRpc") {
+        Some(cx) => {
+            cx.remove_service_rpc(&pid);
+            tracing::info!("unwireServiceRpc: service RpcClient removed for {pid}");
+        }
+        None => {}
     }
 }
 
@@ -601,22 +638,23 @@ pub(crate) fn read_asset_bytes(mgr: usize, path: &str) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// `EasePluginBridge.bindPluginRuntime(runtimeHandle, assetManager)` — hand
-/// the (already-created) tur runtime handle to the backend so
-/// `plugin.list` can register module sources on it (tur #198), and stash
-/// the raw `AAssetManager` pointer for reading bundled plugin zips during
-/// `plugin.bootstrap`. The AssetManager object is owned by the application
-/// Context for the app lifetime, so the raw pointer stays valid. Call once
-/// after `EasePluginBridge.runtime(context)` (which does it automatically).
+/// `EasePluginBridge.bindPluginRuntime(backendHandle, runtimeHandle, assetManager)` —
+/// hand the (already-created) tur runtime handle to the named backend
+/// instance so `plugin.list` can register module sources on it (tur #198),
+/// and stash the raw `AAssetManager` pointer for reading bundled plugin
+/// zips during `plugin.bootstrap`. The AssetManager object is owned by the
+/// application Context for the app lifetime, so the raw pointer stays
+/// valid. Call once right after `createRuntime` (the Kotlin
+/// `PluginRuntimeHost` does it as part of its explicit start sequence).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_bindPluginRuntime(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
+    backend_handle: tur_android::jlong,
     runtime_handle: tur_android::jlong,
     asset_manager: tur_android::JObject,
 ) {
-    let Some(cx) = crate::BACKEND_CONTEXT.get() else {
-        tracing::error!("bindPluginRuntime: BACKEND_CONTEXT not set (bridge.initialize first)");
+    let Some(cx) = backend_cx_for(backend_handle, "bindPluginRuntime") else {
         return;
     };
     let mgr = unsafe {
@@ -632,5 +670,36 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     let shared = cx.plugin_manager();
     shared.set_runtime_handle(runtime_handle);
     shared.set_asset_manager(mgr as usize);
-    tracing::info!("bindPluginRuntime: runtime handle {runtime_handle} + asset manager bound");
+    tracing::info!(
+        "bindPluginRuntime: runtime handle {runtime_handle} + asset manager bound \
+         (backend handle {backend_handle})"
+    );
+}
+
+/// `EasePluginBridge.unbindPluginRuntime(backendHandle, runtimeHandle)` —
+/// the teardown counterpart of [`Java_..._EasePluginBridge_bindPluginRuntime`]:
+/// clears the stored runtime handle (compare-and-set, so a stale stop can
+/// never clobber a newer binding) and drops the stashed `AAssetManager`.
+/// Call BEFORE `TurNative.destroyRuntime` — afterwards the scans would
+/// keep registering module sources against a destroyed runtime and every
+/// `plugin.list` source handle would silently come back 0.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_unbindPluginRuntime(
+    _env: tur_android::JNIEnv,
+    _class: tur_android::JClass,
+    backend_handle: tur_android::jlong,
+    runtime_handle: tur_android::jlong,
+) {
+    let Some(cx) = backend_cx_for(backend_handle, "unbindPluginRuntime") else {
+        return;
+    };
+    let shared = cx.plugin_manager();
+    let cleared = shared.clear_runtime_handle(runtime_handle);
+    shared.set_asset_manager(0);
+    if cleared {
+        tracing::info!(
+            "unbindPluginRuntime: runtime handle {runtime_handle} cleared \
+             (backend handle {backend_handle})"
+        );
+    }
 }
