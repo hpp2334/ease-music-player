@@ -3,7 +3,7 @@ package com.kutedev.cantode
 /**
  * The JNI surface exported by cantode's Rust `ffi` feature
  * (`Java_com_kutedev_cantode_CantodeNative_*`), compiled into
- * `libease_client_backend.so` — the same native library the host app
+ * `libease_client_android.so` — the same native library the host app
  * already ships; no second `.so`.
  *
  * All functions take the **player handle** — the same opaque id the
@@ -13,7 +13,7 @@ package com.kutedev.cantode
  */
 internal object CantodeNative {
     init {
-        System.loadLibrary("ease_client_backend")
+        System.loadLibrary("ease_client_android")
     }
 
     /**
