@@ -23,18 +23,6 @@ use crate::{
     services::{app_bootstrap, app_destroy},
 };
 
-/// Process-wide handle to the active [`BackendContext`]. Set once by
-/// [`Backend::init`] and read by the tur `EaseMusicPlugin` so its `ease:*`
-/// JS bridge modules can call into the database / KV storage without a
-/// direct dependency on the `Backend` object.
-///
-/// This is the in-memory integration seam between the ease backend and
-/// the tur engine — both `.so` symbols live in the same process (tur is
-/// linked as an rlib into `libease_client_backend.so`), so a OnceLock is
-/// all that's needed for cross-module sharing.
-pub(crate) static BACKEND_CONTEXT: std::sync::OnceLock<Arc<BackendContext>> =
-    std::sync::OnceLock::new();
-
 pub struct Backend {
     pub(crate) arg: ArgInitializeApp,
     cx: Arc<BackendContext>,
@@ -49,13 +37,8 @@ impl Drop for Backend {
 impl Backend {
     pub async fn init_async(&self) -> BResult<()> {
         let cx = self.cx.clone();
-        let cx_for_once = self.cx.clone();
         let arg = self.arg.clone();
         app_bootstrap(&cx, arg).await?;
-        // Publish the backend context for the tur EaseMusicPlugin. Set
-        // before the first tur engine is constructed so ease:* modules
-        // can resolve the context synchronously at register-time.
-        let _ = BACKEND_CONTEXT.set(cx_for_once);
         Ok(())
     }
 

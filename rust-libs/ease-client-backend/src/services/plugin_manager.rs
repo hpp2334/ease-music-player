@@ -167,7 +167,29 @@ impl PluginManagerShared {
     }
 
     pub fn set_runtime_handle(&self, handle: i64) {
-        *self.runtime_handle.write().unwrap() = handle;
+        let mut w = self.runtime_handle.write().unwrap();
+        tracing::info!("plugin manager: runtime handle {} -> {}", *w, handle);
+        *w = handle;
+    }
+
+    /// Clear the stored runtime handle, but only when it still equals
+    /// `expected` (compare-and-set) — a stale teardown racing a newer
+    /// `bindPluginRuntime` must never clobber the fresh binding. Returns
+    /// `true` when the handle was actually cleared.
+    pub fn clear_runtime_handle(&self, expected: i64) -> bool {
+        let mut w = self.runtime_handle.write().unwrap();
+        if *w == expected {
+            tracing::info!("plugin manager: runtime handle {expected} cleared (0)");
+            *w = 0;
+            true
+        } else {
+            tracing::warn!(
+                "plugin manager: clear_runtime_handle({expected}) skipped — current handle \
+                 is {} (a newer runtime is bound; this teardown is stale)",
+                *w
+            );
+            false
+        }
     }
 
     pub fn asset_manager(&self) -> usize {
@@ -822,26 +844,68 @@ fn scan_manifests_blocking(root: &Path) -> Vec<(PathBuf, ManifestRaw)> {
 /// return the opaque handle (0 when no runtime is bound or the handle is
 /// stale). Thread-safe (the registry is mutex-guarded), so calling from the
 /// bridge dispatcher's IO thread is fine.
+///
+/// Every `0` return is logged — a missing module-source handle silently
+/// blanked whole plugin pages before, so the failure reason must always be
+/// visible in logcat / the in-app log.
 pub fn register_module_source(runtime_handle: i64, src: String) -> i64 {
     if runtime_handle == 0 {
+        tracing::error!(
+            "register_module_source: no tur runtime bound — bindPluginRuntime not called \
+             (or already unbound); source NOT registered"
+        );
         return 0;
     }
     #[cfg(target_os = "android")]
     {
-        tur_android::ops::with_runtime(runtime_handle, |rt| rt.module_sources.register(src) as i64)
-            .unwrap_or(0)
+        match tur_android::ops::with_runtime(runtime_handle, |rt| {
+            rt.module_sources.register(src) as i64
+        }) {
+            Some(handle) => handle,
+            None => {
+                tracing::error!(
+                    "register_module_source: runtime handle {runtime_handle} not found — \
+                     stale handle (runtime destroyed without unbindPluginRuntime?); \
+                     source NOT registered"
+                );
+                0
+            }
+        }
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = src;
+        let _ = (runtime_handle, src);
         0
     }
 }
 
-fn read_registered(root: &Path, plugin_id: &str, file: &str, runtime_handle: i64) -> i64 {
-    match std::fs::read_to_string(root.join(plugin_id).join(file)) {
-        Ok(src) => register_module_source(runtime_handle, src),
-        Err(_) => 0,
+/// Read one module file and register it. Failures are logged with the full
+/// path and also collected into the scan's `warnings` so they surface
+/// beyond the logs (the `plugin.list` payload carries them).
+fn read_registered(
+    root: &Path,
+    plugin_id: &str,
+    file: &str,
+    runtime_handle: i64,
+    warnings: &mut Vec<String>,
+) -> i64 {
+    let path = root.join(plugin_id).join(file);
+    match std::fs::read_to_string(&path) {
+        Ok(src) => {
+            let handle = register_module_source(runtime_handle, src);
+            if handle == 0 {
+                warnings.push(format!(
+                    "{plugin_id}: module source {file} not registered (see logs)"
+                ));
+            }
+            handle
+        }
+        Err(e) => {
+            let msg = format!("{plugin_id}: read module {file} failed: {e}");
+            tracing::error!("plugin scan: {msg} (path {path:?})");
+            warnings.push(msg);
+            0
+        }
     }
 }
 
@@ -854,23 +918,27 @@ fn contribution_infos(
     root: &Path,
     plugin_id: &str,
     runtime_handle: i64,
+    warnings: &mut Vec<String>,
 ) -> Vec<ContributionInfo> {
     list.into_iter()
-        .map(|c| ContributionInfo {
-            source_handle: if enabled {
+        .map(|c| {
+            let source_handle = if enabled {
                 c.view
                     .as_deref()
-                    .map(|f| read_registered(root, plugin_id, f, runtime_handle))
+                    .map(|f| read_registered(root, plugin_id, f, runtime_handle, warnings))
                     .unwrap_or(0)
             } else {
                 0
-            },
-            id: c.id,
-            title: c.title,
-            desc: c.desc,
-            icon: c.icon,
-            icon_data: c.icon_data,
-            view: c.view,
+            };
+            ContributionInfo {
+                source_handle,
+                id: c.id,
+                title: c.title,
+                desc: c.desc,
+                icon: c.icon,
+                icon_data: c.icon_data,
+                view: c.view,
+            }
         })
         .collect()
 }
@@ -1654,6 +1722,13 @@ pub async fn scan(
     let root = plugins_root(app_document_dir);
     let dir = app_document_dir.to_string();
     let runtime_handle = cx.plugin_manager().runtime_handle();
+    if runtime_handle == 0 {
+        tracing::error!(
+            "plugin scan: no tur runtime bound — every module-source handle will be 0 \
+             (bindPluginRuntime not called / already unbound); plugin views + backends \
+             will not load"
+        );
+    }
     let (scanned, state) = tokio::task::spawn_blocking(move || {
         (
             scan_manifests_blocking(&plugins_root(&dir)),
@@ -1665,6 +1740,14 @@ pub async fn scan(
         message: format!("scan task: {e}"),
     })?;
 
+    let mut warnings: Vec<String> = Vec::new();
+    if runtime_handle == 0 {
+        warnings.push(
+            "no tur runtime bound — module sources not registered (plugin views/backends \
+             will not load)"
+                .to_string(),
+        );
+    }
     let mut registry: Vec<LyricParserEntry> = Vec::with_capacity(scanned.len());
     let plugins = scanned
         .into_iter()
@@ -1686,14 +1769,21 @@ pub async fn scan(
             let backend_source_handle = if enabled {
                 backend
                     .as_deref()
-                    .map(|f| read_registered(&root, &id, f, runtime_handle))
+                    .map(|f| read_registered(&root, &id, f, runtime_handle, &mut warnings))
                     .unwrap_or(0)
             } else {
                 0
             };
-            let dashboard_infos =
-                contribution_infos(dashboard, enabled, &root, &id, runtime_handle);
-            let storages_infos = contribution_infos(storages, enabled, &root, &id, runtime_handle);
+            let dashboard_infos = contribution_infos(
+                dashboard,
+                enabled,
+                &root,
+                &id,
+                runtime_handle,
+                &mut warnings,
+            );
+            let storages_infos =
+                contribution_infos(storages, enabled, &root, &id, runtime_handle, &mut warnings);
             registry.push(LyricParserEntry {
                 plugin_id: id.clone(),
                 enabled,
@@ -1733,6 +1823,7 @@ pub async fn scan(
         generation: shared.generation(),
         lyric_parser_selection: state.lyric_parser_selection,
         plugins,
+        warnings,
     })
 }
 
@@ -1745,6 +1836,10 @@ pub struct PluginListOut {
     /// page renders rides this one payload.
     pub lyric_parser_selection: BTreeMap<String, String>,
     pub plugins: Vec<PluginScanInfo>,
+    /// Non-fatal scan problems (module-source registration failures, unreadable
+    /// view files, …). Also logged Rust-side; carried on the wire so future UI
+    /// can surface them.
+    pub warnings: Vec<String>,
 }
 
 // ============================================================================
@@ -2364,5 +2459,64 @@ mod tests {
             assert!(is_installed(&root, B));
             assert!(generation > 0);
         });
+    }
+
+    /// `clear_runtime_handle` is compare-and-set: a stale teardown (racing a
+    /// newer `bindPluginRuntime`) must never clobber the fresh binding, and
+    /// an unbound manager (handle 0) is a no-op miss.
+    #[test]
+    fn runtime_handle_cas_clear() {
+        let shared = PluginManagerShared::default();
+
+        // Nothing bound: clearing any handle is a miss, stays 0.
+        assert!(!shared.clear_runtime_handle(7));
+        assert_eq!(shared.runtime_handle(), 0);
+
+        // Bind then clear with the right handle.
+        shared.set_runtime_handle(7);
+        assert!(shared.clear_runtime_handle(7));
+        assert_eq!(shared.runtime_handle(), 0);
+
+        // Stale teardown: 7 was destroyed without unbind, 8 is now bound.
+        shared.set_runtime_handle(8);
+        assert!(!shared.clear_runtime_handle(7));
+        assert_eq!(shared.runtime_handle(), 8, "newer binding must survive");
+    }
+
+    /// A scan with no runtime bound must come back with zero module-source
+    /// handles AND a warning saying why — this is the exact state that used
+    /// to blank plugin pages silently.
+    #[tokio::test]
+    async fn scan_without_runtime_warns() {
+        let (guard, root) = temp_root();
+        let app_document_dir = guard.path().to_str().unwrap().to_string();
+        install_zip_bytes_blocking(
+            &root,
+            make_zip(&[
+                ("manifest.json", &manifest_json("com.ease.test", "1.0.0")),
+                ("view.js", "export function start() {}"),
+                ("backend.js", "export function start() {}"),
+            ]),
+        )
+        .unwrap();
+
+        let cx = crate::ctx::BackendContext::new();
+        cx.database_server()
+            .init(app_document_dir.clone())
+            .await
+            .unwrap();
+        let out = scan(&cx, &app_document_dir).await.unwrap();
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w.contains("no tur runtime bound"))
+        );
+        let info = out
+            .plugins
+            .iter()
+            .find(|p| p.id == "com.ease.test")
+            .unwrap();
+        assert_eq!(info.backend_source_handle, 0);
+        assert!(info.dashboard.iter().all(|c| c.source_handle == 0));
     }
 }

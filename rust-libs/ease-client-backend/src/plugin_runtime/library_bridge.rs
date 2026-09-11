@@ -47,15 +47,10 @@ struct PlaylistSnapshot {
 /// own stored rows with a plain string comparison.
 fn playlists(
     _this: &JsValue,
-    _args: &[JsValue],
+    args: &[JsValue],
     ctx: &mut boa_engine::Context,
 ) -> JsResult<JsValue> {
-    let cx = crate::BACKEND_CONTEXT.get().ok_or_else(|| {
-        JsError::from(
-            JsNativeError::typ()
-                .with_message("ease:library: backend not initialized (BACKEND_CONTEXT is unset)"),
-        )
-    })?;
+    let cx = crate::plugin_runtime::backend_cx("library", args)?;
     let db: Arc<DatabaseServer> = cx.database_server().clone();
 
     let result = ease_client_tokio::tokio_runtime().block_on(async move {

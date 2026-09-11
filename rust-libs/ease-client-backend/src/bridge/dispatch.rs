@@ -480,9 +480,9 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
 
         // ====================================================================
         // plugin.* — only the methods actually called from Kotlin.
-        // The other 14 plugin KV functions are routed in-process via
-        // BACKEND_CONTEXT (tur engine db_bridge), not through this
-        // bridge.
+        // The other 14 plugin KV functions are routed in-process via the
+        // per-instance PluginBackendCx (tur engine db_bridge), not
+        // through this bridge.
         // ====================================================================
         "plugin.event" => {
             #[derive(Deserialize)]

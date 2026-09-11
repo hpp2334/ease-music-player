@@ -175,13 +175,8 @@ fn run_blocking<R>(description: &str, result: BResult<R>) -> JsResult<R> {
     })
 }
 
-fn db_clone() -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServer>> {
-    let cx = crate::BACKEND_CONTEXT.get().ok_or_else(|| {
-        JsError::from(
-            JsNativeError::typ()
-                .with_message("ease:db: backend not initialized (BACKEND_CONTEXT is unset)"),
-        )
-    })?;
+fn db_clone(args: &[JsValue]) -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServer>> {
+    let cx = crate::plugin_runtime::backend_cx("db", args)?;
     Ok(cx.database_server().clone())
 }
 
@@ -196,7 +191,7 @@ fn single_get(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_single_get(pid.as_str(), &key).await });
     match run_blocking("singleGet", result)? {
@@ -212,7 +207,7 @@ fn single_get_multi(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_single_get_multi(pid.as_str(), keys).await });
     let entries = run_blocking("singleGetMulti", result)?;
@@ -232,7 +227,7 @@ fn single_set(
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let value = require_string(args, 2)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_single_set(pid.as_str(), &key, &value).await });
     run_blocking("singleSet", result)?;
@@ -246,7 +241,7 @@ fn single_set_multi(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let entries = read_entry_array(args.get_or_undefined(1), ctx)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_single_set_multi(pid.as_str(), entries).await });
     run_blocking("singleSetMulti", result)?;
@@ -260,7 +255,7 @@ fn single_delete(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_single_delete(pid.as_str(), &key).await });
     run_blocking("singleDelete", result)?;
@@ -274,7 +269,7 @@ fn single_delete_multi(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_single_delete_multi(pid.as_str(), keys).await });
     run_blocking("singleDeleteMulti", result)?;
@@ -293,7 +288,7 @@ fn multi_append(
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
     let value = require_string(args, 2)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_multi_append(pid.as_str(), &key, &value).await });
     run_blocking("multiAppend", result)?;
@@ -307,7 +302,7 @@ fn multi_append_multi(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let entries = read_entry_array(args.get_or_undefined(1), ctx)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_multi_append_multi(pid.as_str(), entries).await });
     run_blocking("multiAppendMulti", result)?;
@@ -321,7 +316,7 @@ fn multi_get_all(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_multi_get_all(pid.as_str(), &key).await });
     let values = run_blocking("multiGetAll", result)?;
@@ -339,7 +334,7 @@ fn multi_get_all_multi(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_multi_get_all_multi(pid.as_str(), keys).await });
     let entries = run_blocking("multiGetAllMulti", result)?;
@@ -358,7 +353,7 @@ fn multi_count(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_multi_count(pid.as_str(), &key).await });
     let count = run_blocking("multiCount", result)?;
@@ -372,7 +367,7 @@ fn multi_count_multi(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_multi_count_multi(pid.as_str(), keys).await });
     let entries = run_blocking("multiCountMulti", result)?;
@@ -391,7 +386,7 @@ fn multi_delete(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let key = require_string(args, 1)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_multi_delete(pid.as_str(), &key).await });
     run_blocking("multiDelete", result)?;
@@ -405,7 +400,7 @@ fn multi_delete_multi(
 ) -> JsResult<JsValue> {
     let pid = plugin_id(args)?;
     let keys = read_string_array(args.get_or_undefined(1), ctx)?;
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_multi_delete_multi(pid.as_str(), keys).await });
     run_blocking("multiDeleteMulti", result)?;
@@ -433,7 +428,7 @@ fn list_keys(
             })?
             .to_std_string_escaped()
     };
-    let db = db_clone()?;
+    let db = db_clone(args)?;
     let result = ease_client_tokio::tokio_runtime()
         .block_on(async move { db.plugin_kv_list_keys(pid.as_str(), &prefix).await });
     let entries = run_blocking("listKeys", result)?;

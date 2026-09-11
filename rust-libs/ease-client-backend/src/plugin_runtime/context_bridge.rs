@@ -73,13 +73,8 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
     Ok(s.to_std_string_escaped())
 }
 
-fn backend_ctx() -> JsResult<&'static std::sync::Arc<crate::ctx::BackendContext>> {
-    crate::BACKEND_CONTEXT.get().ok_or_else(|| {
-        JsError::from(
-            JsNativeError::typ()
-                .with_message("ease:context: backend not initialized (BACKEND_CONTEXT is unset)"),
-        )
-    })
+fn backend_ctx(args: &[JsValue]) -> JsResult<crate::ctx::BackendContext> {
+    crate::plugin_runtime::backend_cx("context", args)
 }
 
 fn map_bresult<R>(description: &str, result: BResult<R>) -> JsResult<R> {
@@ -136,7 +131,7 @@ fn create_storage(
 
     let (pid, _inst) = resolve(args)?;
     let plugin_storage_id = require_string(args, 1)?;
-    let cx = backend_ctx()?;
+    let cx = backend_ctx(args)?;
     let pid_str = pid.as_str().to_string();
     let instance = plugin_storage_id.clone();
 
@@ -150,7 +145,7 @@ fn create_storage(
             .obtain_storage(&handle)
             .await
             .map(|id| {
-                crate::services::evict_storage_backend_cache(&**cx, id);
+                crate::services::evict_storage_backend_cache(&cx, id);
                 id
             });
         match result {
@@ -190,7 +185,7 @@ fn remove_storage(
 
     let pid = plugin_id(args)?;
     let plugin_storage_id = require_string(args, 1)?;
-    let cx = backend_ctx()?;
+    let cx = backend_ctx(args)?;
     let pid_str = pid.as_str().to_string();
 
     ease_client_tokio::tokio_runtime().spawn(async move {
@@ -203,7 +198,7 @@ fn remove_storage(
             })
             .map(|r| StorageId::wrap(r.id));
         if let Some(id) = id {
-            crate::services::storage::remove_storage(&**cx, id).await?;
+            crate::services::storage::remove_storage(&cx, id).await?;
         }
         Ok::<_, crate::error::BError>(())
     });

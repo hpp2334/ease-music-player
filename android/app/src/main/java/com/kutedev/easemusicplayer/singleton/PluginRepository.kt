@@ -212,6 +212,9 @@ class PluginRepository @Inject constructor(
      */
     suspend fun scanPlugins() {
         val result = bridge.call(BridgeMethods.Plugin.LIST).unwrapOrNull()?.payload ?: return
+        for (warning in result.warnings) {
+            bridge.logRaw("error", "plugin scan: $warning")
+        }
         _installedPlugins.value = result.plugins.map(::toManifest)
         _enabledPlugins.value = result.plugins.filter { it.enabled }.map(::toManifest)
         recomputeDashboardItems()

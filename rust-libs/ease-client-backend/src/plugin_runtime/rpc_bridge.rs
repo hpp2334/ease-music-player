@@ -65,11 +65,7 @@ fn call(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsR
         _ => args_val.to_json(ctx)?.unwrap_or(serde_json::Value::Null),
     };
 
-    let Some(cx) = crate::BACKEND_CONTEXT.get() else {
-        return Err(JsError::from(
-            JsNativeError::typ().with_message("ease:rpc.call: BACKEND_CONTEXT not set"),
-        ));
-    };
+    let cx = crate::plugin_runtime::backend_cx("rpc", args)?;
     let Some(rpc) = cx.service_rpc_for(pid.as_ref()) else {
         return Err(JsError::from(JsNativeError::typ().with_message(format!(
             "ease:rpc.call: no service RPC wired for plugin {} (backend not up)",

@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.singleton
 
 import android.content.Context
+import android.util.Log
 import com.kutedev.easemusicplayer.singleton.types.ArgInitializeApp
 import com.kutedev.easemusicplayer.singleton.types.BridgeResponse
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -168,6 +169,7 @@ class Bridge @Inject constructor(
             throw RuntimeException("backend.init failed: ${initParsed.errorCode} ${initParsed.errorDetail}")
         }
         logRaw("info", "bridge initialized (backendId=$backendIdValue)")
+        Log.i(TAG, "bridge initialized (backendId=$backendIdValue)")
         _isInit = true
     }
 
@@ -179,6 +181,7 @@ class Bridge @Inject constructor(
             put("args", buildJsonObject {})
         }
         EaseBridge.call(req.toString(), null)
+        Log.i(TAG, "bridge destroyed (backendId=$backendIdValue)")
         backendIdValue = -1L
         playerContextId = -1L
         playerId = -1L
@@ -255,4 +258,8 @@ class Bridge @Inject constructor(
         serializer: kotlinx.serialization.KSerializer<A>,
         arg: A,
     ): JsonElement = json.encodeToJsonElement(serializer, arg)
+
+    private companion object {
+        private const val TAG = "EaseBridge"
+    }
 }
