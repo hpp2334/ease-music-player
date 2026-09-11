@@ -20,7 +20,7 @@ use serde::Deserialize;
 /// - `handle` is the opaque ID returned by `backend.create` /
 ///   `player.contextNew` / `player.new`. Omitted on the very first call.
 #[derive(Debug, Deserialize)]
-pub(crate) struct BridgeRequest {
+pub struct BridgeRequest {
     pub method: String,
     #[serde(default)]
     pub args: serde_json::Value,

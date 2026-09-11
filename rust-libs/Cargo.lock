@@ -1183,13 +1183,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "ease-client-android"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "boa_engine",
+ "ease-client-backend",
+ "ease-client-schema",
+ "ease-client-tokio",
+ "ease-tur-rpc",
+ "fontique",
+ "getrandom 0.3.4",
+ "jni",
+ "ndk-context",
+ "serde_json",
+ "tracing",
+ "tur-android",
+ "tur-animation",
+ "tur-engine",
+ "tur-net-native",
+]
+
+[[package]]
 name = "ease-client-backend"
 version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-channel",
  "base64 0.22.1",
- "boa_engine",
  "bytes",
  "cantode",
  "chrono",
@@ -1200,15 +1221,11 @@ dependencies = [
  "ease-order-key",
  "ease-remote-storage",
  "ease-tur-rpc",
- "fontique",
  "futures",
- "getrandom 0.3.4",
  "getset",
- "jni",
  "libsqlite3-sys",
  "lru",
  "md-5",
- "ndk-context",
  "num-derive 0.2.5",
  "num-traits",
  "once_cell",
@@ -1224,10 +1241,6 @@ dependencies = [
  "tracing",
  "tracing-android",
  "tracing-subscriber",
- "tur-android",
- "tur-animation",
- "tur-engine",
- "tur-net-native",
  "unicode-segmentation",
  "urlencoding",
  "zip",
@@ -1410,7 +1423,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3746,7 +3759,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4209,7 +4222,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5358,7 +5371,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6489,7 +6502,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

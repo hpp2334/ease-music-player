@@ -30,7 +30,7 @@ use crate::{
 };
 
 #[derive(Default)]
-pub(crate) struct StorageState {
+pub struct StorageState {
     cache: RwLock<HashMap<StorageId, Arc<dyn StorageBackend + Send + Sync + 'static>>>,
 }
 
@@ -65,7 +65,7 @@ pub(crate) async fn load_storage_entry_data(
     }
 }
 
-pub(crate) fn evict_storage_backend_cache(cx: &BackendContext, storage_id: StorageId) {
+pub fn evict_storage_backend_cache(cx: &BackendContext, storage_id: StorageId) {
     let mut w = cx.storage_state().cache.write().unwrap();
     w.remove(&storage_id);
 }

@@ -45,20 +45,20 @@ use super::{
     themes_bridge, webapi, PluginBackendCx,
 };
 
-/// The `ease` host module plugin. Carries the [`crate::ctx::BackendContext`]
+/// The `ease` host module plugin. Carries the [`ease_client_backend::ctx::BackendContext`]
 /// this engine is bound to (resolved from the backend handle at
 /// `createRuntime`) and stamps it into every instance's plugin state at
 /// register time, so the `ease:*` bridge fns resolve their backend through
 /// the instance instead of a process-wide singleton.
 pub struct EaseMusicPlugin {
-    cx: crate::ctx::BackendContext,
+    cx: ease_client_backend::ctx::BackendContext,
 }
 
 impl EaseMusicPlugin {
     /// Bind the plugin set to `cx`. The context must outlive every instance
     /// spawned from the runtime — it is held by a cheap clone here and by
     /// each instance's [`PluginBackendCx`] plugin state.
-    pub fn new(cx: crate::ctx::BackendContext) -> Self {
+    pub fn new(cx: ease_client_backend::ctx::BackendContext) -> Self {
         Self { cx }
     }
 }

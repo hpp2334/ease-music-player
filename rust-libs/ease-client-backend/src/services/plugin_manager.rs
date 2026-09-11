@@ -130,15 +130,40 @@ pub struct LyricParserEntry {
     pub parsers: Vec<LyricParserRaw>,
 }
 
+/// The engine-binding seam between this (platform-agnostic) crate and the
+/// Android embedder crate (`ease-client-android`), which implements it
+/// over the tur engine.
+///
+/// One implementor instance exists per `bindPluginRuntime` call; it is
+/// attached to [`PluginManagerShared`] by the JNI trampoline and
+/// compare-and-set detached by `unbindPluginRuntime`. Host builds (tests,
+/// `cargo check`) never attach one — the scan then reports zero
+/// module-source handles plus loud warnings instead of failing silently,
+/// and bootstrap reports its bundled zips as unreadable.
+pub trait PluginEngineHost: Send + Sync {
+    /// Opaque identity of this binding (the tur runtime handle). Used by
+    /// [`PluginManagerShared::detach_engine_host`] for the compare-and-set.
+    fn id(&self) -> i64;
+
+    /// Register module JS on the bound runtime's shared
+    /// `ModuleSourceRegistry` and return its opaque handle. `0` on
+    /// failure (never silent — implementors log loudly).
+    fn register_source(&self, src: String) -> i64;
+
+    /// Read one bundled APK asset (e.g. `plugin-bundles/<id>.zip`).
+    /// `None` when unreadable / no asset manager bound.
+    fn read_bundled_asset(&self, path: &str) -> Option<Vec<u8>>;
+}
+
 /// Per-process shared manager state, held by [`crate::ctx::BackendContext`].
 ///
 /// - `generation` — bumped on every install/uninstall/enable/disable
 ///   mutation; Kotlin mirrors it into its `revision` StateFlow.
 /// - `install_lock` — serializes installs (staging + atomic swap).
-/// - `runtime_handle` — the tur runtime handle from `bindPluginRuntime`
-///   (0 = not bound yet; scans then return zero module-source handles).
-/// - `asset_manager` — raw `*mut AAssetManager` (as usize) for reading
-///   bundled APK assets during bootstrap. Android-only; 0 elsewhere.
+/// - `engine_host` — the attached engine binding (tur runtime handle +
+///   raw `AAssetManager`), set by the Android crate's `bindPluginRuntime`
+///   and compare-and-set cleared by `unbindPluginRuntime`. `None` = not
+///   bound (host builds, pre-bind, post-unbind).
 /// - `lyric_parsers` — the scan-populated lyric-parser registry (dispatch
 ///   reads it per lyric load; empty before the first `plugin.list`).
 /// - `lyric_parser_selection` — the user's per-extension parser picks,
@@ -147,8 +172,7 @@ pub struct LyricParserEntry {
 pub struct PluginManagerShared {
     generation: AtomicU64,
     pub install_lock: tokio::sync::Mutex<()>,
-    runtime_handle: RwLock<i64>,
-    asset_manager: RwLock<usize>,
+    engine_host: RwLock<Option<std::sync::Arc<dyn PluginEngineHost>>>,
     lyric_parsers: RwLock<std::sync::Arc<Vec<LyricParserEntry>>>,
     lyric_parser_selection: RwLock<BTreeMap<String, String>>,
 }
@@ -162,42 +186,51 @@ impl PluginManagerShared {
         self.generation.fetch_add(1, AtomicOrdering::SeqCst) as i64 + 1
     }
 
-    pub fn runtime_handle(&self) -> i64 {
-        *self.runtime_handle.read().unwrap()
+    /// The attached engine binding, if any. Cloned out as an `Arc` —
+    /// callers can hold it across awaits without the lock.
+    pub fn engine_host(&self) -> Option<std::sync::Arc<dyn PluginEngineHost>> {
+        self.engine_host.read().unwrap().clone()
     }
 
-    pub fn set_runtime_handle(&self, handle: i64) {
-        let mut w = self.runtime_handle.write().unwrap();
-        tracing::info!("plugin manager: runtime handle {} -> {}", *w, handle);
-        *w = handle;
+    /// Attach an engine binding (from the `bindPluginRuntime` JNI
+    /// trampoline). Replaces any previous binding — the caller sequence
+    /// (create runtime → bind) guarantees the previous one was already
+    /// detached, and a would-be double bind is logged loudly.
+    pub fn attach_engine_host(&self, host: std::sync::Arc<dyn PluginEngineHost>) {
+        let mut w = self.engine_host.write().unwrap();
+        if let Some(old) = w.as_ref() {
+            tracing::warn!(
+                "plugin manager: attach_engine_host({}) replacing existing binding {} \
+                 — double bind?",
+                host.id(),
+                old.id()
+            );
+        } else {
+            tracing::info!("plugin manager: engine host attached ({})", host.id());
+        }
+        *w = Some(host);
     }
 
-    /// Clear the stored runtime handle, but only when it still equals
+    /// Detach the engine binding, but only when its id still equals
     /// `expected` (compare-and-set) — a stale teardown racing a newer
     /// `bindPluginRuntime` must never clobber the fresh binding. Returns
-    /// `true` when the handle was actually cleared.
-    pub fn clear_runtime_handle(&self, expected: i64) -> bool {
-        let mut w = self.runtime_handle.write().unwrap();
-        if *w == expected {
-            tracing::info!("plugin manager: runtime handle {expected} cleared (0)");
-            *w = 0;
-            true
+    /// the detached host (for caller-side teardown) when the binding was
+    /// actually cleared.
+    pub fn detach_engine_host(&self, expected: i64) -> Option<std::sync::Arc<dyn PluginEngineHost>> {
+        let mut w = self.engine_host.write().unwrap();
+        let matches = w.as_ref().map(|h| h.id()) == Some(expected);
+        if matches {
+            let taken = w.take();
+            tracing::info!("plugin manager: engine host {expected} detached");
+            taken
         } else {
             tracing::warn!(
-                "plugin manager: clear_runtime_handle({expected}) skipped — current handle \
+                "plugin manager: detach_engine_host({expected}) skipped — current binding \
                  is {} (a newer runtime is bound; this teardown is stale)",
-                *w
+                w.as_ref().map(|h| h.id()).unwrap_or(0)
             );
-            false
+            None
         }
-    }
-
-    pub fn asset_manager(&self) -> usize {
-        *self.asset_manager.read().unwrap()
-    }
-
-    pub fn set_asset_manager(&self, mgr: usize) {
-        *self.asset_manager.write().unwrap() = mgr;
     }
 
     /// Snapshot of the lyric-parser registry (scan order: plugins sorted
@@ -840,59 +873,30 @@ fn scan_manifests_blocking(root: &Path) -> Vec<(PathBuf, ManifestRaw)> {
 // Module-source registration (tur #198 handle-based loading)
 // ============================================================================
 
-/// Register `src` on the bound runtime's shared `ModuleSourceRegistry` and
-/// return the opaque handle (0 when no runtime is bound or the handle is
-/// stale). Thread-safe (the registry is mutex-guarded), so calling from the
-/// bridge dispatcher's IO thread is fine.
-///
-/// Every `0` return is logged — a missing module-source handle silently
-/// blanked whole plugin pages before, so the failure reason must always be
-/// visible in logcat / the in-app log.
-pub fn register_module_source(runtime_handle: i64, src: String) -> i64 {
-    if runtime_handle == 0 {
-        tracing::error!(
-            "register_module_source: no tur runtime bound — bindPluginRuntime not called \
-             (or already unbound); source NOT registered"
-        );
-        return 0;
-    }
-    #[cfg(target_os = "android")]
-    {
-        match tur_android::ops::with_runtime(runtime_handle, |rt| {
-            rt.module_sources.register(src) as i64
-        }) {
-            Some(handle) => handle,
-            None => {
-                tracing::error!(
-                    "register_module_source: runtime handle {runtime_handle} not found — \
-                     stale handle (runtime destroyed without unbindPluginRuntime?); \
-                     source NOT registered"
-                );
-                0
-            }
-        }
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = (runtime_handle, src);
-        0
-    }
-}
-
-/// Read one module file and register it. Failures are logged with the full
-/// path and also collected into the scan's `warnings` so they surface
-/// beyond the logs (the `plugin.list` payload carries them).
+/// Read one module file and register it on the bound engine host. Failures
+/// are logged with the full path and also collected into the scan's
+/// `warnings` so they surface beyond the logs (the `plugin.list` payload
+/// carries them).
 fn read_registered(
     root: &Path,
     plugin_id: &str,
     file: &str,
-    runtime_handle: i64,
+    host: Option<&std::sync::Arc<dyn PluginEngineHost>>,
     warnings: &mut Vec<String>,
 ) -> i64 {
     let path = root.join(plugin_id).join(file);
     match std::fs::read_to_string(&path) {
         Ok(src) => {
-            let handle = register_module_source(runtime_handle, src);
+            let handle = match host {
+                Some(h) => h.register_source(src),
+                None => {
+                    tracing::error!(
+                        "read_registered: no engine host bound — bindPluginRuntime not \
+                         called (or already unbound); source NOT registered"
+                    );
+                    0
+                }
+            };
             if handle == 0 {
                 warnings.push(format!(
                     "{plugin_id}: module source {file} not registered (see logs)"
@@ -917,7 +921,7 @@ fn contribution_infos(
     enabled: bool,
     root: &Path,
     plugin_id: &str,
-    runtime_handle: i64,
+    host: Option<&std::sync::Arc<dyn PluginEngineHost>>,
     warnings: &mut Vec<String>,
 ) -> Vec<ContributionInfo> {
     list.into_iter()
@@ -925,7 +929,7 @@ fn contribution_infos(
             let source_handle = if enabled {
                 c.view
                     .as_deref()
-                    .map(|f| read_registered(root, plugin_id, f, runtime_handle, warnings))
+                    .map(|f| read_registered(root, plugin_id, f, host, warnings))
                     .unwrap_or(0)
             } else {
                 0
@@ -1503,18 +1507,6 @@ pub fn remove_custom_source(app_document_dir: &str, url: &str) -> BResult<()> {
     Ok(())
 }
 
-/// Read one bundled APK asset (Android-only; `mgr` is the raw
-/// `*mut AAssetManager` stashed by the `bindPluginRuntime` trampoline).
-#[cfg(target_os = "android")]
-pub(crate) fn read_bundled_asset(mgr: usize, path: &str) -> Option<Vec<u8>> {
-    crate::plugin_runtime::read_asset_bytes(mgr, path)
-}
-
-#[cfg(not(target_os = "android"))]
-pub(crate) fn read_bundled_asset(_mgr: usize, _path: &str) -> Option<Vec<u8>> {
-    None
-}
-
 /// Startup defaults, run on every `KeepBackendService` create:
 ///
 /// 1. **Ensure-installed pass** for [`BUNDLED_PLUGINS`]: each bundled id
@@ -1551,8 +1543,8 @@ pub async fn bootstrap(cx: &crate::ctx::BackendContext, app_document_dir: &str) 
                 changed = true;
                 continue;
             }
-            let mgr = shared.asset_manager();
-            match read_bundled_asset(mgr, &format!("plugin-bundles/{id}.zip")) {
+            let host = shared.engine_host();
+            match host.as_ref().and_then(|h| h.read_bundled_asset(&format!("plugin-bundles/{id}.zip"))) {
                 Some(bytes) => {
                     match install_bytes_and_enable(cx, app_document_dir, bytes).await {
                         Ok(_) => {
@@ -1566,7 +1558,7 @@ pub async fn bootstrap(cx: &crate::ctx::BackendContext, app_document_dir: &str) 
                     }
                 }
                 None => tracing::error!(
-                    "plugin bootstrap: bundled zip '{id}' missing (asset manager not bound?)"
+                    "plugin bootstrap: bundled zip '{id}' missing (engine host not bound?)"
                 ),
             }
         }
@@ -1589,8 +1581,10 @@ pub async fn bootstrap(cx: &crate::ctx::BackendContext, app_document_dir: &str) 
                 }
                 // Best-effort bundled install first, then the default
                 // registry source.
-                let mgr = shared.asset_manager();
-                let bundled = read_bundled_asset(mgr, &format!("plugin-bundles/{id}.zip"));
+                let host = shared.engine_host();
+                let bundled = host
+                    .as_ref()
+                    .and_then(|h| h.read_bundled_asset(&format!("plugin-bundles/{id}.zip")));
                 if let Some(bytes) = bundled {
                     if let Err(e) = install_bytes_and_enable(cx, app_document_dir, bytes).await {
                         tracing::error!("plugin bootstrap: bundled install '{id}' failed: {e}");
@@ -1721,8 +1715,8 @@ pub async fn scan(
 ) -> BResult<PluginListOut> {
     let root = plugins_root(app_document_dir);
     let dir = app_document_dir.to_string();
-    let runtime_handle = cx.plugin_manager().runtime_handle();
-    if runtime_handle == 0 {
+    let host = cx.plugin_manager().engine_host();
+    if host.is_none() {
         tracing::error!(
             "plugin scan: no tur runtime bound — every module-source handle will be 0 \
              (bindPluginRuntime not called / already unbound); plugin views + backends \
@@ -1741,7 +1735,7 @@ pub async fn scan(
     })?;
 
     let mut warnings: Vec<String> = Vec::new();
-    if runtime_handle == 0 {
+    if host.is_none() {
         warnings.push(
             "no tur runtime bound — module sources not registered (plugin views/backends \
              will not load)"
@@ -1769,7 +1763,7 @@ pub async fn scan(
             let backend_source_handle = if enabled {
                 backend
                     .as_deref()
-                    .map(|f| read_registered(&root, &id, f, runtime_handle, &mut warnings))
+                    .map(|f| read_registered(&root, &id, f, host.as_ref(), &mut warnings))
                     .unwrap_or(0)
             } else {
                 0
@@ -1779,11 +1773,11 @@ pub async fn scan(
                 enabled,
                 &root,
                 &id,
-                runtime_handle,
+                host.as_ref(),
                 &mut warnings,
             );
             let storages_infos =
-                contribution_infos(storages, enabled, &root, &id, runtime_handle, &mut warnings);
+                contribution_infos(storages, enabled, &root, &id, host.as_ref(), &mut warnings);
             registry.push(LyricParserEntry {
                 plugin_id: id.clone(),
                 enabled,
@@ -2461,26 +2455,99 @@ mod tests {
         });
     }
 
-    /// `clear_runtime_handle` is compare-and-set: a stale teardown (racing a
+    /// A recording engine host for tests — hands out deterministic
+    /// module-source handles (id * 100 + n) and remembers what was asked
+    /// of it.
+    struct RecordingHost {
+        id: i64,
+        registered: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl PluginEngineHost for RecordingHost {
+        fn id(&self) -> i64 {
+            self.id
+        }
+
+        fn register_source(&self, src: String) -> i64 {
+            let mut w = self.registered.lock().unwrap();
+            w.push(src);
+            (self.id * 100 + w.len() as i64) as i64
+        }
+
+        fn read_bundled_asset(&self, _path: &str) -> Option<Vec<u8>> {
+            None
+        }
+    }
+
+    /// `detach_engine_host` is compare-and-set: a stale teardown (racing a
     /// newer `bindPluginRuntime`) must never clobber the fresh binding, and
-    /// an unbound manager (handle 0) is a no-op miss.
+    /// an unbound manager is a no-op miss.
     #[test]
-    fn runtime_handle_cas_clear() {
+    fn engine_host_cas_detach() {
         let shared = PluginManagerShared::default();
 
-        // Nothing bound: clearing any handle is a miss, stays 0.
-        assert!(!shared.clear_runtime_handle(7));
-        assert_eq!(shared.runtime_handle(), 0);
+        // Nothing bound: detaching any id is a miss, stays unbound.
+        assert!(shared.detach_engine_host(7).is_none());
+        assert!(shared.engine_host().is_none());
 
-        // Bind then clear with the right handle.
-        shared.set_runtime_handle(7);
-        assert!(shared.clear_runtime_handle(7));
-        assert_eq!(shared.runtime_handle(), 0);
+        // Attach then detach with the right id.
+        shared.attach_engine_host(std::sync::Arc::new(RecordingHost {
+            id: 7,
+            registered: Default::default(),
+        }));
+        assert_eq!(shared.engine_host().unwrap().id(), 7);
+        assert!(shared.detach_engine_host(7).is_some());
+        assert!(shared.engine_host().is_none());
 
         // Stale teardown: 7 was destroyed without unbind, 8 is now bound.
-        shared.set_runtime_handle(8);
-        assert!(!shared.clear_runtime_handle(7));
-        assert_eq!(shared.runtime_handle(), 8, "newer binding must survive");
+        shared.attach_engine_host(std::sync::Arc::new(RecordingHost {
+            id: 8,
+            registered: Default::default(),
+        }));
+        assert!(shared.detach_engine_host(7).is_none());
+        assert_eq!(
+            shared.engine_host().unwrap().id(),
+            8,
+            "newer binding must survive"
+        );
+    }
+
+    /// A scan with an attached (recording) host registers module sources
+    /// through it and reports non-zero handles.
+    #[tokio::test]
+    async fn scan_registers_through_engine_host() {
+        let (guard, root) = temp_root();
+        let app_document_dir = guard.path().to_str().unwrap().to_string();
+        install_zip_bytes_blocking(
+            &root,
+            make_zip(&[
+                ("manifest.json", &manifest_json("com.ease.test", "1.0.0")),
+                ("view.js", "export function start() {}"),
+                ("backend.js", "export function start() {}"),
+            ]),
+        )
+        .unwrap();
+
+        let cx = crate::ctx::BackendContext::new();
+        cx.database_server()
+            .init(app_document_dir.clone())
+            .await
+            .unwrap();
+        let host = std::sync::Arc::new(RecordingHost {
+            id: 42,
+            registered: Default::default(),
+        });
+        cx.plugin_manager().attach_engine_host(host.clone());
+        let out = scan(&cx, &app_document_dir).await.unwrap();
+        assert!(out.warnings.is_empty());
+        let info = out
+            .plugins
+            .iter()
+            .find(|p| p.id == "com.ease.test")
+            .unwrap();
+        assert_ne!(info.backend_source_handle, 0);
+        // backend.js + view.js both went through the host.
+        assert_eq!(host.registered.lock().unwrap().len(), 2);
     }
 
     /// A scan with no runtime bound must come back with zero module-source

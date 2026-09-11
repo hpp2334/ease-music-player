@@ -6,11 +6,11 @@ import android.content.Context
  * JNI bridge to the ease-specific tur **runtime** creation entry points.
  *
  * Mirrors `Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_*`
- * in `rust-libs/ease-client-backend/src/plugin_runtime/plugin_jni.rs`. The
+ * in `rust-libs/ease-client-android/src/plugin_runtime/plugin_jni.rs`. The
  * standard instance-operation symbols (`TurNative.*`) live in the same `.so`.
  *
  * The library is already loaded by `EaseMusicPlayerApplication`'s
- * `companion object { init { System.loadLibrary("ease_client_backend") } }`,
+ * `companion object { init { System.loadLibrary("ease_client_android") } }`,
  * so the `external fun` resolves at first call without an explicit
  * `System.loadLibrary` here.
  *

@@ -22,8 +22,8 @@ use boa_engine::object::JsObject;
 use boa_engine::{js_string, JsError, JsNativeError, JsResult, JsValue};
 use tur_engine::core::js_runtime::helpers::{FnEntry, Ptr};
 
-use crate::error::BResult;
-use crate::repositories::core::DatabaseServer;
+use ease_client_backend::error::BResult;
+use ease_client_backend::repositories::core::DatabaseServer;
 
 /// Build the `FnEntry` table for the `library` namespace object.
 pub fn build_fns() -> Vec<FnEntry> {

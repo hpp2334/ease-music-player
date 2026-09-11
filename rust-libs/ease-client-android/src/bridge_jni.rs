@@ -19,7 +19,7 @@ use jni::{
     JNIEnv,
 };
 
-use crate::bridge::{dispatch::dispatch, request::BridgeRequest};
+use ease_client_backend::bridge::{dispatch::dispatch, request::BridgeRequest};
 
 const BRIDGE_RESULT_CLASS: &str = "com/kutedev/easemusicplayer/singleton/NativeBridgeResult";
 

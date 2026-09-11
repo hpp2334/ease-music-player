@@ -10,9 +10,9 @@ use boa_engine::{js_string, JsArgs, JsError, JsNativeError, JsResult, JsValue};
 use ease_client_schema::{PluginId as SchemaPluginId, SecretId, SecretScope};
 use tur_engine::core::js_runtime::helpers::{extract_js_ctx, FnEntry, Ptr};
 
-use crate::error::BResult;
+use ease_client_backend::error::BResult;
 use crate::plugin_runtime::PluginId;
-use crate::repositories::secret::SecretStore;
+use ease_client_backend::repositories::secret::SecretStore;
 
 /// Build the `FnEntry` table for the `secret` namespace object.
 pub fn build_fns() -> Vec<FnEntry> {
@@ -64,7 +64,7 @@ fn require_i64(args: &[JsValue], idx: usize) -> JsResult<i64> {
     Ok(n as i64)
 }
 
-fn db_clone(args: &[JsValue]) -> JsResult<std::sync::Arc<crate::repositories::core::DatabaseServer>> {
+fn db_clone(args: &[JsValue]) -> JsResult<std::sync::Arc<ease_client_backend::repositories::core::DatabaseServer>> {
     let cx = crate::plugin_runtime::backend_cx("secret", args)?;
     Ok(cx.database_server().clone())
 }

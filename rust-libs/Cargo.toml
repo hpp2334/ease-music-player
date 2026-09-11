@@ -3,6 +3,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "ease-client-android",
     "ease-client-backend",
     "ease-client-migration",
     "ease-client-schema",

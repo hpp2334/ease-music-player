@@ -1,10 +1,10 @@
-pub(crate) mod app;
-pub(crate) mod lyrics;
-pub(crate) mod music;
-pub(crate) mod playlist;
-pub(crate) mod plugin_manager;
-pub(crate) mod preference;
-pub(crate) mod storage;
+pub mod app;
+pub mod lyrics;
+pub mod music;
+pub mod playlist;
+pub mod plugin_manager;
+pub mod preference;
+pub mod storage;
 
 pub use app::*;
 pub use music::*;

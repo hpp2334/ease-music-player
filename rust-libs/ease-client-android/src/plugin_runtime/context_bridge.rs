@@ -25,7 +25,7 @@
 use boa_engine::{JsArgs, JsError, JsNativeError, JsResult, JsValue};
 use tur_engine::core::js_runtime::helpers::{extract_js_ctx, FnEntry, Ptr};
 
-use crate::error::BResult;
+use ease_client_backend::error::BResult;
 use crate::plugin_runtime::{PluginId, PluginInstance};
 
 /// Build the `FnEntry` table for the `context` namespace object.
@@ -73,7 +73,7 @@ fn require_string(args: &[JsValue], idx: usize) -> JsResult<String> {
     Ok(s.to_std_string_escaped())
 }
 
-fn backend_ctx(args: &[JsValue]) -> JsResult<crate::ctx::BackendContext> {
+fn backend_ctx(args: &[JsValue]) -> JsResult<ease_client_backend::ctx::BackendContext> {
     crate::plugin_runtime::backend_cx("context", args)
 }
 
@@ -145,7 +145,7 @@ fn create_storage(
             .obtain_storage(&handle)
             .await
             .map(|id| {
-                crate::services::evict_storage_backend_cache(&cx, id);
+                ease_client_backend::services::evict_storage_backend_cache(&cx, id);
                 id
             });
         match result {
@@ -198,9 +198,9 @@ fn remove_storage(
             })
             .map(|r| StorageId::wrap(r.id));
         if let Some(id) = id {
-            crate::services::storage::remove_storage(&cx, id).await?;
+            ease_client_backend::services::storage::remove_storage(&cx, id).await?;
         }
-        Ok::<_, crate::error::BError>(())
+        Ok::<_, ease_client_backend::error::BError>(())
     });
 
     Ok(JsValue::undefined())

@@ -5,11 +5,11 @@ package com.kutedev.easemusicplayer.turintegration
  *
  * Every method is a thin `external fun` over the hand-written
  * `Java_com_kutedev_easemusicplayer_turintegration_TurNative_*` entry points
- * that `libease_client_backend.so` exports (see `rust-libs/ease-client-backend/
+ * that `libease_client_android.so` exports (see `rust-libs/ease-client-backend/
  * src/plugin_runtime/plugin_jni.rs`).
  *
  * The library is loaded once by `EaseMusicPlayerApplication`'s
- * `companion object { init { System.loadLibrary("ease_client_backend") } }`,
+ * `companion object { init { System.loadLibrary("ease_client_android") } }`,
  * so this object doesn't need its own `System.loadLibrary` call — the
  * external-fn bindings resolve against the already-loaded library.
  *

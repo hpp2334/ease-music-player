@@ -19,12 +19,11 @@ num-derive = "0.2"
 bytes = "1.5.0"
 thiserror = { workspace = true }
 futures = { workspace = true }
+# The audio engine. The `ffi` feature (its cantode JNI surface) stays on
+# this crate's dependency so the symbols ride the final `.so` — which is
+# now built from `ease-client-android` (that crate links this one as an
+# rlib and unions the feature set).
 cantode = { path = "../../cantode/rust", features = ["ffi"] }
-# OS entropy for the `crypto.getRandomValues` / `crypto.randomUUID` JS
-# polyfills (plugin_runtime/webapi.rs).
-getrandom = "0.3"
-jni = "0.21"
-ndk-context = "0.1"
 urlencoding = "2.1.3"
 getset = "0.1.3"
 serde_json = "1.0"
@@ -35,6 +34,11 @@ unicode-segmentation = "1.10.1"
 base64 = "0.22.1"
 lru = "0.12.5"
 tokio = { version = "1" }
+# Logcat layer for Android builds. Deliberate exception to "no Android
+# deps in this crate": the tracing subscriber is a set-global-default, so
+# the android layer must be composed at `init_infra` time (backend.create)
+# — it cannot be attached later by the embedder crate. On host builds the
+# layer is never constructed (cfg'd out at the use site).
 tracing-android = "0.2.0"
 tracing-subscriber = "0.3.0"
 serde = { workspace = true }
@@ -47,30 +51,6 @@ ease-order-key = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 
-# CJK fallback fonts for the tur text pipeline (plugin_runtime/fonts.rs):
-# FallbackKey/Script/GenericFamily/Blob for the explicit script-fallback
-# registration that must not depend on the device's fonts.xml quirks.
-# Resolves to the same 0.9.0 instance tur's parley stack compiles against.
-fontique = "0.9"
-
-# tur engine integration (https://github.com/hpp2334/tur @ dfa218f).
-# JS API contract our plugin views rely on: builder-pattern element
-# construction (#225), the instance-owned reactive store (#201/#207 — no
-# module-level get/set; atoms via `source`/`derive`/`mutate`, subscriptions
-# via `watch`), and `Flexible`/`Expanded` flex items (#227/#228 — non-flex
-# Row children get an unbounded main axis, so ellipsizing labels need a
-# `Flexible` wrapper; under an unbounded main axis flex items lay out
-# inflexible, Flutter `canFlex` parity). `@tur-ng/std` 0.0.16 /
-# `@tur-ng/core` 0.0.9 typings.
-# The engine core is tokio-free; the embedder provides a tokio Handle to NativeHttp
-# (registered on the runtime builder) and for timer/sleep.
-# All crates live in the same repo; cargo clones once and resolves their
-# internal path deps against the checkout.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "dfa218f91638fe66bdefe52e322d9d431567a2a6" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "dfa218f91638fe66bdefe52e322d9d431567a2a6" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "dfa218f91638fe66bdefe52e322d9d431567a2a6" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "dfa218f91638fe66bdefe52e322d9d431567a2a6" }
-
 # Plugin install layer (`services/plugin_manager.rs`): zip extraction
 # (SAF/registry installs), sha256 registry verification, md5 registry-cache
 # filenames, and reqwest for registry fetches + plugin zip downloads.
@@ -80,7 +60,3 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 md-5 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-# Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
-# our `use boa_engine::*` resolves to the exact same instance the engine
-# compiles against.
-boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "93a9e31a83bbaa15bbd8b687e61639ffc53bbef1" }

@@ -23,7 +23,7 @@ class NativeBridgeResult(
  * [call], replaced the entire UniFFI-generated Kotlin bindings (~30 files).
  *
  * The native library is loaded once by `EaseMusicPlayerApplication` via
- * `System.loadLibrary("ease_client_backend")` — the same `.so` that hosts
+ * `System.loadLibrary("ease_client_android")` — the same `.so` that hosts
  * the tur engine and the JNI entrypoint for `nativeInitAndroidContext`.
  *
  * Companion is declared `object` so the `external fun` resolves to a

@@ -1,5 +1,5 @@
 //! JNI entry points for the tur engine, embedded inside
-//! `libease_client_backend.so`.
+//! `libease_client_android.so` (the `ease-client-android` cdylib).
 //!
 //! We hand-write **all** JNI entry points under the
 //! `com.kutedev.easemusicplayer.turintegration` package (matching the
@@ -28,9 +28,9 @@ use tur_engine::core::scheduler::WorkerPoolHandle;
 /// Owned by the Kotlin host as an opaque `jlong` handle (boxed here), so
 /// every entry point receives it explicitly — no process-global stash
 /// whose handles could outlive a destroyed runtime.
-struct PluginWorkerPools {
-    backend: WorkerPoolHandle,
-    view: WorkerPoolHandle,
+pub(crate) struct PluginWorkerPools {
+    pub(crate) backend: WorkerPoolHandle,
+    pub(crate) view: WorkerPoolHandle,
 }
 
 impl PluginWorkerPools {
@@ -45,7 +45,7 @@ impl PluginWorkerPools {
 /// Borrow the pools from a Kotlin-held `PluginWorkerPools` handle. `0`
 /// (Kotlin "no handle") yields `None` — callers then leave the engine's
 /// default pool in place.
-fn borrow_pools(pools: tur_android::jlong) -> Option<&'static PluginWorkerPools> {
+pub(crate) fn borrow_pools(pools: tur_android::jlong) -> Option<&'static PluginWorkerPools> {
     (pools != 0).then(|| unsafe { &*(pools as *const PluginWorkerPools) })
 }
 
@@ -391,15 +391,15 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     }
 }
 
-/// Resolve the [`crate::ctx::BackendContext`] for a Kotlin-passed backend
+/// Resolve the [`ease_client_backend::ctx::BackendContext`] for a Kotlin-passed backend
 /// handle — the same opaque handle the JSON bridge's `{ handle }` envelope
 /// uses (`Bridge.getBackendId()`). Returns `None` (after logging) when the
 /// handle is unknown: a never-created or already-destroyed backend.
 fn backend_cx_for(
     backend_handle: tur_android::jlong,
     caller: &str,
-) -> Option<crate::ctx::BackendContext> {
-    let cx = crate::bridge::handle_table::get_backend(backend_handle as u64)
+) -> Option<ease_client_backend::ctx::BackendContext> {
+    let cx = ease_client_backend::bridge::handle_table::get_backend(backend_handle as u64)
         .map(|b| b.get_context().clone());
     if cx.is_none() {
         tracing::error!(
@@ -570,73 +570,9 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
 }
 
 // ============================================================================
-// Minimal NDK asset FFI (libandroid.so) — reading the bundled plugin zip
-// natively so its bytes never cross the JNI boundary. Pattern lifted from
-// tur's compose demo (`createAssetModuleSource`).
+// NDK asset FFI lives in [`engine`] — `bindPluginRuntime` below uses its
+// `aasset_manager_from_java` to stash the raw `AAssetManager` pointer.
 // ============================================================================
-
-#[repr(C)]
-struct AAssetManager {
-    _unused: [u8; 0],
-}
-
-#[repr(C)]
-struct AAsset {
-    _unused: [u8; 0],
-}
-
-#[link(name = "android")]
-unsafe extern "C" {
-    fn AAssetManager_fromJava(
-        env: *mut std::ffi::c_void,
-        asset_manager: *mut std::ffi::c_void,
-    ) -> *mut AAssetManager;
-    fn AAssetManager_open(
-        mgr: *mut AAssetManager,
-        filename: *const std::ffi::c_char,
-        mode: i32,
-    ) -> *mut AAsset;
-    fn AAsset_getLength(asset: *mut AAsset) -> u64;
-    fn AAsset_read(asset: *mut AAsset, buf: *mut std::ffi::c_void, count: usize) -> i32;
-    fn AAsset_close(asset: *mut AAsset);
-}
-
-/// Read an APK asset fully, given the raw `*mut AAssetManager` stashed by
-/// [`Java_..._EasePluginBridge_bindPluginRuntime`]. Thread-safe
-/// (`AAssetManager_open` is); called from the bridge dispatcher's IO
-/// thread during `plugin.bootstrap`.
-pub(crate) fn read_asset_bytes(mgr: usize, path: &str) -> Option<Vec<u8>> {
-    let mgr = mgr as *mut AAssetManager;
-    if mgr.is_null() {
-        return None;
-    }
-    let c_path = std::ffi::CString::new(path).ok()?;
-    // 3 == AASSET_MODE_BUFFER: read the whole asset up front.
-    let asset = unsafe { AAssetManager_open(mgr, c_path.as_ptr(), 3) };
-    if asset.is_null() {
-        return None;
-    }
-    let len = unsafe { AAsset_getLength(asset) } as usize;
-    let mut buf = vec![0u8; len];
-    // `AAsset_read` may return short reads — loop until full or EOF.
-    let mut filled = 0usize;
-    while filled < len {
-        let n = unsafe {
-            AAsset_read(
-                asset,
-                buf[filled..].as_mut_ptr() as *mut std::ffi::c_void,
-                len - filled,
-            )
-        };
-        if n <= 0 {
-            break;
-        }
-        filled += n as usize;
-    }
-    unsafe { AAsset_close(asset) };
-    buf.truncate(filled);
-    Some(buf)
-}
 
 /// `EasePluginBridge.bindPluginRuntime(backendHandle, runtimeHandle, assetManager)` —
 /// hand the (already-created) tur runtime handle to the named backend
@@ -658,7 +594,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         return;
     };
     let mgr = unsafe {
-        AAssetManager_fromJava(
+        crate::plugin_runtime::engine::aasset_manager_from_java(
             env.get_raw() as *mut std::ffi::c_void,
             asset_manager.as_raw() as *mut std::ffi::c_void,
         )
@@ -667,9 +603,10 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         tracing::error!("bindPluginRuntime: AAssetManager_fromJava returned null");
         return;
     }
-    let shared = cx.plugin_manager();
-    shared.set_runtime_handle(runtime_handle);
-    shared.set_asset_manager(mgr as usize);
+    crate::plugin_runtime::engine::attach(
+        &cx,
+        crate::plugin_runtime::engine::TurEngineHost::new(runtime_handle, mgr as usize),
+    );
     tracing::info!(
         "bindPluginRuntime: runtime handle {runtime_handle} + asset manager bound \
          (backend handle {backend_handle})"
@@ -678,11 +615,12 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
 
 /// `EasePluginBridge.unbindPluginRuntime(backendHandle, runtimeHandle)` —
 /// the teardown counterpart of [`Java_..._EasePluginBridge_bindPluginRuntime`]:
-/// clears the stored runtime handle (compare-and-set, so a stale stop can
-/// never clobber a newer binding) and drops the stashed `AAssetManager`.
-/// Call BEFORE `TurNative.destroyRuntime` — afterwards the scans would
-/// keep registering module sources against a destroyed runtime and every
-/// `plugin.list` source handle would silently come back 0.
+/// compare-and-set detaches the engine host (runtime handle + asset
+/// manager) the backend's plugin manager holds, so a stale stop can never
+/// clobber a newer binding. Call BEFORE `TurNative.destroyRuntime` —
+/// afterwards the scans would keep registering module sources against a
+/// destroyed runtime and every `plugin.list` source handle would silently
+/// come back 0.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_unbindPluginRuntime(
     _env: tur_android::JNIEnv,
@@ -693,10 +631,8 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     let Some(cx) = backend_cx_for(backend_handle, "unbindPluginRuntime") else {
         return;
     };
-    let shared = cx.plugin_manager();
-    let cleared = shared.clear_runtime_handle(runtime_handle);
-    shared.set_asset_manager(0);
-    if cleared {
+    let detached = cx.plugin_manager().detach_engine_host(runtime_handle);
+    if detached.is_some() {
         tracing::info!(
             "unbindPluginRuntime: runtime handle {runtime_handle} cleared \
              (backend handle {backend_handle})"
