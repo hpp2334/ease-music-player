@@ -494,100 +494,30 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     })
 }
 
-/// `EasePluginBridge.wireServiceRpc(backendHandle, instanceHandle, pluginId): boolean` —
-/// connects the headless service instance's event bus to ease-tur-rpc and
-/// stashes the resulting `Send` [`RpcClient`] into the named backend
-/// instance's context under `pluginId`. Called once per plugin, on the
-/// instance's own thread (the JNI thread) after `createHeadlessInstance` +
-/// `loadModule(backend.js)`. Returns `true` on success.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_wireServiceRpc(
-    mut env: tur_android::JNIEnv,
-    _class: tur_android::JClass,
-    backend_handle: tur_android::jlong,
-    instance_handle: tur_android::jlong,
-    plugin_id: tur_android::JString,
-) -> tur_android::jboolean {
-    let pid: String = match env.get_string(&plugin_id) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            tracing::error!("wireServiceRpc: get_string(plugin_id) failed: {e}");
-            return 0;
-        }
-    };
-    let Some(rpc) =
-        tur_android::ops::with_app(instance_handle, |app| ease_tur_rpc::RpcClient::wire(app))
-    else {
-        tracing::error!("wireServiceRpc: invalid instance handle");
-        return 0;
-    };
-    match rpc {
-        Ok(client) => match backend_cx_for(backend_handle, "wireServiceRpc") {
-            Some(cx) => {
-                cx.set_service_rpc(&pid, client);
-                tracing::info!(
-                    "wireServiceRpc: service RpcClient installed for {pid} \
-                     (backend handle {backend_handle})"
-                );
-                1
-            }
-            None => 0,
-        },
-        Err(e) => {
-            tracing::error!("wireServiceRpc: RpcClient::wire failed: {e}");
-            0
-        }
-    }
-}
-
-/// `EasePluginBridge.unwireServiceRpc(backendHandle, pluginId)` — drop the
-/// backend context's service `RpcClient` entry for `plugin_id` (its
-/// headless instance is being torn down: the plugin was disabled /
-/// uninstalled / upgraded). Storage dispatch + event delivery for the
-/// plugin degrade gracefully (miss on `service_rpc_for`) until a fresh
-/// instance is wired.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_unwireServiceRpc(
-    mut env: tur_android::JNIEnv,
-    _class: tur_android::JClass,
-    backend_handle: tur_android::jlong,
-    plugin_id: tur_android::JString,
-) {
-    let pid: String = match env.get_string(&plugin_id) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            tracing::error!("unwireServiceRpc: get_string(plugin_id) failed: {e}");
-            return;
-        }
-    };
-    match backend_cx_for(backend_handle, "unwireServiceRpc") {
-        Some(cx) => {
-            cx.remove_service_rpc(&pid);
-            tracing::info!("unwireServiceRpc: service RpcClient removed for {pid}");
-        }
-        None => {}
-    }
-}
-
 // ============================================================================
 // NDK asset FFI lives in [`engine`] — `bindPluginRuntime` below uses its
 // `aasset_manager_from_java` to stash the raw `AAssetManager` pointer.
 // ============================================================================
 
-/// `EasePluginBridge.bindPluginRuntime(backendHandle, runtimeHandle, assetManager)` —
+/// `EasePluginBridge.bindPluginRuntime(backendHandle, runtimeHandle, poolsHandle, assetManager)` —
 /// hand the (already-created) tur runtime handle to the named backend
 /// instance so `plugin.list` can register module sources on it (tur #198),
 /// and stash the raw `AAssetManager` pointer for reading bundled plugin
-/// zips during `plugin.bootstrap`. The AssetManager object is owned by the
-/// application Context for the app lifetime, so the raw pointer stays
-/// valid. Call once right after `createRuntime` (the Kotlin
-/// `PluginRuntimeHost` does it as part of its explicit start sequence).
+/// zips during `plugin.bootstrap`. `poolsHandle` lets the backend's own
+/// headless-instance spawns assign the shared `ease-plugin-backend` worker
+/// pool (the same pools the runtime was created with). The AssetManager
+/// object is owned by the application Context for the app lifetime, so the
+/// raw pointer stays valid. Call once right after `createRuntime` (the
+/// Kotlin `PluginRuntimeHost` does it as part of its explicit start
+/// sequence) — attaching the engine host also triggers the first backend
+/// reload (scan + spawn + wire, Rust-side).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_bindPluginRuntime(
     mut env: tur_android::JNIEnv,
     _class: tur_android::JClass,
     backend_handle: tur_android::jlong,
     runtime_handle: tur_android::jlong,
+    pools_handle: tur_android::jlong,
     asset_manager: tur_android::JObject,
 ) {
     let Some(cx) = backend_cx_for(backend_handle, "bindPluginRuntime") else {
@@ -605,22 +535,24 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     }
     crate::plugin_runtime::engine::attach(
         &cx,
-        crate::plugin_runtime::engine::TurEngineHost::new(runtime_handle, mgr as usize),
+        crate::plugin_runtime::engine::TurEngineHost::new(runtime_handle, pools_handle, mgr as usize),
     );
     tracing::info!(
         "bindPluginRuntime: runtime handle {runtime_handle} + asset manager bound \
-         (backend handle {backend_handle})"
+         (backend handle {backend_handle}, pools handle {pools_handle})"
     );
 }
 
 /// `EasePluginBridge.unbindPluginRuntime(backendHandle, runtimeHandle)` —
 /// the teardown counterpart of [`Java_..._EasePluginBridge_bindPluginRuntime`]:
 /// compare-and-set detaches the engine host (runtime handle + asset
-/// manager) the backend's plugin manager holds, so a stale stop can never
-/// clobber a newer binding. Call BEFORE `TurNative.destroyRuntime` —
-/// afterwards the scans would keep registering module sources against a
-/// destroyed runtime and every `plugin.list` source handle would silently
-/// come back 0.
+/// manager) the backend's plugin manager holds — a stale stop can never
+/// clobber a newer binding — and, when the binding was ours, tears down
+/// every Rust-owned headless backend instance + its service RPC entry
+/// (stale `RpcClient`s must not survive into storage dispatch). Call
+/// BEFORE `TurNative.destroyRuntime` — afterwards the scans would keep
+/// registering module sources against a destroyed runtime and every
+/// `plugin.list` source handle would silently come back 0.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePluginBridge_unbindPluginRuntime(
     _env: tur_android::JNIEnv,
@@ -632,7 +564,8 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
         return;
     };
     let detached = cx.plugin_manager().detach_engine_host(runtime_handle);
-    if detached.is_some() {
+    if let Some(host) = detached {
+        ease_client_backend::services::plugin_manager::teardown_headless_backends(&cx, host.as_ref());
         tracing::info!(
             "unbindPluginRuntime: runtime handle {runtime_handle} cleared \
              (backend handle {backend_handle})"

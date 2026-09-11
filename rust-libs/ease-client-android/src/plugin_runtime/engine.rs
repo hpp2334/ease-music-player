@@ -9,6 +9,7 @@
 //! [`PluginEngineHost::read_bundled_asset`] to read the bundled plugin zips
 //! natively — their bytes never cross the JNI boundary.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ease_client_backend::services::plugin_manager::PluginEngineHost;
@@ -17,18 +18,44 @@ use ease_client_backend::services::plugin_manager::PluginEngineHost;
 /// trampoline ([`crate::plugin_runtime::plugin_jni`]) and attached to the
 /// backend context's plugin-manager shared state; dropped (compare-and-set)
 /// by `unbindPluginRuntime`.
+///
+/// Headless-instance spawn/load/close run on whatever thread the backend's
+/// reload lands on (a tokio worker): the JVM-dependent steps attach that
+/// thread to the JVM via ndk-context for the duration of the call.
 pub(crate) struct TurEngineHost {
     runtime_handle: i64,
+    pools_handle: i64,
     asset_manager: usize,
+    /// Per spawned headless instance: the Kotlin `FrameLoop` global ref +
+    /// its `AtomicLong` handle cell (the zeroable pump guard — see
+    /// `FrameLoop.closeInstance`). Dropped when the instance closes.
+    loops: std::sync::Mutex<HashMap<i64, (jni::objects::GlobalRef, jni::objects::GlobalRef)>>,
 }
 
 impl TurEngineHost {
-    pub(crate) fn new(runtime_handle: i64, asset_manager: usize) -> Self {
+    pub(crate) fn new(runtime_handle: i64, pools_handle: i64, asset_manager: usize) -> Self {
         Self {
             runtime_handle,
+            pools_handle,
             asset_manager,
+            loops: Default::default(),
         }
     }
+}
+
+/// Attach the current (native) thread to the JVM via ndk-context for the
+/// duration of `f`. Works from any thread — the tokio workers the backend
+/// reload runs on, or an already-attached JNI thread.
+#[cfg(target_os = "android")]
+fn with_attached_env<R>(
+    f: impl FnOnce(&mut jni::JNIEnv) -> anyhow::Result<R>,
+) -> anyhow::Result<R> {
+    let ctx = ndk_context::android_context();
+    // SAFETY: the JavaVM pointer registered by `nativeInitAndroidContext`
+    // is valid for the process lifetime.
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm() as *mut _) }?;
+    let mut env = vm.attach_current_thread().map_err(|e| anyhow::anyhow!("{e}"))?;
+    f(&mut env)
 }
 
 impl PluginEngineHost for TurEngineHost {
@@ -82,6 +109,190 @@ impl PluginEngineHost for TurEngineHost {
         {
             let _ = path;
             None
+        }
+    }
+
+    /// Spawn a headless instance from Rust: attach to the JVM, construct
+    /// the Kotlin `FrameLoop` (main-looper-safe by construction), hand it
+    /// to the engine's `create_instance` (which globalizes the ref itself),
+    /// then wire the loop's wake callbacks through a zeroable
+    /// `AtomicLong` cell — the exact `TurInstance` guard semantics, so a
+    /// wake that lands after `close_headless` reads 0 and no-ops instead of
+    /// pumping a freed route.
+    fn spawn_headless(&self, plugin_id: &str) -> anyhow::Result<i64> {
+        #[cfg(target_os = "android")]
+        {
+            use tur_engine::core::render::brush::Color;
+
+            let pid = plugin_id.to_string();
+            let pools_handle = self.pools_handle;
+            let runtime_handle = self.runtime_handle;
+            let loops = &self.loops;
+            with_attached_env(move |env| {
+                let backend_pool =
+                    crate::plugin_runtime::plugin_jni::borrow_pools(pools_handle)
+                        .map(|pools| pools.backend.clone());
+                let class = crate::plugin_runtime::host_cache::frame_loop_class()
+                    .ok_or_else(|| anyhow::anyhow!("FrameLoop class not cached (createRuntime not run)"))?;
+                // SAFETY: the cached raw jclass is a process-lifetime global ref.
+                let class = unsafe { jni::objects::JClass::from_raw(class) };
+                let loop_obj: jni::objects::JObject =
+                    env.new_object(&class, "()V", &[]).map_err(|e| anyhow::anyhow!("FrameLoop ctor: {e}"))?;
+                // Global refs up front: `create_instance` takes the JObject
+                // by value (and globalizes it for the engine's FrameLoopRef);
+                // our own references for the wiring + close statics are these.
+                let loop_global = env
+                    .new_global_ref(&loop_obj)
+                    .map_err(|e| anyhow::anyhow!("global ref (loop): {e}"))?;
+                let instance = tur_android::ops::create_instance(
+                    env,
+                    runtime_handle,
+                    loop_obj,
+                    move |builder| {
+                        let builder = match backend_pool {
+                            Some(ref pool) => builder.worker_pool(pool.clone()),
+                            None => builder,
+                        };
+                        builder.instance_data(move |cx| {
+                            cx.define::<crate::plugin_runtime::PluginId>(
+                                crate::plugin_runtime::PluginId::new(pid.clone()),
+                            );
+                            cx.define::<crate::plugin_runtime::PluginInstance>(
+                                crate::plugin_runtime::PluginInstance(None),
+                            );
+                        })
+                    },
+                    // Never attached to a surface — the base color is moot.
+                    Color::WHITE,
+                );
+                if instance == 0 {
+                    anyhow::bail!("create_instance returned 0 (see logcat)");
+                }
+                // Guard cell + wake wiring (mirrors TurInstance.init).
+                let cell = env
+                    .new_object(
+                        "java/util/concurrent/atomic/AtomicLong",
+                        "(J)V",
+                        &[jni::objects::JValue::Long(instance)],
+                    )
+                    .map_err(|e| anyhow::anyhow!("AtomicLong ctor: {e}"))?;
+                let cell_global = env
+                    .new_global_ref(&cell)
+                    .map_err(|e| anyhow::anyhow!("global ref (cell): {e}"))?;
+                env.call_static_method(
+                    &class,
+                    "wireToInstance",
+                    "(Lcom/kutedev/easemusicplayer/turintegration/FrameLoop;Ljava/util/concurrent/atomic/AtomicLong;)V",
+                    &[(&*loop_global).into(), (&cell).into()],
+                )
+                .map_err(|e| anyhow::anyhow!("FrameLoop.wireToInstance: {e}"))?;
+                loops
+                    .lock()
+                    .unwrap()
+                    .insert(instance, (loop_global, cell_global));
+                Ok(instance)
+            })
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (plugin_id, source_handle);
+            anyhow::bail!("headless spawn requires Android")
+        }
+    }
+
+    fn load_headless_module(&self, instance_handle: i64, source_handle: i64) {
+        #[cfg(target_os = "android")]
+        {
+            // `ops::load_module` takes an env it never uses for anything but
+            // exception handling — attach for the call to preserve the exact
+            // engine path (posted, FIFO behind the spawn).
+            let _ = with_attached_env(|env| {
+                tur_android::ops::load_module(env, instance_handle, source_handle);
+                Ok(())
+            });
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (instance_handle, source_handle);
+        }
+    }
+
+    fn extract_rpc(&self, instance_handle: i64) -> Option<ease_tur_rpc::RpcClient> {
+        #[cfg(target_os = "android")]
+        {
+            // Blocking round-trip onto the engine host thread — FIFO behind
+            // the spawn + load posts, so the JS handlers are registered by
+            // the time this runs.
+            tur_android::ops::with_app(instance_handle, |app| {
+                ease_tur_rpc::RpcClient::wire(app)
+            })
+            .and_then(|r| match r {
+                Ok(client) => Some(client),
+                Err(e) => {
+                    tracing::error!("RpcClient::wire failed: {e}");
+                    None
+                }
+            })
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = instance_handle;
+            None
+        }
+    }
+
+    fn close_headless(&self, instance_handle: i64) {
+        #[cfg(target_os = "android")]
+        {
+            let globals = self.loops.lock().unwrap().remove(&instance_handle);
+            let _ = with_attached_env(|env| {
+                if let Some((loop_ref, cell_ref)) = globals {
+                    let class = crate::plugin_runtime::host_cache::frame_loop_class()
+                        .ok_or_else(|| anyhow::anyhow!("FrameLoop class not cached"))?;
+                    // SAFETY: process-lifetime global ref.
+                    let class = unsafe { jni::objects::JClass::from_raw(class) };
+                    env.call_static_method(
+                        &class,
+                        "closeInstance",
+                        "(Lcom/kutedev/easemusicplayer/turintegration/FrameLoop;Ljava/util/concurrent/atomic/AtomicLong;)V",
+                        &[(&*loop_ref).into(), (&*cell_ref).into()],
+                    )
+                    .map_err(|e| anyhow::anyhow!("FrameLoop.closeInstance: {e}"))?;
+                }
+                Ok(())
+            });
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = instance_handle;
+        }
+    }
+
+    fn emit_signal(&self, op: u32, payload: &str) {
+        #[cfg(target_os = "android")]
+        {
+            let payload = payload.to_string();
+            let _ = with_attached_env(|env| {
+                let class = crate::plugin_runtime::host_cache::signal_host_class()
+                    .ok_or_else(|| anyhow::anyhow!("EaseSignalHost class not cached"))?;
+                // SAFETY: process-lifetime global ref.
+                let class = unsafe { jni::objects::JClass::from_raw(class) };
+                let jstr = env
+                    .new_string(&payload)
+                    .map_err(|e| anyhow::anyhow!("new_string: {e}"))?;
+                env.call_static_method(
+                    &class,
+                    "onSignal",
+                    "(ILjava/lang/String;)V",
+                    &[jni::objects::JValue::Int(op as i32), (&jstr).into()],
+                )
+                .map_err(|e| anyhow::anyhow!("EaseSignalHost.onSignal: {e}"))?;
+                Ok(())
+            });
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (op, payload);
         }
     }
 }
@@ -169,8 +380,8 @@ pub(crate) unsafe fn aasset_manager_from_java(
 }
 
 /// Convenience for the JNI trampolines: attach the host impl to a backend
-/// context's plugin-manager shared state.
+/// context's plugin-manager shared state and kick the first backend reload.
 pub(crate) fn attach(cx: &ease_client_backend::ctx::BackendContext, host: TurEngineHost) {
-    cx.plugin_manager()
-        .attach_engine_host(Arc::new(host));
+    cx.plugin_manager().attach_engine_host(Arc::new(host));
+    ease_client_backend::services::plugin_manager::spawn_reload_backends(cx);
 }

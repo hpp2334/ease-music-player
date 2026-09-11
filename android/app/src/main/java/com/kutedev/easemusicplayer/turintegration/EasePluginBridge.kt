@@ -62,42 +62,29 @@ object EasePluginBridge {
      * Hand the (already-created) tur runtime handle + the app `AssetManager`
      * to the named backend instance, so the Rust-side plugin manager can
      * register module sources on the runtime (`plugin.list`) and read
-     * bundled plugin zips natively (`plugin.bootstrap`). Only the handles
-     * cross JNI — never the JS or zip bytes. Call once right after
-     * [createRuntime], as part of [PluginRuntimeHost.start].
+     * bundled plugin zips natively (`plugin.bootstrap`). `poolsHandle`
+     * lets the backend's own headless-instance spawns assign the shared
+     * `ease-plugin-backend` worker pool. Only the handles cross JNI — never
+     * the JS or zip bytes. Call once right after [createRuntime], as part
+     * of [PluginRuntimeHost.start]; attaching also triggers the first
+     * Rust-side backend reload (scan + spawn + wire).
      */
     @JvmStatic
-    external fun bindPluginRuntime(backendHandle: Long, runtimeHandle: Long, assetManager: android.content.res.AssetManager)
+    external fun bindPluginRuntime(
+        backendHandle: Long,
+        runtimeHandle: Long,
+        poolsHandle: Long,
+        assetManager: android.content.res.AssetManager,
+    )
 
     /**
-     * The teardown counterpart of [bindPluginRuntime]: clears the stored
-     * runtime handle (compare-and-set — a stale stop can never clobber a
-     * newer binding) and drops the stashed `AAssetManager`. Call BEFORE
-     * `TurNative.destroyRuntime`, while [backendHandle] is still alive —
-     * afterwards every `plugin.list` module-source handle would silently
-     * come back 0.
+     * The teardown counterpart of [bindPluginRuntime]: compare-and-set
+     * detaches the engine binding (a stale stop can never clobber a newer
+     * one) and tears down every Rust-owned headless backend instance +
+     * its service RPC entry. Call BEFORE `TurNative.destroyRuntime`, while
+     * [backendHandle] is still alive — afterwards every `plugin.list`
+     * module-source handle would silently come back 0.
      */
     @JvmStatic
     external fun unbindPluginRuntime(backendHandle: Long, runtimeHandle: Long)
-
-    /**
-     * Connect a headless backend instance's event bus to ease-tur-rpc and
-     * stash the resulting `Send` `RpcClient` into the named backend
-     * instance's context under [pluginId]. Call once per plugin, after
-     * `createHeadlessInstance` + `loadModule` (by source handle) so the JS
-     * dispatcher + backend handlers are registered — the native op queue is
-     * FIFO, so the wire round-trip lands behind both even though the
-     * instance build is async. Returns `true` on success.
-     */
-    @JvmStatic
-    external fun wireServiceRpc(backendHandle: Long, instanceHandle: Long, pluginId: String): Boolean
-
-    /**
-     * Drop the backend context's service `RpcClient` entry for [pluginId]
-     * (its headless instance is being torn down — the plugin was disabled /
-     * uninstalled / upgraded). Storage dispatch + event delivery for the
-     * plugin degrade gracefully until a fresh instance is wired.
-     */
-    @JvmStatic
-    external fun unwireServiceRpc(backendHandle: Long, pluginId: String)
 }
