@@ -107,6 +107,7 @@ class PluginRuntimeHost @Inject constructor(
             EasePluginBridge.bindPluginRuntime(
                 backendHandle,
                 handle,
+                pools,
                 context.applicationContext.assets,
             )
 

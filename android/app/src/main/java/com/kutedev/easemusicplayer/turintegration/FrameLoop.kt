@@ -49,6 +49,40 @@ class FrameLoop {
     private var frameCallback: Choreographer.FrameCallback? = null
     private var pumpPosted = false
 
+    companion object {
+        /**
+         * Rust-side headless spawn path: wire this loop's wake callbacks to
+         * pump the named native instance, guarded by a zeroable
+         * [java.util.concurrent.atomic.AtomicLong] cell — the exact
+         * `TurInstance` semantics. Reads the cell at fire time, so a wake
+         * that lands after [closeInstance] zeroed it no-ops instead of
+         * pumping a freed route.
+         *
+         * Called from `ease-client-android`'s engine host (an attached
+         * native thread) after `createInstance` returns the handle.
+         */
+        @JvmStatic
+        fun wireToInstance(loop: FrameLoop, cell: java.util.concurrent.atomic.AtomicLong) {
+            loop.onVsync = { val h = cell.get(); if (h != 0L) TurNative.pump(h) }
+            loop.onPump = { val h = cell.get(); if (h != 0L) TurNative.pumpMessages(h) }
+        }
+
+        /**
+         * Rust-side headless teardown: zero the guard cell, cancel pending
+         * wakes, destroy the instance. Hops to the main looper — `cancel()`
+         * touches `Choreographer` when a vsync is armed, which requires a
+         * looper thread. Mirrors `TurInstance.close()`.
+         */
+        @JvmStatic
+        fun closeInstance(loop: FrameLoop, cell: java.util.concurrent.atomic.AtomicLong) {
+            Handler(Looper.getMainLooper()).post {
+                val h = cell.getAndSet(0L)
+                loop.cancel()
+                if (h != 0L) TurNative.destroy(h)
+            }
+        }
+    }
+
     /** Fired when a scheduled display frame is due (Choreographer). */
     var onVsync: (() -> Unit)? = null
 

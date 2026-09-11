@@ -19,11 +19,13 @@ use jni::JNIEnv;
 static THEME_HOST_CLASS: OnceLock<usize> = OnceLock::new();
 static OAUTH_HOST_CLASS: OnceLock<usize> = OnceLock::new();
 static STORAGE_HOST_CLASS: OnceLock<usize> = OnceLock::new();
+static FRAME_LOOP_CLASS: OnceLock<usize> = OnceLock::new();
+static SIGNAL_HOST_CLASS: OnceLock<usize> = OnceLock::new();
 
 /// Cache global refs to `EaseThemesHost` + `EaseOauthHost` +
-/// `EaseStorageHost`. Call from the main thread (e.g. `createRuntime`),
-/// where `find_class` can resolve app classes. Idempotent; leaks the
-/// global refs for the app lifetime.
+/// `EaseStorageHost` + `FrameLoop` + `EaseSignalHost`. Call from the main
+/// thread (e.g. `createRuntime`), where `find_class` can resolve app
+/// classes. Idempotent; leaks the global refs for the app lifetime.
 pub fn cache_host_classes(env: &mut JNIEnv<'_>) -> Result<(), String> {
     cache_one(
         env,
@@ -39,6 +41,16 @@ pub fn cache_host_classes(env: &mut JNIEnv<'_>) -> Result<(), String> {
         env,
         "com/kutedev/easemusicplayer/turintegration/EaseStorageHost",
         &STORAGE_HOST_CLASS,
+    )?;
+    cache_one(
+        env,
+        "com/kutedev/easemusicplayer/turintegration/FrameLoop",
+        &FRAME_LOOP_CLASS,
+    )?;
+    cache_one(
+        env,
+        "com/kutedev/easemusicplayer/turintegration/EaseSignalHost",
+        &SIGNAL_HOST_CLASS,
     )?;
     Ok(())
 }
@@ -79,4 +91,16 @@ pub fn oauth_host_class() -> Option<jni::sys::jclass> {
 /// [`cache_host_classes`] has run.
 pub fn storage_host_class() -> Option<jni::sys::jclass> {
     STORAGE_HOST_CLASS.get().map(|r| *r as jni::sys::jclass)
+}
+
+/// Raw global `jclass` for `FrameLoop`, or `None` before
+/// [`cache_host_classes`] has run.
+pub fn frame_loop_class() -> Option<jni::sys::jclass> {
+    FRAME_LOOP_CLASS.get().map(|r| *r as jni::sys::jclass)
+}
+
+/// Raw global `jclass` for `EaseSignalHost`, or `None` before
+/// [`cache_host_classes`] has run.
+pub fn signal_host_class() -> Option<jni::sys::jclass> {
+    SIGNAL_HOST_CLASS.get().map(|r| *r as jni::sys::jclass)
 }

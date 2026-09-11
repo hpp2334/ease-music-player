@@ -140,6 +140,10 @@ pub struct LyricParserEntry {
 /// `cargo check`) never attach one — the scan then reports zero
 /// module-source handles plus loud warnings instead of failing silently,
 /// and bootstrap reports its bundled zips as unreadable.
+///
+/// The headless-backend lifecycle is fully engine-side: the backend decides
+/// *what* should run ([`reload_backends`]) and calls these methods to make
+/// it so — no Kotlin-side orchestration of plugin instances remains.
 pub trait PluginEngineHost: Send + Sync {
     /// Opaque identity of this binding (the tur runtime handle). Used by
     /// [`PluginManagerShared::detach_engine_host`] for the compare-and-set.
@@ -153,7 +157,36 @@ pub trait PluginEngineHost: Send + Sync {
     /// Read one bundled APK asset (e.g. `plugin-bundles/<id>.zip`).
     /// `None` when unreadable / no asset manager bound.
     fn read_bundled_asset(&self, path: &str) -> Option<Vec<u8>>;
+
+    /// Spawn a headless instance stamped with the plugin's id (assigned to
+    /// the shared `ease-plugin-backend` worker pool) and return its opaque
+    /// handle. The instance's pump wiring (the Kotlin `FrameLoop`) is the
+    /// implementor's concern.
+    fn spawn_headless(&self, plugin_id: &str) -> anyhow::Result<i64>;
+
+    /// Evaluate the registered module source into the instance. FIFO-ordered
+    /// behind the spawn on the engine's host thread.
+    fn load_headless_module(&self, instance_handle: i64, source_handle: i64);
+
+    /// Extract the `Send` RPC client for a spawned instance's event bus
+    /// (a blocking round-trip that settles behind the spawn + module load —
+    /// by the time it runs, the JS backend handlers are registered).
+    /// `None` on a stale/invalid handle.
+    fn extract_rpc(&self, instance_handle: i64) -> Option<ease_tur_rpc::RpcClient>;
+
+    /// Close a spawned headless instance (cancel its pump wiring + destroy).
+    /// Safe on stale handles (no-op).
+    fn close_headless(&self, instance_handle: i64);
+
+    /// Fire-and-forget upcall into the Kotlin host (the `EaseSignalHost`
+    /// static). No return value ever — host data flows to Rust as state
+    /// pushes, not queries. Op codes: see the `SIGNAL_*` constants.
+    fn emit_signal(&self, op: u32, payload: &str);
 }
+
+/// Signal op codes shared between Rust emission and the Kotlin
+/// `EaseSignalHost` consumer (mirror in `BackendSignal.kt`).
+pub const SIGNAL_PLUGINS_CHANGED: u32 = 1;
 
 /// Per-process shared manager state, held by [`crate::ctx::BackendContext`].
 ///
@@ -164,6 +197,11 @@ pub trait PluginEngineHost: Send + Sync {
 ///   raw `AAssetManager`), set by the Android crate's `bindPluginRuntime`
 ///   and compare-and-set cleared by `unbindPluginRuntime`. `None` = not
 ///   bound (host builds, pre-bind, post-unbind).
+/// - `headless` — the Rust-owned headless backend instances
+///   (plugin id → instance handle); torn down + rebuilt by
+///   [`reload_backends`].
+/// - `reload_lock` — serializes backend reloads (bind-triggered +
+///   mutation-triggered).
 /// - `lyric_parsers` — the scan-populated lyric-parser registry (dispatch
 ///   reads it per lyric load; empty before the first `plugin.list`).
 /// - `lyric_parser_selection` — the user's per-extension parser picks,
@@ -173,6 +211,8 @@ pub struct PluginManagerShared {
     generation: AtomicU64,
     pub install_lock: tokio::sync::Mutex<()>,
     engine_host: RwLock<Option<std::sync::Arc<dyn PluginEngineHost>>>,
+    headless: RwLock<HashMap<String, i64>>,
+    reload_lock: tokio::sync::Mutex<()>,
     lyric_parsers: RwLock<std::sync::Arc<Vec<LyricParserEntry>>>,
     lyric_parser_selection: RwLock<BTreeMap<String, String>>,
 }
@@ -237,6 +277,28 @@ impl PluginManagerShared {
     /// by id, contributions in manifest order).
     pub fn lyric_parser_snapshot(&self) -> std::sync::Arc<Vec<LyricParserEntry>> {
         self.lyric_parsers.read().unwrap().clone()
+    }
+
+    /// Record a live headless backend instance (called by
+    /// [`reload_backends`] after a successful spawn + wire).
+    pub fn record_headless(&self, plugin_id: &str, instance_handle: i64) {
+        self.headless
+            .write()
+            .unwrap()
+            .insert(plugin_id.to_string(), instance_handle);
+    }
+
+    /// Take the live headless backend instance set (plugin id → instance
+    /// handle), leaving it empty — the caller closes them.
+    pub fn drain_headless(&self) -> Vec<(String, i64)> {
+        std::mem::take(&mut *self.headless.write().unwrap())
+            .into_iter()
+            .collect()
+    }
+
+    /// The live headless backend instance for `plugin_id`, if any.
+    pub fn headless_for(&self, plugin_id: &str) -> Option<i64> {
+        self.headless.read().unwrap().get(plugin_id).copied()
     }
 
     /// Swap the lyric-parser registry (called by [`scan`]).
@@ -1310,6 +1372,8 @@ async fn install_bytes_and_enable(
         ..s
     })?;
     tracing::info!("plugin installed: {} {}", manifest.id, manifest.version);
+    // The new/updated backend (if any) loads in the background reload.
+    spawn_reload_backends(cx);
     Ok((manifest.id.clone(), cx.plugin_manager().bump_generation()))
 }
 
@@ -1331,6 +1395,8 @@ pub async fn set_enabled(
         "plugin {}: {plugin_id}",
         if enabled { "enabled" } else { "disabled" }
     );
+    // Enable/disable changes the live backend set — reload in the background.
+    spawn_reload_backends(cx);
     Ok(cx.plugin_manager().bump_generation())
 }
 
@@ -1447,6 +1513,8 @@ pub async fn uninstall(
     cx.plugin_manager()
         .set_lyric_parser_selection_map(state_after.lyric_parser_selection);
     tracing::info!("plugin uninstalled: {plugin_id}");
+    // Tears down the (now orphaned) backend instance + storage rows.
+    spawn_reload_backends(cx);
     Ok(cx.plugin_manager().bump_generation())
 }
 
@@ -1628,6 +1696,8 @@ pub async fn bootstrap(cx: &crate::ctx::BackendContext, app_document_dir: &str) 
     }
 
     if mutated {
+        // Fresh installs (or upgrades) need their backends loaded.
+        spawn_reload_backends(cx);
         Ok(shared.bump_generation())
     } else {
         Ok(shared.generation())
@@ -1647,6 +1717,108 @@ async fn collect_storage_plugin_ids(cx: &crate::ctx::BackendContext) -> Vec<Stri
     ids.sort();
     ids.dedup();
     ids
+}
+
+// ============================================================================
+// Headless backend lifecycle (Rust-owned)
+// ============================================================================
+
+/// Close every live headless backend instance + unwire its service RPC
+/// entry. Used by [`reload_backends`] (teardown half) and the unbind path
+/// (the runtime is about to die — stale `RpcClient`s must not survive into
+/// storage dispatch).
+pub fn teardown_headless_backends(
+    cx: &crate::ctx::BackendContext,
+    host: &dyn PluginEngineHost,
+) {
+    for (pid, instance) in cx.plugin_manager().drain_headless() {
+        cx.remove_service_rpc(&pid);
+        host.close_headless(instance);
+        tracing::debug!("plugin backend torn down: {pid} (instance {instance})");
+    }
+}
+
+/// (Re)load the headless backend instances for all enabled plugins — the
+/// single reload path, triggered by the engine binding (bind) and by every
+/// set-changing mutation (install / uninstall / enable / disable /
+/// bootstrap). Serialized by the shared reload lock; a concurrent
+/// unbind CAS-detaches the host, which the next reload observes (scans then
+/// come back with zero handles + warnings — the loud degradation path).
+pub async fn reload_backends(cx: &crate::ctx::BackendContext, app_document_dir: &str) {
+    let _guard = cx.plugin_manager().reload_lock.lock().await;
+    let Some(host) = cx.plugin_manager().engine_host() else {
+        tracing::error!(
+            "reload_backends: no engine host bound — plugin backends not loaded \
+             (bindPluginRuntime not called / already unbound)"
+        );
+        return;
+    };
+    // Teardown: close old instances + unwire their RPC entries so storage
+    // dispatch + events for a disabled/uninstalled plugin stop at the source.
+    teardown_headless_backends(cx, host.as_ref());
+    // Rescan (registers module sources for the enabled set on this host).
+    let list = match scan(cx, app_document_dir).await {
+        Ok(list) => list,
+        Err(e) => {
+            tracing::error!("reload_backends: scan failed: {e}");
+            return;
+        }
+    };
+    // Spawn + load + wire every enabled backend.
+    let mut loaded = 0usize;
+    for plugin in &list.plugins {
+        if !plugin.enabled || plugin.backend.is_none() || plugin.backend_source_handle == 0 {
+            if plugin.enabled && plugin.backend.is_some() {
+                tracing::error!(
+                    "plugin backend skipped (no source handle): {} — see the plugin \
+                     scan warnings in the log",
+                    plugin.id
+                );
+            }
+            continue;
+        }
+        let instance = match host.spawn_headless(&plugin.id) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::error!("plugin backend load failed: {} ({e})", plugin.id);
+                continue;
+            }
+        };
+        host.load_headless_module(instance, plugin.backend_source_handle);
+        match host.extract_rpc(instance) {
+            Some(rpc) => {
+                cx.set_service_rpc(&plugin.id, rpc);
+                cx.plugin_manager().record_headless(&plugin.id, instance);
+                tracing::info!(
+                    "plugin backend loaded: {}/{:?} (instance {instance})",
+                    plugin.id,
+                    plugin.backend
+                );
+                loaded += 1;
+            }
+            None => {
+                tracing::error!(
+                    "plugin backend wire failed (no RpcClient): {} — see logs",
+                    plugin.id
+                );
+                host.close_headless(instance);
+            }
+        }
+    }
+    let gen = cx.plugin_manager().bump_generation();
+    tracing::info!("plugin backends reloaded: {loaded} live (generation {gen})");
+    host.emit_signal(SIGNAL_PLUGINS_CHANGED, &gen.to_string());
+}
+
+/// Fire-and-forget [`reload_backends`] on the shared tokio runtime — the
+/// mutation path (bridge calls) must not block its response on the full
+/// spawn + module-eval cycle.
+pub fn spawn_reload_backends(cx: &crate::ctx::BackendContext) {
+    let cx = cx.clone();
+    let dir = cx.get_app_document_dir();
+    ease_client_tokio::tokio_runtime().spawn(async move {
+        reload_backends(&cx, &dir).await;
+    });
 }
 
 // ============================================================================
@@ -2477,6 +2649,20 @@ mod tests {
         fn read_bundled_asset(&self, _path: &str) -> Option<Vec<u8>> {
             None
         }
+
+        fn spawn_headless(&self, _plugin_id: &str) -> anyhow::Result<i64> {
+            Ok(self.id + 1)
+        }
+
+        fn load_headless_module(&self, _instance_handle: i64, _source_handle: i64) {}
+
+        fn extract_rpc(&self, _instance_handle: i64) -> Option<ease_tur_rpc::RpcClient> {
+            None
+        }
+
+        fn close_headless(&self, _instance_handle: i64) {}
+
+        fn emit_signal(&self, _op: u32, _payload: &str) {}
     }
 
     /// `detach_engine_host` is compare-and-set: a stale teardown (racing a

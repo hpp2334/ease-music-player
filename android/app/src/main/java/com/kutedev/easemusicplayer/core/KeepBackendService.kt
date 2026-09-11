@@ -9,34 +9,26 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.PluginManager
-import com.kutedev.easemusicplayer.singleton.PluginRepository
-import com.kutedev.easemusicplayer.turintegration.EasePluginBridge
 import com.kutedev.easemusicplayer.turintegration.PluginRuntimeHost
-import com.kutedev.easemusicplayer.turintegration.TurInstance
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 
 @AndroidEntryPoint
 class KeepBackendService : Service() {
     @Inject lateinit var bridge: Bridge
-    @Inject lateinit var pluginRepository: PluginRepository
     @Inject lateinit var pluginManager: PluginManager
     @Inject lateinit var pluginRuntimeHost: PluginRuntimeHost
     private val _channelId: String = "EaseMusicBackendServiceChannel"
 
-    /** Held for the service lifetime so the headless instances are not GC'd. */
-    private var serviceScope: CoroutineScope? = null
-    private val serviceInstances = mutableListOf<TurInstance>()
-    /** Guards [loadPluginBackends] re-entries (initial load + revision bumps). */
-    private val loadMutex = Mutex()
+    /** Runs the first-run bootstrap (bundled installs) off the main thread. */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var bootstrapped = false
 
     override fun onCreate() {
         super.onCreate()
@@ -59,106 +51,30 @@ class KeepBackendService : Service() {
     }
 
     /**
-     * Bring up the plugin install layer + the headless tur instances that
-     * host JS plugin backends. Sequence: start the shared runtime via
-     * [PluginRuntimeHost] (explicit create → `bindPluginRuntime`, logged —
-     * it registers `TurRpcPlugin` + `EaseMusicPlugin` bound to *this*
-     * backend instance), run the first-run install bootstrap
-     * ([PluginManager.bootstrapDefaults] — bundled WebDAV + any
-     * storage-referenced plugins), then load every *enabled* plugin's
-     * backend module into a headless instance stamped with the plugin's id
-     * and wire the event bus into a `Send` `RpcClient` the backend can call
-     * from any thread.
-     *
-     * [PluginManager.revision] is collected for the service lifetime: every
-     * install / uninstall / enable / disable mutation tears all instances
-     * down (unwiring their service RPC entries) and reloads the enabled
-     * set. The scan runs on [Dispatchers.IO]; instance creation + wiring
-     * run on the main looper (where `with_app` / the `FrameLoop`
-     * Choreographer are valid); failures are logged but never crash the
-     * service.
+     * Bring up the shared plugin runtime and kick the first-run install
+     * bootstrap. That is ALL this service does now: since the backend owns
+     * the headless-instance lifecycle (`reload_backends` in Rust, triggered
+     * by the engine binding + every set-changing mutation), there is no
+     * instance list, no revision collection, and no per-plugin wiring on
+     * the Kotlin side anymore. The UI refreshes its plugin lists from the
+     * `PLUGINS_CHANGED` signal (`EaseSignalHost`).
      */
     private fun bootstrapServicePlugin() {
-        if (serviceScope != null) return
         try {
             pluginRuntimeHost.start(this)
-            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-            serviceScope = scope
-            scope.launch {
-                try {
-                    pluginManager.bootstrapDefaults()
-                    loadPluginBackends()
-                    pluginManager.revision.collect {
-                        bridge.logRaw("info", "plugin set changed (revision $it) — reloading backends")
-                        loadPluginBackends()
-                    }
-                } catch (e: Throwable) {
-                    bridge.logRaw("error", "service plugin bootstrap failed: ${e.message}")
-                    Log.e(TAG, "service plugin bootstrap failed", e)
+            if (!bootstrapped) {
+                bootstrapped = true
+                serviceScope.launch {
+                    runCatching { pluginManager.bootstrapDefaults() }
+                        .onFailure {
+                            bridge.logRaw("error", "plugin bootstrap failed: ${it.message}")
+                            Log.e(TAG, "plugin bootstrap failed", it)
+                        }
                 }
             }
         } catch (e: Throwable) {
             bridge.logRaw("error", "service plugin bootstrap failed: ${e.message}")
             Log.e(TAG, "service plugin bootstrap failed", e)
-        }
-    }
-
-    /** Plugin ids whose backend instance is currently live (wired into the
-     *  backend context). Tracked so teardown can unwire exactly those. */
-    private val loadedPluginIds = mutableListOf<String>()
-
-    /** (Re)load the headless backend instances for all enabled plugins.
-     *  Tears down any live instances first — closing each instance and
-     *  unwiring its service RPC entry so storage dispatch + events for a
-     *  disabled/uninstalled plugin stop at the source. Backend modules
-     *  load by **source handle** (registered on the runtime by the
-     *  Rust-side `plugin.list` scan — tur #198); no JS string crosses
-     *  JNI. */
-    private suspend fun loadPluginBackends() {
-        loadMutex.withLock {
-            pluginRepository.scanPlugins()
-            for (instance in serviceInstances) {
-                runCatching { instance.close() }
-            }
-            serviceInstances.clear()
-            val backendHandle = bridge.getBackendId()
-            for (id in loadedPluginIds.toList()) {
-                runCatching { EasePluginBridge.unwireServiceRpc(backendHandle, id) }
-            }
-            loadedPluginIds.clear()
-            val runtime = pluginRuntimeHost.runtimeOrNull()
-            if (runtime == null) {
-                bridge.logRaw("error", "loadPluginBackends: plugin runtime not running — no backends loaded")
-                Log.e(TAG, "loadPluginBackends: plugin runtime not running")
-                return@withLock
-            }
-            for (plugin in pluginRepository.enabledPlugins.value) {
-                val sourceHandle = plugin.backendSourceHandle
-                if (plugin.backend == null || sourceHandle == 0L) {
-                    bridge.logRaw(
-                        "error",
-                        "plugin backend skipped (no source handle): ${plugin.id} — " +
-                            "see the plugin scan warnings in the log",
-                    )
-                    Log.e(TAG, "plugin backend skipped (no source handle): ${plugin.id}")
-                    continue
-                }
-                try {
-                    val instance = runtime.createHeadlessInstance(plugin.id)
-                    serviceInstances += instance
-                    loadedPluginIds += plugin.id
-                    instance.loadModule(sourceHandle)
-                    val ok = EasePluginBridge.wireServiceRpc(backendHandle, instance.nativeHandle(), plugin.id)
-                    if (!ok) {
-                        bridge.logRaw("error", "wireServiceRpc failed for ${plugin.id} (see logcat)")
-                    } else {
-                        bridge.logRaw("info", "plugin backend loaded: ${plugin.id}/${plugin.backend}")
-                    }
-                } catch (e: Throwable) {
-                    bridge.logRaw("error", "plugin backend load failed: ${plugin.id} (${e.message})")
-                    Log.e(TAG, "plugin backend load failed: ${plugin.id}", e)
-                }
-            }
         }
     }
 
@@ -172,20 +88,11 @@ class KeepBackendService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        val backendHandle = bridge.getBackendId()
-        for (id in loadedPluginIds.toList()) {
-            runCatching { EasePluginBridge.unwireServiceRpc(backendHandle, id) }
-        }
-        loadedPluginIds.clear()
-        serviceInstances.forEach { instance ->
-            runCatching { instance.close() }
-        }
-        serviceInstances.clear()
-        serviceScope?.cancel()
-        serviceScope = null
+        serviceScope.cancel()
         // Unbind + destroy the runtime while the backend handle is still
         // resolvable — AFTER bridge.destroy() the Rust-side binding could
-        // not be cleared anymore.
+        // not be cleared anymore. The unbind itself tears down the
+        // Rust-owned headless backends.
         pluginRuntimeHost.stop("KeepBackendService destroyed")
         bridge.destroy()
     }

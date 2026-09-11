@@ -70,6 +70,7 @@ impl Backend {
 pub fn create_backend(arg: ArgInitializeApp) -> Arc<Backend> {
     let cx = Arc::new(BackendContext::new());
     init_infra(&arg.app_document_dir);
+    cx.set_app_document_dir(&arg.app_document_dir);
     Arc::new(Backend { cx, arg })
 }
 
