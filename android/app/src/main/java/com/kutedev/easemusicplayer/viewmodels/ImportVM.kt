@@ -69,7 +69,10 @@ class ImportVM @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Lazily, defaultSplitPaths())
     private val _selected = MutableStateFlow(persistentHashSetOf<String>())
     private val _entries = MutableStateFlow(listOf<StorageEntry>())
-    private val _selectedStorageId = MutableStateFlow(storageRepository.storages.value.firstOrNull()?.id)
+    private val _selectedStorageId = MutableStateFlow(filterStorages(
+        storageRepository.storages.value,
+        importRepository.allowedStorageIds.value
+    ).firstOrNull()?.id)
     private val _loadState = MutableStateFlow(CurrentStorageStateType.LOADING)
     // Toggle-all is disabled when there is nothing *selectable* — entries
     // whose type the current import accepts (dirs and mismatched files,
@@ -79,6 +82,61 @@ class ImportVM @Inject constructor(
             selectableEntries(entries, types).isEmpty()
         }.stateIn(viewModelScope, SharingStarted.Lazily, true)
     private val _undoStack = MutableStateFlow(persistentListOf<String>())
+
+    /**
+     * Storages the prepared import may actually use — the configured
+     * storage list filtered by the source restriction
+     * ([ImportRepository.allowedStorageIds]; `null` = unrestricted).
+     * Drives default/fallback selection; disallowed storages stay
+     * visible in the picker but render disabled.
+     */
+    private fun filterStorages(
+        storages: List<Storage>,
+        allowed: List<StorageId>?
+    ): List<Storage> {
+        if (allowed == null) {
+            return storages
+        }
+        return storages.filter { storage -> allowed.contains(storage.id) }
+    }
+
+    private val selectableStorages = combine(
+        storageRepository.storages,
+        importRepository.allowedStorageIds
+    ) {
+            storages, allowed ->
+        filterStorages(storages, allowed)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Lazily,
+        initialValue = filterStorages(
+            storageRepository.storages.value,
+            importRepository.allowedStorageIds.value
+        )
+    )
+
+    /** All configured storages — the picker renders these, dimming the disallowed ones. */
+    val storages = storageRepository.storages
+
+    /** Storages excluded by the prepared import's source restriction (empty = unrestricted). */
+    val disabledStorageIds = combine(
+        storageRepository.storages,
+        importRepository.allowedStorageIds
+    ) {
+            storages, allowed ->
+        if (allowed == null) {
+            emptySet()
+        } else {
+            storages
+                .filter { storage -> !allowed.contains(storage.id) }
+                .map { storage -> storage.id }
+                .toSet()
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Lazily,
+        initialValue = emptySet()
+    )
 
     val splitPaths = _splitPaths
     val selectedCount = _selected.combine(_entries) { selected, entries ->
@@ -98,10 +156,10 @@ class ImportVM @Inject constructor(
 
     init {
         viewModelScope.launch {
-            storageRepository.storages.collect { storages ->
+            selectableStorages.collect { storages ->
                 val storage = storages.find { storage -> storage.id == _selectedStorageId.value }
                 if (storage == null) {
-                    _selectedStorageId.value = storageRepository.storages.value.firstOrNull()?.id
+                    _selectedStorageId.value = storages.firstOrNull()?.id
                 }
 
                 reload()
@@ -152,6 +210,9 @@ class ImportVM @Inject constructor(
     }
 
     fun selectStorage(storageId: StorageId) {
+        if (disabledStorageIds.value.contains(storageId)) {
+            return
+        }
         _selectedStorageId.value = storageId
         _undoStack.value = persistentListOf()
 
@@ -252,7 +313,7 @@ class ImportVM @Inject constructor(
     }
 
     private fun currentStorage(): Storage? {
-        val storage = storageRepository.storages.value.find { storage -> storage.id == _selectedStorageId.value }
+        val storage = storages.value.find { storage -> storage.id == _selectedStorageId.value }
         return storage
     }
 

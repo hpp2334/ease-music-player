@@ -11,6 +11,9 @@ pub struct Model {
     pub picture_path: Option<String>,
     /// JSON-encoded `Vec<u32>` (ease-order-key raw).
     pub order: String,
+    /// JSON-encoded `Vec<i64>` of storage row ids; NULL = allow all
+    /// storages (see `PlaylistModel::storage_allowlist`).
+    pub storage_allowlist: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

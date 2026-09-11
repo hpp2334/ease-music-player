@@ -33,7 +33,7 @@ pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BRe
         .spawn(async move {
             let cx = cx.get_context();
             cx.database_server()
-                .update_playlist(arg.id, arg.title, arg.cover)
+                .update_playlist(arg.id, arg.title, arg.cover, arg.storage_allowlist)
                 .await?;
             Ok(())
         })
@@ -100,6 +100,7 @@ pub async fn ct_create_playlist(
                     musics,
                     current_time_ms,
                     OrderKey::greater(&last_order),
+                    arg.storage_allowlist,
                 )
                 .await?;
 

@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use ease_client_schema::{DataSourceKey, MusicId, MusicModel, PlaylistId, StorageEntryLoc};
+use ease_client_schema::{
+    DataSourceKey, MusicId, MusicModel, PlaylistId, StorageEntryLoc, StorageId,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -18,6 +20,10 @@ pub struct ArgUpdatePlaylist {
     pub id: PlaylistId,
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
+    /// Import-source restriction (`None` = all storages). Defaults for
+    /// older callers that predate the field.
+    #[serde(default)]
+    pub storage_allowlist: Option<Vec<StorageId>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +39,10 @@ pub struct ArgCreatePlaylist {
     pub title: String,
     pub cover: Option<StorageEntryLoc>,
     pub entries: Vec<ToAddMusicEntry>,
+    /// Import-source restriction (`None` = all storages). Defaults for
+    /// older callers that predate the field.
+    #[serde(default)]
+    pub storage_allowlist: Option<Vec<StorageId>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

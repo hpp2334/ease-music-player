@@ -3,9 +3,11 @@ pub mod m20260726_000002_plugin_kv;
 pub mod m20260801_000003_storage_registry;
 pub mod m20260816_000004_webdav_plugin;
 pub mod m20260905_000005_preference_language;
+pub mod m20260911_000006_playlist_storage_allowlist;
 
 pub use m20260715_000001_init::Migration as InitMigration;
 pub use m20260726_000002_plugin_kv::Migration as PluginKvMigration;
 pub use m20260801_000003_storage_registry::Migration as StorageRegistryMigration;
 pub use m20260816_000004_webdav_plugin::Migration as WebdavPluginMigration;
 pub use m20260905_000005_preference_language::Migration as PreferenceLanguageMigration;
+pub use m20260911_000006_playlist_storage_allowlist::Migration as PlaylistStorageAllowlistMigration;

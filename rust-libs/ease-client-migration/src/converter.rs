@@ -60,7 +60,16 @@ pub fn playlist_from(m: PlaylistModel) -> playlist::ActiveModel {
         picture_storage_id: sea_orm::ActiveValue::Set(m.picture.as_ref().map(|p| *p.storage_id.as_ref())),
         picture_path: sea_orm::ActiveValue::Set(m.picture.map(|p| p.path)),
         order: sea_orm::ActiveValue::Set(encode_order(&m.order)),
+        storage_allowlist: sea_orm::ActiveValue::Set(encode_storage_allowlist(m.storage_allowlist.as_deref())),
     }
+}
+
+fn encode_storage_allowlist(list: Option<&[StorageId]>) -> Option<String> {
+    list.map(|ids| serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()))
+}
+
+fn decode_storage_allowlist(s: &Option<String>) -> Option<Vec<StorageId>> {
+    s.as_deref().and_then(|s| serde_json::from_str(s).ok())
 }
 
 pub fn playlist_to_model(row: playlist::Model) -> PlaylistModel {
@@ -76,6 +85,7 @@ pub fn playlist_to_model(row: playlist::Model) -> PlaylistModel {
             _ => None,
         },
         order: decode_order(&row.order),
+        storage_allowlist: decode_storage_allowlist(&row.storage_allowlist),
     }
 }
 

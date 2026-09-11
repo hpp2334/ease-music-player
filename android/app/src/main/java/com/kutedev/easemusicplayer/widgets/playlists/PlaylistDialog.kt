@@ -1,6 +1,8 @@
 package com.kutedev.easemusicplayer.widgets.playlists
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,29 +26,36 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.components.EaseCheckbox
 import com.kutedev.easemusicplayer.components.EaseTextButton
 import com.kutedev.easemusicplayer.components.EaseTextButtonSize
 import com.kutedev.easemusicplayer.components.EaseTextButtonType
 import com.kutedev.easemusicplayer.components.ImportCover
 import com.kutedev.easemusicplayer.components.SimpleFormText
 import com.kutedev.easemusicplayer.viewmodels.CreatePlaylistVM
+import com.kutedev.easemusicplayer.viewmodels.VImportStorageEntry
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import com.kutedev.easemusicplayer.singleton.types.CreatePlaylistMode
 import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.Storage
+import com.kutedev.easemusicplayer.singleton.types.StorageAllowlistMode
+import com.kutedev.easemusicplayer.singleton.types.StorageId
 
 @Composable
 private fun Tab(
@@ -91,6 +101,201 @@ private fun FullImportHeader(
         text = text,
         fontSize = 10.sp,
     )
+}
+
+/** Exclusive-choice indicator ring (All / Specific storages). */
+@Composable
+private fun EaseRadioDot(
+    selected: Boolean,
+) {
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    Box(
+        modifier = Modifier
+            .size(16.dp)
+            .border(1.dp, borderColor, RoundedCornerShape(999.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AllowlistModeRow(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .clickable { onClick() }
+            .padding(0.dp, 6.dp)
+    ) {
+        EaseRadioDot(selected = selected)
+        Text(
+            text = text,
+            fontSize = 12.sp,
+        )
+    }
+}
+
+@Composable
+private fun AllowlistStorageRow(
+    storage: Storage,
+    checked: Boolean,
+    locked: Boolean,
+    onToggle: () -> Unit,
+) {
+    val item = VImportStorageEntry(storage)
+    val dim = if (locked) {
+        0.5F
+    } else {
+        1F
+    }
+
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(enabled = !locked) { onToggle() }
+            .padding(2.dp, 6.dp)
+            .alpha(dim)
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1.0F)
+        ) {
+            Text(
+                text = item.name,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (item.subtitle.isNotBlank()) {
+                Text(
+                    text = item.subtitle,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Box(modifier = Modifier.width(12.dp))
+        EaseCheckbox(
+            value = checked,
+            onChange = { _ -> onToggle() },
+            disabled = locked,
+        )
+    }
+}
+
+/**
+ * The [Advanced] expandable section of the create/edit playlist dialogs:
+ * the playlist's storage allowlist (import-source restriction). All is
+ * the default; Specific multi-selects storages, with storages already
+ * referenced by the playlist's musics locked on (they cannot be
+ * unchecked).
+ */
+@Composable
+private fun PlaylistAdvancedBlock(
+    advancedOpen: Boolean,
+    allowlistMode: StorageAllowlistMode,
+    allowlistStorages: List<StorageId>,
+    lockedStorages: List<StorageId>,
+    storages: List<Storage>,
+    onToggleAdvanced: () -> Unit,
+    onUpdateMode: (StorageAllowlistMode) -> Unit,
+    onToggleStorage: (StorageId) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(4.dp))
+                .clickable { onToggleAdvanced() }
+                .padding(0.dp, 8.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.playlists_dialog_advanced),
+                fontSize = 10.sp,
+            )
+            Icon(
+                painter = painterResource(
+                    id = if (advancedOpen) {
+                        R.drawable.icon_collapse
+                    } else {
+                        R.drawable.icon_forward
+                    }
+                ),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        AnimatedVisibility(visible = advancedOpen) {
+            Column {
+                Box(modifier = Modifier.height(4.dp))
+                FullImportHeader(
+                    text = stringResource(R.string.playlists_dialog_allowlist_title),
+                )
+                Box(modifier = Modifier.height(4.dp))
+                AllowlistModeRow(
+                    text = stringResource(R.string.playlists_dialog_allowlist_all),
+                    selected = allowlistMode == StorageAllowlistMode.ALL,
+                    onClick = { onUpdateMode(StorageAllowlistMode.ALL) },
+                )
+                AllowlistModeRow(
+                    text = stringResource(R.string.playlists_dialog_allowlist_specific),
+                    selected = allowlistMode == StorageAllowlistMode.SPECIFIC,
+                    onClick = { onUpdateMode(StorageAllowlistMode.SPECIFIC) },
+                )
+                AnimatedVisibility(visible = allowlistMode == StorageAllowlistMode.SPECIFIC) {
+                    Column {
+                        for (storage in storages) {
+                            val locked = lockedStorages.contains(storage.id)
+                            val checked = locked || allowlistStorages.contains(storage.id)
+                            AllowlistStorageRow(
+                                storage = storage,
+                                checked = checked,
+                                locked = locked,
+                                onToggle = { onToggleStorage(storage.id) },
+                            )
+                        }
+                        if ((allowlistStorages + lockedStorages).distinct().isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.playlists_dialog_allowlist_empty),
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -200,6 +405,11 @@ fun CreatePlaylistsDialog(
     val name by createPlaylistVM.name.collectAsState()
     val fullImported by createPlaylistVM.fullImported.collectAsState()
     val canSubmit by createPlaylistVM.canSubmit.collectAsState()
+    val advancedOpen by createPlaylistVM.advancedOpen.collectAsState()
+    val allowlistMode by createPlaylistVM.allowlistMode.collectAsState()
+    val allowlistStorages by createPlaylistVM.allowlistStorages.collectAsState()
+    val lockedAllowlistStorages by createPlaylistVM.lockedAllowlistStorages.collectAsState()
+    val storages by createPlaylistVM.storages.collectAsState()
 
     val onDismissRequest = {
         createPlaylistVM.closeModal()
@@ -245,6 +455,23 @@ fun CreatePlaylistsDialog(
                     }
                 )
             }
+            Box(modifier = Modifier.height(12.dp))
+            PlaylistAdvancedBlock(
+                advancedOpen = advancedOpen,
+                allowlistMode = allowlistMode,
+                allowlistStorages = allowlistStorages,
+                lockedStorages = lockedAllowlistStorages,
+                storages = storages,
+                onToggleAdvanced = {
+                    createPlaylistVM.toggleAdvanced()
+                },
+                onUpdateMode = { value ->
+                    createPlaylistVM.updateAllowlistMode(value)
+                },
+                onToggleStorage = { value ->
+                    createPlaylistVM.toggleAllowlistStorage(value)
+                },
+            )
             Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
@@ -296,6 +523,11 @@ fun EditPlaylistsDialog(
     val name by editPlaylistVM.name.collectAsState()
     val cover by editPlaylistVM.cover.collectAsState()
     val canSubmit by editPlaylistVM.canSubmit.collectAsState()
+    val advancedOpen by editPlaylistVM.advancedOpen.collectAsState()
+    val allowlistMode by editPlaylistVM.allowlistMode.collectAsState()
+    val allowlistStorages by editPlaylistVM.allowlistStorages.collectAsState()
+    val lockedAllowlistStorages by editPlaylistVM.lockedAllowlistStorages.collectAsState()
+    val storages by editPlaylistVM.storages.collectAsState()
 
     val onDismissRequest = {
         editPlaylistVM.closeModal()
@@ -337,6 +569,23 @@ fun EditPlaylistsDialog(
                 onRemove = {
                     editPlaylistVM.clearCover()
                 }
+            )
+            Box(modifier = Modifier.height(12.dp))
+            PlaylistAdvancedBlock(
+                advancedOpen = advancedOpen,
+                allowlistMode = allowlistMode,
+                allowlistStorages = allowlistStorages,
+                lockedStorages = lockedAllowlistStorages,
+                storages = storages,
+                onToggleAdvanced = {
+                    editPlaylistVM.toggleAdvanced()
+                },
+                onUpdateMode = { value ->
+                    editPlaylistVM.updateAllowlistMode(value)
+                },
+                onToggleStorage = { value ->
+                    editPlaylistVM.toggleAllowlistStorage(value)
+                },
             )
             Row(
                 horizontalArrangement = Arrangement.End,

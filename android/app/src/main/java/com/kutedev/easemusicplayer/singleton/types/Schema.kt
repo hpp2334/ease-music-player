@@ -67,6 +67,13 @@ enum class LyricLoadState { LOADING, MISSING, FAILED, LOADED }
 @Serializable
 enum class CreatePlaylistMode { FULL, EMPTY }
 
+// UI-only companion of `PlaylistMeta.storageAllowlist`: the dialog's
+// All-vs-Specific choice. On the wire All is `null` and Specific is a
+// non-empty id list — the mode distinction itself never crosses the
+// bridge (there is no "specific but empty" persisted state).
+@Serializable
+enum class StorageAllowlistMode { ALL, SPECIFIC }
+
 @Serializable
 enum class CurrentStorageStateType { LOADING, OK, NEED_PERMISSION, AUTHENTICATION_FAILED, TIMEOUT, UNKNOWN_ERROR }
 
@@ -176,12 +183,14 @@ data class PlaylistMeta(
     val showCover: DataSourceKey? = null,
     val createdTime: Long,
     val order: List<Long> = emptyList(),
+    val storageAllowlist: List<StorageId>? = null,
 )
 
 @Serializable
 data class PlaylistAbstract(
     val meta: PlaylistMeta,
     val musicCount: ULong,
+    val musicStorageIds: List<StorageId> = emptyList(),
     val duration: Long? = null,
 )
 
@@ -305,6 +314,7 @@ data class ArgUpdatePlaylist(
     val id: PlaylistId,
     val title: String,
     val cover: StorageEntryLoc? = null,
+    val storageAllowlist: List<StorageId>? = null,
 )
 
 @Serializable
@@ -312,6 +322,7 @@ data class ArgCreatePlaylist(
     val title: String,
     val cover: StorageEntryLoc? = null,
     val entries: List<ToAddMusicEntry>,
+    val storageAllowlist: List<StorageId>? = null,
 )
 
 @Serializable
