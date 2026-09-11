@@ -16,7 +16,7 @@ import android.content.Context
  *
  * This object is a **stateless JNI surface only** — no cached runtime, no
  * get-or-create. The runtime lifecycle (create → bind → instances → unbind →
- * destroy) is owned explicitly by [PluginRuntimeHost], which logs every
+ * destroy) is owned explicitly by the `EaseBackend` facade, which logs every
  * transition; the backend a runtime binds to is named by the backend handle
  * passed into [createRuntime] / [bindPluginRuntime] (the same handle the
  * JSON bridge uses — there is no process-wide "current backend" singleton on
@@ -66,7 +66,7 @@ object EasePluginBridge {
      * lets the backend's own headless-instance spawns assign the shared
      * `ease-plugin-backend` worker pool. Only the handles cross JNI — never
      * the JS or zip bytes. Call once right after [createRuntime], as part
-     * of [PluginRuntimeHost.start]; attaching also triggers the first
+     * of `EaseBackend.start`; attaching also triggers the first
      * Rust-side backend reload (scan + spawn + wire).
      */
     @JvmStatic

@@ -9,7 +9,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.kutedev.easemusicplayer.singleton.Bridge
 import com.kutedev.easemusicplayer.singleton.PluginManager
-import com.kutedev.easemusicplayer.turintegration.PluginRuntimeHost
+import com.kutedev.easemusicplayer.singleton.EaseBackend
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +23,7 @@ import javax.inject.Inject
 class KeepBackendService : Service() {
     @Inject lateinit var bridge: Bridge
     @Inject lateinit var pluginManager: PluginManager
-    @Inject lateinit var pluginRuntimeHost: PluginRuntimeHost
+    @Inject lateinit var easeBackend: EaseBackend
     private val _channelId: String = "EaseMusicBackendServiceChannel"
 
     /** Runs the first-run bootstrap (bundled installs) off the main thread. */
@@ -61,7 +61,7 @@ class KeepBackendService : Service() {
      */
     private fun bootstrapServicePlugin() {
         try {
-            pluginRuntimeHost.start(this)
+            easeBackend.start(this)
             if (!bootstrapped) {
                 bootstrapped = true
                 serviceScope.launch {
@@ -93,7 +93,7 @@ class KeepBackendService : Service() {
         // resolvable — AFTER bridge.destroy() the Rust-side binding could
         // not be cleared anymore. The unbind itself tears down the
         // Rust-owned headless backends.
-        pluginRuntimeHost.stop("KeepBackendService destroyed")
+        easeBackend.stop("KeepBackendService destroyed")
         bridge.destroy()
     }
 

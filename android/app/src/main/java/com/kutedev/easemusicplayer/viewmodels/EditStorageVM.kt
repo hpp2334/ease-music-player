@@ -41,7 +41,7 @@ class EditStorageVM @Inject constructor(
     private val bridge: Bridge,
     private val storageRepository: StorageRepository,
     private val pluginRepository: PluginRepository,
-    pluginRuntimeHost: com.kutedev.easemusicplayer.turintegration.PluginRuntimeHost,
+    easeBackend: com.kutedev.easemusicplayer.singleton.EaseBackend,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -56,8 +56,8 @@ class EditStorageVM @Inject constructor(
     private val _editPluginHandle = MutableStateFlow<EditPluginHandle?>(null)
     private val _removedEvent = MutableSharedFlow<Unit>()
 
-    /** The shared tur runtime (null until `PluginRuntimeHost.start`). */
-    val pluginRuntime = pluginRuntimeHost.runtime
+    /** The shared tur runtime (null until `EaseBackend.start`). */
+    val pluginRuntime = easeBackend.runtime
 
     val musicCount = _musicCount.asStateFlow()
     val title = _title.asStateFlow()
