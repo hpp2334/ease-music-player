@@ -77,6 +77,7 @@ fn backend_ctx(args: &[JsValue]) -> JsResult<ease_client_backend::ctx::BackendCo
     crate::plugin_runtime::backend_cx("context", args)
 }
 
+#[allow(dead_code)] // kept for future ease:* bridge fns
 fn map_bresult<R>(description: &str, result: BResult<R>) -> JsResult<R> {
     result.map_err(|e| {
         JsError::from(
