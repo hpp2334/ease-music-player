@@ -4,17 +4,22 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kutedev.easemusicplayer.singleton.ImportRepository
 import com.kutedev.easemusicplayer.singleton.PlaylistRepository
+import com.kutedev.easemusicplayer.singleton.StorageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import com.kutedev.easemusicplayer.singleton.types.ArgCreatePlaylist
 import com.kutedev.easemusicplayer.singleton.types.CreatePlaylistMode
+import com.kutedev.easemusicplayer.singleton.types.Storage
 import com.kutedev.easemusicplayer.singleton.types.StorageEntry
 import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.StorageAllowlistMode
+import com.kutedev.easemusicplayer.singleton.types.StorageId
 import com.kutedev.easemusicplayer.singleton.types.ToAddMusicEntry
 import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
 import java.net.URLDecoder
@@ -25,7 +30,8 @@ import kotlin.collections.map
 @HiltViewModel
 class CreatePlaylistVM @Inject constructor(
     private val importRepository: ImportRepository,
-    private val playlistRepository: PlaylistRepository
+    private val playlistRepository: PlaylistRepository,
+    private val storageRepository: StorageRepository
 ) : ViewModel() {
     private val _modalOpen = MutableStateFlow(false)
     private val _mode = MutableStateFlow(CreatePlaylistMode.FULL)
@@ -33,6 +39,9 @@ class CreatePlaylistVM @Inject constructor(
     private val _entries = MutableStateFlow(listOf<StorageEntry>())
     private val _name = MutableStateFlow("")
     private val _cover = MutableStateFlow<StorageEntryLoc?>(null)
+    private val _advancedOpen = MutableStateFlow(false)
+    private val _allowlistMode = MutableStateFlow(StorageAllowlistMode.ALL)
+    private val _allowlistStorages = MutableStateFlow(listOf<StorageId>())
     val mode = _mode.asStateFlow()
     val musicCount = _entries.map { entries ->
         entries.count { entry ->  entry.entryTyp() == StorageEntryType.MUSIC }
@@ -50,7 +59,7 @@ class CreatePlaylistVM @Inject constructor(
                     } catch (e: Exception) {
                         p.trim()
                     }
-                    
+
                     if (!set.contains(x)) {
                         set.add(x)
                         l.add(x)
@@ -70,12 +79,52 @@ class CreatePlaylistVM @Inject constructor(
     val modalOpen = _modalOpen.asStateFlow()
     val fullImported = _fullImported.asStateFlow()
 
-    val canSubmit = combine(name, mode, musicCount, cover) {
-            name, mode, musicCount, cover ->
+    val storages: StateFlow<List<Storage>> = storageRepository.storages
+    val advancedOpen = _advancedOpen.asStateFlow()
+    val allowlistMode = _allowlistMode.asStateFlow()
+    val allowlistStorages = _allowlistStorages.asStateFlow()
+
+    /**
+     * Storages the imported entries live on — in SPECIFIC mode these can
+     * never be unchecked (the playlist-to-be must keep importing from the
+     * storages its musics come from). Only bites when the import ran
+     * before the allowlist was narrowed; the reverse order can't produce
+     * a violation because the import picker is already restricted.
+     */
+    val lockedAllowlistStorages = _entries.map { entries ->
+        entries.map { entry -> entry.storageId }.distinct()
+    }.stateIn(viewModelScope, SharingStarted.Lazily, listOf())
+
+    /** Selection as persisted: user picks ∪ locked (locked are checked). */
+    private fun effectiveAllowlistStorages(): List<StorageId> {
+        return (_allowlistStorages.value + lockedAllowlistStorages.value).distinct()
+    }
+
+    /** Restriction handed to the import picker; null = unrestricted. An
+     *  empty SPECIFIC selection stays empty (nothing importable) rather
+     *  than silently falling back to unrestricted — imports from wrong
+     *  storages would become locked afterwards. */
+    private fun currentAllowlist(): List<StorageId>? {
+        if (_allowlistMode.value != StorageAllowlistMode.SPECIFIC) {
+            return null
+        }
+        return effectiveAllowlistStorages()
+    }
+
+    val canSubmit = combine(
+        name,
+        mode,
+        musicCount,
+        cover,
+        combine(_allowlistMode, _allowlistStorages) { m, s -> m to s }
+    ) {
+            name, mode, musicCount, cover, (allowlistMode, allowlistStorages) ->
+        val allowlistOk = allowlistMode != StorageAllowlistMode.SPECIFIC ||
+            (allowlistStorages + lockedAllowlistStorages.value).distinct().isNotEmpty()
         if (mode == CreatePlaylistMode.FULL) {
-             name.isNotBlank() && (musicCount > 0 || cover != null)
+             name.isNotBlank() && (musicCount > 0 || cover != null) && allowlistOk
         } else {
-            name.isNotBlank()
+            name.isNotBlank() && allowlistOk
         }
     }.stateIn(
         scope = viewModelScope,
@@ -95,6 +144,30 @@ class CreatePlaylistVM @Inject constructor(
         _mode.value = mode
     }
 
+    fun toggleAdvanced() {
+        _advancedOpen.value = !_advancedOpen.value
+    }
+
+    fun updateAllowlistMode(mode: StorageAllowlistMode) {
+        _allowlistMode.value = mode
+        if (mode == StorageAllowlistMode.SPECIFIC) {
+            // Locked storages are always part of the checked set.
+            _allowlistStorages.value = effectiveAllowlistStorages()
+        }
+    }
+
+    fun toggleAllowlistStorage(id: StorageId) {
+        if (lockedAllowlistStorages.value.contains(id)) {
+            return
+        }
+        val current = _allowlistStorages.value
+        _allowlistStorages.value = if (current.contains(id)) {
+            current - id
+        } else {
+            current + id
+        }
+    }
+
     fun openModal() {
         _modalOpen.value = true
     }
@@ -110,15 +183,27 @@ class CreatePlaylistVM @Inject constructor(
         _fullImported.value = false
         _name.value = ""
         _cover.value = null
+        _advancedOpen.value = false
+        _allowlistMode.value = StorageAllowlistMode.ALL
+        _allowlistStorages.value = listOf()
     }
 
     fun prepareImportCreate() {
-        importRepository.prepare(listOf(StorageEntryType.MUSIC, StorageEntryType.IMAGE)) {
+        importRepository.prepare(
+            listOf(StorageEntryType.MUSIC, StorageEntryType.IMAGE),
+            currentAllowlist()
+        ) {
                 entries ->
             _entries.value = entries.filter { v -> v.entryTyp() == StorageEntryType.MUSIC }
             _cover.value = entries.filter { v -> v.entryTyp() == StorageEntryType.IMAGE }.map { v ->
                 StorageEntryLoc(v.storageId, v.path) }.firstOrNull()
             _fullImported.value = true
+
+            // Late-arriving referenced storages must stay checked in
+            // SPECIFIC mode.
+            if (_allowlistMode.value == StorageAllowlistMode.SPECIFIC) {
+                _allowlistStorages.value = effectiveAllowlistStorages()
+            }
 
             val name = recommendPlaylistNames.value.lastOrNull()
             if (name != null) {
@@ -133,7 +218,12 @@ class CreatePlaylistVM @Inject constructor(
         playlistRepository.createPlaylist(ArgCreatePlaylist(
             title = _name.value,
             cover = _cover.value,
-            entries = entries
+            entries = entries,
+            storageAllowlist = if (_allowlistMode.value == StorageAllowlistMode.SPECIFIC) {
+                effectiveAllowlistStorages()
+            } else {
+                null
+            }
         ))
     }
 }

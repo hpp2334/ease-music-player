@@ -54,6 +54,9 @@ impl MigratorTrait for Migrator {
             Box::new(migrations::StorageRegistryMigration),
             Box::new(migrations::WebdavPluginMigration),
             Box::new(migrations::PreferenceLanguageMigration),
+            // Real post-collapse schema change (playlist import-source
+            // allowlist) — applies to both fresh and existing databases.
+            Box::new(migrations::PlaylistStorageAllowlistMigration),
         ]
     }
 }

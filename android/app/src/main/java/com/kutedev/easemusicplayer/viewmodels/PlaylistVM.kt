@@ -99,7 +99,10 @@ class PlaylistVM @Inject constructor(
     }
 
     fun prepareImportMusics() {
-        importRepository.prepare(listOf(StorageEntryType.MUSIC)) { entries ->
+        importRepository.prepare(
+            listOf(StorageEntryType.MUSIC),
+            _playlistAbstr.value.meta.storageAllowlist
+        ) { entries ->
             viewModelScope.launch {
                 val arg = ArgAddMusicsToPlaylist(
                     id = _id,

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ease_client_schema::{DataSourceKey, MusicId, PlaylistId, PlaylistModel};
+use ease_client_schema::{DataSourceKey, MusicId, PlaylistId, PlaylistModel, StorageId};
 
 use crate::{
     ctx::BackendContext,
@@ -45,6 +45,7 @@ pub(crate) fn build_playlist_meta(
         show_cover,
         created_time: Duration::from_millis(model.created_time as u64),
         order: model.order,
+        storage_allowlist: model.storage_allowlist,
     }
 }
 
@@ -55,6 +56,12 @@ pub(crate) async fn build_playlist_abstract(
     let id = model.id;
     let musics = cx.database_server().load_musics_by_playlist_id(id).await?;
     let first_cover_music_id = musics.iter().find(|m| m.cover.is_some()).map(|v| v.id);
+    // Distinct storages the playlist's musics live on — feeds the edit
+    // dialog's rule that referenced storages can't be unchecked from
+    // the allowlist. Sorted + deduped for deterministic output.
+    let mut music_storage_ids: Vec<StorageId> = musics.iter().map(|m| m.loc.storage_id).collect();
+    music_storage_ids.sort_unstable();
+    music_storage_ids.dedup();
     let meta = build_playlist_meta(cx, model, first_cover_music_id);
 
     let musics = musics
@@ -66,6 +73,7 @@ pub(crate) async fn build_playlist_abstract(
     let abstr = PlaylistAbstract {
         meta,
         music_count: musics.len() as u64,
+        music_storage_ids,
         duration,
     };
 

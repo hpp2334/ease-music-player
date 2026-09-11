@@ -89,6 +89,8 @@ impl From<v3::PlaylistModel> for schema::PlaylistModel {
             created_time: v.created_time,
             picture: v.picture.map(Into::into),
             order: v.order,
+            // The legacy redb schemas predate the storage allowlist.
+            storage_allowlist: None,
         }
     }
 }

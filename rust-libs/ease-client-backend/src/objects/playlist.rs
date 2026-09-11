@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ease_client_schema::{DataSourceKey, PlaylistId, StorageEntryLoc};
+use ease_client_schema::{DataSourceKey, PlaylistId, StorageEntryLoc, StorageId};
 use serde::{Deserialize, Serialize};
 
 use super::music::MusicAbstract;
@@ -16,6 +16,9 @@ pub struct PlaylistMeta {
     #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
     pub created_time: Duration,
     pub order: Vec<u32>,
+    /// Import-source restriction: `None` = all storages, `Some(ids)` =
+    /// only the listed storages may be imported from into this playlist.
+    pub storage_allowlist: Option<Vec<StorageId>>,
 }
 
 #[serde_with::serde_as]
@@ -24,6 +27,10 @@ pub struct PlaylistMeta {
 pub struct PlaylistAbstract {
     pub meta: PlaylistMeta,
     pub music_count: u64,
+    /// Distinct storages the playlist's musics live on (derived, not
+    /// persisted) — the edit dialog locks these as always-checked in the
+    /// allowlist picker.
+    pub music_storage_ids: Vec<StorageId>,
     #[serde_as(as = "Option<serde_with::DurationMilliSeconds<u64>>")]
     pub duration: Option<Duration>,
 }

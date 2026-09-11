@@ -18,6 +18,11 @@
     <string name="playlists_dialog_button_reset">重置</string>
     <string name="playlists_dialog_button_cancel">取消</string>
     <string name="playlists_dialog_button_ok">确认</string>
+    <string name="playlists_dialog_advanced">高级</string>
+    <string name="playlists_dialog_allowlist_title">存储白名单</string>
+    <string name="playlists_dialog_allowlist_all">全部存储</string>
+    <string name="playlists_dialog_allowlist_specific">指定存储</string>
+    <string name="playlists_dialog_allowlist_empty">请至少选择一个存储</string>
     <string name="playlist_empty_list">空播放列表</string>
     <string name="playlist_list_count_suffixes">首曲目</string>
     <string name="playlist_list_count_suffix">首曲目</string>

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ease_client_migration::converter;
 use ease_client_schema::entities::{music, playlist, playlist_music};
 use ease_client_schema::{
-    BlobId, MusicId, PlaylistId, PlaylistModel, PlaylistMusicModel, StorageEntryLoc,
+    BlobId, MusicId, PlaylistId, PlaylistModel, PlaylistMusicModel, StorageEntryLoc, StorageId,
 };
 use ease_order_key::OrderKey;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
@@ -60,6 +60,7 @@ impl DatabaseServer {
         musics: Vec<ArgDBAddMusic>,
         current_time_ms: i64,
         order: OrderKey,
+        storage_allowlist: Option<Vec<StorageId>>,
     ) -> BResult<(PlaylistId, Vec<AddedMusic>)> {
         let db = self.db();
 
@@ -70,6 +71,11 @@ impl DatabaseServer {
             picture_storage_id: ActiveValue::Set(picture.as_ref().map(|p| *p.storage_id.as_ref())),
             picture_path: ActiveValue::Set(picture.map(|p| p.path)),
             order: ActiveValue::Set(serde_json::to_string(&order.into_raw())?),
+            storage_allowlist: ActiveValue::Set(
+                storage_allowlist
+                    .map(|ids| serde_json::to_string(&ids))
+                    .transpose()?,
+            ),
         };
         let inserted = playlist_am.insert(&db).await?;
         let playlist_id = PlaylistId::wrap(inserted.id);
@@ -112,6 +118,7 @@ impl DatabaseServer {
         id: PlaylistId,
         title: String,
         picture: Option<StorageEntryLoc>,
+        storage_allowlist: Option<Vec<StorageId>>,
     ) -> BResult<PlaylistId> {
         let db = self.db();
         let row = playlist::Entity::find_by_id(*id.as_ref()).one(&db).await?;
@@ -121,6 +128,11 @@ impl DatabaseServer {
             am.picture_storage_id =
                 ActiveValue::Set(picture.as_ref().map(|p| *p.storage_id.as_ref()));
             am.picture_path = ActiveValue::Set(picture.map(|p| p.path));
+            am.storage_allowlist = ActiveValue::Set(
+                storage_allowlist
+                    .map(|ids| serde_json::to_string(&ids))
+                    .transpose()?,
+            );
             am.update(&db).await?;
         }
         Ok(id)

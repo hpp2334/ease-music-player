@@ -18,6 +18,11 @@
     <string name="playlists_dialog_button_reset">RESET</string>
     <string name="playlists_dialog_button_cancel">CANCEL</string>
     <string name="playlists_dialog_button_ok">OK</string>
+    <string name="playlists_dialog_advanced">ADVANCED</string>
+    <string name="playlists_dialog_allowlist_title">STORAGE ALLOWLIST</string>
+    <string name="playlists_dialog_allowlist_all">All storages</string>
+    <string name="playlists_dialog_allowlist_specific">Specific storages</string>
+    <string name="playlists_dialog_allowlist_empty">Select at least one storage</string>
     <string name="playlist_empty_list">Empty Musics in playlist</string>
     <string name="playlist_list_count_suffixes">Musics</string>
     <string name="playlist_list_count_suffix">Music</string>

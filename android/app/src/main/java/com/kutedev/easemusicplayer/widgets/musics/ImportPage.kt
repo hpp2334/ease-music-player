@@ -32,6 +32,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
@@ -48,7 +49,6 @@ import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.viewmodels.ImportVM
-import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.viewmodels.VImportStorageEntry
 import com.kutedev.easemusicplayer.viewmodels.entryTyp
 import com.kutedev.easemusicplayer.core.LocalNavController
@@ -299,10 +299,10 @@ private fun ImportEntries(
 
 @Composable
 private fun ImportStorages(
-    storagesVM: StoragesVM = hiltViewModel(),
     importVM: ImportVM = hiltViewModel()
 ) {
-    val storageItems by storagesVM.storages.collectAsState()
+    val storageItems by importVM.storages.collectAsState()
+    val disabledStorageIds by importVM.disabledStorageIds.collectAsState()
     val selectedStorageId by importVM.selectedStorageId.collectAsState()
 
     Row(
@@ -313,8 +313,9 @@ private fun ImportStorages(
     ) {
         for (_item in storageItems) {
             val item = VImportStorageEntry(_item)
+            val disabled = disabledStorageIds.contains(item.id)
 
-            val selected = selectedStorageId == item.id
+            val selected = !disabled && selectedStorageId == item.id
 
             val bgColor = if (selected) {
                 MaterialTheme.colorScheme.primary
@@ -329,8 +330,13 @@ private fun ImportStorages(
 
             Box(
                 modifier = Modifier
+                    .alpha(if (disabled) {
+                        0.4F
+                    } else {
+                        1F
+                    })
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable {
+                    .clickable(enabled = !disabled) {
                         importVM.selectStorage(item.id)
                     }
                     .background(bgColor)
@@ -465,8 +471,7 @@ private fun ImportMusicsError(
 
 @Composable
 fun ImportMusicsPage(
-    importVM: ImportVM = hiltViewModel(),
-    storagesVM: StoragesVM = hiltViewModel()
+    importVM: ImportVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val selectedCount by importVM.selectedCount.collectAsState()
