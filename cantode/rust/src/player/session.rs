@@ -56,6 +56,9 @@ pub(super) struct Loaded {
     remix_buf: Vec<f32>,
     /// Latch: `PlayerEvent::Ended` has been emitted for this load already.
     ended: bool,
+    /// Last position published by the pump (diagnostic: detect
+    /// non-realtime jumps — the runaway-clock signature).
+    last_reported: Option<Duration>,
     /// The shared observables. The session writes `position` and resets
     /// both session-scoped observables on drop; `duration` is published
     /// by the worker after a successful open.
@@ -113,6 +116,7 @@ impl Loaded {
             device_channels,
             remix_buf: Vec::new(),
             ended: false,
+            last_reported: None,
             shared,
         }
     }
@@ -143,6 +147,21 @@ impl Loaded {
                 self.decoded_through = frame_end;
                 self.write_frame(&frame);
                 let reported = self.sink.output_position().unwrap_or(frame.timestamp);
+                // Anomaly trace: the pump ticks every ~5 ms, so a sane
+                // delta is a few tens of ms. A jump of seconds (either
+                // direction) means the output clock re-anchored
+                // mid-playback — the runaway/reset signature.
+                if let Some(prev) = self.last_reported
+                    && reported.as_millis().abs_diff(prev.as_millis()) > 800
+                {
+                    tracing::warn!(
+                        prev_ms = prev.as_millis() as u64,
+                        new_ms = reported.as_millis() as u64,
+                        frame_ts_ms = frame.timestamp.as_millis() as u64,
+                        "position jumped"
+                    );
+                }
+                self.last_reported = Some(reported);
                 self.shared.set_position(reported);
                 let now = Instant::now();
                 let emit = now.duration_since(*last_emit) >= interval;
@@ -204,6 +223,7 @@ impl Loaded {
         // The frontier jumps with the seek; the next empty-ring write
         // re-anchors the sink's output clock at `actual`.
         self.decoded_through = actual;
+        self.last_reported = Some(actual);
         self.shared.set_position(actual);
         Ok(actual)
     }

@@ -373,6 +373,14 @@ impl Worker {
                     .and_then(|loaded| loaded.output_position().map(|_| loaded.decoded_through()));
                 match drain_target {
                     Some(target) => {
+                        // Early-decode-EOF trace: if the frontier is far
+                        // short of the known duration, the decoder
+                        // consumed the stream too fast (or truncated).
+                        tracing::info!(
+                            frontier_ms = target.as_millis() as u64,
+                            duration_ms = self.shared.duration().map(|d| d.as_millis() as u64),
+                            "tail drain armed"
+                        );
                         self.drain = Some(Drain {
                             target,
                             last_pos: Duration::ZERO,
@@ -434,6 +442,12 @@ impl Worker {
             self.shared.set_position(pos);
         }
         if finish {
+            if let Some(drain) = &self.drain {
+                tracing::info!(
+                    target_ms = drain.target.as_millis() as u64,
+                    "tail drain finished"
+                );
+            }
             self.finish_end_of_stream();
         }
     }
