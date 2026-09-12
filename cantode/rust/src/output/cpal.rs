@@ -142,6 +142,16 @@ pub(crate) struct CpalSink {
     /// Shared with the cpal callback so `set_volume` takes effect
     /// immediately without rebuilding the stream.
     volume: Arc<AtomicU32>,
+    /// Media time of the last output-clock anchor (diagnostic: the
+    /// runaway-position signature is repeated forward anchor jumps).
+    last_anchor_ts: Option<Duration>,
+    /// Flush generation last observed by a `write` (worker side). Any
+    /// write after a `flush()` MUST anchor the clock — the ring may
+    /// still hold pre-flush samples the callback hasn't discarded yet,
+    /// and `producer.is_empty()` alone would skip the anchor, leaving
+    /// the clock on the pre-seek timeline while decode runs the new
+    /// one (the "seek reverted" failure).
+    seen_flush_gen: Option<u32>,
     /// Flush generation counter, shared with the cpal callback.
     ///
     /// When `flush()` is called, the worker bumps this counter. The callback
@@ -166,6 +176,8 @@ impl CpalSink {
             stream: None,
             producer: None,
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
+            last_anchor_ts: None,
+            seen_flush_gen: None,
             flush_gen: Arc::new(AtomicU32::new(0)),
             clock: None,
             format: None,
@@ -326,9 +338,34 @@ impl AudioSink for CpalSink {
         // advance between this observation and our push — the anchor is
         // exact. Anchors land exactly at the timestamp-discontinuity
         // points: session start, post-flush/seek, post-underflow refill.
-        if producer.is_empty()
+        //
+        // A write that follows a `flush()` anchors UNCONDITIONALLY: the
+        // ring often still holds pre-flush samples at this point (the
+        // callback discards them at its next entry), and anchoring only
+        // on observed emptiness would race that discard and leave the
+        // clock on the pre-seek timeline. If the discard then also drops
+        // this write's samples, the following write sees an empty ring
+        // and re-anchors — self-correcting either way.
+        let flush_gen_now = self.flush_gen.load(Ordering::Acquire);
+        let must_anchor = self.seen_flush_gen != Some(flush_gen_now);
+        self.seen_flush_gen = Some(flush_gen_now);
+        if (must_anchor || producer.is_empty())
             && let Some(clock) = &self.clock
         {
+            // Anomaly trace: anchors land at session start, post-flush
+            // (seek) and post-underflow refills. A forward jump far
+            // beyond a realtime continuation of the previous anchor is
+            // the "position runs faster than audio" signature.
+            if let Some(prev) = self.last_anchor_ts
+                && start_ts > prev + Duration::from_secs(1)
+            {
+                tracing::warn!(
+                    prev_ms = prev.as_millis() as u64,
+                    new_ms = start_ts.as_millis() as u64,
+                    "sink anchor jumped forward"
+                );
+            }
+            self.last_anchor_ts = Some(start_ts);
             clock.anchor(start_ts);
         }
 
