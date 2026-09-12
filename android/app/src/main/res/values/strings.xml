@@ -92,6 +92,9 @@
     <string name="plugin_install_ok">Plugin installed.</string>
     <string name="plugin_install_fail">Plugin install failed.</string>
     <string name="plugin_disabled_tag">Disabled</string>
+    <string name="plugin_incompatible_tag">Incompatible</string>
+    <string name="plugin_api_requires">Requires plugin API %1$d — not supported by this app version.</string>
+    <string name="plugin_api_undeclared">Declares no plugin API version — not supported by this app.</string>
     <string name="plugin_enable_action">Enable</string>
     <string name="plugin_disable_action">Disable</string>
     <string name="plugin_uninstall_action">Uninstall</string>

@@ -12,8 +12,9 @@
         "zh-CN": "LRC、SRT、WebVTT 歌词文件解析器。应用的歌词显示完全由本插件驱动，应用内没有内置解析器。"
       },
       "zip": "zips/com.ease.lyricformats-0.2.1.zip",
-      "sha256": "a13385a774595a6729b95c01bcc9f70ee0e8b3852c64671886ca06f06c236dc2",
-      "size": 35849
+      "sha256": "1f0b993098709bce81da26a5b2c67f07b7e4e123d03f92d1f347c41ca68f22a8",
+      "size": 35868,
+      "apiVersion": 1
     },
     {
       "id": "com.ease.onedrive",
@@ -27,9 +28,10 @@
         "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
       },
       "zip": "zips/com.ease.onedrive-0.0.5.zip",
-      "sha256": "bfa842a6dabcd0ce1e3428f63fcfaf1ca4f86926d141ab2355c1dbce25eaaa01",
-      "size": 52623,
-      "icon": "icons/com.ease.onedrive.png"
+      "sha256": "681982155842dc1e8b6f70b8ebeee02b0786b42fc27ce202d6a1c2aa3be95173",
+      "size": 52642,
+      "icon": "icons/com.ease.onedrive.png",
+      "apiVersion": 1
     },
     {
       "id": "com.ease.playcount",
@@ -43,9 +45,10 @@
         "zh-CN": "统计每首歌的播放次数，支持按时间段（今天到最近一年）和按播放列表成员过滤。"
       },
       "zip": "zips/com.ease.playcount-0.0.7.zip",
-      "sha256": "104bc1aaa8c6d74c8406a528501e0ff06ff4db9a1ea61cd439ed3de124ced316",
-      "size": 58246,
-      "icon": "icons/com.ease.playcount.png"
+      "sha256": "c02d6a87b37632338000791e3f7d8ede427e7511d2c6bcd2bf94dded556414de",
+      "size": 58265,
+      "icon": "icons/com.ease.playcount.png",
+      "apiVersion": 1
     },
     {
       "id": "com.ease.webdav",
@@ -59,9 +62,10 @@
         "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
       },
       "zip": "zips/com.ease.webdav-0.0.5.zip",
-      "sha256": "f481863e7e2501ea4b7a8063df88a2d445a501e0fe3051a3a08814b38d326169",
-      "size": 340319,
-      "icon": "icons/com.ease.webdav.png"
+      "sha256": "e3d45b931199651511a1111bddb88b8e0398deb714b870d90474309e57f6f41f",
+      "size": 340338,
+      "icon": "icons/com.ease.webdav.png",
+      "apiVersion": 1
     }
   ]
 }

@@ -32,6 +32,12 @@ data class PluginManifest(
     val id: String,
     val name: LocalizedText,
     val version: String,
+    /** Plugin API level the manifest declares; `null` = undeclared. */
+    val apiVersion: Long? = null,
+    /** Rust-computed against the engine's supported plugin API range —
+     *  `false` plugins never load (zero handles) and are excluded from
+     *  every enabled-plugin flow; the management page badges them. */
+    val apiCompatible: Boolean = true,
     val description: LocalizedText = LocalizedText(""),
     val backend: String? = null,
     val backendSourceHandle: Long = 0L,
@@ -174,6 +180,10 @@ class PluginRepository @Inject constructor(
     val installedPlugins = _installedPlugins.asStateFlow()
 
     private val _enabledPlugins = MutableStateFlow<List<PluginManifest>>(emptyList())
+    /** Enabled **and** API-compatible plugins — the set that actually
+     *  contributes (dashboard items, storage providers, lyric parsers,
+     *  event forwarding). Incompatible installs stay in
+     *  [installedPlugins] for the management page to badge. */
     val enabledPlugins = _enabledPlugins.asStateFlow()
 
     private val _dashboardItems = MutableStateFlow<List<DashboardItem>>(emptyList())
@@ -237,7 +247,8 @@ class PluginRepository @Inject constructor(
             bridge.logRaw("error", "plugin scan: $warning")
         }
         _installedPlugins.value = result.plugins.map(::toManifest)
-        _enabledPlugins.value = result.plugins.filter { it.enabled }.map(::toManifest)
+        _enabledPlugins.value =
+            result.plugins.filter { it.enabled && it.apiCompatible }.map(::toManifest)
         recomputeDashboardItems()
         recomputeStorageProviders()
         recomputeLyricParsers()
@@ -248,6 +259,8 @@ class PluginRepository @Inject constructor(
         id = info.id,
         name = info.name,
         version = info.version,
+        apiVersion = info.apiVersion,
+        apiCompatible = info.apiCompatible,
         description = info.description,
         backend = info.backend,
         backendSourceHandle = info.backendSourceHandle,

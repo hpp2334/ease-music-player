@@ -55,6 +55,27 @@ use crate::error::{BError, BResult};
 /// LRC parser is gone, so it must ship offline.
 pub const BUNDLED_PLUGINS: &[&str] = &["com.ease.webdav", "com.ease.lyricformats"];
 
+/// The plugin API levels this engine supports, inclusive (integer "API
+/// levels", not semver). Each plugin declares the single level it
+/// targets as `"apiVersion": <number>` in its `manifest.json`; install
+/// is **rejected** outside this range (missing or invalid declarations
+/// included), and already-installed incompatible plugins (an app
+/// downgrade, or a pre-versioning install) scan as `apiCompatible:
+/// false` with zero module-source handles — they never load.
+///
+/// Bump `MAX` when the host grows backwards-compatible surface (older
+/// plugins keep working); bump both when the contract breaks (old
+/// plugins are refused — exactly the incompatible-install gate).
+pub const PLUGIN_API_MIN: i64 = 1;
+pub const PLUGIN_API_MAX: i64 = 1;
+
+/// Is a declared plugin API level within the engine's supported range?
+/// A missing declaration (`None`) is **not** supported — manifests must
+/// declare the level they target (see [`PLUGIN_API_MIN`]).
+pub fn plugin_api_supported(v: Option<i64>) -> bool {
+    matches!(v, Some(v) if (PLUGIN_API_MIN..=PLUGIN_API_MAX).contains(&v))
+}
+
 const MAX_ENTRIES: usize = 200;
 const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
 
@@ -526,6 +547,25 @@ pub fn install_zip_bytes_blocking(root: &Path, bytes: Vec<u8>) -> BResult<Manife
             message: format!("invalid plugin id: '{}'", manifest.id),
         });
     }
+    // Plugin API gate — every install path (SAF zip, registry download,
+    // bundled asset) funnels through here, so this is the single choke
+    // point that keeps incompatible plugins off the device.
+    match manifest.api_version {
+        Some(v) if plugin_api_supported(Some(v)) => {}
+        Some(v) => {
+            return Err(BError::CustomError {
+                message: format!(
+                    "plugin apiVersion {v} is not supported by this app \
+                     (supported: {PLUGIN_API_MIN}..{PLUGIN_API_MAX})"
+                ),
+            })
+        }
+        None => {
+            return Err(BError::CustomError {
+                message: r#"manifest.json is missing "apiVersion" (a number)"#.into(),
+            })
+        }
+    }
 
     std::fs::create_dir_all(root)?;
     let staging = root.join(format!(
@@ -661,6 +701,12 @@ pub struct ManifestRaw {
     pub name: LocalizedString,
     pub version: String,
     pub description: LocalizedString,
+    /// The plugin API level this plugin targets (`"apiVersion": <number>`
+    /// — required for install, see [`PLUGIN_API_MIN`]). `None` when the
+    /// manifest omits it or declares a non-number (string `"1"` doesn't
+    /// count) — such plugins are rejected at install and scan as
+    /// incompatible.
+    pub api_version: Option<i64>,
     pub backend: Option<String>,
     pub events: Vec<String>,
     /// Plugin-level icon file name relative to the plugin root (raster
@@ -818,6 +864,7 @@ pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
         name,
         version: opt_str(&v, "version").unwrap_or_else(|| "0.0.0".into()),
         description: opt_localized(&v, "description").unwrap_or_default(),
+        api_version: v.get("apiVersion").and_then(|x| x.as_i64()),
         backend: opt_str(&v, "backend"),
         events: v
             .get("events")
@@ -838,6 +885,15 @@ pub fn parse_manifest(text: &str) -> BResult<ManifestRaw> {
 
 pub fn is_installed(root: &Path, plugin_id: &str) -> bool {
     root.join(plugin_id).join("manifest.json").is_file()
+}
+
+/// The declared plugin API level of an installed copy, or `None` when
+/// the folder is missing / the manifest doesn't parse. Callers treat a
+/// `None`-or-unsupported result as "needs (re)install" (bundled heal)
+/// or "incompatible" (scan) — see [`plugin_api_supported`].
+fn installed_api_version(root: &Path, plugin_id: &str) -> Option<i64> {
+    let text = std::fs::read_to_string(root.join(plugin_id).join("manifest.json")).ok()?;
+    parse_manifest(&text).ok()?.api_version
 }
 
 /// Read + base64 a contribution icon (raster only: PNG/WebP/JPEG, ≤
@@ -976,8 +1032,8 @@ fn read_registered(
 }
 
 /// Map one contribution list to wire shape, registering view module sources
-/// (enabled plugins only; disabled ones get zero handles — a re-enable bumps
-/// the generation and the service rescans).
+/// (loadable plugins only — enabled **and** API-compatible; others get zero
+/// handles — a re-enable or compatible upgrade rescans).
 fn contribution_infos(
     list: Vec<ContributionRaw>,
     enabled: bool,
@@ -1015,7 +1071,8 @@ fn contribution_infos(
 
 /// One entry of a registry `plugins.json`. `installed_version` /
 /// `update_available` are stamped at fetch time by comparing against the
-/// installed tree (Kotlin never compares versions). `name` / `description`
+/// installed tree, and `incompatible` against the engine's plugin API
+/// range (Kotlin never compares anything). `name` / `description`
 /// accept the localized forms (plain string or tag map) — old registries
 /// with plain strings parse unchanged, and the normalized shape round-trips
 /// when Kotlin sends the entry back via `plugin.installFromRegistry`.
@@ -1025,6 +1082,11 @@ pub struct RegistryEntry {
     pub id: String,
     pub name: LocalizedString,
     pub version: String,
+    /// The plugin API level the entry's zip declares (from its
+    /// `plugins.json` entry, stamped at package time). `None` when the
+    /// registry doesn't carry it — such entries stamp `incompatible`
+    /// (the install gate would reject the zip anyway).
+    pub api_version: Option<i64>,
     pub description: LocalizedString,
     /// Zip path relative to the source base URL (e.g. `zips/<id>-<v>.zip`),
     /// or an absolute http(s) URL.
@@ -1047,6 +1109,10 @@ pub struct RegistryEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
     pub update_available: bool,
+    /// Stamped Rust-side against [`PLUGIN_API_MIN`]..[`PLUGIN_API_MAX`]:
+    /// `true` = this entry's zip cannot install on this app. Drives the
+    /// "incompatible" tag + disabled install button Kotlin-side.
+    pub incompatible: bool,
 }
 
 fn http_client() -> &'static reqwest::Client {
@@ -1123,6 +1189,7 @@ pub fn parse_registry(body: &str) -> BResult<Vec<RegistryEntry>> {
                         name: opt_localized(e, "name")
                             .unwrap_or_else(|| LocalizedString::plain(id.to_string())),
                         version: opt_str(e, "version").unwrap_or_else(|| "0.0.0".into()),
+                        api_version: e.get("apiVersion").and_then(|x| x.as_i64()),
                         description: opt_localized(e, "description").unwrap_or_default(),
                         zip: opt_str(e, "zip").unwrap_or_default(),
                         sha256: opt_str(e, "sha256").unwrap_or_default(),
@@ -1132,6 +1199,7 @@ pub fn parse_registry(body: &str) -> BResult<Vec<RegistryEntry>> {
                         icon_data: None,
                         installed_version: None,
                         update_available: false,
+                        incompatible: false,
                     })
                 })
                 .collect()
@@ -1184,12 +1252,14 @@ pub fn cached_registry(app_document_dir: &str, base_url: &str) -> Option<Vec<Reg
     Some(entries)
 }
 
-/// Stamp `installed_version` + `update_available` against the installed tree.
+/// Stamp `installed_version` + `update_available` against the installed
+/// tree, and `incompatible` against the engine's plugin API range.
 pub fn stamp_entries(entries: Vec<RegistryEntry>, root: &Path) -> Vec<RegistryEntry> {
     let installed = scan_manifests_blocking(root);
     entries
         .into_iter()
         .map(|mut e| {
+            e.incompatible = !plugin_api_supported(e.api_version);
             if let Some((_, m)) = installed.iter().find(|(_, m)| m.id == e.id) {
                 let installed_version = m.version.clone();
                 e.update_available =
@@ -1580,12 +1650,15 @@ pub fn remove_custom_source(app_document_dir: &str, url: &str) -> BResult<()> {
 /// 1. **Ensure-installed pass** for [`BUNDLED_PLUGINS`]: each bundled id
 ///    not yet recorded in `PluginState::bundled_installed` is installed
 ///    from its APK asset (offline-friendly). Recording happens after a
-///    successful install (or when the folder already exists — e.g. the
+///    successful install (or when a compatible folder already exists — e.g. the
 ///    user installed it from the registry first — which preserves their
 ///    version + enabled flag), so adding a new bundled id reaches
 ///    existing installs on upgrade while a later uninstall is never
-///    re-forced. A failed install stays unrecorded and retries next
-///    start.
+///    re-forced. An installed-but-API-incompatible copy is healed from
+///    the bundled zip (a pre-versioning install or an app downgrade —
+///    the bundled zip always matches this engine, and an explicit
+///    disabled flag survives the heal). A failed install stays
+///    unrecorded and retries next start.
 /// 2. **First-run pass** (guarded by `firstRunDone`): install any plugin
 ///    referenced by an existing storage row (upgrade path); non-bundled
 ///    referenced plugins are fetched from the default registry source
@@ -1595,28 +1668,61 @@ pub async fn bootstrap(cx: &crate::ctx::BackendContext, app_document_dir: &str) 
     let root = plugins_root(app_document_dir);
     let mut mutated = false;
 
-    // 1) Bundled plugins — ensure-installed (fresh installs AND upgrades).
+    // 1) Bundled plugins — ensure-install (fresh installs AND upgrades),
+    //    plus a heal pass: an installed-but-API-incompatible copy (a
+    //    pre-versioning install, or an app downgrade) is replaced by the
+    //    bundled zip, which is built against this engine. A deliberate
+    //    user uninstall (folder gone, id still recorded) is never
+    //    re-forced.
     {
         let state = read_state(app_document_dir);
         let mut recorded = state.bundled_installed.clone();
         let mut changed = false;
         for id in BUNDLED_PLUGINS {
-            if recorded.iter().any(|r| r == id) {
-                continue;
-            }
+            let recorded_already = recorded.iter().any(|r| r == id);
             if is_installed(&root, id) {
-                // Already present (e.g. installed from the registry before
-                // this app version bundled it) — keep the user's copy.
-                recorded.push(id.to_string());
-                changed = true;
+                if plugin_api_supported(installed_api_version(&root, id)) {
+                    // Already present and compatible (e.g. installed from
+                    // the registry before this app version bundled it) —
+                    // keep the user's copy.
+                    if !recorded_already {
+                        recorded.push(id.to_string());
+                        changed = true;
+                    }
+                    continue;
+                }
+                tracing::info!(
+                    "plugin bootstrap: '{id}' installed but API-incompatible — \
+                     replacing with the bundled copy"
+                );
+            } else if recorded_already {
+                // Deliberately uninstalled by the user — never re-force.
                 continue;
             }
             let host = shared.engine_host();
             match host.as_ref().and_then(|h| h.read_bundled_asset(&format!("plugin-bundles/{id}.zip"))) {
                 Some(bytes) => {
+                    // The heal path is not user-initiated — preserve an
+                    // explicit disabled flag across the reinstall.
+                    let was_disabled = read_state(app_document_dir)
+                        .enabled
+                        .get(*id)
+                        .is_some_and(|&e| !e);
                     match install_bytes_and_enable(cx, app_document_dir, bytes).await {
                         Ok(_) => {
-                            recorded.push(id.to_string());
+                            if was_disabled {
+                                let _ = mutate_state(app_document_dir, |s| PluginState {
+                                    enabled: {
+                                        let mut enabled = s.enabled;
+                                        enabled.insert(id.to_string(), false);
+                                        enabled
+                                    },
+                                    ..s
+                                });
+                            }
+                            if !recorded_already {
+                                recorded.push(id.to_string());
+                            }
                             changed = true;
                             mutated = true;
                         }
@@ -1767,8 +1873,12 @@ pub async fn reload_backends(cx: &crate::ctx::BackendContext, app_document_dir: 
     // Spawn + load + wire every enabled backend.
     let mut loaded = 0usize;
     for plugin in &list.plugins {
-        if !plugin.enabled || plugin.backend.is_none() || plugin.backend_source_handle == 0 {
-            if plugin.enabled && plugin.backend.is_some() {
+        if !plugin.enabled
+            || !plugin.api_compatible
+            || plugin.backend.is_none()
+            || plugin.backend_source_handle == 0
+        {
+            if plugin.enabled && plugin.api_compatible && plugin.backend.is_some() {
                 tracing::error!(
                     "plugin backend skipped (no source handle): {} — see the plugin \
                      scan warnings in the log",
@@ -1832,6 +1942,15 @@ pub struct PluginScanInfo {
     pub id: String,
     pub name: LocalizedString,
     pub version: String,
+    /// The plugin API level the manifest declares (`null` when it omits
+    /// it — pre-versioning installs).
+    pub api_version: Option<i64>,
+    /// `false` when the declared level is outside the engine's
+    /// [`PLUGIN_API_MIN`]..[`PLUGIN_API_MAX`] range (or missing). Such
+    /// plugins get zero module-source handles (never load) and are
+    /// excluded from `enabledPlugins` Kotlin-side — but stay in the
+    /// installed list so the management page can badge them.
+    pub api_compatible: bool,
     pub description: LocalizedString,
     pub backend: Option<String>,
     pub backend_source_handle: i64,
@@ -1923,6 +2042,7 @@ pub async fn scan(
                 name,
                 version,
                 description,
+                api_version,
                 backend,
                 events,
                 icon: _,
@@ -1932,7 +2052,22 @@ pub async fn scan(
                 lyric_parsers,
             } = m;
             let enabled = state.enabled.get(&id).copied().unwrap_or(true);
-            let backend_source_handle = if enabled {
+            // API-incompatible plugins never load: zero module-source
+            // handles, no contributions, no lyric dispatch, no event
+            // forwarding. They stay in the payload (management page
+            // badges them) with `apiCompatible: false`.
+            let api_compatible = plugin_api_supported(api_version);
+            if !api_compatible {
+                warnings.push(format!(
+                    "{id}: plugin apiVersion {} not supported by this app \
+                     ({PLUGIN_API_MIN}..{PLUGIN_API_MAX}) — not loaded",
+                    api_version
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "missing".into())
+                ));
+            }
+            let loadable = enabled && api_compatible;
+            let backend_source_handle = if loadable {
                 backend
                     .as_deref()
                     .map(|f| read_registered(&root, &id, f, host.as_ref(), &mut warnings))
@@ -1942,17 +2077,17 @@ pub async fn scan(
             };
             let dashboard_infos = contribution_infos(
                 dashboard,
-                enabled,
+                loadable,
                 &root,
                 &id,
                 host.as_ref(),
                 &mut warnings,
             );
             let storages_infos =
-                contribution_infos(storages, enabled, &root, &id, host.as_ref(), &mut warnings);
+                contribution_infos(storages, loadable, &root, &id, host.as_ref(), &mut warnings);
             registry.push(LyricParserEntry {
                 plugin_id: id.clone(),
-                enabled,
+                enabled: loadable,
                 parsers: lyric_parsers.clone(),
             });
             let parser_infos = lyric_parsers
@@ -1970,6 +2105,8 @@ pub async fn scan(
                 id,
                 name,
                 version,
+                api_version,
+                api_compatible,
                 description,
                 backend,
                 backend_source_handle,
@@ -1987,6 +2124,10 @@ pub async fn scan(
     shared.set_lyric_parser_selection_map(state.lyric_parser_selection.clone());
     Ok(PluginListOut {
         generation: shared.generation(),
+        // The engine's supported plugin API range (informational — the
+        // per-plugin `apiCompatible` flags are authoritative).
+        api_min: PLUGIN_API_MIN,
+        api_max: PLUGIN_API_MAX,
         lyric_parser_selection: state.lyric_parser_selection,
         plugins,
         warnings,
@@ -1997,6 +2138,8 @@ pub async fn scan(
 #[serde(rename_all = "camelCase")]
 pub struct PluginListOut {
     pub generation: i64,
+    pub api_min: i64,
+    pub api_max: i64,
     /// User's per-extension parser picks (extension →
     /// `"<pluginId>:<parserId>"`) — everything the Lyric Parser settings
     /// page renders rides this one payload.
@@ -2030,7 +2173,7 @@ mod tests {
 
     fn manifest_json(id: &str, version: &str) -> String {
         format!(
-            r#"{{"id":"{id}","name":"{id}","version":"{version}","backend":"backend.js",
+            r#"{{"id":"{id}","name":"{id}","version":"{version}","apiVersion":1,"backend":"backend.js",
                 "contributions":{{"dashboard":[{{"id":"main","title":"Main","view":"view.js"}}]}}}}"#
         )
     }
@@ -2168,6 +2311,74 @@ mod tests {
     }
 
     #[test]
+    fn plugin_api_range() {
+        assert_eq!((PLUGIN_API_MIN, PLUGIN_API_MAX), (1, 1));
+        assert!(plugin_api_supported(Some(1)));
+        // Outside the range…
+        assert!(!plugin_api_supported(Some(0)));
+        assert!(!plugin_api_supported(Some(2)));
+        // …and a missing declaration is never supported (manifests must
+        // declare the level they target).
+        assert!(!plugin_api_supported(None));
+    }
+
+    /// The install gate is the single choke point for every install path
+    /// (SAF zip, registry download, bundled asset): a manifest must
+    /// declare an in-range integer `apiVersion`.
+    #[test]
+    fn install_rejects_bad_api_versions() {
+        let cases: &[(&str, &str)] = &[
+            // Missing declaration.
+            (
+                "missing",
+                r#"{"id":"com.ease.t","version":"1.0.0"}"#,
+            ),
+            // String form — must be a plain JSON number.
+            (
+                "string",
+                r#"{"id":"com.ease.t","version":"1.0.0","apiVersion":"1"}"#,
+            ),
+            // Below the engine range.
+            (
+                "low",
+                r#"{"id":"com.ease.t","version":"1.0.0","apiVersion":0}"#,
+            ),
+            // Above the engine range.
+            (
+                "high",
+                r#"{"id":"com.ease.t","version":"1.0.0","apiVersion":2}"#,
+            ),
+        ];
+        for (name, manifest) in cases {
+            let (_guard, root) = temp_root();
+            let err = install_zip_bytes_blocking(
+                &root,
+                make_zip(&[("manifest.json", manifest)]),
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("apiVersion"),
+                "{name}: unexpected error {err}"
+            );
+            assert!(!is_installed(&root, "com.ease.t"), "{name}: must not install");
+        }
+
+        // Boundary levels install fine.
+        for v in [PLUGIN_API_MIN, PLUGIN_API_MAX] {
+            let (_guard, root) = temp_root();
+            let m = install_zip_bytes_blocking(
+                &root,
+                make_zip(&[(
+                    "manifest.json",
+                    &format!(r#"{{"id":"com.ease.t","apiVersion":{v}}}"#),
+                )]),
+            )
+            .unwrap();
+            assert_eq!(m.api_version, Some(v));
+        }
+    }
+
+    #[test]
     fn state_roundtrip_keeps_legacy_schema() {
         let (_guard, root) = temp_root();
         let dir = root.parent().unwrap();
@@ -2192,13 +2403,15 @@ mod tests {
     fn registry_parse_and_stamp() {
         let body = r#"{"plugins":[
             {"id":"com.ease.a","name":"A","version":"1.0.0","zip":"zips/a.zip","sha256":"00","size":10,
-             "icon":"icons/com.ease.a.png"},
+             "icon":"icons/com.ease.a.png","apiVersion":1},
             {"id":"com.ease.b","version":"2.0.0"}
         ]}"#;
         let mut entries = parse_registry(body).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, LocalizedString::plain("A".into()));
         assert_eq!(entries[1].name, LocalizedString::plain("com.ease.b".into()));
+        assert_eq!(entries[0].api_version, Some(1));
+        assert!(entries[1].api_version.is_none());
         assert_eq!(
             entries[0].icon.as_deref(),
             Some("icons/com.ease.a.png"),
@@ -2211,6 +2424,7 @@ mod tests {
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json.get("icon").is_none());
         assert!(json.get("iconData").is_none());
+        assert_eq!(json.get("apiVersion").and_then(|v| v.as_i64()), Some(1));
 
         let (_guard, root) = temp_root();
         install_zip_bytes_blocking(
@@ -2221,8 +2435,17 @@ mod tests {
         entries = stamp_entries(entries, &root);
         assert_eq!(entries[0].installed_version.as_deref(), Some("0.9.0"));
         assert!(entries[0].update_available);
+        assert!(!entries[0].incompatible, "apiVersion 1 is in range");
         assert!(entries[1].installed_version.is_none());
         assert!(!entries[1].update_available);
+        // No declared apiVersion → stamped incompatible (Kotlin greys the
+        // row out instead of downloading a zip the gate would reject).
+        assert!(entries[1].incompatible);
+
+        // Out-of-range declarations stamp incompatible too.
+        let body = r#"{"plugins":[{"id":"com.ease.c","version":"1.0.0","apiVersion":2}]}"#;
+        let stamped = stamp_entries(parse_registry(body).unwrap(), &root);
+        assert!(stamped[0].incompatible);
     }
 
     #[test]
@@ -2448,7 +2671,7 @@ mod tests {
             make_zip(&[
                 (
                     "manifest.json",
-                    r#"{"id":"com.ease.test","name":"Test","version":"1.0.0",
+                    r#"{"id":"com.ease.test","name":"Test","version":"1.0.0","apiVersion":1,
                         "contributions":{"lyricParsers":[
                             {"id":"lrc","extensions":["lrc"]},
                             {"id":"subtitle","extensions":["srt","vtt"]}]}}"#,
@@ -2726,14 +2949,83 @@ mod tests {
         cx.plugin_manager().attach_engine_host(host.clone());
         let out = scan(&cx, &app_document_dir).await.unwrap();
         assert!(out.warnings.is_empty());
+        assert_eq!((out.api_min, out.api_max), (PLUGIN_API_MIN, PLUGIN_API_MAX));
         let info = out
             .plugins
             .iter()
             .find(|p| p.id == "com.ease.test")
             .unwrap();
+        assert!(info.api_compatible);
+        assert_eq!(info.api_version, Some(1));
         assert_ne!(info.backend_source_handle, 0);
         // backend.js + view.js both went through the host.
         assert_eq!(host.registered.lock().unwrap().len(), 2);
+    }
+
+    /// An installed-but-API-incompatible plugin (a pre-versioning install
+    /// written straight into the tree, or an app downgrade) scans as
+    /// `apiCompatible: false`, gets zero module-source handles even with
+    /// an engine host bound, contributes no lyric parsers, and carries a
+    /// warning saying why.
+    #[tokio::test]
+    async fn scan_flags_incompatible_installs() {
+        let (guard, root) = temp_root();
+        let app_document_dir = guard.path().to_str().unwrap().to_string();
+        // Compatible plugin (normal install path).
+        install_zip_bytes_blocking(
+            &root,
+            make_zip(&[
+                ("manifest.json", &manifest_json("com.ease.ok", "1.0.0")),
+                ("backend.js", "export function start() {}"),
+            ]),
+        )
+        .unwrap();
+        // Legacy plugin: folder written directly, manifest without
+        // `apiVersion` (exactly what a pre-versioning device upgrade
+        // leaves in filesDir/plugins/).
+        let legacy = root.join("com.ease.legacy");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(
+            legacy.join("manifest.json"),
+            r#"{"id":"com.ease.legacy","name":"Legacy","version":"0.0.1",
+                "backend":"backend.js",
+                "contributions":{"lyricParsers":[{"id":"lrc","extensions":["lrc"]}]}}"#,
+        )
+        .unwrap();
+        std::fs::write(legacy.join("backend.js"), "export function start() {}").unwrap();
+
+        let cx = crate::ctx::BackendContext::new();
+        cx.database_server()
+            .init(app_document_dir.clone())
+            .await
+            .unwrap();
+        let host = std::sync::Arc::new(RecordingHost {
+            id: 7,
+            registered: Default::default(),
+        });
+        cx.plugin_manager().attach_engine_host(host.clone());
+        let out = scan(&cx, &app_document_dir).await.unwrap();
+
+        let legacy_info = out.plugins.iter().find(|p| p.id == "com.ease.legacy").unwrap();
+        assert!(!legacy_info.api_compatible);
+        assert!(legacy_info.api_version.is_none());
+        assert_eq!(legacy_info.backend_source_handle, 0, "never loads");
+        assert!(
+            out.warnings.iter().any(|w| w.contains("com.ease.legacy")),
+            "incompatibility must not be silent: {warnings:?}",
+            warnings = out.warnings
+        );
+        // The compatible plugin registers normally through the host…
+        let ok_info = out.plugins.iter().find(|p| p.id == "com.ease.ok").unwrap();
+        assert!(ok_info.api_compatible);
+        assert_ne!(ok_info.backend_source_handle, 0);
+        assert_eq!(host.registered.lock().unwrap().len(), 1, "legacy JS never registered");
+        // …and the legacy plugin's parsers don't reach the dispatch
+        // registry (no sibling probes, no parse dispatch).
+        assert!(!cx
+            .plugin_manager()
+            .lyric_sibling_extensions()
+            .contains(&"lrc".to_string()));
     }
 
     /// A scan with no runtime bound must come back with zero module-source
