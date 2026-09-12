@@ -100,10 +100,18 @@ pub const EVENT_CHANNEL_ID: u64 = 1;
 pub const CREDIT_CHANNEL_ID: u64 = 2;
 
 /// Per-stream credit window: the maximum number of data frames allowed in
-/// flight (bus queue + router channel) per open stream. Equals the router's
-/// mpsc capacity, so a credit-gated push can never find the channel full —
-/// a Full hit indicates a protocol violation and is dropped with a warning.
+/// flight (bus queue + router channel) per open stream. The router's mpsc
+/// capacity carries headroom above it (see [`STREAM_CHANNEL_CAPACITY`]):
+/// the credit protocol alone gates the pump, and a transient credit
+/// accounting slip must never drop a data frame — for control traffic a
+/// drop is a glitch, for streamed audio bytes it is permanent corruption.
 pub const CREDIT_WINDOW: u32 = 32;
+
+/// Router channel capacity per stream: the credit window plus headroom.
+/// Credits still bound legitimate in-flight frames (≤ `CREDIT_WINDOW`);
+/// the slack absorbs bursts racing the credit round-trip so `try_send`
+/// can only hit `Full` on a real protocol violation (dropped + warned).
+const STREAM_CHANNEL_CAPACITY: usize = CREDIT_WINDOW as usize * 2;
 
 // ---------------------------------------------------------------------------
 // Error
@@ -348,7 +356,7 @@ impl RpcClient {
         args: Value,
     ) -> Result<(Value, StreamRx), RpcError> {
         let stream_id = self.next_stream_id.fetch_add(1, Ordering::Relaxed) as u32;
-        let (stx, srx) = mpsc::channel::<StreamChunk>(CREDIT_WINDOW as usize);
+        let (stx, srx) = mpsc::channel::<StreamChunk>(STREAM_CHANNEL_CAPACITY);
         self.streams.lock().unwrap().insert(stream_id, stx);
         // Initial credit window — emitted before the request so the credits
         // are already queued when the JS pump starts taking them.
@@ -519,11 +527,20 @@ fn forward_stream(streams: &StreamTable, sid: u32, chunk: StreamChunk) {
     if let Some(sender) = sender {
         match sender.try_send(chunk) {
             Ok(()) => {}
-            // Unreachable for well-formed pumps — the credit window equals
-            // the channel capacity (see CREDIT_WINDOW); warn loudly if a
-            // protocol violation ever lands here.
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                tracing::warn!("tur:rpc: stream {sid} chunk dropped (channel full)");
+            // Unreachable for well-formed pumps — the credit window is
+            // below the channel capacity (see STREAM_CHANNEL_CAPACITY);
+            // a Full hit means a protocol violation, and a dropped DATA
+            // frame is permanent audio corruption — escalate it.
+            Err(mpsc::error::TrySendError::Full(c)) => {
+                let bytes = match &c {
+                    StreamChunk::Data(b) => b.len(),
+                    _ => 0,
+                };
+                tracing::error!(
+                    sid,
+                    bytes,
+                    "tur:rpc: stream chunk dropped (channel full) — DATA LOSS"
+                );
             }
             // Consumer gone; its StreamRx drop already emitted a cancel.
             Err(mpsc::error::TrySendError::Closed(_)) => {}
