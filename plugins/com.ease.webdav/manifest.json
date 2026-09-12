@@ -2,6 +2,7 @@
   "id": "com.ease.webdav",
   "name": { "en-US": "WebDAV", "zh-CN": "WebDAV" },
   "version": "0.0.5",
+  "apiVersion": 1,
   "description": {
     "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless JS plugin.",
     "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"

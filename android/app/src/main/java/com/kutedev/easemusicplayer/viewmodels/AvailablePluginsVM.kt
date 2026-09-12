@@ -136,6 +136,12 @@ class AvailablePluginsVM @Inject constructor(
 
     /** Download + install (or upgrade) one entry; toasts the outcome. */
     fun install(entry: RegistryPluginEntry) {
+        if (entry.incompatible) {
+            // Rust stamps this at fetch time and the install gate rejects
+            // the zip anyway — don't even download.
+            toastRepository.emitToastRes(R.string.plugin_incompatible_tag)
+            return
+        }
         viewModelScope.launch {
             _busyIds.value = _busyIds.value + entry.id
             try {

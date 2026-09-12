@@ -59,6 +59,11 @@ data class PluginMutationResult(
 @Serializable
 data class PluginListResult(
     val generation: Long = 0,
+    /** The engine's supported plugin API range, inclusive (informational
+     *  only — the per-plugin [PluginScanInfo.apiCompatible] flags are
+     *  authoritative). */
+    val apiMin: Long = 1,
+    val apiMax: Long = 1,
     val plugins: List<PluginScanInfo> = emptyList(),
     /** User's per-extension lyric-parser picks (extension →
      * `"<pluginId>:<parserId>"`); absent entry = Auto. */
@@ -74,6 +79,13 @@ data class PluginScanInfo(
     val id: String,
     val name: LocalizedText,
     val version: String = "0.0.0",
+    /** Plugin API level the manifest declares (`"apiVersion": <number>`),
+     *  or `null` when it doesn't (a pre-versioning install). */
+    val apiVersion: Long? = null,
+    /** Rust-computed against the engine's supported range — Kotlin never
+     *  compares. `false` ⇒ zero source handles + excluded from the
+     *  enabled-plugins flows; the management page badges it. */
+    val apiCompatible: Boolean = true,
     val description: LocalizedText = LocalizedText(""),
     val backend: String? = null,
     val backendSourceHandle: Long = 0,
@@ -123,6 +135,8 @@ data class RegistryPluginEntry(
     val id: String,
     val name: LocalizedText,
     val version: String = "0.0.0",
+    /** Plugin API level the entry's zip declares; `null` = undeclared. */
+    val apiVersion: Long? = null,
     val description: LocalizedText = LocalizedText(""),
     /** Zip path relative to the source base URL, or an absolute http(s) URL. */
     val zip: String = "",
@@ -135,6 +149,10 @@ data class RegistryPluginEntry(
     /** Stamped by Rust at fetch time — Kotlin never compares versions. */
     val installedVersion: String? = null,
     val updateAvailable: Boolean = false,
+    /** Rust-stamped: this entry's zip cannot install on this app (its
+     * declared plugin API level is outside the engine's supported range).
+     * The row shows an "incompatible" tag instead of an install button. */
+    val incompatible: Boolean = false,
 )
 
 @Serializable

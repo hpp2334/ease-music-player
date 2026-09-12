@@ -91,6 +91,9 @@
     <string name="plugin_install_ok">插件安装成功。</string>
     <string name="plugin_install_fail">插件安装失败。</string>
     <string name="plugin_disabled_tag">已停用</string>
+    <string name="plugin_incompatible_tag">不兼容</string>
+    <string name="plugin_api_requires">需要插件 API %1$d，当前应用版本不支持。</string>
+    <string name="plugin_api_undeclared">插件未声明 API 版本，当前应用不支持。</string>
     <string name="plugin_enable_action">启用</string>
     <string name="plugin_disable_action">停用</string>
     <string name="plugin_uninstall_action">卸载</string>

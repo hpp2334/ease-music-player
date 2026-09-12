@@ -271,7 +271,7 @@ private fun InstalledPluginRow(
     onToggle: (Boolean) -> Unit,
     onUninstall: () -> Unit,
 ) {
-    val dim = if (plugin.enabled) 1f else 0.45f
+    val dim = if (plugin.enabled && plugin.apiCompatible) 1f else 0.45f
     val accent = pluginAccent(plugin.id)
     Column(
         modifier = Modifier
@@ -314,6 +314,28 @@ private fun InstalledPluginRow(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (!plugin.apiCompatible) {
+                        Box(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(id = R.string.plugin_incompatible_tag),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                if (!plugin.apiCompatible) {
+                    // A pre-versioning install or an app downgrade: the
+                    // plugin never loaded this session (zero handles).
+                    Box(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = plugin.apiVersion
+                            ?.let { stringResource(id = R.string.plugin_api_requires, it) }
+                            ?: stringResource(id = R.string.plugin_api_undeclared),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 val description = plugin.description.resolve()
                 if (description.isNotBlank()) {

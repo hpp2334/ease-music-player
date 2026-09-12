@@ -430,10 +430,11 @@ private fun AvailablePluginRowItem(
     busy: Boolean,
     vm: AvailablePluginsVM,
 ) {
-    // `updateAvailable` / `installedVersion` are stamped Rust-side at fetch
-    // time — no version comparison happens in Kotlin.
+    // `updateAvailable` / `installedVersion` / `incompatible` are stamped
+    // Rust-side at fetch time — no version comparison happens in Kotlin.
     val hasUpdate = row.entry.updateAvailable
     val installed = row.entry.installedVersion != null
+    val incompatible = row.entry.incompatible
     val accent = pluginAccent(row.entry.id)
     Row(
         modifier = Modifier
@@ -475,10 +476,37 @@ private fun AvailablePluginRowItem(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (incompatible) {
+                Box(modifier = Modifier.height(2.dp))
+                Text(
+                    text = row.entry.apiVersion
+                        ?.let { stringResource(id = R.string.plugin_api_requires, it) }
+                        ?: stringResource(id = R.string.plugin_api_undeclared),
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Box(modifier = Modifier.width(8.dp))
         if (busy) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else if (incompatible) {
+            // Never installable on this app — an "incompatible" tag
+            // replaces the button entirely (the Rust gate would reject
+            // the zip after download).
+            Text(
+                text = stringResource(id = R.string.plugin_incompatible_tag),
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .background(
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
+                        RoundedCornerShape(999.dp),
+                    )
+                    .padding(10.dp, 3.dp),
+            )
         } else if (!installed) {
             EaseTextButton(
                 text = stringResource(id = R.string.plugin_install),

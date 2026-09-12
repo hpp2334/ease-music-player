@@ -29,6 +29,10 @@ interface RegistryEntry {
   id: string;
   name: string | Record<string, string>;
   version: string;
+  /** Plugin API level the plugin targets (a plain integer, required —
+   *  mirrors the manifest's `apiVersion`; the app refuses to install
+   *  outside its supported range). */
+  apiVersion: number;
   description: string | Record<string, string>;
   zip: string;
   sha256: string;
@@ -79,6 +83,15 @@ function packagePlugin(pluginDir: string): RegistryEntry {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const id: string = manifest.id;
   const version: string = manifest.version ?? "0.0.0";
+  // The app rejects installs whose manifest lacks an integer `apiVersion`
+  // (see PLUGIN_API_MIN/MAX in `plugin_manager.rs`) — fail the packaging
+  // loudly instead of shipping an uninstallable zip.
+  if (!Number.isInteger(manifest.apiVersion)) {
+    throw new Error(
+      `manifest.json must declare an integer "apiVersion" (e.g. 1): ${manifestPath}`,
+    );
+  }
+  const apiVersion: number = manifest.apiVersion;
   const distDir = path.join(pluginDir, "dist");
   if (!existsSync(distDir)) {
     throw new Error(`dist/ not found — run the plugin's rspack build first: ${distDir}`);
@@ -116,6 +129,7 @@ function packagePlugin(pluginDir: string): RegistryEntry {
     id,
     name: manifest.name ?? id,
     version,
+    apiVersion,
     description: manifest.description ?? "",
     zip: `zips/${path.basename(zipPath)}`,
     sha256: sha256(zipPath),
