@@ -18,7 +18,8 @@
 // Handlers, split by caller (the dispatcher routes strictly by scope). The
 // host-called ops are contract literals — identical names for every storage
 // provider, identity riding the payload (`pluginId` = this manifest's id,
-// `storageId` = the `plugin_storage_id` instance):
+// `storageId` = the `plugin_storage_id` instance) — typed by the shared sigs
+// in `../../infra/host-ops.ts` (args/results below describe those sigs):
 //
 // hostRpc — the Rust host invokes these:
 //   - storage:list           { pluginId, storageId, dir }          -> Entry[]
@@ -29,7 +30,8 @@
 //     `storage_plugin.remove_instance` bridge)
 //
 // viewRpc — this plugin's own view invokes these via `ease.rpc.call`
-// (plugin-private names, no identity needed — the backend knows itself):
+// (plugin-private sigs in `./rpc.ts`, shared by both modules — no identity
+// needed, the backend knows itself):
 //   - webdav:test           { storageId?, addr, username, password?, isAnonymous } -> { result }
 //   - webdav:connect        { storageId?, addr, alias, username?, password?, isAnonymous } -> { storageId, created }
 //     (the add/edit-storage form)
@@ -53,7 +55,19 @@ import "../../infra/text-polyfill";
 import type { StreamResponse } from "tur:net";
 import { decodeUtf8 } from "tur:std";
 import { hostRpc, viewRpc } from "tur:rpc";
-import type { StreamSource } from "tur:rpc";
+import type { EaseRpcOpArg, StreamSource } from "tur:rpc";
+import {
+    StorageListSig,
+    StorageGetSig,
+    StorageRemoveInstanceSig,
+} from "../../infra/host-ops";
+import type { StorageEntry, StorageGetMeta } from "../../infra/host-ops";
+import { WebdavTestSig, WebdavConnectSig } from "./rpc";
+import type {
+    TestOutcome,
+    WebdavTestArgs,
+    WebdavConnectArgs,
+} from "./rpc";
 import { db, secret, context } from "ease";
 
 // npm deps — bundled by rspack (only `tur:*` / `ease` are externals). The
@@ -468,13 +482,6 @@ function parseMultistatus(xml: string): RawEntry[] {
     return out;
 }
 
-interface Entry {
-    name: string;
-    path: string;
-    size?: number;
-    isDir: boolean;
-}
-
 function urlDecode(s: string): string {
     try {
         return decodeURIComponent(s);
@@ -483,7 +490,7 @@ function urlDecode(s: string): string {
     }
 }
 
-async function listImpl(conf: InstanceConfig, dir: string): Promise<Entry[]> {
+async function listImpl(conf: InstanceConfig, dir: string): Promise<StorageEntry[]> {
     const password = loadPassword(conf);
     const url = buildUrl(conf.addr, dir, true);
     const resp = await davRequest(conf.addr, conf.username, password, conf.isAnonymous, {
@@ -499,7 +506,7 @@ async function listImpl(conf: InstanceConfig, dir: string): Promise<Entry[]> {
     });
 
     const raw = parseMultistatus(resp.bodyText);
-    const out: Entry[] = [];
+    const out: StorageEntry[] = [];
     const dirTrimmed = dir.endsWith("/") ? dir.slice(0, -1) : dir;
     for (const item of raw) {
         let path = hrefToPath(conf.addr, item.href);
@@ -554,7 +561,7 @@ async function openGet(
     conf: InstanceConfig,
     path: string,
     offset: number,
-): Promise<StreamSource> {
+): Promise<StreamSource<StorageGetMeta>> {
     const password = loadPassword(conf);
     const { origin } = splitAddr(conf.addr);
     const url = buildUrl(conf.addr, path, false);
@@ -621,8 +628,6 @@ async function openGet(
 // test / connect / instance lifecycle
 // ---------------------------------------------------------------------------
 
-type TestOutcome = "SUCCESS" | "UNAUTHORIZED" | "TIMEOUT" | "OTHER_ERROR";
-
 /** Resolve the credentials for a test call: explicit values win; on edit a
  * blank password falls back to the stored one. */
 function testCredentials(
@@ -642,46 +647,7 @@ function testCredentials(
     };
 }
 
-// Handler args shapes (see the op table in the header comment). Host-op
-// `pluginId` is literal-typed — a mismatch would mean the host routed
-// somebody else's call here.
-
-interface ListArgs {
-    pluginId: "com.ease.webdav";
-    storageId: string;
-    dir: string;
-}
-
-interface GetArgs {
-    pluginId: "com.ease.webdav";
-    storageId: string;
-    path: string;
-    offset: number;
-}
-
-interface TestArgs {
-    storageId?: string;
-    addr: string;
-    username: string;
-    password?: string;
-    isAnonymous?: boolean;
-}
-
-interface ConnectArgs {
-    storageId?: string;
-    addr: string;
-    alias?: string;
-    username?: string;
-    password?: string;
-    isAnonymous?: boolean;
-}
-
-interface RemoveInstanceArgs {
-    pluginId: "com.ease.webdav";
-    storageId: string;
-}
-
-async function testImpl(args: TestArgs): Promise<{ result: TestOutcome }> {
+async function testImpl(args: WebdavTestArgs): Promise<{ result: TestOutcome }> {
     const anon = !!args.isAnonymous;
     const cred = testCredentials(args.storageId, args.addr, args.username, args.password ?? "");
     try {
@@ -715,7 +681,7 @@ async function testImpl(args: TestArgs): Promise<{ result: TestOutcome }> {
  * storage row (`context.createStorage` — the host pops the create form). On
  * update, rewrite the kv config; a blank `password` keeps the stored secret.
  */
-function connectImpl(args: ConnectArgs): { storageId: string; created: boolean } {
+function connectImpl(args: WebdavConnectArgs): { storageId: string; created: boolean } {
     const isAnonymous = !!args.isAnonymous;
     const addr = args.addr.trim();
     const alias = (args.alias ?? "").trim() || "WebDAV";
@@ -786,7 +752,7 @@ function configToJson(conf: InstanceConfig): Record<string, unknown> {
 /** Remove an instance: drop its config (kv) + password secret, ask the host
  * to delete the storage row, and reload the dashboard. Called from the
  * host trash button (`storage:removeInstance` via `storage_plugin.remove_instance`). */
-function removeInstance(args: RemoveInstanceArgs): void {
+function removeInstance(args: EaseRpcOpArg<typeof StorageRemoveInstanceSig>): void {
     const conf = instances.get(args.storageId);
     let secretId: number | null | undefined = conf?.secretId;
     if (secretId === undefined) {
@@ -820,24 +786,23 @@ function removeInstance(args: RemoveInstanceArgs): void {
 // ---------------------------------------------------------------------------
 
 export function start(): void {
-    hostRpc.registerHandler("storage:list", (args: ListArgs) =>
+    hostRpc.registerHandler(StorageListSig, (args) =>
         listImpl(configOf(args.storageId), args.dir).catch((e: any) => {
             throw markedError(e);
         }),
     );
 
-    hostRpc.registerStream("storage:get", (args: GetArgs) =>
+    hostRpc.registerStream(StorageGetSig, (args) =>
         openGet(configOf(args.storageId), args.path, args.offset).catch((e: any) => {
             throw markedError(e);
         }),
     );
 
-    viewRpc.registerHandler("webdav:test", (args: TestArgs) => testImpl(args));
+    viewRpc.registerHandler(WebdavTestSig, (args) => testImpl(args));
 
-    viewRpc.registerHandler("webdav:connect", (args: ConnectArgs) => connectImpl(args));
+    viewRpc.registerHandler(WebdavConnectSig, (args) => connectImpl(args));
 
-    hostRpc.registerHandler("storage:removeInstance", (args: RemoveInstanceArgs) => {
+    hostRpc.registerHandler(StorageRemoveInstanceSig, (args) => {
         removeInstance(args);
-        return {};
     });
 }

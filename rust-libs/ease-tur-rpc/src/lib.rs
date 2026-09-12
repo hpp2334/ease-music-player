@@ -39,8 +39,10 @@
 //!     `0x02 error  : [0x02][streamId u32 LE][utf-8 message...]`.
 //! - [`EVENT_CHANNEL_ID`] (1) — plugin-only events, host → JS,
 //!   fire-and-forget: [`RpcClient::emit_event`] pushes `{type, payload}`;
-//!   the JS side dispatches it to the `hostRpc.onEvent(type, …)`
-//!   registration. No reply is sent, and a plugin with no registration
+//!   the JS side dispatches it to the `hostRpc.onEvent(sig, …)`
+//!   registration (the sig object carries the wire `type`; the legacy
+//!   bare-string form is still accepted for already-installed bundles). No
+//!   reply is sent, and a plugin with no registration
 //!   simply never hears it.
 //! - [`CREDIT_CHANNEL_ID`] (2) — stream flow control + cancellation, host →
 //!   JS only, JSON frames: grants `{"sid":n,"n":k}` re-credit stream `n`'s
@@ -329,7 +331,7 @@ impl RpcClient {
 
     /// Fire a plugin event at the JS realm on the dedicated event channel:
     /// pushes `{type, payload}` JSON, delivered to the
-    /// `hostRpc.onEvent(type, …)` registration on the next flush.
+    /// `hostRpc.onEvent(sig, …)` registration on the next flush.
     /// Fire-and-forget — no reply is sent, and a plugin with no registration
     /// silently never hears it (standard channel semantics since tur #190).
     pub fn emit_event(&self, event_type: &str, payload: Value) {

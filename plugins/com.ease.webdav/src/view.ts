@@ -34,6 +34,8 @@ import {
     type Store, type StoreCtx, type TextController, type Val,
 } from "tur:std";
 import { db, rpc, context, themes } from "ease";
+import { WebdavTestSig, WebdavConnectSig } from "./rpc";
+import type { WebdavConnectArgs } from "./rpc";
 
 const PROVIDER = "webdav";
 
@@ -210,16 +212,7 @@ function ActionButton(opts: {
 
 // --- actions ---------------------------------------------------------------
 
-interface ConnectArgs {
-    storageId?: string;
-    addr: string;
-    alias?: string;
-    username?: string;
-    password?: string;
-    isAnonymous?: boolean;
-}
-
-const collectArgs$ = mutate((ctx: StoreCtx): ConnectArgs => {
+const collectArgs$ = mutate((ctx: StoreCtx): WebdavConnectArgs => {
     const isAnon = ctx.get(anonymous);
     const isEdit = ctx.get(isEdit$);
     const storageId = ctx.get(context.storageId$);
@@ -233,7 +226,7 @@ const collectArgs$ = mutate((ctx: StoreCtx): ConnectArgs => {
     };
 });
 
-function validate(args: ConnectArgs, isEdit: boolean): string | null {
+function validate(args: WebdavConnectArgs, isEdit: boolean): string | null {
     if (args.addr === "") return "服务器地址不能为空";
     if (args.alias === "") return "服务器名称 (别名) 不能为空";
     if (!args.isAnonymous && args.username === "") return "用户名不能为空";
@@ -254,7 +247,13 @@ const runTest$ = mutate((ctx: StoreCtx, _ev: PointerInteractEvent): void => {
     // plain `await` (the `launch` generator driver is gone).
     void (async () => {
         try {
-            const r = (await rpc.call("webdav:test", args)) as { result: string };
+            const r = await rpc.call(WebdavTestSig, {
+                storageId: args.storageId,
+                addr: args.addr,
+                username: args.username ?? "",
+                password: args.password,
+                isAnonymous: args.isAnonymous,
+            });
             if (r.result === "SUCCESS") {
                 ctx.set(setStatus$, "测试成功", false);
             } else if (r.result === "UNAUTHORIZED") {
@@ -283,7 +282,7 @@ const save$ = mutate((ctx: StoreCtx, _ev: PointerInteractEvent): void => {
     ctx.set(setStatus$, "", false);
     void (async () => {
         try {
-            await rpc.call("webdav:connect", args);
+            await rpc.call(WebdavConnectSig, args);
             if (ctx.get(isEdit$)) {
                 // The backend already rewrote the kv + notified the host;
                 // show confirmation (create mode pops via the host upcall).

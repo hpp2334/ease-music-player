@@ -17,6 +17,13 @@ const viewHandlers = new Map();       // op -> viewRpc.registerHandler fn
 const streamHandlers = new Map();     // op -> hostRpc.registerStream opener fn
 const eventHandlers = new Map();      // type -> hostRpc.onEvent fn
 
+// Sig/string tolerance: new code registers with a sig object ({ op } / 
+// { type }) that binds the wire name to its arg/payload types
+// (plugins/infra/host-ops.ts + events.ts); already-installed bundles built
+// against the bare-string API keep working.
+const opOf = (sig) => (typeof sig === "string" ? sig : sig && sig.op);
+const typeOf = (sig) => (typeof sig === "string" ? sig : sig && sig.type);
+
 // --- credit gates (flow control + cancellation, host -> JS on CREDIT_CH) --
 // One per open stream: the counting semaphore a StreamProducer.push acquires.
 // Credits arrive as {"sid",n}; cancels as {"sid",cancel:true}.
@@ -148,21 +155,22 @@ eventBus.on(RPC_CH, (payload) => {
 // viewRpc: ops this plugin's own VIEW reaches via `ease.rpc.call`. Views
 // are JSON request/response only, so there is no registerStream/onEvent
 // here. An op callable from both sides is simply registered in both.
+// Registration keys come from the sig object (see opOf/typeOf above).
 export const hostRpc = {
-  registerHandler(op, fn) {
-    hostHandlers.set(op, fn);
+  registerHandler(sig, fn) {
+    hostHandlers.set(opOf(sig), fn);
   },
-  registerStream(op, open) {
-    streamHandlers.set(op, open);
+  registerStream(sig, open) {
+    streamHandlers.set(opOf(sig), open);
   },
-  onEvent(type, fn) {
-    eventHandlers.set(type, fn);
+  onEvent(sig, fn) {
+    eventHandlers.set(typeOf(sig), fn);
   },
 };
 
 export const viewRpc = {
-  registerHandler(op, fn) {
-    viewHandlers.set(op, fn);
+  registerHandler(sig, fn) {
+    viewHandlers.set(opOf(sig), fn);
   },
 };
 

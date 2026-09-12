@@ -24,17 +24,10 @@
 import "../../infra/string-polyfill";
 import "../../infra/text-polyfill";
 import { hostRpc } from "tur:rpc";
+import { LyricParseSig } from "../../infra/host-ops";
 import { Base64 } from "js-base64";
 import { parseLrc, parseSubtitle } from "./parsers";
-import type { LyricParseResult, Parser } from "./parsers";
-
-interface LyricParseArgs {
-    pluginId: string;
-    parserId: string;
-    fileName: string;
-    size: number;
-    contentBase64: string;
-}
+import type { Parser } from "./parsers";
 
 const PARSERS: Record<string, Parser> = {
     lrc: parseLrc,
@@ -42,7 +35,7 @@ const PARSERS: Record<string, Parser> = {
 };
 
 export function start(): void {
-    hostRpc.registerHandler("lyric:parse", (args: LyricParseArgs) => {
+    hostRpc.registerHandler(LyricParseSig, (args) => {
         const parser = PARSERS[args.parserId];
         if (!parser) return null;
         const bytes = Base64.toUint8Array(args.contentBase64);
@@ -50,7 +43,6 @@ export function start(): void {
         // A parse error thrown here rejects the RPC call host-side (logged,
         // next parser tried); `null` means "unrecognized content" with the
         // same fall-through.
-        const result: LyricParseResult | null = parser(text);
-        return result;
+        return parser(text);
     });
 }

@@ -506,8 +506,14 @@ const EVENT_JS: &str = r#"
 import { hostRpc } from "tur:rpc";
 
 let got = null;
-hostRpc.onEvent("ping", (payload) => { got = payload.value; });
-hostRpc.registerHandler("got", () => ({ value: got }));
+let gotLegacy = null;
+// Sig form ({ type } / { op }) — what plugins built against the sig API
+// (plugins/infra/events.ts + host-ops.ts) register with.
+hostRpc.onEvent({ type: "ping" }, (payload) => { got = payload.value; });
+hostRpc.registerHandler({ op: "got" }, () => ({ value: got }));
+// Legacy string form — already-installed bundles must keep working.
+hostRpc.onEvent("pong", (payload) => { gotLegacy = payload.value; });
+hostRpc.registerHandler("gotLegacy", () => ({ value: gotLegacy }));
 "#;
 
 #[test]
@@ -529,4 +535,32 @@ fn emit_event_reaches_on_event_registration() {
         }
     }
     assert!(delivered, "event should have been delivered to onEvent");
+}
+
+#[test]
+fn emit_event_legacy_string_registration_still_works() {
+    let mut app = build_app();
+    let client = RpcClient::wire(app.app()).expect("rpc client");
+    app.eval_module_source(EVENT_JS).expect("load js");
+
+    client.emit_event("pong", serde_json::json!({ "value": 11 }));
+    let mut delivered = false;
+    for _ in 0..50 {
+        let v = call_with_pump(
+            &mut app,
+            client.clone(),
+            RpcScope::Host,
+            "gotLegacy",
+            serde_json::json!(null),
+        )
+        .expect("probe call ok");
+        if v.get("value").and_then(|x| x.as_i64()) == Some(11) {
+            delivered = true;
+            break;
+        }
+    }
+    assert!(
+        delivered,
+        "event should have been delivered to a legacy string onEvent registration"
+    );
 }

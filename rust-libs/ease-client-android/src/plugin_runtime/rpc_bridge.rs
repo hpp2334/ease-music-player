@@ -1,13 +1,17 @@
 //! `ease.rpc` JS bridge — lets a view instance call a handler on its own
 //! plugin's headless backend.
 //!
-//! `call(op, args): Promise<any>` resolves the calling plugin's identity
+//! `call(sig, args): Promise<any>` resolves the calling plugin's identity
 //! from the per-instance data slot, looks up the backend's wired `RpcClient`
 //! (`BackendContext::service_rpc_for(pluginId)`), and awaits
-//! `rpc.call_view(op, args)`. The promise settles with the handler's result,
-//! or rejects with its error. This is the channel a tur-rendered view uses to
-//! reach plugin-owned domain logic that lives in the backend instance
-//! (e.g. `webdav:test` / `webdav:connect` from the add-storage form).
+//! `rpc.call_view(op, args)` — `op` taken from the sig object (`{ op }`,
+//! which binds the op name to its args/result types; see
+//! `plugins/infra/host-ops.ts`). The legacy bare-string form is still
+//! accepted, so already-installed bundles keep working. The promise settles
+//! with the handler's result, or rejects with its error. This is the channel
+//! a tur-rendered view uses to reach plugin-owned domain logic that lives in
+//! the backend instance (e.g. `webdav:test` / `webdav:connect` from the
+//! add-storage form).
 //!
 //! Calls land in the **view scope** — they resolve handlers registered via
 //! `viewRpc.registerHandler` in the backend's `tur:rpc` module; host-side ops
@@ -33,12 +37,15 @@ pub fn build_fns() -> Vec<FnEntry> {
     vec![("call", 2, call as Ptr)]
 }
 
-/// `call(op, args): Promise<any>` — invoke handler `op` on this plugin's
-/// backend with JSON-serializable `args`.
+/// `call(sig, args): Promise<any>` — invoke the op bound on `sig` (an
+/// `{ op }` sig object) on this plugin's backend with JSON-serializable
+/// `args`.
 ///
 /// `args[0]` is the bound ctx value (prepended by `bound_native`); the
-/// user's `op` is at index 1 and `args` at index 2. `args` may be omitted
-/// (treated as `null`).
+/// user's `sig` is at index 1 and `args` at index 2. `args` may be omitted
+/// (treated as `null`). The op name is read from a sig object's `op`
+/// property; a bare string is still accepted for already-installed bundles
+/// built against the pre-sig API.
 fn call(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsResult<JsValue> {
     use boa_engine::object::builtins::JsPromise;
 
@@ -49,15 +56,24 @@ fn call(_this: &JsValue, args: &[JsValue], ctx: &mut boa_engine::Context) -> JsR
         )
     })?;
 
-    let op = args
-        .get_or_undefined(1)
-        .as_string()
-        .ok_or_else(|| {
-            JsError::from(
-                JsNativeError::typ().with_message("ease:rpc.call: op (arg 0) must be a string"),
-            )
-        })?
-        .to_std_string_escaped();
+    let op = {
+        let sig = args.get_or_undefined(1);
+        match sig.variant() {
+            // New bundles pass a sig object: { op: "..." }.
+            JsVariant::Object(obj) => obj
+                .get(js_string!("op"), ctx)
+                .ok()
+                .and_then(|v| v.as_string().map(|s| s.to_std_string_escaped())),
+            // Legacy string form — already-installed bundles keep working.
+            JsVariant::String(s) => Some(s.to_std_string_escaped()),
+            _ => None,
+        }
+    }
+    .ok_or_else(|| {
+        JsError::from(JsNativeError::typ().with_message(
+            "ease:rpc.call: sig (arg 0) must be an op sig object or string",
+        ))
+    })?;
 
     let args_val = args.get_or_undefined(2);
     let args_json = match args_val.variant() {
