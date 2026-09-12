@@ -540,6 +540,10 @@ fn decide(shared: &Arc<Shared>) -> Action {
             st.last_progress = Instant::now();
             st.retries += 1;
             if st.retries > MAX_SESSION_RETRIES {
+                tracing::error!(
+                    offset,
+                    "buffered source: session stalled before the watchdog; retry budget exhausted"
+                );
                 st.error = Some("session stalled: no delivery progress before the watchdog".into());
                 st.session_open = false;
                 st.close_pending = true;
@@ -548,6 +552,12 @@ fn decide(shared: &Arc<Shared>) -> Action {
                 // waiters re-acquire on wake).
                 shared.cv.notify_all();
             } else {
+                tracing::warn!(
+                    retries = st.retries,
+                    max = MAX_SESSION_RETRIES,
+                    offset,
+                    "buffered source: no delivery progress before the watchdog; reopening"
+                );
                 return Action::Reopen(offset);
             }
         }
@@ -608,12 +618,18 @@ fn open_session(shared: &Arc<Shared>, inner: &dyn RemoteAudioSource, offset: u64
 /// kill the session (generation bump drops its late deliveries) and count
 /// the failure against the budget. Caller notifies.
 fn fail_session(st: &mut Inner, reason: String) {
+    tracing::warn!(
+        retries = st.retries,
+        max = MAX_SESSION_RETRIES,
+        "buffered source: session failed: {reason}"
+    );
     st.session_gen += 1;
     st.session_open = false;
     st.close_pending = true;
     st.outstanding = 0;
     st.retries += 1;
     if st.retries > MAX_SESSION_RETRIES {
+        tracing::error!("buffered source: retry budget exhausted; sticky error set");
         st.error = Some(reason);
     }
 }
