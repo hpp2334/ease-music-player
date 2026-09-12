@@ -9,7 +9,7 @@
 //     const oauthId = oauth.new();
 //     oauth.start(oauthId);              // fires the host OAuth flow
 //     themes.color("primary");           // throws on unknown names
-//     rpc.call("webdav:test", { ... });  // view → its backend handler
+//     rpc.call(WebdavTestSig, { ... });  // view → its backend handler (op sig)
 //     store.get(context.storageId$);     // null = create, id = edit
 //     library.playlists();               // read-only host playlist roster
 //
@@ -22,6 +22,7 @@
 
 declare module "ease" {
     import type { Readable } from "tur:std";
+    import type { EaseRpcOp, EaseRpcOpArg, EaseRpcOpResult } from "tur:rpc";
     // ---- db entry types ----------------------------------------------------
 
     /** Single-value entry returned by `singleGetMulti`. */
@@ -139,16 +140,22 @@ declare module "ease" {
 
     export const rpc: {
         /**
-         * Invoke handler `op` on this plugin's headless backend (the instance
-         * wired via `wireServiceRpc`) with JSON-serializable `args`. Returns
-         * a promise of the handler's result (or rejection with its error).
-         * The backend's `RpcClient` is reused — no cross-bus relay.
+         * Invoke the op bound on `sig` on this plugin's headless backend
+         * (the instance wired via `wireServiceRpc`) with JSON-serializable
+         * args, and await its result. Returns a promise of the handler's
+         * result typed by the sig's bound Result (or rejection with its
+         * error). The backend's `RpcClient` is reused — no cross-bus relay.
          *
          * Calls land in the **view scope**: they resolve handlers the backend
          * registered via `viewRpc.registerHandler`; host-side ops
          * (`hostRpc.registerHandler` / `registerStream`) are out of reach.
+         * Plugin-private sigs are declared once in the plugin and imported by
+         * both its view and backend modules.
          */
-        call(op: string, args?: unknown): Promise<any>;
+        call<S extends EaseRpcOp<string, any, any>>(
+            sig: S,
+            args: EaseRpcOpArg<S>,
+        ): Promise<EaseRpcOpResult<S>>;
     };
 
     // ---- library namespace -----------------------------------------------

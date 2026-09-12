@@ -58,6 +58,8 @@ import {
 import type { Source, Readable, Element, StoreCtx } from "tur:core";
 import { db as Storage, themes, library } from "ease";
 import type { PlaylistInfo } from "ease";
+import { MusicPlaySig } from "../../infra/events";
+import type { EaseRpcSigArg } from "tur:rpc";
 import { createSelector } from "./ui/selector";
 
 // ---------------------------------------------------------------------------
@@ -180,11 +182,10 @@ function dateKeysForRange(range: RangeDef): string[] {
 // Refresh — synchronous KV scan + JS aggregation
 // ---------------------------------------------------------------------------
 
-interface PlayEventRow {
-    musicId?: unknown;
-    title?: unknown;
-    ts?: unknown;
-}
+// A stored play row: what the backend appended from the `music:play`
+// payload. `Partial` because the rows are JSON-parsed from KV — fields are
+// validated defensively below, not trusted.
+type PlayEventRow = Partial<EaseRpcSigArg<typeof MusicPlaySig>>;
 
 // A mutation (dispatched from `start({ store })` / the range selector) so it
 // can write through the instance store's ctx — there is no module-level store.

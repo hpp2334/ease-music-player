@@ -25,29 +25,18 @@
 //     VTT dot, and 1-3 fraction digits. No cues -> null.
 
 // ---------------------------------------------------------------------------
-// Contract types (host ↔ plugin)
+// Contract types (host ↔ plugin) — canonical copies live in
+// `../../infra/host-ops.ts` (bound on `LyricParseSig`); re-exported here for
+// the parser implementations below.
 // ---------------------------------------------------------------------------
 
-export interface LyricLine {
-    timeMs: number;
-    durationMs?: number;
-    text: string;
-}
+import type {
+    LyricLine,
+    LyricMetadata,
+    LyricParseResult,
+} from "../../infra/host-ops";
 
-export interface LyricMetadata {
-    artist?: string;
-    album?: string;
-    title?: string;
-    lyricist?: string;
-    author?: string;
-    length?: string;
-    offset?: string;
-}
-
-export interface LyricParseResult {
-    lines: LyricLine[];
-    metadata?: LyricMetadata;
-}
+export type { LyricLine, LyricMetadata, LyricParseResult };
 
 export type Parser = (text: string) => LyricParseResult | null;
 

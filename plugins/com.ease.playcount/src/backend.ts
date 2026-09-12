@@ -5,7 +5,8 @@
 // the plugin-event bus channel (fire-and-forget, one channel per plugin
 // instance); the host (`PluginRepository.bindPlayerEvents`) calls
 // `plugin.event { pluginId, type, payload }` for each play and the Rust
-// side emits it to this handler via the plugin's RpcClient.
+// side emits it to this handler via the plugin's RpcClient. The payload
+// type is bound on the shared event sig (`plugins/infra/events.ts`).
 //
 // Data model (KV multi-value, append-only):
 //   key   = "plays:YYYY-MM-DD"
@@ -17,13 +18,8 @@
 import "../../infra/string-polyfill";
 import "../../infra/text-polyfill";
 import { hostRpc } from "tur:rpc";
+import { MusicPlaySig } from "../../infra/events";
 import { db } from "ease";
-
-interface MusicPlayPayload {
-    musicId: number;
-    title: string;
-    ts: number;
-}
 
 function pad2(n: number): string {
     return n < 10 ? "0" + n : String(n);
@@ -39,7 +35,7 @@ function dayKey(ts: number): string {
 // runs the returned cleanup before the next load / at destroy). The event
 // subscription dies with the instance, so no cleanup is needed.
 export function start(): void {
-    hostRpc.onEvent("music:play", (args: MusicPlayPayload) => {
+    hostRpc.onEvent(MusicPlaySig, (args) => {
         db.multiAppend(
             dayKey(args.ts),
             JSON.stringify({ musicId: args.musicId, title: args.title, ts: args.ts }),

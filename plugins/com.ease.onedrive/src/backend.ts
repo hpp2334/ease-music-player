@@ -18,8 +18,9 @@
 //
 // Handlers — contract literals under hostRpc scope: identical op names for
 // every storage provider, identity riding the payload (`pluginId` = this
-// manifest's id; `storageId` = the `plugin_storage_id` instance). The OAuth
-// flow is host-bridged (the view fires `ease.oauth.start`, the host comes
+// manifest's id; `storageId` = the `plugin_storage_id` instance) — typed by
+// the shared sigs in `../../infra/host-ops.ts`. The OAuth flow is host-bridged
+// (the view fires `ease.oauth.start`, the host comes
 // back through the `oauth.url` / `oauth.exchange` bridges):
 //   - storage:list           { pluginId, storageId, dir }          -> Entry[]
 //   - storage:get            { pluginId, storageId, path, offset } -> registerStream: meta
@@ -40,7 +41,15 @@ import "../../infra/text-polyfill";
 import { request, requestStream } from "tur:net";
 import { decodeUtf8 } from "tur:std";
 import { hostRpc } from "tur:rpc";
-import type { StreamSource } from "tur:rpc";
+import type { EaseRpcOpArg, StreamSource } from "tur:rpc";
+import {
+    StorageListSig,
+    StorageGetSig,
+    StorageRemoveInstanceSig,
+    OauthUrlSig,
+    OauthExchangeSig,
+} from "../../infra/host-ops";
+import type { StorageEntry, StorageGetMeta } from "../../infra/host-ops";
 import { db, secret, context } from "ease";
 import { takePending } from "./oauth-pending";
 import { v4 as uuidv4 } from "uuid";
@@ -207,21 +216,14 @@ async function withRetry<T>(instance: string, fn: (token: string) => Promise<T>)
 // list
 // ---------------------------------------------------------------------------
 
-interface Entry {
-    name: string;
-    path: string;
-    size?: number;
-    isDir: boolean;
-}
-
 function computeListUrl(dir: string): string {
     const sub = dir === "/" ? "/root/children" : `/root:${dir}:/children`;
     return `${ONEDRIVE_ROOT_API}${sub}`;
 }
 
-async function listImpl(token: string, dir: string): Promise<Entry[]> {
+async function listImpl(token: string, dir: string): Promise<StorageEntry[]> {
     let url = computeListUrl(dir);
-    const out: Entry[] = [];
+    const out: StorageEntry[] = [];
     for (;;) {
         const resp = await request({
             url,
@@ -284,7 +286,7 @@ async function openGet(
     token: string,
     path: string,
     offset: number,
-): Promise<StreamSource> {
+): Promise<StreamSource<StorageGetMeta>> {
     const url = `${ONEDRIVE_ROOT_API}/root:${path}:/content`;
     const headers = authHeaders(token);
     headers["Range"] = `bytes=${offset}-`;
@@ -329,39 +331,6 @@ function authorizeUrl(): string {
 }
 
 
-// Handler args shapes (see the op table in the header comment). `pluginId`
-// is this plugin's manifest id, literal-typed — a mismatch would mean the
-// host routed somebody else's call here.
-
-interface ListArgs {
-    pluginId: "com.ease.onedrive";
-    storageId: string;
-    dir: string;
-}
-
-interface GetArgs {
-    pluginId: "com.ease.onedrive";
-    storageId: string;
-    path: string;
-    offset: number;
-}
-
-interface OauthUrlArgs {
-    pluginId: "com.ease.onedrive";
-    oauthId: string;
-}
-
-interface ExchangeArgs {
-    pluginId: "com.ease.onedrive";
-    oauthId: string;
-    code: string;
-}
-
-interface RemoveInstanceArgs {
-    pluginId: "com.ease.onedrive";
-    storageId: string;
-}
-
 /**
  * Exchange an authorization code for tokens, mint a new `onedrive:<uuid>`
  * storage instance, persist its config + refresh token, and return its id.
@@ -369,7 +338,9 @@ interface RemoveInstanceArgs {
  * (`oauth:<oauthId>`, stashed by the view before `ease.oauth.start`) —
  * never from the host.
  */
-async function exchangeCode(args: ExchangeArgs): Promise<{ storageId: string }> {
+async function exchangeCode(
+    args: EaseRpcOpArg<typeof OauthExchangeSig>,
+): Promise<{ storageId: string }> {
     const t = await redeemToken("authorization_code", { code: args.code });
     const instance = `onedrive:${uuidv4()}`;
     const secretId = secret.put(t.refresh_token);
@@ -390,7 +361,9 @@ async function exchangeCode(args: ExchangeArgs): Promise<{ storageId: string }> 
  *  trash both route through `context.removeStorage` / the host's
  *  `storage_plugin.remove_instance` bridge, which invokes this op
  *  (`storage:removeInstance`, hostRpc scope) before deleting the row. */
-function removeInstance(args: RemoveInstanceArgs): void {
+function removeInstance(
+    args: EaseRpcOpArg<typeof StorageRemoveInstanceSig>,
+): void {
     const st = instances.get(args.storageId);
     let secretId: number | undefined = st?.secretId;
     if (secretId === undefined) {
@@ -422,20 +395,19 @@ function removeInstance(args: RemoveInstanceArgs): void {
 // runs the returned cleanup before the next load / at destroy). Handlers are
 // per-instance and die with the instance, so no cleanup is needed.
 export function start(): void {
-    hostRpc.registerHandler("storage:list", (args: ListArgs) =>
+    hostRpc.registerHandler(StorageListSig, (args) =>
         withRetry(args.storageId, (token) => listImpl(token, args.dir)),
     );
 
-    hostRpc.registerStream("storage:get", (args: GetArgs) =>
+    hostRpc.registerStream(StorageGetSig, (args) =>
         withRetry(args.storageId, (token) => openGet(token, args.path, args.offset)),
     );
 
-    hostRpc.registerHandler("oauth:url", (_args: OauthUrlArgs) => ({ url: authorizeUrl() }));
+    hostRpc.registerHandler(OauthUrlSig, () => ({ url: authorizeUrl() }));
 
-    hostRpc.registerHandler("oauth:exchange", (args: ExchangeArgs) => exchangeCode(args));
+    hostRpc.registerHandler(OauthExchangeSig, (args) => exchangeCode(args));
 
-    hostRpc.registerHandler("storage:removeInstance", (args: RemoveInstanceArgs) => {
+    hostRpc.registerHandler(StorageRemoveInstanceSig, (args) => {
         removeInstance(args);
-        return {};
     });
 }
