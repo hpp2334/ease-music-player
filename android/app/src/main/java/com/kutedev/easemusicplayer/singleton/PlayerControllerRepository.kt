@@ -338,6 +338,16 @@ class PlayerControllerRepository @Inject constructor(
 
     fun resume() {
         val engine = _cantodeEngine.value ?: return
+        // The engine wedges play/pause once `Ended` (by design — see the
+        // state machine's Ended row): without this, the play button at
+        // end-of-track / end-of-playlist was a dead no-op. Replay the
+        // current track from the top instead.
+        val m = _music.value
+        val p = _playlist.value
+        if (engine.state.value == PlayerState.ENDED && m != null && p != null) {
+            play(m.meta.id, p.abstr.meta.id)
+            return
+        }
         engine.play()
         _pluginEvents.tryEmit(
             PluginEvent.MusicResume(
