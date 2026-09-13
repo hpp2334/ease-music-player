@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use ease_client_schema::{
-    DataSourceKey, MusicId, MusicModel, PlaylistId, StorageEntryLoc, StorageId,
+    DataSourceKey, MusicId, MusicModel, PlaylistGroupId, PlaylistId, StorageEntryLoc, StorageId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +24,10 @@ pub struct ArgUpdatePlaylist {
     /// older callers that predate the field.
     #[serde(default)]
     pub storage_allowlist: Option<Vec<StorageId>>,
+    /// Move the playlist into another group when `Some` and different
+    /// from the current one. `None` (default) = keep the group.
+    #[serde(default)]
+    pub group_id: Option<PlaylistGroupId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +47,9 @@ pub struct ArgCreatePlaylist {
     /// older callers that predate the field.
     #[serde(default)]
     pub storage_allowlist: Option<Vec<StorageId>>,
+    /// Group the playlist is created in. Required — playlists always
+    /// live in a group.
+    pub group_id: PlaylistGroupId,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

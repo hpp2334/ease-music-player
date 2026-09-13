@@ -88,6 +88,7 @@ define_id!(SecretId);
 define_id!(BlobId);
 define_id!(MusicId);
 define_id!(PlaylistId);
+define_id!(PlaylistGroupId);
 
 define_string_id!(PluginId);
 define_string_id!(PluginStorageId);

@@ -1,4 +1,4 @@
-use ease_client_schema::{MusicId, PlaylistId};
+use ease_client_schema::{MusicId, PlaylistGroupId, PlaylistId};
 use serde::{Deserialize, Serialize};
 
 /// Error type that flows across the JSON bridge.
@@ -24,6 +24,10 @@ pub enum BError {
     AssetNotFound,
     #[error("playlist not found: {0:?}")]
     PlaylistNotFound(PlaylistId),
+    #[error("playlist group not found: {0:?}")]
+    GroupNotFound(PlaylistGroupId),
+    #[error("the last playlist group cannot be removed")]
+    LastGroupCannotRemove,
     #[error("music not found: {0:?}")]
     MusicNotFound(MusicId),
     #[error("database error: {0}")]

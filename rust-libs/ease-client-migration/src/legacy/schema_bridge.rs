@@ -91,6 +91,9 @@ impl From<v3::PlaylistModel> for schema::PlaylistModel {
             order: v.order,
             // The legacy redb schemas predate the storage allowlist.
             storage_allowlist: None,
+            // The legacy redb schemas predate playlist groups — the
+            // runtime ensure-default sweep assigns these orphans.
+            group_id: None,
         }
     }
 }

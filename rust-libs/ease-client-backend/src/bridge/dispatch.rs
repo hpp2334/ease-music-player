@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use ease_client_schema::{
-    MusicId, PlayMode, PlaylistId, PluginId, PluginStorageId, StorageEntryLoc, StorageHandle,
-    StorageId,
+    MusicId, PlayMode, PlaylistGroupId, PlaylistId, PluginId, PluginStorageId, StorageEntryLoc,
+    StorageHandle, StorageId,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -30,6 +30,13 @@ use crate::{
             ct_remove_music_from_playlist, ct_remove_playlist, ct_update_playlist,
             reorder_music_in_playlist_inner, reorder_playlist_inner, ArgReorderMusic,
             ArgReorderPlaylist,
+        },
+        playlist_group::{
+            ct_create_playlist_group, ct_ensure_playlist_groups, ct_list_playlist_groups,
+            ct_move_playlist_to_group, ct_remove_playlist_group, ct_set_playlist_group_expanded,
+            ct_update_playlist_group, reorder_playlist_group_inner, ArgCreatePlaylistGroup,
+            ArgEnsurePlaylistGroups, ArgMovePlaylistToGroup, ArgRemovePlaylistGroup,
+            ArgReorderPlaylistGroup, ArgSetPlaylistGroupExpanded, ArgUpdatePlaylistGroup,
         },
         storage::{ct_list_storage, ct_list_storage_entry_children, ct_remove_storage},
     },
@@ -241,6 +248,58 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx = must_backend(handle)?;
             let cx_cx = cx.get_context().clone();
             reorder_music_in_playlist_inner(&cx_cx, arg).await?;
+            Ok((Value::Null, vec![]))
+        }
+
+        // ====================================================================
+        // playlistGroup.*
+        // ====================================================================
+        "playlistGroup.list" => {
+            let cx = must_backend(handle)?;
+            let result = ct_list_playlist_groups(cx).await?;
+            Ok((serde_json::to_value(result)?, vec![]))
+        }
+        "playlistGroup.create" => {
+            let arg: ArgCreatePlaylistGroup = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let result = ct_create_playlist_group(cx, arg).await?;
+            Ok((serde_json::to_value(result)?, vec![]))
+        }
+        "playlistGroup.update" => {
+            let arg: ArgUpdatePlaylistGroup = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            ct_update_playlist_group(cx, arg).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "playlistGroup.remove" => {
+            let arg: ArgRemovePlaylistGroup = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            ct_remove_playlist_group(cx, arg).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "playlistGroup.reorder" => {
+            let arg: ArgReorderPlaylistGroup = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            reorder_playlist_group_inner(&cx_cx, arg).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "playlistGroup.setExpanded" => {
+            let arg: ArgSetPlaylistGroupExpanded = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            ct_set_playlist_group_expanded(cx, arg).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "playlistGroup.ensureDefault" => {
+            let arg: ArgEnsurePlaylistGroups = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let result = ct_ensure_playlist_groups(cx, arg).await?;
+            Ok((serde_json::to_value(result)?, vec![]))
+        }
+        "playlistGroup.movePlaylist" => {
+            let arg: ArgMovePlaylistToGroup = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            ct_move_playlist_to_group(cx, arg).await?;
             Ok((Value::Null, vec![]))
         }
 

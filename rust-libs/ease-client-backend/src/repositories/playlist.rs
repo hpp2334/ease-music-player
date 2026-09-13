@@ -3,7 +3,8 @@ use std::sync::Arc;
 use ease_client_migration::converter;
 use ease_client_schema::entities::{music, playlist, playlist_music};
 use ease_client_schema::{
-    BlobId, MusicId, PlaylistId, PlaylistModel, PlaylistMusicModel, StorageEntryLoc, StorageId,
+    BlobId, MusicId, PlaylistGroupId, PlaylistId, PlaylistModel, PlaylistMusicModel,
+    StorageEntryLoc, StorageId,
 };
 use ease_order_key::OrderKey;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
@@ -18,6 +19,17 @@ use super::{core::DatabaseServer, music::ArgDBAddMusic};
 pub struct AddedMusic {
     pub id: MusicId,
     pub existed: bool,
+}
+
+/// `DatabaseServer::create_playlist` argument bundle.
+pub struct ArgDBCreatePlaylist {
+    pub title: String,
+    pub picture: Option<StorageEntryLoc>,
+    pub musics: Vec<ArgDBAddMusic>,
+    pub current_time_ms: i64,
+    pub order: OrderKey,
+    pub storage_allowlist: Option<Vec<StorageId>>,
+    pub group_id: PlaylistGroupId,
 }
 
 impl DatabaseServer {
@@ -55,14 +67,19 @@ impl DatabaseServer {
 
     pub async fn create_playlist(
         self: &Arc<Self>,
-        title: String,
-        picture: Option<StorageEntryLoc>,
-        musics: Vec<ArgDBAddMusic>,
-        current_time_ms: i64,
-        order: OrderKey,
-        storage_allowlist: Option<Vec<StorageId>>,
+        arg: ArgDBCreatePlaylist,
     ) -> BResult<(PlaylistId, Vec<AddedMusic>)> {
         let db = self.db();
+
+        let ArgDBCreatePlaylist {
+            title,
+            picture,
+            musics,
+            current_time_ms,
+            order,
+            storage_allowlist,
+            group_id,
+        } = arg;
 
         let playlist_am = playlist::ActiveModel {
             id: ActiveValue::NotSet,
@@ -76,6 +93,7 @@ impl DatabaseServer {
                     .map(|ids| serde_json::to_string(&ids))
                     .transpose()?,
             ),
+            group_id: ActiveValue::Set(Some(*group_id.as_ref())),
         };
         let inserted = playlist_am.insert(&db).await?;
         let playlist_id = PlaylistId::wrap(inserted.id);

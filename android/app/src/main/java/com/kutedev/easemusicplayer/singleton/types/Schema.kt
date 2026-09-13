@@ -35,6 +35,10 @@ value class PlaylistId(val value: Long)
 
 @Serializable
 @JvmInline
+value class PlaylistGroupId(val value: Long)
+
+@Serializable
+@JvmInline
 value class StorageId(val value: Long)
 
 // Plugin storage-contribution ids (mirror the Rust `PluginId` /
@@ -184,6 +188,7 @@ data class PlaylistMeta(
     val createdTime: Long,
     val order: List<Long> = emptyList(),
     val storageAllowlist: List<StorageId>? = null,
+    val groupId: PlaylistGroupId? = null,
 )
 
 @Serializable
@@ -192,6 +197,18 @@ data class PlaylistAbstract(
     val musicCount: ULong,
     val musicStorageIds: List<StorageId> = emptyList(),
     val duration: Long? = null,
+)
+
+// A named, ordered playlist container. Playlist membership is derived
+// client-side by matching `PlaylistMeta.groupId` — the group list and the
+// flat playlist list are two separate bridge responses.
+@Serializable
+data class PlaylistGroupMeta(
+    val id: PlaylistGroupId,
+    val title: String,
+    val createdTime: Long,
+    val order: List<Long> = emptyList(),
+    val expanded: Boolean = true,
 )
 
 @Serializable
@@ -315,6 +332,7 @@ data class ArgUpdatePlaylist(
     val title: String,
     val cover: StorageEntryLoc? = null,
     val storageAllowlist: List<StorageId>? = null,
+    val groupId: PlaylistGroupId? = null,
 )
 
 @Serializable
@@ -323,6 +341,50 @@ data class ArgCreatePlaylist(
     val cover: StorageEntryLoc? = null,
     val entries: List<ToAddMusicEntry>,
     val storageAllowlist: List<StorageId>? = null,
+    val groupId: PlaylistGroupId,
+)
+
+@Serializable
+data class ArgCreatePlaylistGroup(
+    val title: String,
+)
+
+@Serializable
+data class ArgUpdatePlaylistGroup(
+    val id: PlaylistGroupId,
+    val title: String,
+)
+
+@Serializable
+data class ArgRemovePlaylistGroup(
+    val id: PlaylistGroupId,
+    val deletePlaylists: Boolean = false,
+)
+
+@Serializable
+data class ArgMovePlaylistToGroup(
+    val playlistId: PlaylistId,
+    val groupId: PlaylistGroupId,
+    val a: PlaylistId? = null,
+    val b: PlaylistId? = null,
+)
+
+@Serializable
+data class ArgReorderPlaylistGroup(
+    val id: PlaylistGroupId,
+    val a: PlaylistGroupId? = null,
+    val b: PlaylistGroupId? = null,
+)
+
+@Serializable
+data class ArgSetPlaylistGroupExpanded(
+    val id: PlaylistGroupId,
+    val expanded: Boolean,
+)
+
+@Serializable
+data class ArgEnsurePlaylistGroups(
+    val defaultTitle: String? = null,
 )
 
 @Serializable

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::shared::{MusicId, PlaylistId, StorageEntryLoc, StorageId};
+use crate::shared::{MusicId, PlaylistGroupId, PlaylistId, StorageEntryLoc, StorageId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistModel {
@@ -14,6 +14,9 @@ pub struct PlaylistModel {
     /// picker restriction — it never filters the playlist's existing
     /// musics or playback.
     pub storage_allowlist: Option<Vec<StorageId>>,
+    /// Owning group. `None` only transiently (pre-group databases) —
+    /// the ensure-default sweep assigns orphans to the first group.
+    pub group_id: Option<PlaylistGroupId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
