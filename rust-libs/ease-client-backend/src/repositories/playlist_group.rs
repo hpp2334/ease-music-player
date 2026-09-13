@@ -327,6 +327,7 @@ mod tests {
                 path: path.to_string(),
             },
             title: path.to_string(),
+            lyric: None,
         }
     }
 
