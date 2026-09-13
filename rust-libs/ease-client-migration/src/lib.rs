@@ -61,6 +61,10 @@ impl MigratorTrait for Migrator {
             // expand/collapse persistence column) — applies to both
             // fresh and existing databases.
             Box::new(migrations::PlaylistGroupMigration),
+            // Real post-collapse schema change (last import folder on
+            // the preference row) — applies to both fresh and existing
+            // databases.
+            Box::new(migrations::PreferenceLastImportLocMigration),
         ]
     }
 }

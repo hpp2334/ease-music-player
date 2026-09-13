@@ -157,11 +157,26 @@ pub fn playlist_music_from(playlist_id: PlaylistId, music_id: MusicId) -> playli
     }
 }
 
+/// `preference.last_import_loc` column encodes the typed
+/// [`StorageEntryLoc`] as camelCase JSON text (same approach as
+/// `playlist_group.order`). Malformed text degrades to `None` — the
+/// preference is a UX nicety, never worth failing a query over.
+pub fn preference_loc_from_json(s: Option<String>) -> Option<StorageEntryLoc> {
+    s.and_then(|v| serde_json::from_str(&v).ok())
+}
+
+/// Inverse of [`preference_loc_from_json`]; serialization of the plain
+/// struct cannot fail in practice, and degrades to `None` if it ever did.
+pub fn preference_loc_to_json(loc: Option<StorageEntryLoc>) -> Option<String> {
+    loc.and_then(|v| serde_json::to_string(&v).ok())
+}
+
 pub fn preference_from(m: PreferenceModel) -> preference::ActiveModel {
     preference::ActiveModel {
         id: sea_orm::ActiveValue::Set(0),
         playmode: sea_orm::ActiveValue::Set(play_mode_index(m.playmode)),
         language: sea_orm::ActiveValue::Set(m.language),
+        last_import_loc: sea_orm::ActiveValue::Set(preference_loc_to_json(m.last_import_loc)),
     }
 }
 
@@ -169,6 +184,7 @@ pub fn preference_to_model(row: preference::Model) -> PreferenceModel {
     PreferenceModel {
         playmode: play_mode_from_index(row.playmode),
         language: row.language,
+        last_import_loc: preference_loc_from_json(row.last_import_loc),
     }
 }
 

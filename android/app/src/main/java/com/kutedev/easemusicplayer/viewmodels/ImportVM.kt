@@ -84,6 +84,21 @@ class ImportVM @Inject constructor(
     private val _undoStack = MutableStateFlow(persistentListOf<String>())
 
     /**
+     * True until the initial last-import-folder restore attempt settles
+     * (a single-row backend read). While pending, [reload] is inert so
+     * the collectors' immediate emissions cannot race the restore into
+     * listing `/` first — the UI already shows the LOADING skeleton.
+     */
+    private var restorePending = true
+
+    /**
+     * True while the listing in flight is the *first open* of the
+     * restored folder. Its failures fall back to the storage root
+     * instead of rendering the error UI (see [handleLoadFailure]).
+     */
+    private var awaitingRememberedOpen = false
+
+    /**
      * Storages the prepared import may actually use — the configured
      * storage list filtered by the source restriction
      * ([ImportRepository.allowedStorageIds]; `null` = unrestricted).
@@ -156,23 +171,63 @@ class ImportVM @Inject constructor(
 
     init {
         viewModelScope.launch {
+            restoreLastImportLoc()
+            restorePending = false
+            reload()
+        }
+        viewModelScope.launch {
             selectableStorages.collect { storages ->
                 val storage = storages.find { storage -> storage.id == _selectedStorageId.value }
                 if (storage == null) {
                     _selectedStorageId.value = storages.firstOrNull()?.id
+                    // The previously selected storage is gone (removed,
+                    // or newly outside this session's allowlist) — its
+                    // deep path is meaningless under the replacement
+                    // storage, so restart from the root.
+                    _currentPath.value = "/"
+                    _undoStack.value = persistentListOf()
+                    _selected.update { selected -> selected.clear() }
                 }
 
                 reload()
             }
         }
         viewModelScope.launch {
-            reload()
-        }
-        viewModelScope.launch {
             permissionRepository.havePermission.collect {
                 reload()
             }
         }
+    }
+
+    /**
+     * Seed the storage/path from the persisted last import folder when
+     * it is still usable: the storage must exist and be allowed for this
+     * import session (playlist allowlist). Anything else leaves the
+     * defaults (first allowed storage, `/`). Read from
+     * [com.kutedev.easemusicplayer.singleton.ImportRepository.allowedStorageIds] /
+     * [storages] directly — the derived flows are `Lazily`-shared and
+     * would still hold their initial values before the first subscriber.
+     */
+    private suspend fun restoreLastImportLoc() {
+        val loc = try {
+            importRepository.loadLastImportLoc()
+        } catch (e: Throwable) {
+            null
+        } ?: return
+
+        val allowed = importRepository.allowedStorageIds.value
+        if (allowed != null && !allowed.contains(loc.storageId)) {
+            return
+        }
+        if (storages.value.none { storage -> storage.id == loc.storageId }) {
+            return
+        }
+
+        _selectedStorageId.value = loc.storageId
+        _currentPath.value = loc.path
+        _undoStack.value = persistentListOf()
+        _selected.update { selected -> selected.clear() }
+        awaitingRememberedOpen = true
     }
 
     fun clickEntry(entry: StorageEntry) {
@@ -202,6 +257,16 @@ class ImportVM @Inject constructor(
 
     fun finish() {
         val v = _entries.value.filter { entry -> _selected.value.contains(entry.path) }
+        // Remember the folder this import came from — the next Import
+        // entry reopens here. Fire-and-forget on the repository scope:
+        // the page pops the route before calling this, so the VM (and
+        // its viewModelScope) may already be on its way out.
+        val storage = currentStorage()
+        if (storage != null) {
+            importRepository.saveLastImportLoc(
+                StorageEntryLoc(storageId = storage.id, path = currentPath())
+            )
+        }
         importRepository.onFinish(v)
     }
 
@@ -245,6 +310,12 @@ class ImportVM @Inject constructor(
     }
 
     fun reload() {
+        // Inert until the last-import-folder restore settles — the
+        // collectors above fire immediately on collect, and their
+        // reloads would race the restore into listing `/` first.
+        if (restorePending) {
+            return
+        }
         val storage = currentStorage() ?: return
 
         // The local storage reads by raw path (list + get) — without
@@ -274,26 +345,42 @@ class ImportVM @Inject constructor(
 
             when (resp) {
                 null -> {
-                    _loadState.value = CurrentStorageStateType.UNKNOWN_ERROR
+                    handleLoadFailure(CurrentStorageStateType.UNKNOWN_ERROR)
                 }
                 is ListStorageEntryChildrenResp.Ok -> {
+                    awaitingRememberedOpen = false
                     _loadState.value = CurrentStorageStateType.OK
                     _entries.value = resp.data
                 }
 
                 ListStorageEntryChildrenResp.AuthenticationFailed -> {
-                    _loadState.value = CurrentStorageStateType.AUTHENTICATION_FAILED
+                    handleLoadFailure(CurrentStorageStateType.AUTHENTICATION_FAILED)
                 }
 
                 ListStorageEntryChildrenResp.Timeout -> {
-                    _loadState.value = CurrentStorageStateType.TIMEOUT
+                    handleLoadFailure(CurrentStorageStateType.TIMEOUT)
                 }
 
                 ListStorageEntryChildrenResp.Unknown -> {
-                    _loadState.value = CurrentStorageStateType.UNKNOWN_ERROR
+                    handleLoadFailure(CurrentStorageStateType.UNKNOWN_ERROR)
                 }
             }
         }
+    }
+
+    /**
+     * A failed listing is a hard error — except the *first* open of the
+     * restored folder (deleted folder, reconfigured storage, transient
+     * timeout): that silently falls back to the storage root. The saved
+     * preference is deliberately kept so the next import entry retries
+     * the folder; if the root also fails, the normal error UI shows.
+     */
+    private fun handleLoadFailure(state: CurrentStorageStateType) {
+        if (awaitingRememberedOpen) {
+            navigateDirImpl("/")
+            return
+        }
+        _loadState.value = state
     }
 
     fun undo() {
@@ -307,7 +394,13 @@ class ImportVM @Inject constructor(
         val p = _splitPaths.value.lastOrNull()?.path
 
         if (p == null) {
-            return "/"
+            // `_splitPaths` is Lazily-shared: before its first subscriber
+            // (e.g. while the restore seeds a deep path under the LOADING
+            // skeleton, before the breadcrumb composes) it still holds the
+            // initial empty list — fall back to the raw path, which is
+            // already normalized (it came from a StorageEntry or a
+            // restored preference written by this same pipeline).
+            return _currentPath.value.ifEmpty { "/" }
         }
         return p
     }
@@ -335,6 +428,9 @@ class ImportVM @Inject constructor(
 
 
     private fun navigateDirImpl(path: String) {
+        // Past the initial open, failures are genuine errors (see
+        // [handleLoadFailure]).
+        awaitingRememberedOpen = false
         _currentPath.value = path
         _selected.update { selected ->
             selected.clear()
