@@ -84,7 +84,6 @@ impl EventSinks {
 /// Acts as a builder: start from [`PlayerConfig::default`] and chain the
 /// setters, then pass to [`Player::with_config`]. All fields are also
 /// public, so struct-update syntax works too.
-#[derive(Default)]
 pub struct PlayerConfig {
     /// Optional per-player event sink, in addition to the
     /// [`PlayerContext`]'s global one.
@@ -94,7 +93,45 @@ pub struct PlayerConfig {
     ///
     /// Unset by default. See [`AudioSinkFactory`].
     pub audio_sink_factory: Option<AudioSinkFactory>,
+    /// Minimum buffered-ahead media time before playback may run: an
+    /// autoplay load and an underrun resume park in `Buffering` until
+    /// the source's window (plus whatever decoded audio the sink ring
+    /// still holds) covers at least this much of the track ahead of the
+    /// audible position — instead of resuming on the first byte and
+    /// starving again a few hundred milliseconds later.
+    ///
+    /// Defaults to [`DEFAULT_MIN_BUFFER_DURATION`] (2 s). `Duration::ZERO`
+    /// restores the resume-on-any-data behavior. The gate only applies
+    /// to sources that report a buffered window, a known total length,
+    /// and a known duration; a window that already covers the rest of
+    /// the track always resumes (short tails never wedge in `Buffering`).
+    ///
+    /// **Keep this below what the source's readahead window can hold**
+    /// (in media time): a source that cannot buffer this much ahead
+    /// stays parked in `Buffering` until its window reaches the end of
+    /// the stream. The default 2 s sits far below cantode's 4 MiB
+    /// default readahead (minutes of compressed audio).
+    ///
+    /// When unset (`audio_sink_factory`), the default cpal sink's ring
+    /// buffer is grown to match this value so the threshold isn't
+    /// capped by the ring.
+    pub min_buffer_duration: Duration,
 }
+
+impl Default for PlayerConfig {
+    fn default() -> Self {
+        Self {
+            event_sink: None,
+            audio_sink_factory: None,
+            min_buffer_duration: DEFAULT_MIN_BUFFER_DURATION,
+        }
+    }
+}
+
+/// The default [`PlayerConfig::min_buffer_duration`]: two seconds of
+/// buffered-ahead media time before playback starts or resumes. See the
+/// field docs for the full contract.
+pub const DEFAULT_MIN_BUFFER_DURATION: Duration = Duration::from_secs(2);
 
 impl PlayerConfig {
     /// Set (or clear, with `None`) the per-player event sink.
@@ -109,6 +146,14 @@ impl PlayerConfig {
     #[must_use]
     pub fn audio_sink_factory(mut self, factory: AudioSinkFactory) -> Self {
         self.audio_sink_factory = Some(factory);
+        self
+    }
+
+    /// Set the minimum buffered-ahead media time before playback may
+    /// run (see [`PlayerConfig::min_buffer_duration`]).
+    #[must_use]
+    pub fn min_buffer_duration(mut self, min: Duration) -> Self {
+        self.min_buffer_duration = min;
         self
     }
 }
@@ -142,12 +187,20 @@ impl Player {
         let shared = Arc::new(SharedStatus::new());
 
         let decoder_factory = Arc::clone(cx.decoder_factory());
+        let min_buffer = config.min_buffer_duration;
         // Resolve the sink factory once, on the handle side: custom if
         // configured, otherwise the default cpal device sink. The worker
-        // calls it at the top of every `load`.
-        let sink_factory: AudioSinkFactory = config
-            .audio_sink_factory
-            .unwrap_or_else(|| Arc::new(|| Ok(Box::new(crate::output::CpalSink::new()))));
+        // calls it at the top of every `load`. The default ring grows
+        // with `min_buffer_duration` so the prebuffer threshold isn't
+        // capped by the 2 s default capacity.
+        let sink_factory: AudioSinkFactory = config.audio_sink_factory.unwrap_or_else(|| {
+            let buf_secs = min_buffer.as_secs_f32();
+            Arc::new(move || {
+                Ok(Box::new(crate::output::CpalSink::with_buffer_secs(
+                    buf_secs,
+                )))
+            })
+        });
 
         let worker_shared = Arc::clone(&shared);
         let sinks = EventSinks {
@@ -166,6 +219,7 @@ impl Player {
                     sink_factory,
                     worker_shared,
                     sinks,
+                    min_buffer,
                 );
                 worker.run();
             })

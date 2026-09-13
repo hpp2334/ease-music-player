@@ -21,7 +21,9 @@
 //!   exactly one session; the phantom-`Ended` fix (a premature close of
 //!   a known-length resource is retried, not ended); stall
 //!   freeze/resume with output continuity; persistent errors staying
-//!   `Playing`-silent.
+//!   `Playing`-silent; min-buffer gating — the autoplay startup
+//!   prebuffer, refill waiting for the cushion, the thin-readahead
+//!   park, and the end-of-stream resume escape.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::mpsc;
@@ -151,6 +153,13 @@ struct FakeState {
     /// Once only.
     cut_once: Option<u64>,
     cut_fired: bool,
+    /// Delivery ceiling: serve no bytes at/above this offset until the
+    /// test raises it (`FakeHandle::raise_deliver_until`). Unlike the
+    /// release-once gate — which parks whole *requests* and lets an
+    /// in-flight span leap the gate offset — the ceiling clamps every
+    /// push, so it scripts exactly "the network has delivered [0, cap)"
+    /// regardless of demand sizes. `None` = unlimited.
+    deliver_until: Option<u64>,
     /// `finish_error` once the cursor reaches this offset.
     fail_from: Option<u64>,
     /// Report the total at the first delivery instead of at `open`
@@ -218,6 +227,13 @@ impl FakeBuilder {
         }
         self
     }
+    /// Cap delivery below `cap` bytes (see [`FakeState::deliver_until`]);
+    /// raise it from the handle with
+    /// [`FakeHandle::raise_deliver_until`].
+    fn deliver_until(self, cap: u64) -> Self {
+        self.st.lock().unwrap().deliver_until = Some(cap);
+        self
+    }
     fn cut_once(self, at: u64) -> Self {
         self.st.lock().unwrap().cut_once = Some(at);
         self
@@ -276,9 +292,30 @@ impl FakeHandle {
             gate.release();
         }
     }
+    /// Raise the delivery ceiling (never lowers it).
+    fn raise_deliver_until(&self, cap: u64) {
+        let mut st = self.st.lock().unwrap();
+        if st.deliver_until.is_none_or(|c| cap > c) {
+            st.deliver_until = Some(cap);
+        }
+    }
     fn clear_fail(&self) {
         self.st.lock().unwrap().fail_from = None;
     }
+}
+
+/// Outcome of one [`FakeRemote::serve`] pass, consumed by the
+/// delivery-ceiling chaining in [`deliver_aware`].
+enum Served {
+    /// Nothing more to do now: the demand was met, EOF fired, or the
+    /// adapter's window rejected the tail (future demand re-offers it).
+    Done,
+    /// The session was superseded — stop touching its reply.
+    Superseded,
+    /// Stopped at the delivery ceiling with `remaining` bytes of the
+    /// demand still owed; a watcher must re-offer them once the
+    /// ceiling rises past the cursor.
+    Capped { remaining: usize },
 }
 
 impl FakeRemote {
@@ -286,7 +323,7 @@ impl FakeRemote {
     /// advancing the cursor by accepted bytes only. A partial acceptance
     /// (window full) defers the remainder to the next request — exactly
     /// the "keep the tail" contract.
-    fn serve(data: &[u8], st: &mut FakeState, reply: &StreamReply, want: usize) {
+    fn serve(data: &[u8], st: &mut FakeState, reply: &StreamReply, want: usize) -> Served {
         if st.report_total_late && !st.total_reported {
             st.total_reported = true;
             reply.set_total_len(Some(data.len() as u64));
@@ -294,9 +331,12 @@ impl FakeRemote {
         let cursor = st.cursor;
         if st.fail_from.is_some_and(|f| cursor >= f) {
             reply.finish_error("scripted failure".into());
-            return;
+            return Served::Done;
         }
         let mut end = (cursor + want as u64).min(data.len() as u64);
+        if let Some(cap) = st.deliver_until {
+            end = end.min(cap);
+        }
         if let Some(cut) = st.cut_once
             && !st.cut_fired
             && cursor < cut
@@ -304,6 +344,7 @@ impl FakeRemote {
             end = end.min(cut);
         }
         let mut at = cursor;
+        let mut superseded = false;
         while at < end {
             let base = (end - at) as usize;
             let mut pushed_len = if st.chunk == 0 || st.over_deliver > 0 {
@@ -317,7 +358,10 @@ impl FakeRemote {
             pushed_len = pushed_len.min(data.len() - at as usize);
             let bytes = data[at as usize..at as usize + pushed_len].to_vec();
             match reply.push(bytes) {
-                Pushed::Superseded => break,
+                Pushed::Superseded => {
+                    superseded = true;
+                    break;
+                }
                 Pushed::Accepted(n) => {
                     st.pushes.push((pushed_len, n));
                     st.push_threads.push(std::thread::current().id());
@@ -334,11 +378,63 @@ impl FakeRemote {
         if st.cut_once == Some(at) && !st.cut_fired {
             st.cut_fired = true;
             reply.finish_eof(); // short of the reported total — the lie
-            return;
+            return Served::Done;
         }
         if at >= data.len() as u64 {
             reply.finish_eof();
+            return Served::Done;
         }
+        if superseded {
+            return Served::Superseded;
+        }
+        let delivered = (at - cursor) as usize;
+        if delivered < want && st.deliver_until == Some(at) && (at as usize) < data.len() {
+            return Served::Capped {
+                remaining: want - delivered,
+            };
+        }
+        Served::Done
+    }
+}
+
+/// Serve `want`, parking (off the caller's thread) whenever the
+/// delivery ceiling pins the cursor, and re-offering the remainder as
+/// the ceiling rises. One thread per capped span; no thread at all
+/// without a ceiling.
+fn deliver_aware(
+    data: Arc<Vec<u8>>,
+    st: Arc<Mutex<FakeState>>,
+    reply: StreamReply,
+    mut want: usize,
+) {
+    loop {
+        let outcome = {
+            let mut s = st.lock().unwrap();
+            FakeRemote::serve(&data, &mut s, &reply, want)
+        };
+        match outcome {
+            Served::Capped { remaining } => {
+                want = remaining;
+                wait_ceiling_rises(&st);
+            }
+            Served::Done | Served::Superseded => return,
+        }
+    }
+}
+
+/// Poll until the cursor sits below the delivery ceiling (or there is
+/// none). Polling, not a condvar: the ceiling may rise repeatedly and
+/// the park happens on disposable test threads.
+fn wait_ceiling_rises(st: &Mutex<FakeState>) {
+    loop {
+        let open = {
+            let st = st.lock().unwrap();
+            st.deliver_until.is_none_or(|cap| st.cursor < cap)
+        };
+        if open {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -377,15 +473,22 @@ impl RemoteAudioSource for FakeRemote {
             let data = Arc::clone(&self.data);
             std::thread::spawn(move || {
                 gate.wait_released();
-                let mut st = st.lock().unwrap();
-                FakeRemote::serve(&data, &mut st, &reply, want);
+                deliver_aware(data, st, reply, want);
             });
         } else {
             // Inline delivery: re-enters cantode synchronously from
             // inside `request` (allowed — cantode never holds its lock
-            // across trait calls).
-            let mut st = self.st.lock().unwrap();
-            FakeRemote::serve(&self.data, &mut st, &reply, want);
+            // across trait calls). A capped span hands the remainder to
+            // a watcher thread instead.
+            let outcome = {
+                let mut st = self.st.lock().unwrap();
+                FakeRemote::serve(&self.data, &mut st, &reply, want)
+            };
+            if let Served::Capped { remaining } = outcome {
+                let st = Arc::clone(&self.st);
+                let data = Arc::clone(&self.data);
+                std::thread::spawn(move || deliver_aware(data, st, reply, remaining));
+            }
         }
     }
 
@@ -796,6 +899,19 @@ struct Harness {
 }
 
 fn harness_with(fake: Box<FakeRemote>, readahead: usize) -> Harness {
+    harness_with_config(fake, readahead, Duration::ZERO, false)
+}
+
+/// The full harness: a `min_buffer_duration` for the refill gate and a
+/// choice of `load` vs `load_and_play` (the latter exercises the
+/// startup prebuffer morph). The legacy [`harness_with`] pins the
+/// zero-threshold mechanics; the min-buffer tests come through here.
+fn harness_with_config(
+    fake: Box<FakeRemote>,
+    readahead: usize,
+    min_buffer: Duration,
+    autoplay: bool,
+) -> Harness {
     let cx = PlayerContext::new().unwrap();
     let (capture, factory) = capture_factory(false);
     let event_sink = Arc::new(ChannelEventSink::new(1024));
@@ -805,12 +921,17 @@ fn harness_with(fake: Box<FakeRemote>, readahead: usize) -> Harness {
         &cx,
         PlayerConfig::default()
             .audio_sink_factory(factory)
-            .event_sink(Some(event_sink)),
+            .event_sink(Some(event_sink))
+            .min_buffer_duration(min_buffer),
     )
     .expect("player construction failed");
 
     let src: Box<dyn AudioSource> = Box::new(BufferedSource::with_readahead(readahead, fake));
-    player.load(src).expect("load");
+    if autoplay {
+        player.load_and_play(src).expect("load");
+    } else {
+        player.load(src).expect("load");
+    }
 
     Harness {
         _cx: cx,
@@ -977,4 +1098,130 @@ fn buffered_position_tracks_the_window_in_media_time() {
         "frontier must reach the duration at EOF (window: {:?})",
         harness.player.buffered_range()
     );
+}
+
+// ============================================================================
+// B/O — min-buffer gating (startup prebuffer + refill threshold)
+// ============================================================================
+
+/// WAV byte rate in the fakes (44.1 kHz stereo 16-bit ≈ 176.4 KB/s): a
+/// 2 s cushion needs ~352.8 KB, so a readahead of 400 KB can reach the
+/// 2 s threshold while the legacy 16 KB cannot (~90 ms).
+const TWO_SECS_OF_WAV: u64 = 352_800;
+const _: () = assert!(TWO_SECS_OF_WAV > 64 * 1024);
+
+#[test]
+fn autoplay_prebuffers_before_playing_when_the_window_is_thin() {
+    // Only the first ~0.57 s has been "delivered": the autoplay load
+    // must park in `Buffering` instead of playing the thin window out
+    // (and stuttering). Raising the ceiling past the threshold lets
+    // the 400 KB readahead cross 2 s and play the rest through,
+    // bit-exact, on the same session.
+    let data = wav(3.0);
+    let (fake, h) = fake(Arc::clone(&data)).deliver_until(100_000).finish();
+    let harness = harness_with_config(fake, 400 * 1024, Duration::from_secs(2), true);
+
+    // `load_and_play` returned with the startup prebuffer armed — the
+    // morph happened synchronously in the load command.
+    assert_eq!(harness.player.state(), PlayerState::Buffering);
+    // It holds while the cushion is below the threshold (readiness is
+    // already `Ready` here — the gate is the cushion, not the bytes).
+    let mut stayed = true;
+    let hold_until = std::time::Instant::now() + Duration::from_millis(400);
+    while std::time::Instant::now() < hold_until {
+        if harness.player.state() != PlayerState::Buffering {
+            stayed = false;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(stayed, "must stay Buffering while the cushion is below 2 s");
+
+    h.raise_deliver_until(data.len() as u64);
+    assert!(
+        wait_until(Duration::from_secs(3), || {
+            harness.player.state() == PlayerState::Playing
+        }),
+        "refill must cross the threshold and morph back to Playing"
+    );
+    assert!(wait_for_ended(&harness.events, Duration::from_secs(10)));
+
+    let captured = harness.capture.lock().unwrap().samples.clone();
+    let reference = reference_decode(&data);
+    assert_eq!(captured, reference, "prebuffered audio must be bit-exact");
+    assert_eq!(h.opens(), vec![0], "one session per play-through");
+}
+
+#[test]
+fn refill_below_the_threshold_stays_parked() {
+    // The gate's discriminator, pinned: once data IS flowing again
+    // (ceiling raised to the whole file), a readahead window that can
+    // only hold ~0.37 s of media still may not resume — the threshold
+    // is 2 s. Under the pre-threshold behavior this resumes on the
+    // first available byte.
+    let data = wav(3.0);
+    let (fake, h) = fake(Arc::clone(&data)).deliver_until(44_100).finish();
+    let harness = harness_with_config(fake, 64 * 1024, Duration::from_secs(2), true);
+
+    assert_eq!(harness.player.state(), PlayerState::Buffering);
+    h.raise_deliver_until(data.len() as u64);
+    let mut stayed = true;
+    let hold_until = std::time::Instant::now() + Duration::from_millis(1200);
+    while std::time::Instant::now() < hold_until {
+        if harness.player.state() != PlayerState::Buffering {
+            stayed = false;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        stayed,
+        "a window that cannot reach the threshold must not resume (state: {:?})",
+        harness.player.state()
+    );
+    assert!(
+        harness
+            .player
+            .buffered_position()
+            .is_some_and(|p| p < Duration::from_secs(2)),
+        "the parked window stays below the threshold: {:?}",
+        harness.player.buffered_position()
+    );
+}
+
+#[test]
+fn near_tail_refill_resumes_via_the_stream_end() {
+    // A stall near the end of the track leaves less than the threshold
+    // remaining (~0.57 s of a 4 s track): once the ceiling rises, the
+    // window's end reaches the stream total and the refill must resume
+    // regardless of the cushion — short tails never wedge in
+    // `Buffering`. Playback starts un-gated here (not an autoplay load,
+    // and the window already holds ~3.4 s ≥ 2 s), so this also covers
+    // starving mid-play.
+    let data = wav(4.0);
+    let cap = (data.len() - 100_000) as u64;
+    let (fake, h) = fake(Arc::clone(&data)).deliver_until(cap).finish();
+    let harness = harness_with_config(fake, 400 * 1024, Duration::from_secs(2), false);
+
+    harness.player.play().unwrap();
+    assert!(
+        wait_until(Duration::from_secs(6), || {
+            harness.player.state() == PlayerState::Buffering
+        }),
+        "decode must starve at the ceiling (state: {:?})",
+        harness.player.state()
+    );
+
+    h.raise_deliver_until(data.len() as u64);
+    assert!(
+        wait_until(Duration::from_secs(3), || {
+            harness.player.state() == PlayerState::Playing
+        }),
+        "end-of-stream window must resume despite the thin cushion"
+    );
+    assert!(wait_for_ended(&harness.events, Duration::from_secs(10)));
+
+    let captured = harness.capture.lock().unwrap().samples.clone();
+    let reference = reference_decode(&data);
+    assert_eq!(captured, reference, "tail audio must be bit-exact");
 }

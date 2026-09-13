@@ -131,14 +131,19 @@ impl OutputClock {
 
 /// A hardware [`AudioSink`] backed by cpal.
 ///
-/// Always targets the host's default output device and a 2-second ring
-/// buffer. Cantode intentionally does not expose device/buffer
-/// configuration — embedders get the system default, period. If a future
-/// caller needs more, lift these into `PlayerContext` config rather than
-/// widening this type's API.
+/// Always targets the host's default output device. Cantode intentionally
+/// does not expose device configuration — embedders get the system
+/// default, period. The one knob that does reach the ring is its
+/// **capacity**: [`PlayerConfig::min_buffer_duration`](crate::PlayerConfig)
+/// grows it beyond the 2-second default so a larger prebuffer threshold
+/// isn't capped by the ring (the player waits for that much buffered
+/// audio before starting/resuming playback).
 pub(crate) struct CpalSink {
     stream: Option<Stream>,
     producer: Option<HeapProd<f32>>,
+    /// Ring capacity in seconds of audio (clamped to at least
+    /// [`DEFAULT_BUFFER_SECS`] at construction).
+    buffer_secs: f32,
     /// Shared with the cpal callback so `set_volume` takes effect
     /// immediately without rebuilding the stream.
     volume: Arc<AtomicU32>,
@@ -169,10 +174,18 @@ pub(crate) struct CpalSink {
 }
 
 impl CpalSink {
-    /// Construct a sink. The device itself is opened lazily by
-    /// [`AudioSink::start`].
+    /// Construct a sink with the default 2-second ring. The device
+    /// itself is opened lazily by [`AudioSink::start`].
     pub(crate) fn new() -> Self {
+        Self::with_buffer_secs(DEFAULT_BUFFER_SECS)
+    }
+
+    /// Construct a sink whose ring holds `secs` seconds of audio
+    /// (clamped to at least [`DEFAULT_BUFFER_SECS`]). The device itself
+    /// is opened lazily by [`AudioSink::start`].
+    pub(crate) fn with_buffer_secs(secs: f32) -> Self {
         CpalSink {
+            buffer_secs: secs.max(DEFAULT_BUFFER_SECS),
             stream: None,
             producer: None,
             volume: Arc::new(AtomicU32::new(1.0f32.to_bits())),
@@ -208,8 +221,8 @@ impl AudioSink for CpalSink {
         let stream_config = supported.config();
         let actual = AudioFormat::new(stream_config.channels as u16, stream_config.sample_rate);
 
-        // Size the ring buffer for `DEFAULT_BUFFER_SECS` of audio.
-        let buf_secs = DEFAULT_BUFFER_SECS;
+        // Size the ring buffer for the configured seconds of audio.
+        let buf_secs = self.buffer_secs;
         let cap_samples = (((buf_secs * actual.sample_rate as f32) as usize)
             * actual.channels as usize)
             .next_power_of_two()

@@ -89,7 +89,7 @@ pub use error::{CantodeError, Result};
 pub use events::{ChannelEventSink, EventSink, NullEventSink, PlayerEvent};
 pub use metadata::{CoverArt, Metadata, Tag, probe_metadata};
 pub use output::{AudioSink, AudioSinkFactory};
-pub use player::{Player, PlayerConfig};
+pub use player::{DEFAULT_MIN_BUFFER_DURATION, Player, PlayerConfig};
 pub use source::{
     AudioSource, BufferedRange, BufferedSource, MemoryAudioSource, Pushed, Readiness,
     RemoteAudioSource, StreamReply,

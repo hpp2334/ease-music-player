@@ -45,6 +45,7 @@ use crate::{
 };
 
 use super::EventSinks;
+use super::buffered_media_time;
 use super::command::{Command, LoadResult, SeekResult};
 use super::phase::Machine;
 use super::session::{Loaded, PumpOutcome};
@@ -112,6 +113,10 @@ pub(super) struct Worker {
     /// (pause/seek/stop/load) — a pause, for instance, freezes the
     /// output clock, and the re-pump after resume re-arms the drain.
     drain: Option<Drain>,
+    /// The configured [`PlayerConfig::min_buffer_duration`]: playback
+    /// start and underrun resume wait for this much buffered-ahead
+    /// media time (see [`Worker::buffered_ahead_sufficient`]).
+    min_buffer: Duration,
 }
 
 impl Worker {
@@ -124,6 +129,7 @@ impl Worker {
         sink_factory: AudioSinkFactory,
         shared: Arc<SharedStatus>,
         sinks: EventSinks,
+        min_buffer: Duration,
     ) -> Self {
         Self {
             machine,
@@ -134,6 +140,7 @@ impl Worker {
             sinks,
             error_latched: false,
             drain: None,
+            min_buffer,
         }
     }
 
@@ -296,6 +303,21 @@ impl Worker {
         // `Playing` for an autoplay load (validated against the
         // transition table inside the machine).
         self.machine.complete_load(loaded, autoplay);
+        // Startup prebuffer: an autoplay load whose cushion is thinner
+        // than `min_buffer_duration` parks in `Buffering` (the same
+        // legal `Playing → Buffering` morph an underrun takes) until
+        // the refill poll sees the threshold. Starting on a thin window
+        // is exactly the "plays a beat, buffers, plays a beat" stutter
+        // this exists to prevent. Non-window sources, unknown
+        // durations, and windows that already cover the rest of the
+        // track fall straight through to `Playing`.
+        if autoplay && !self.buffered_ahead_sufficient() {
+            tracing::info!(
+                min_buffer_ms = self.min_buffer.as_millis() as u64,
+                "startup prebuffer armed"
+            );
+            self.machine.buffer_underrun();
+        }
         Ok(meta)
     }
 
@@ -467,9 +489,13 @@ impl Worker {
     }
 
     /// While `Buffering`: poll the source's readiness and morph back to
-    /// `Playing` once data has arrived. Also keeps the position observable
-    /// live — the pump is parked, but the device keeps draining its ring,
-    /// so the audible position keeps advancing until the ring runs dry.
+    /// `Playing` once data has arrived **and** the buffered cushion has
+    /// refilled to [`Worker::min_buffer`] (see
+    /// [`Worker::buffered_ahead_sufficient`]) — resuming on the first
+    /// byte would starve again a few hundred milliseconds later. Also
+    /// keeps the position observable live — the pump is parked, but the
+    /// device keeps draining its ring, so the audible position keeps
+    /// advancing until the ring runs dry.
     fn poll_refill(&mut self) {
         // Every buffering tick refreshes the buffered-window mirror —
         // this is the state where it visibly grows.
@@ -481,11 +507,63 @@ impl Worker {
         if let Some(pos) = live {
             self.shared.set_position(pos);
         }
-        if let Some(loaded) = self.machine.loaded_mut()
-            && loaded.readiness() == crate::Readiness::Ready
-        {
+        let refilled = self
+            .machine
+            .loaded_mut()
+            .is_some_and(|loaded| loaded.readiness() == crate::Readiness::Ready);
+        if refilled && self.buffered_ahead_sufficient() {
             self.machine.buffer_refilled();
         }
+    }
+
+    /// Whether the live session's buffered cushion has reached the
+    /// configured [`PlayerConfig::min_buffer_duration`].
+    ///
+    /// The cushion is *total unheard-but-buffered media time*: the
+    /// source's window frontier (mapped onto media time by linear
+    /// interpolation — `buffered_media_time`) minus the audible
+    /// position, so decoded-but-unplayed audio in the sink ring counts
+    /// alongside the undecoded window.
+    ///
+    /// Returns `true` (no gating) whenever the threshold can't be
+    /// meaningfully evaluated — a zero threshold, no live session, a
+    /// source without a buffered window (memory / local files), an
+    /// unknown duration or total length — or when the window already
+    /// covers the rest of the track (`end >= total`), so the tail of a
+    /// short track never wedges in `Buffering`.
+    ///
+    /// **Config constraint**: the threshold must stay below what the
+    /// source's readahead window can hold in media time; a source that
+    /// can never buffer this much ahead stays parked until its window
+    /// reaches the stream end.
+    fn buffered_ahead_sufficient(&mut self) -> bool {
+        if self.min_buffer.is_zero() {
+            return true;
+        }
+        let Some(loaded) = self.machine.loaded_mut() else {
+            return true;
+        };
+        let Some(range) = loaded.buffered_range() else {
+            return true;
+        };
+        if range.total.is_some_and(|total| range.end >= total) {
+            return true;
+        }
+        // `loaded` borrows `self.machine`; `self.shared` is a disjoint
+        // field, so this reads fine alongside it.
+        let Some(duration) = self.shared.duration() else {
+            return true;
+        };
+        let Some(frontier) = buffered_media_time(&range, duration) else {
+            return true;
+        };
+        // The audible position: the sink's realtime output clock when
+        // tracked, else the shared position mirror (the decode frontier
+        // for untracked sinks — tests).
+        let audible = loaded
+            .output_position()
+            .unwrap_or_else(|| self.shared.position());
+        frontier.saturating_sub(audible) >= self.min_buffer
     }
 
     /// Surface a source/decode error as `PlayerEvent::Error` — once per
@@ -529,6 +607,7 @@ mod tests {
             sinks: EventSinks::default(),
             error_latched: false,
             drain: None,
+            min_buffer: Duration::ZERO,
         }
     }
 
@@ -746,5 +825,163 @@ mod tests {
         );
         assert_eq!(worker.machine.state(), PlayerState::Paused);
         assert_eq!(worker.next_timeout(), Duration::from_secs(60 * 60));
+    }
+
+    // ---- min-buffer refill gating ----
+
+    /// A worker resting in `Buffering` on a session whose decoder
+    /// reports `buffered` (a fixed window — enough for the gate logic;
+    /// window growth is covered by `tests/buffered_source.rs`).
+    fn buffering_worker(
+        buffered: Option<crate::BufferedRange>,
+        duration: Option<Duration>,
+        position: Duration,
+        min_buffer: Duration,
+    ) -> Worker {
+        let (loaded, fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: None,
+                buffered,
+            },
+            2,
+            2,
+        );
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        fx.shared.set_duration(duration);
+        fx.shared.set_position(position);
+        worker.min_buffer = min_buffer;
+        worker.machine.play();
+        worker.machine.buffer_underrun();
+        assert_eq!(worker.machine.state(), PlayerState::Buffering);
+        worker
+    }
+
+    #[test]
+    fn refill_waits_for_the_min_buffer_cushion() {
+        // Window end at byte 100 of 1000 on a 10 s track = a 1 s
+        // frontier; the audible position is 0 → a 1 s cushion, below
+        // the 2 s threshold. The refill poll must keep parking.
+        let mut worker = buffering_worker(
+            Some(crate::BufferedRange {
+                start: 0,
+                end: 100,
+                total: Some(1000),
+            }),
+            Some(Duration::from_secs(10)),
+            Duration::ZERO,
+            Duration::from_secs(2),
+        );
+
+        worker.poll_refill();
+
+        assert_eq!(worker.machine.state(), PlayerState::Buffering);
+    }
+
+    #[test]
+    fn refill_resumes_once_the_cushion_reaches_the_threshold() {
+        // Byte 300 of 1000 on a 10 s track = a 3 s frontier at position
+        // 0 → a 3 s cushion ≥ the 2 s threshold → morph to `Playing`.
+        let mut worker = buffering_worker(
+            Some(crate::BufferedRange {
+                start: 0,
+                end: 300,
+                total: Some(1000),
+            }),
+            Some(Duration::from_secs(10)),
+            Duration::ZERO,
+            Duration::from_secs(2),
+        );
+
+        worker.poll_refill();
+
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+    }
+
+    #[test]
+    fn the_cushion_is_measured_from_the_audible_position() {
+        // Same 3 s frontier, but 2 s of it has already sounded: the
+        // cushion is 1 s, below the threshold — no resume yet. Decoded
+        // audio still in the sink ring counts as cushion precisely so
+        // this math (frontier − audible) matches what the listener
+        // would hear before a second stall.
+        let mut worker = buffering_worker(
+            Some(crate::BufferedRange {
+                start: 0,
+                end: 300,
+                total: Some(1000),
+            }),
+            Some(Duration::from_secs(10)),
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        );
+
+        worker.poll_refill();
+
+        assert_eq!(worker.machine.state(), PlayerState::Buffering);
+    }
+
+    #[test]
+    fn refill_resumes_at_the_end_of_the_stream_regardless_of_the_threshold() {
+        // The window covers the whole rest of the track (end == total):
+        // nothing more can arrive, so even a 5 s threshold on a 1 s
+        // frontier must resume — short tails never wedge in `Buffering`.
+        let mut worker = buffering_worker(
+            Some(crate::BufferedRange {
+                start: 900,
+                end: 1000,
+                total: Some(1000),
+            }),
+            Some(Duration::from_secs(10)),
+            Duration::from_secs(9),
+            Duration::from_secs(5),
+        );
+
+        worker.poll_refill();
+
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+    }
+
+    #[test]
+    fn refill_resumes_without_a_known_duration() {
+        // No duration → the bytes→media-time mapping is impossible; the
+        // gate degrades to readiness-only rather than parking forever.
+        let mut worker = buffering_worker(
+            Some(crate::BufferedRange {
+                start: 0,
+                end: 1,
+                total: Some(1000),
+            }),
+            None,
+            Duration::ZERO,
+            Duration::from_secs(2),
+        );
+
+        worker.poll_refill();
+
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+    }
+
+    #[test]
+    fn zero_threshold_restores_readiness_only_refill() {
+        // `Duration::ZERO` opts out of the gate entirely — the legacy
+        // resume-on-any-data behavior the pre-threshold suite pins.
+        let mut worker = buffering_worker(
+            Some(crate::BufferedRange {
+                start: 0,
+                end: 1,
+                total: Some(1000),
+            }),
+            Some(Duration::from_secs(10)),
+            Duration::ZERO,
+            Duration::ZERO,
+        );
+
+        worker.poll_refill();
+
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
     }
 }
