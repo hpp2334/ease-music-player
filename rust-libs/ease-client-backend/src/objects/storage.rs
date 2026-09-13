@@ -1,9 +1,9 @@
-use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc, StorageId, StorageType};
+use ease_client_schema::{MusicId, PlaylistId, StorageEntryLoc, StorageHandle, StorageId};
 use serde::{Deserialize, Serialize};
 
-use crate::objects::EASEM_ONEDRIVE_ID;
-
-#[derive(Debug, Clone, uniffi::Record)]
+/// One entry in a directory listing, storage-kind-agnostic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StorageEntry {
     pub storage_id: StorageId,
     pub name: String,
@@ -12,29 +12,8 @@ pub struct StorageEntry {
     pub is_dir: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, uniffi::Record)]
-pub struct ArgUpsertStorage {
-    pub id: Option<StorageId>,
-    pub addr: String,
-    pub alias: String,
-    pub username: String,
-    pub password: String,
-    pub is_anonymous: bool,
-    pub typ: StorageType,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
-pub enum StorageConnectionTestResult {
-    #[default]
-    None,
-    Testing,
-    Success,
-    Unauthorized,
-    Timeout,
-    OtherError,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StorageEntryType {
     Folder,
     Music,
@@ -43,19 +22,21 @@ pub enum StorageEntryType {
     Other,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+/// A storage source surfaced to the UI. `handle` identifies the kind; the
+/// plugin-owned display `alias` comes from the plugin's kv config. Connection
+/// details (WebDAV addr / credentials, ...) live entirely in the plugin's
+/// kv + secret stores and never cross this boundary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Storage {
     pub id: StorageId,
-    pub addr: String,
+    pub handle: StorageHandle,
     pub alias: String,
-    pub username: String,
-    pub password: String,
-    pub is_anonymous: bool,
-    pub typ: StorageType,
     pub music_count: u64,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CurrentStorageImportType {
     #[default]
     None,
@@ -70,7 +51,8 @@ pub enum CurrentStorageImportType {
     },
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, uniffi::Enum)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CurrentStorageStateType {
     #[default]
     Loading,
@@ -90,9 +72,10 @@ impl StorageEntry {
     }
 }
 
-#[derive(Debug, Clone, uniffi::Enum)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ListStorageEntryChildrenResp {
-    Ok(Vec<StorageEntry>),
+    Ok { data: Vec<StorageEntry> },
     AuthenticationFailed,
     Timeout,
     Unknown,
@@ -101,19 +84,10 @@ pub enum ListStorageEntryChildrenResp {
 impl ListStorageEntryChildrenResp {
     pub fn is_error(&self) -> bool {
         match self {
-            ListStorageEntryChildrenResp::Ok(_) => false,
+            ListStorageEntryChildrenResp::Ok { .. } => false,
             ListStorageEntryChildrenResp::AuthenticationFailed => false,
             ListStorageEntryChildrenResp::Timeout => false,
             ListStorageEntryChildrenResp::Unknown => false,
         }
     }
-}
-
-pub fn onedrive_oauth_url() -> String {
-    let base_url = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
-    let client_id: &str = EASEM_ONEDRIVE_ID;
-    let redirect_uri = "easem://oauth2redirect/";
-    let scope = urlencoding::encode("Files.Read offline_access").to_string();
-
-    format!("{base_url}?client_id={client_id}&response_type=code&redirect_uri={redirect_uri}&scope={scope}")
 }

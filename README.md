@@ -13,13 +13,6 @@ ScreenShot
 
 ![screenshot](./docs/Screenshots.webp)
 
-Roadmap
-----
-
-- v0.4: Plugin support
-- v0.5: Ubuntu Linux support
-- v0.6: UI/UX Improvements
-
 Motivation
 ----
 

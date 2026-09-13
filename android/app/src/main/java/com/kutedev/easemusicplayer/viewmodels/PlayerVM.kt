@@ -2,6 +2,7 @@ package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kutedev.easemusicplayer.singleton.ImportRepository
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import com.kutedev.easemusicplayer.singleton.ToastRepository
@@ -14,34 +15,36 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import uniffi.ease_client_schema.DataSourceKey
-import uniffi.ease_client_schema.MusicId
-import uniffi.ease_client_schema.PlaylistId
-import java.time.Duration
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.PlaylistId
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
 import javax.inject.Inject
-import kotlin.time.DurationUnit
-import kotlin.time.toDuration
-import kotlin.time.toJavaDuration
 
 @HiltViewModel
 class PlayerVM @Inject constructor(
     private val playerRepository: PlayerRepository,
-    private val playerControllerRepository: PlayerControllerRepository
+    private val playerControllerRepository: PlayerControllerRepository,
+    private val importRepository: ImportRepository,
 ) : ViewModel() {
-    private val _currentDuration = MutableStateFlow(Duration.ZERO)
-    private val _bufferDuration = MutableStateFlow(Duration.ZERO)
+    // Position / buffered-position in milliseconds (Long, not java.time.Duration).
+    private val _currentMs = MutableStateFlow(0L)
+    private val _bufferMs = MutableStateFlow(0L)
     val music = playerRepository.music
     val previousMusic = playerRepository.previousMusic
     val nextMusic = playerRepository.nextMusic
     val playing = playerRepository.playing
-    val currentDuration = _currentDuration.asStateFlow()
-    val bufferDuration = _bufferDuration.asStateFlow()
+    val currentMs = _currentMs.asStateFlow()
+    val bufferMs = _bufferMs.asStateFlow()
     val playMode = playerRepository.playMode
     val loading = playerRepository.loading
 
-    val lyricIndex = combine(currentDuration, music) {
-        currentDuration, music ->
-            music?.lyric?.data?.lines?.indexOfLast { it.duration <= currentDuration } ?: -1
+    /** Music id mirrored from [music]; used to detect track switches. */
+    private var lastMusicId: MusicId? = null
+
+    val lyricIndex = combine(currentMs, music) { currentMs, music ->
+        music?.lyric?.data?.lines?.indexOfLast { it.duration <= currentMs } ?: -1
     }.stateIn(viewModelScope, SharingStarted.Lazily, -1)
 
     init {
@@ -56,52 +59,57 @@ class PlayerVM @Inject constructor(
                 syncPosition()
             }
         }
+        viewModelScope.launch {
+            // Track switch: zero the progress immediately instead of
+            // showing the previous track's position for up to one poll
+            // tick (the 1 Hz loop below refreshes it right after).
+            playerRepository.music.collect { music ->
+                val id = music?.meta?.id
+                if (id != lastMusicId) {
+                    lastMusicId = id
+                    _currentMs.value = 0L
+                    _bufferMs.value = 0L
+                    syncPosition()
+                }
+            }
+        }
     }
 
-    fun resume() {
-        playerControllerRepository.resume()
-    }
-
-    fun pause() {
-        playerControllerRepository.pause()
-    }
-
-    fun stop() {
-        playerControllerRepository.stop()
-    }
-
-    fun playNext() {
-        playerControllerRepository.playNext()
-    }
-
-    fun playPrevious() {
-        playerControllerRepository.playPrevious()
-    }
-
-    fun remove() {
-        playerRepository.remove()
-    }
-
+    fun resume() = playerControllerRepository.resume()
+    fun pause() = playerControllerRepository.pause()
+    fun stop() = playerControllerRepository.stop()
+    fun playNext() = playerControllerRepository.playNext()
+    fun playPrevious() = playerControllerRepository.playPrevious()
+    fun remove() = playerRepository.remove()
     fun seek(ms: ULong) {
         playerControllerRepository.seek(ms)
+        // Pull the seek override into _currentMs now — not at the next
+        // 1 Hz tick — so the slider, the label and the lyric index flip
+        // to the target instantly.
+        syncPosition()
     }
+    fun play(id: MusicId, playlistId: PlaylistId) = playerControllerRepository.play(id, playlistId)
+    fun changePlayModeToNext() = playerRepository.changePlayModeToNext()
+    fun removeLyric() = playerRepository.removeLyric()
 
-    fun play(id: MusicId, playlistId: PlaylistId) {
-        playerControllerRepository.play(id, playlistId)
-    }
-
-    fun changePlayModeToNext() {
-        playerRepository.changePlayModeToNext()
-    }
-
-    fun removeLyric() {
-        playerRepository.removeLyric()
+    /**
+     * Prepare the import picker for an explicit lyric pick ("Add lyric"):
+     * the first selected entry is attached to the current music via
+     * [PlayerRepository.setLyric] when the picker finishes. The caller
+     * then navigates to `RouteImport(RouteImportType.Lyric)`.
+     */
+    fun prepareAddLyric() {
+        importRepository.prepare(listOf(StorageEntryType.LYRIC)) { entries ->
+            entries.firstOrNull()?.let { entry ->
+                playerRepository.setLyric(
+                    StorageEntryLoc(storageId = entry.storageId, path = entry.path)
+                )
+            }
+        }
     }
 
     fun syncPosition() {
-        _currentDuration.value = playerControllerRepository.getCurrentPosition().toDuration(
-            DurationUnit.MILLISECONDS).toJavaDuration()
-        _bufferDuration.value = playerControllerRepository.getBufferedPosition().toDuration(
-            DurationUnit.MILLISECONDS).toJavaDuration()
+        _currentMs.value = playerControllerRepository.getCurrentPosition()
+        _bufferMs.value = playerControllerRepository.getBufferedPosition()
     }
 }

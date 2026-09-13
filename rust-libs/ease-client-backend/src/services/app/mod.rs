@@ -1,67 +1,42 @@
-use ease_client_schema::{upgrade_v1_to_v2, upgrade_v2_to_v3, StorageType};
+use serde::{Deserialize, Serialize};
 
-use crate::{ctx::BackendContext, error::BResult, objects::ArgUpsertStorage};
+use crate::{ctx::BackendContext, error::BResult};
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArgInitializeApp {
     pub app_document_dir: String,
     pub app_cache_dir: String,
     pub storage_path: String,
 }
 
-pub fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
+pub async fn app_bootstrap(cx: &BackendContext, arg: ArgInitializeApp) -> BResult<()> {
     tracing::info!("app bootstrap: {:?}", arg);
     cx.set_storage_path(&arg.storage_path);
-    // Init
-    init_database(cx, &arg)?;
+    init_database(cx, &arg).await?;
     Ok(())
 }
 
-pub fn app_destroy(cx: &BackendContext) -> BResult<()> {
+pub async fn app_destroy(cx: &BackendContext) -> BResult<()> {
     cx.database_server().destroy();
     tracing::info!("app destroyed");
     Ok(())
 }
 
-fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
-    static SCHEMA_VERSION: u32 = 3;
-
-    cx.database_server().init(arg.app_document_dir.clone());
-    let old_schema_version = cx.database_server().get_schema_version()?;
-
-    if old_schema_version < SCHEMA_VERSION {
-        if old_schema_version < 1 {
-            init_local_storage(cx)?;
-            cx.database_server().save_schema_version(SCHEMA_VERSION)?;
-        } else {
-            if old_schema_version < 2 {
-                upgrade_v1_to_v2(&cx.database_server().db())?;
-            }
-            if old_schema_version < 3 {
-                upgrade_v2_to_v3(&cx.database_server().db())?;
-            }
-        }
-    }
-
-    let schema_version = cx.database_server().get_schema_version()?;
-    tracing::info!(
-        "old schema version is {}, now is {}",
-        old_schema_version,
-        schema_version
-    );
-
-    Ok(())
-}
-
-fn init_local_storage(cx: &BackendContext) -> BResult<()> {
-    cx.database_server().upsert_storage(ArgUpsertStorage {
-        id: None,
-        addr: Default::default(),
-        alias: "Local".to_string(),
-        username: Default::default(),
-        password: Default::default(),
-        is_anonymous: Default::default(),
-        typ: StorageType::Local,
-    })?;
+async fn init_database(cx: &BackendContext, arg: &ArgInitializeApp) -> BResult<()> {
+    // `DatabaseServer::init` runs ease_client_migration::migrate, which:
+    //   1. Opens/creates data.db.
+    //   2. Runs sea-orm-migration to the latest schema (v4).
+    //   3. If a legacy data.redb exists at <doc_dir>/data.redb, imports all
+    //      rows into SQLite and deletes data.redb.
+    //
+    // Local storage is NOT seeded here. The biz layer synthesizes it on every
+    // `list_storage` call (see services::storage::list_storage), so it is
+    // always present regardless of DB / migration state.
+    cx.database_server()
+        .init(arg.app_document_dir.clone())
+        .await?;
+    let schema_version = cx.database_server().get_schema_version().await?;
+    tracing::info!("database initialized; schema version = {}", schema_version);
     Ok(())
 }

@@ -32,6 +32,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseIconButton
+import com.kutedev.easemusicplayer.components.EaseIconButtonColors
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.components.MusicCover
@@ -40,7 +41,7 @@ import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteMusicPlayer
 import com.kutedev.easemusicplayer.utils.formatDuration
 import com.kutedev.easemusicplayer.utils.toMusicDurationMs
-import uniffi.ease_client_schema.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
 
 @Composable
 private fun MiniPlayerCore(
@@ -95,8 +96,19 @@ private fun MiniPlayerCore(
                         EaseIconButton(
                             sizeType = EaseIconButtonSize.Medium,
                             buttonType = EaseIconButtonType.Default,
-                            disabled = loading,
                             painter = painterResource(R.drawable.icon_play),
+                            loading = loading,
+                            disabled = loading,
+                            overrideColors = if (loading) {
+                                // The default disabled tint (surfaceVariant)
+                                // would make the spinner nearly invisible on
+                                // the transparent mini-player background.
+                                EaseIconButtonColors(
+                                    iconDisabledTint = MaterialTheme.colorScheme.onSurface,
+                                )
+                            } else {
+                                null
+                            },
                             onClick = onPlay,
                         )
                     } else {
@@ -104,6 +116,7 @@ private fun MiniPlayerCore(
                             sizeType = EaseIconButtonSize.Medium,
                             buttonType = EaseIconButtonType.Default,
                             painter = painterResource(R.drawable.icon_pause),
+                            loading = loading,
                             onClick = onPause,
                         )
                     }
@@ -128,17 +141,24 @@ private fun MiniPlayerCore(
                     .clip(RoundedCornerShape(999.dp))
                     .fillMaxWidth()
             ) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                    progress = {
-                        if (totalDurationMS == 0uL) {
-                            0f
-                        } else {
-                            currentDurationMS.toFloat() / totalDurationMS.toFloat()
-                        }
-                    },
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                if (loading) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        progress = {
+                            if (totalDurationMS == 0uL) {
+                                0f
+                            } else {
+                                currentDurationMS.toFloat() / totalDurationMS.toFloat()
+                            }
+                        },
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
             Text(
                 text = totalDuration,
@@ -157,13 +177,13 @@ fun MiniPlayer(
     val music by playerVM.music.collectAsState()
     val loading by playerVM.loading.collectAsState()
     val nextMusic by playerVM.nextMusic.collectAsState()
-    val currentDuration by playerVM.currentDuration.collectAsState()
+    val currentMs by playerVM.currentMs.collectAsState()
 
     MiniPlayerCore(
         isPlaying = isPlaying,
         title = music?.meta?.title ?: "",
         cover = music?.cover,
-        currentDurationMS = toMusicDurationMs(currentDuration),
+        currentDurationMS = currentMs.toULong(),
         totalDuration = formatDuration(music),
         totalDurationMS = toMusicDurationMs(music),
         canNext = nextMusic != null,

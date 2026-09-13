@@ -1,0 +1,71 @@
+{
+  "plugins": [
+    {
+      "id": "com.ease.lyricformats",
+      "name": {
+        "en-US": "Lyric Formats",
+        "zh-CN": "歌词格式"
+      },
+      "version": "0.2.1",
+      "description": {
+        "en-US": "Lyric file parsers for LRC, SRT and WebVTT. The app's lyric pane is powered entirely by this plugin — there is no built-in parser.",
+        "zh-CN": "LRC、SRT、WebVTT 歌词文件解析器。应用的歌词显示完全由本插件驱动，应用内没有内置解析器。"
+      },
+      "zip": "zips/com.ease.lyricformats-0.2.1.zip",
+      "sha256": "1f0b993098709bce81da26a5b2c67f07b7e4e123d03f92d1f347c41ca68f22a8",
+      "size": 35868,
+      "apiVersion": 1
+    },
+    {
+      "id": "com.ease.onedrive",
+      "name": {
+        "en-US": "OneDrive",
+        "zh-CN": "OneDrive"
+      },
+      "version": "0.0.5",
+      "description": {
+        "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless JS plugin.",
+        "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
+      },
+      "zip": "zips/com.ease.onedrive-0.0.5.zip",
+      "sha256": "681982155842dc1e8b6f70b8ebeee02b0786b42fc27ce202d6a1c2aa3be95173",
+      "size": 52642,
+      "icon": "icons/com.ease.onedrive.png",
+      "apiVersion": 1
+    },
+    {
+      "id": "com.ease.playcount",
+      "name": {
+        "en-US": "Play Counts",
+        "zh-CN": "播放计数"
+      },
+      "version": "0.0.7",
+      "description": {
+        "en-US": "Counts how many times each music has been played, filterable by time period (Today through Last Year) and by playlist membership.",
+        "zh-CN": "统计每首歌的播放次数，支持按时间段（今天到最近一年）和按播放列表成员过滤。"
+      },
+      "zip": "zips/com.ease.playcount-0.0.7.zip",
+      "sha256": "c02d6a87b37632338000791e3f7d8ede427e7511d2c6bcd2bf94dded556414de",
+      "size": 58265,
+      "icon": "icons/com.ease.playcount.png",
+      "apiVersion": 1
+    },
+    {
+      "id": "com.ease.webdav",
+      "name": {
+        "en-US": "WebDAV",
+        "zh-CN": "WebDAV"
+      },
+      "version": "0.0.5",
+      "description": {
+        "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless JS plugin.",
+        "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
+      },
+      "zip": "zips/com.ease.webdav-0.0.5.zip",
+      "sha256": "e3d45b931199651511a1111bddb88b8e0398deb714b870d90474309e57f6f41f",
+      "size": 340338,
+      "icon": "icons/com.ease.webdav.png",
+      "apiVersion": 1
+    }
+  ]
+}

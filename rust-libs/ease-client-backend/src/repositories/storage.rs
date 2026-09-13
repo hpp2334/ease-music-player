@@ -1,140 +1,118 @@
 use std::sync::Arc;
 
-use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, ReadableTableMetadata};
-
-use crate::{error::BResult, objects::ArgUpsertStorage};
-
-use super::core::DatabaseServer;
-use ease_client_schema::{
-    BlobId, DbKeyAlloc, MusicId, StorageId, StorageModel, TABLE_MUSIC, TABLE_MUSIC_BY_LOC,
-    TABLE_MUSIC_PLAYLIST, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE, TABLE_STORAGE_MUSIC,
+use ease_client_schema::entities::{music, playlist_music, storage};
+use ease_client_schema::{BlobId, StorageHandle, StorageId};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
 };
 
+use crate::error::BResult;
+
+use super::core::DatabaseServer;
+
 impl DatabaseServer {
-    pub fn load_storage_music_count(self: &Arc<Self>, id: StorageId) -> BResult<u64> {
-        let db = self.db().begin_read()?;
-        let table = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
-        let len = table.get(id)?.len();
-        Ok(len)
+    pub async fn load_storage_music_count(&self, id: StorageId) -> BResult<u64> {
+        let db = self.db();
+        let count = music::Entity::find()
+            .filter(music::Column::LocStorageId.eq(*id.as_ref()))
+            .count(&db)
+            .await?;
+        Ok(count as u64)
     }
 
-    pub fn load_storage(self: &Arc<Self>, id: StorageId) -> BResult<Option<StorageModel>> {
-        let db = self.db().begin_read()?;
-        self.load_storage_impl(&db, id)
+    /// Load one registry row.
+    pub async fn load_storage_row(&self, id: StorageId) -> BResult<Option<storage::Model>> {
+        Ok(storage::Entity::find_by_id(*id.as_ref())
+            .one(&self.db())
+            .await?)
     }
 
-    fn load_storage_impl(
-        self: &Arc<Self>,
-        db: &ReadTransaction,
-        id: StorageId,
-    ) -> BResult<Option<StorageModel>> {
-        let table = db.open_table(TABLE_STORAGE)?;
-        let p = table.get(id)?.map(|v| v.value());
-        Ok(p)
+    /// Load every registry row.
+    pub async fn load_all_storage_rows(&self) -> BResult<Vec<storage::Model>> {
+        Ok(storage::Entity::find().all(&self.db()).await?)
     }
 
-    pub fn load_storages(self: &Arc<Self>) -> BResult<Vec<StorageModel>> {
-        let db = self.db().begin_read()?;
-        let table = db.open_table(TABLE_STORAGE)?;
-        let len = table.len()? as usize;
+    /// Find-or-create the registry row for a handle. Idempotent — the
+    /// uniqueness index (`idx_storage_plugin`) makes the find authoritative
+    /// for Plugin.
+    pub async fn obtain_storage(&self, handle: &StorageHandle) -> BResult<StorageId> {
+        let db = self.db();
+        let typ_i = handle.storage_type().as_i32();
 
-        let mut ret: Vec<StorageModel> = Vec::with_capacity(len);
-
-        let iter = table.iter()?;
-        for v in iter {
-            let v = v?.1.value();
-            ret.push(v);
-        }
-
-        Ok(ret)
-    }
-
-    pub fn upsert_storage(self: &Arc<Self>, arg: ArgUpsertStorage) -> BResult<StorageId> {
-        let db = self.db().begin_write()?;
-
-        let id = {
-            let mut table = db.open_table(TABLE_STORAGE)?;
-            let mut model = if let Some(id) = arg.id {
-                let v = table.get(id)?.unwrap().value();
-                v
-            } else {
-                let id = self.alloc_id(&db, DbKeyAlloc::Storage)?;
-
-                StorageModel {
-                    id: StorageId::wrap(id),
-                    addr: Default::default(),
-                    alias: Default::default(),
-                    username: Default::default(),
-                    password: Default::default(),
-                    is_anonymous: Default::default(),
-                    typ: Default::default(),
-                }
-            };
-            let id = model.id;
-
-            model.addr = arg.addr;
-            model.alias = arg.alias;
-            model.username = arg.username;
-            model.password = arg.password;
-            model.is_anonymous = arg.is_anonymous;
-            model.typ = arg.typ;
-            table.insert(model.id, model)?;
-
-            id
-        };
-        db.commit()?;
-
-        Ok(id)
-    }
-
-    pub fn remove_storage(self: &Arc<Self>, id: StorageId) -> BResult<()> {
-        let mut to_remove_blobs: Vec<BlobId> = Default::default();
-        let db = self.db().begin_write()?;
-        let rdb = self.db().begin_read()?;
-
-        {
-            let mut table_storage_musics = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
-            let mut table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
-            let mut table_music_playlists = db.open_multimap_table(TABLE_MUSIC_PLAYLIST)?;
-            let mut table_storage = db.open_table(TABLE_STORAGE)?;
-            let mut table_musics = db.open_table(TABLE_MUSIC)?;
-            let mut table_music_by_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
-
-            let mut music_iter = table_storage_musics.get(id)?;
-
-            for v in music_iter.by_ref() {
-                let id = v?.value();
-
-                let mut iter = table_music_playlists.get(id)?;
-                for v in iter.by_ref() {
-                    let playlist_id = v?.value();
-                    table_playlist_musics.remove(playlist_id, id)?;
-                }
-                drop(iter);
-                table_music_playlists.remove_all(id)?;
-
-                {
-                    let m = self.load_music_impl(&rdb, id)?.unwrap();
-                    if let Some(id) = m.cover {
-                        to_remove_blobs.push(id);
-                    }
-                }
-
-                table_musics.remove(id)?;
+        let existing = match handle {
+            StorageHandle::Local => {
+                storage::Entity::find()
+                    .filter(storage::Column::Type.eq(typ_i))
+                    .one(&db)
+                    .await?
             }
-            drop(music_iter);
-
-            table_music_by_loc.retain(|v, _| v.storage_id != id)?;
-            table_storage.remove(id)?;
-            table_storage_musics.remove_all(id)?;
+            StorageHandle::Plugin {
+                plugin_id,
+                plugin_storage_id,
+            } => {
+                storage::Entity::find()
+                    .filter(storage::Column::Type.eq(typ_i))
+                    .filter(storage::Column::PluginId.eq(&plugin_id.id))
+                    .filter(storage::Column::PluginStorageId.eq(&plugin_storage_id.id))
+                    .one(&db)
+                    .await?
+            }
+        };
+        if let Some(row) = existing {
+            return Ok(StorageId::wrap(row.id));
         }
 
-        db.commit()?;
+        let am = storage::ActiveModel {
+            id: ActiveValue::NotSet,
+            r#type: ActiveValue::Set(typ_i),
+            plugin_id: ActiveValue::Set(match handle {
+                StorageHandle::Plugin { plugin_id, .. } => Some(plugin_id.id.clone()),
+                _ => None,
+            }),
+            plugin_storage_id: ActiveValue::Set(match handle {
+                StorageHandle::Plugin {
+                    plugin_storage_id, ..
+                } => Some(plugin_storage_id.id.clone()),
+                _ => None,
+            }),
+        };
+        let m = am.insert(&db).await?;
+        Ok(StorageId::wrap(m.id))
+    }
 
-        for id in to_remove_blobs {
-            self.blob().remove(id)?;
+    /// Remove a registry row and cascade: detach + delete every music whose
+    /// `loc_storage_id` points here (and its cover blob), then drop the row.
+    /// Plugin detail (kv + secret) is the plugin's responsibility.
+    pub async fn remove_storage(self: &Arc<Self>, id: StorageId) -> BResult<()> {
+        let db = self.db();
+        let reg = storage::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        if reg.is_none() {
+            return Ok(());
         }
 
+        let musics = music::Entity::find()
+            .filter(music::Column::LocStorageId.eq(*id.as_ref()))
+            .all(&db)
+            .await?;
+        let mut to_remove_blobs: Vec<BlobId> = Default::default();
+        for m in musics {
+            playlist_music::Entity::delete_many()
+                .filter(playlist_music::Column::MusicId.eq(m.id))
+                .exec(&db)
+                .await?;
+            if let Some(cover) = m.cover_blob_id {
+                to_remove_blobs.push(BlobId::wrap(cover));
+            }
+            music::Entity::delete_by_id(m.id).exec(&db).await?;
+        }
+
+        storage::Entity::delete_by_id(*id.as_ref())
+            .exec(&db)
+            .await?;
+
+        for blob_id in to_remove_blobs {
+            self.blob().remove(blob_id)?;
+        }
         Ok(())
     }
 }
