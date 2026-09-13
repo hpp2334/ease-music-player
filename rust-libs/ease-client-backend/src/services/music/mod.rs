@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use ease_client_schema::{
@@ -12,7 +13,7 @@ use crate::{
     StorageEntry,
 };
 
-use super::{lyrics::parse_lyric_content, storage::load_storage_entry_data};
+use super::{lyrics::parse_lyric_content, storage::get_storage_backend, storage::load_storage_entry_data};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -211,39 +212,426 @@ pub(crate) async fn update_music_cover(
 }
 
 /// Resolve a music's candidate lyric locations: the explicit `model.lyric`
-/// if set, else — when `lyric_default` is enabled — one sibling per
-/// registered parser extension (`<audio-base>.<ext>`, registry order —
+/// if set, else — when `lyric_default` is enabled — siblings per
+/// registered parser extension (`<audio>.<ext>` and `<audio-base>.<ext>`,
+/// registry order —
 /// `plugin_manager::PluginManagerShared::lyric_sibling_extensions`).
 /// Empty when nothing can parse (no parser plugin enabled and no explicit
 /// pick). Returns `(loc, is_fallback)` pairs; only the explicit pick is
 /// ever non-fallback.
+///
+/// A user's explicit pick (`lyric_default` cleared by `update_music_lyric`)
+/// is exclusive. An import-detected loc (see
+/// [`detect_import_sibling_lyrics`]) keeps `lyric_default` set — it is a
+/// resolution snapshot, not a commitment, so the sibling candidates are
+/// still appended and probing falls through to them if the attached file
+/// can no longer be fetched.
 fn resolve_lyric_locs(
     model: &MusicModel,
     sibling_extensions: &[String],
 ) -> Vec<(StorageEntryLoc, bool)> {
+    let mut out: Vec<(StorageEntryLoc, bool)> = Vec::new();
     if let Some(loc) = model.lyric.clone() {
-        return vec![(loc, false)];
+        out.push((loc, model.lyric_default));
+        if !model.lyric_default {
+            return out;
+        }
     }
     if !model.lyric_default || sibling_extensions.is_empty() {
-        return Vec::new();
+        return out;
     }
     let audio = &model.loc;
-    let mut base = audio.path.clone();
-    if let Some(pos) = base.rfind('.') {
-        base.truncate(pos);
+    // Same two name forms as import-time detection, same precedence per
+    // extension: the full audio file name + lyric extension
+    // (`a.wav.vtt`) before the extension-swapped base (`a.vtt`).
+    let full_form = audio.path.clone();
+    let base_form = match audio.path.rfind('.') {
+        Some(pos) => audio.path[..pos].to_string(),
+        None => String::new(),
+    };
+    out.extend(
+        sibling_extensions
+            .iter()
+            .flat_map(|ext| {
+                let full = format!("{full_form}.{ext}");
+                let base = format!("{base_form}.{ext}");
+                if base != full {
+                    vec![full, base]
+                } else {
+                    // Extensionless audio — the two forms coincide.
+                    vec![full]
+                }
+            })
+            .map(|path| (StorageEntryLoc {
+                path,
+                storage_id: audio.storage_id,
+            }, true))
+            // The attached loc is already the first candidate — don't
+            // probe the same path twice.
+            .filter(|(loc, _)| Some(loc) != model.lyric.as_ref()),
+    );
+    out
+}
+
+/// Parent directory of a storage path (`"/"` for root-level files).
+fn parent_dir(path: &str) -> String {
+    match path.rfind('/') {
+        Some(0) | None => "/".to_string(),
+        Some(pos) => path[..pos].to_string(),
     }
-    sibling_extensions
-        .iter()
-        .map(|ext| {
-            (
-                StorageEntryLoc {
-                    path: format!("{base}.{ext}"),
-                    storage_id: audio.storage_id,
-                },
-                true,
-            )
-        })
-        .collect()
+}
+
+/// Match a music file's sibling lyric among a directory listing.
+/// Extensions are tried in the given order (registry scan order — the
+/// same precedence play-time probing uses). Within an extension, two
+/// name forms are tried, most specific first: the full audio file name
+/// with the lyric extension appended (`a.wav.vtt`) and the
+/// extension-swapped base (`a.vtt`); for each, an exact hit wins over a
+/// case-insensitive one (a real listing makes that free;
+/// constructed-path probing cannot do it on case-sensitive storages).
+/// Directory entries never match. Returns the matched entry's full path.
+pub(crate) fn match_sibling_lyric(
+    music_path: &str,
+    listed: &[StorageEntry],
+    extensions: &[String],
+) -> Option<String> {
+    let file_name = music_path.rsplit('/').next().unwrap_or(music_path);
+    // Base form needs an extension to swap (and a non-empty base); the
+    // full-name form is always available, so extensionless musics can
+    // still match `<name>.<ext>` through it.
+    let base = match file_name.rfind('.') {
+        Some(pos) if pos > 0 => Some(&file_name[..pos]),
+        _ => None,
+    };
+    for ext in extensions {
+        let full_form = format!("{file_name}.{ext}");
+        let mut forms = vec![full_form.clone()];
+        if let Some(b) = base {
+            let base_form = format!("{b}.{ext}");
+            if base_form != full_form {
+                forms.push(base_form);
+            }
+        }
+        for wanted in forms {
+            if let Some(hit) = listed.iter().find(|e| !e.is_dir && e.name == wanted) {
+                return Some(hit.path.clone());
+            }
+            let wanted_lower = wanted.to_ascii_lowercase();
+            if let Some(hit) = listed
+                .iter()
+                .find(|e| !e.is_dir && e.name.to_ascii_lowercase() == wanted_lower)
+            {
+                return Some(hit.path.clone());
+            }
+        }
+    }
+    None
+}
+
+/// List a folder over the storage seam; `None` on any failure (missing
+/// backend, network error) — lyric detection is best-effort and must
+/// never fail the import around it.
+async fn list_storage_children(
+    cx: &BackendContext,
+    loc: &StorageEntryLoc,
+) -> Option<Vec<StorageEntry>> {
+    let backend = get_storage_backend(cx, loc.storage_id).await.ok()??;
+    let entries = backend.list(loc.path.clone()).await.ok()?;
+    Some(
+        entries
+            .into_iter()
+            .map(|entry| StorageEntry {
+                storage_id: loc.storage_id,
+                name: entry.name,
+                path: entry.path,
+                size: entry.size.map(|s| s as u64),
+                is_dir: entry.is_dir,
+            })
+            .collect(),
+    )
+}
+
+/// Detect sibling lyric files for the musics of an import: list each
+/// distinct `(storage, parent folder)` once and match `<base>.<ext>`
+/// against every extension registered by enabled lyric-parser plugins —
+/// the generalized form of the old fixed `.lrc`-sibling swap. Best
+/// effort: a failed listing skips that group (lazy play-time probing
+/// stays the safety net for anything undetected).
+pub(crate) async fn detect_import_sibling_lyrics(
+    cx: &BackendContext,
+    music_locs: &[StorageEntryLoc],
+) -> HashMap<StorageEntryLoc, StorageEntryLoc> {
+    let mut out: HashMap<StorageEntryLoc, StorageEntryLoc> = HashMap::new();
+    let extensions = cx.plugin_manager().lyric_sibling_extensions();
+    if extensions.is_empty() || music_locs.is_empty() {
+        return out;
+    }
+
+    // Distinct (storage, parent) groups in first-seen order — one
+    // listing per group (an import's selection shares one folder).
+    let mut groups: Vec<(StorageEntryLoc, Vec<usize>)> = Vec::new();
+    for (idx, loc) in music_locs.iter().enumerate() {
+        let parent = StorageEntryLoc {
+            storage_id: loc.storage_id,
+            path: parent_dir(&loc.path),
+        };
+        match groups.iter_mut().find(|(p, _)| *p == parent) {
+            Some((_, members)) => members.push(idx),
+            None => groups.push((parent, vec![idx])),
+        }
+    }
+
+    for (parent, members) in groups {
+        let Some(entries) = list_storage_children(cx, &parent).await else {
+            tracing::warn!(
+                "import lyric detection: failed to list {}/{} — skipping",
+                parent.storage_id.as_ref(),
+                parent.path
+            );
+            continue;
+        };
+        for idx in members {
+            let loc = &music_locs[idx];
+            if let Some(lyric_path) = match_sibling_lyric(&loc.path, &entries, &extensions) {
+                out.insert(
+                    loc.clone(),
+                    StorageEntryLoc {
+                        storage_id: loc.storage_id,
+                        path: lyric_path,
+                    },
+                );
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ease_client_schema::{BlobId, MusicId, StorageId};
+
+    fn listed_entry(name: &str, is_dir: bool) -> StorageEntry {
+        StorageEntry {
+            storage_id: StorageId::wrap(1),
+            name: name.to_string(),
+            path: format!("/Music/{name}"),
+            size: None,
+            is_dir,
+        }
+    }
+
+    fn music_model(lyric: Option<StorageEntryLoc>, lyric_default: bool) -> MusicModel {
+        MusicModel {
+            id: MusicId::wrap(7),
+            loc: StorageEntryLoc {
+                storage_id: StorageId::wrap(1),
+                path: "/Music/song.mp3".to_string(),
+            },
+            title: "song".to_string(),
+            duration: None,
+            cover: None::<BlobId>,
+            lyric,
+            lyric_default,
+            order: vec![],
+        }
+    }
+
+    fn exts(exts: &[&str]) -> Vec<String> {
+        exts.iter().map(|e| e.to_string()).collect()
+    }
+
+    #[test]
+    fn parent_dir_of_storage_paths() {
+        assert_eq!(parent_dir("/Music/a/song.mp3"), "/Music/a");
+        assert_eq!(parent_dir("/song.mp3"), "/");
+        assert_eq!(parent_dir("/"), "/");
+    }
+
+    #[test]
+    fn sibling_match_exact_then_case_insensitive_per_extension_order() {
+        let exts = exts(&["lrc", "srt", "vtt"]);
+        let listed = vec![
+            listed_entry("cover.jpg", false),
+            listed_entry("sub", true),
+            listed_entry("song.srt", false),
+            listed_entry("song.LRC", false),
+        ];
+        // Case-insensitive hit within the first extension beats an exact
+        // hit in a later one (registry order wins).
+        assert_eq!(
+            match_sibling_lyric("/Music/song.mp3", &listed, &exts),
+            Some("/Music/song.LRC".to_string())
+        );
+
+        // Exact hit beats a case-insensitive one of the same extension
+        // regardless of listing order.
+        let listed = vec![
+            listed_entry("song.lrc", false),
+            listed_entry("other.txt", false),
+        ];
+        assert_eq!(
+            match_sibling_lyric("/Music/song.mp3", &listed, &exts),
+            Some("/Music/song.lrc".to_string())
+        );
+
+        // Fall through to the next extension when the first misses.
+        let listed = vec![listed_entry("song.SRT", false)];
+        assert_eq!(
+            match_sibling_lyric("/Music/song.mp3", &listed, &exts),
+            Some("/Music/song.SRT".to_string())
+        );
+
+        // Directories never match, even named exactly.
+        let listed = vec![listed_entry("song.lrc", true)];
+        assert_eq!(match_sibling_lyric("/Music/song.mp3", &listed, &exts), None);
+
+        // Nothing matches → None.
+        let listed = vec![listed_entry("other.lrc", false)];
+        assert_eq!(match_sibling_lyric("/Music/song.mp3", &listed, &exts), None);
+    }
+
+    #[test]
+    fn sibling_match_full_name_form_and_precedence() {
+        // Declared first: `let exts = …` below shadows the helper fn.
+        let exts_late = exts(&["srt", "vtt"]);
+        let exts = exts(&["lrc", "vtt"]);
+        // `a.wav` also matches `a.wav.vtt` (full file name + lyric ext).
+        let listed = vec![listed_entry("a.wav.vtt", false)];
+        assert_eq!(
+            match_sibling_lyric("/Music/a.wav", &listed, &exts),
+            Some("/Music/a.wav.vtt".to_string())
+        );
+
+        // The full-name form is the more specific attachment: when both
+        // forms exist for the same extension, it wins — this is what
+        // disambiguates `a.wav` vs `a.flac` sharing a base.
+        let listed = vec![
+            listed_entry("a.lrc", false),
+            listed_entry("a.wav.lrc", false),
+        ];
+        assert_eq!(
+            match_sibling_lyric("/Music/a.wav", &listed, &exts),
+            Some("/Music/a.wav.lrc".to_string())
+        );
+
+        // ... but extension order is the primary key: an earlier
+        // extension's base form beats a later extension's full form.
+        let listed = vec![
+            listed_entry("a.srt", false),
+            listed_entry("a.wav.vtt", false),
+        ];
+        assert_eq!(
+            match_sibling_lyric("/Music/a.wav", &listed, &exts_late),
+            Some("/Music/a.srt".to_string())
+        );
+
+        // Case-insensitive matching applies to the full-name form too.
+        let listed = vec![listed_entry("a.WAV.VTT", false)];
+        assert_eq!(
+            match_sibling_lyric("/Music/a.wav", &listed, &exts),
+            Some("/Music/a.WAV.VTT".to_string())
+        );
+    }
+
+    #[test]
+    fn sibling_match_without_extension_uses_full_name_form() {
+        // Extensionless musics can still match `<name>.<ext>` — the two
+        // forms coincide, so nothing is tried twice.
+        let listed = vec![listed_entry("song.lrc", false)];
+        assert_eq!(
+            match_sibling_lyric("/Music/song", &listed, &exts(&["lrc"])),
+            Some("/Music/song.lrc".to_string())
+        );
+        // Nothing listed → no match.
+        assert_eq!(match_sibling_lyric("/Music/song", &[], &exts(&["lrc"])), None);
+        // Empty extension registry.
+        assert_eq!(
+            match_sibling_lyric("/Music/song.mp3", &[listed_entry("song.lrc", false)], &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_user_pick_is_exclusive() {
+        let pick = StorageEntryLoc {
+            storage_id: StorageId::wrap(1),
+            path: "/Music/custom.lrc".to_string(),
+        };
+        let out = resolve_lyric_locs(&music_model(Some(pick.clone()), false), &exts(&["lrc"]));
+        assert_eq!(out, vec![(pick, false)]);
+    }
+
+    #[test]
+    fn resolve_detected_loc_falls_through_to_siblings() {
+        let attached = StorageEntryLoc {
+            storage_id: StorageId::wrap(1),
+            path: "/Music/song.lrc".to_string(),
+        };
+        let out = resolve_lyric_locs(
+            &music_model(Some(attached.clone()), true),
+            &exts(&["lrc", "srt"]),
+        );
+        // Attached loc first (flagged as a fallback candidate — an
+        // all-miss shows Missing, not Failed), then the remaining
+        // sibling probes in probe order: per extension the full-name
+        // form (`song.mp3.<ext>`) before the base form (`song.<ext>`);
+        // the sibling identical to the attached loc is deduplicated
+        // away.
+        assert_eq!(
+            out,
+            vec![
+                (attached, true),
+                (
+                    StorageEntryLoc {
+                        storage_id: StorageId::wrap(1),
+                        path: "/Music/song.mp3.lrc".to_string()
+                    },
+                    true
+                ),
+                (
+                    StorageEntryLoc {
+                        storage_id: StorageId::wrap(1),
+                        path: "/Music/song.mp3.srt".to_string()
+                    },
+                    true
+                ),
+                (
+                    StorageEntryLoc {
+                        storage_id: StorageId::wrap(1),
+                        path: "/Music/song.srt".to_string()
+                    },
+                    true
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_plain_default_probes_siblings_only() {
+        let out = resolve_lyric_locs(&music_model(None, true), &exts(&["lrc"]));
+        assert_eq!(
+            out,
+            vec![
+                (
+                    StorageEntryLoc {
+                        storage_id: StorageId::wrap(1),
+                        path: "/Music/song.mp3.lrc".to_string()
+                    },
+                    true
+                ),
+                (
+                    StorageEntryLoc {
+                        storage_id: StorageId::wrap(1),
+                        path: "/Music/song.lrc".to_string()
+                    },
+                    true
+                ),
+            ]
+        );
+        // Removed lyric (default cleared, no loc) resolves to nothing.
+        assert!(resolve_lyric_locs(&music_model(None, false), &exts(&["lrc"])).is_empty());
+    }
 }
 
 /// DB-only music fetch. The lyric arrives as a [`LyricLoadState::Loading`]

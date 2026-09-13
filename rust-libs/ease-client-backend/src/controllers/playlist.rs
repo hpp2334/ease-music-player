@@ -12,8 +12,8 @@ use crate::{
         music::ArgDBAddMusic, playlist::AddedMusic, playlist::ArgDBCreatePlaylist,
     },
     services::{
-        get_all_playlist_abstracts, get_playlist, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
-        ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
+        detect_import_sibling_lyrics, get_all_playlist_abstracts, get_playlist,
+        ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
     },
     Backend,
 };
@@ -77,6 +77,20 @@ pub async fn ct_create_playlist(
             let cx = cx.get_context();
             let current_time_ms = cx.current_time().as_millis() as i64;
 
+            // Detect sibling lyric files from the imported folder before
+            // building the rows — one listing per distinct parent folder.
+            let detected = detect_import_sibling_lyrics(
+                cx,
+                &arg.entries
+                    .iter()
+                    .map(|e| StorageEntryLoc {
+                        storage_id: e.entry.storage_id,
+                        path: e.entry.path.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .await;
+
             let musics = arg
                 .entries
                 .clone()
@@ -84,12 +98,15 @@ pub async fn ct_create_playlist(
                 .map(|arg| {
                     let entry = arg.entry;
                     let name = arg.name;
+                    let loc = StorageEntryLoc {
+                        storage_id: entry.storage_id,
+                        path: entry.path,
+                    };
+                    let lyric = detected.get(&loc).cloned();
                     ArgDBAddMusic {
-                        loc: StorageEntryLoc {
-                            storage_id: entry.storage_id,
-                            path: entry.path,
-                        },
+                        loc,
                         title: name,
+                        lyric,
                     }
                 })
                 .collect();
@@ -139,6 +156,20 @@ pub async fn ct_add_musics_to_playlist(
         .handle()
         .spawn(async move {
             let cx = cx.get_context();
+            // Detect sibling lyric files from the imported folder before
+            // building the rows — one listing per distinct parent folder.
+            let detected = detect_import_sibling_lyrics(
+                cx,
+                &arg.entries
+                    .iter()
+                    .map(|e| StorageEntryLoc {
+                        storage_id: e.entry.storage_id,
+                        path: e.entry.path.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .await;
+
             let musics = arg
                 .entries
                 .clone()
@@ -146,12 +177,15 @@ pub async fn ct_add_musics_to_playlist(
                 .map(|arg| {
                     let entry = arg.entry;
                     let name = arg.name;
+                    let loc = StorageEntryLoc {
+                        storage_id: entry.storage_id,
+                        path: entry.path,
+                    };
+                    let lyric = detected.get(&loc).cloned();
                     ArgDBAddMusic {
-                        loc: StorageEntryLoc {
-                            storage_id: entry.storage_id,
-                            path: entry.path,
-                        },
+                        loc,
                         title: name,
+                        lyric,
                     }
                 })
                 .collect();
