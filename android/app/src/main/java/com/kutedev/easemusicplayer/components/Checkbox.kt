@@ -25,15 +25,19 @@ fun EaseCheckbox(
     onChange: (value: Boolean) -> Unit,
     disabled: Boolean = false
 ) {
-    val activeColor = if (value) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        Color.Transparent
-    }
     val dim = if (disabled) {
         0.38F
     } else {
         1F
+    }
+    // Outline style: unchecked = transparent interior + `onSurface`
+    // border (black in light theme); checked = primary fill + surface
+    // check. NB `Color.Transparent` is black-with-zero-alpha — never
+    // `.copy(alpha = …)` it, that yields an opaque black box.
+    val bgColor = if (value) {
+        MaterialTheme.colorScheme.primary.copy(alpha = dim)
+    } else {
+        Color.Transparent
     }
     val borderColor = if (value) {
         MaterialTheme.colorScheme.primary.copy(alpha = dim)
@@ -46,7 +50,7 @@ fun EaseCheckbox(
             .border(1.dp, borderColor, RoundedCornerShape(4.dp))
             .clip(RoundedCornerShape(4.dp))
             .size(16.dp)
-            .background(activeColor.copy(alpha = dim))
+            .background(bgColor)
             .then(
                 if (disabled) {
                     Modifier
