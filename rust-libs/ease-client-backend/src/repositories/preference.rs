@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ease_client_migration::converter;
 use ease_client_schema::entities::preference;
-use ease_client_schema::{PlayMode, PreferenceModel, StorageId};
+use ease_client_schema::{PlayMode, PreferenceModel};
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
 
 use crate::error::BResult;
@@ -60,7 +60,7 @@ impl DatabaseServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ease_client_schema::StorageEntryLoc;
+    use ease_client_schema::{StorageEntryLoc, StorageId};
 
     async fn server() -> (std::sync::Arc<DatabaseServer>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
