@@ -3,6 +3,7 @@ pub mod blob;
 pub mod core;
 pub mod music;
 pub mod playlist;
+pub mod playlist_group;
 pub mod plugin_kv;
 pub mod preference;
 pub mod secret;

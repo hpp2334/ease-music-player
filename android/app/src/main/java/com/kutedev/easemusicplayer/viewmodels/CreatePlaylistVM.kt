@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import com.kutedev.easemusicplayer.singleton.types.ArgCreatePlaylist
 import com.kutedev.easemusicplayer.singleton.types.CreatePlaylistMode
+import com.kutedev.easemusicplayer.singleton.types.PlaylistGroupMeta
 import com.kutedev.easemusicplayer.singleton.types.Storage
 import com.kutedev.easemusicplayer.singleton.types.StorageEntry
 import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
@@ -42,6 +43,7 @@ class CreatePlaylistVM @Inject constructor(
     private val _advancedOpen = MutableStateFlow(false)
     private val _allowlistMode = MutableStateFlow(StorageAllowlistMode.ALL)
     private val _allowlistStorages = MutableStateFlow(listOf<StorageId>())
+    private val _groupId = MutableStateFlow<com.kutedev.easemusicplayer.singleton.types.PlaylistGroupId?>(null)
     val mode = _mode.asStateFlow()
     val musicCount = _entries.map { entries ->
         entries.count { entry ->  entry.entryTyp() == StorageEntryType.MUSIC }
@@ -80,6 +82,8 @@ class CreatePlaylistVM @Inject constructor(
     val fullImported = _fullImported.asStateFlow()
 
     val storages: StateFlow<List<Storage>> = storageRepository.storages
+    val groups: StateFlow<List<PlaylistGroupMeta>> = playlistRepository.groups
+    val groupId = _groupId.asStateFlow()
     val advancedOpen = _advancedOpen.asStateFlow()
     val allowlistMode = _allowlistMode.asStateFlow()
     val allowlistStorages = _allowlistStorages.asStateFlow()
@@ -116,15 +120,16 @@ class CreatePlaylistVM @Inject constructor(
         mode,
         musicCount,
         cover,
-        combine(_allowlistMode, _allowlistStorages) { m, s -> m to s }
+        combine(_allowlistMode, _allowlistStorages, _groupId) { m, s, g -> Triple(m, s, g) }
     ) {
-            name, mode, musicCount, cover, (allowlistMode, allowlistStorages) ->
+            name, mode, musicCount, cover, (allowlistMode, allowlistStorages, groupId) ->
         val allowlistOk = allowlistMode != StorageAllowlistMode.SPECIFIC ||
             (allowlistStorages + lockedAllowlistStorages.value).distinct().isNotEmpty()
+        val groupOk = groupId != null
         if (mode == CreatePlaylistMode.FULL) {
-             name.isNotBlank() && (musicCount > 0 || cover != null) && allowlistOk
+             name.isNotBlank() && (musicCount > 0 || cover != null) && allowlistOk && groupOk
         } else {
-            name.isNotBlank() && allowlistOk
+            name.isNotBlank() && allowlistOk && groupOk
         }
     }.stateIn(
         scope = viewModelScope,
@@ -168,7 +173,17 @@ class CreatePlaylistVM @Inject constructor(
         }
     }
 
-    fun openModal() {
+    fun updateGroupId(id: com.kutedev.easemusicplayer.singleton.types.PlaylistGroupId) {
+        _groupId.value = id
+    }
+
+    /**
+     * Open the create dialog. [defaultGroupId] preselects the group
+     * (e.g. the first group when opened from the empty state or the
+     * toolbar `+`); null picks the first group once loaded.
+     */
+    fun openModal(defaultGroupId: com.kutedev.easemusicplayer.singleton.types.PlaylistGroupId? = null) {
+        _groupId.value = defaultGroupId ?: playlistRepository.groups.value.firstOrNull()?.id
         _modalOpen.value = true
     }
 
@@ -186,6 +201,7 @@ class CreatePlaylistVM @Inject constructor(
         _advancedOpen.value = false
         _allowlistMode.value = StorageAllowlistMode.ALL
         _allowlistStorages.value = listOf()
+        _groupId.value = null
     }
 
     fun prepareImportCreate() {
@@ -213,7 +229,16 @@ class CreatePlaylistVM @Inject constructor(
     }
 
     fun finish() {
-        val entries = _entries.value.map { entry -> ToAddMusicEntry(entry, entry.name) }
+        // Only the FULL tab carries the pending import; the EMPTY tab
+        // must create a playlist with no musics even if an import was
+        // picked earlier on the FULL tab (the pending import survives
+        // tab toggling — RESET is what discards it).
+        val entries = if (_mode.value == CreatePlaylistMode.FULL) {
+            _entries.value.map { entry -> ToAddMusicEntry(entry, entry.name) }
+        } else {
+            emptyList()
+        }
+        val groupId = _groupId.value ?: return
 
         playlistRepository.createPlaylist(ArgCreatePlaylist(
             title = _name.value,
@@ -223,7 +248,8 @@ class CreatePlaylistVM @Inject constructor(
                 effectiveAllowlistStorages()
             } else {
                 null
-            }
+            },
+            groupId = groupId,
         ))
     }
 }

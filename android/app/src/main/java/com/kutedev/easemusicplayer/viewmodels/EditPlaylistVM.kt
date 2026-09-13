@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
+import com.kutedev.easemusicplayer.singleton.types.PlaylistGroupId
+import com.kutedev.easemusicplayer.singleton.types.PlaylistGroupMeta
 import com.kutedev.easemusicplayer.singleton.types.Storage
 import com.kutedev.easemusicplayer.singleton.types.StorageAllowlistMode
 import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
@@ -39,9 +41,13 @@ class EditPlaylistVM @Inject constructor(
     private val _allowlistMode = MutableStateFlow(StorageAllowlistMode.ALL)
     private val _allowlistStorages = MutableStateFlow(listOf<StorageId>())
     private val _lockedAllowlistStorages = MutableStateFlow(listOf<StorageId>())
+    private val _groupId = MutableStateFlow<PlaylistGroupId?>(null)
     val name = _name.asStateFlow()
     val cover = _cover.asStateFlow()
     val modalOpen = _modalOpen.asStateFlow()
+
+    val groups: StateFlow<List<PlaylistGroupMeta>> = playlistRepository.groups
+    val groupId = _groupId.asStateFlow()
 
     val storages: StateFlow<List<Storage>> = storageRepository.storages
     val advancedOpen = _advancedOpen.asStateFlow()
@@ -83,6 +89,10 @@ class EditPlaylistVM @Inject constructor(
         _name.value = name
     }
 
+    fun updateGroupId(id: PlaylistGroupId) {
+        _groupId.value = id
+    }
+
     fun clearCover() {
         _cover.value = null
     }
@@ -121,6 +131,8 @@ class EditPlaylistVM @Inject constructor(
         if (item != null) {
             _name.value = item.meta.title
             _cover.value = item.meta.cover
+            _groupId.value = item.meta.groupId
+                ?: playlistRepository.groups.value.firstOrNull()?.id
 
             val persisted = item.meta.storageAllowlist
             val locked = item.musicStorageIds
@@ -170,6 +182,7 @@ class EditPlaylistVM @Inject constructor(
         _allowlistMode.value = StorageAllowlistMode.ALL
         _allowlistStorages.value = listOf()
         _lockedAllowlistStorages.value = listOf()
+        _groupId.value = null
     }
 
     fun prepareImportCover() {
@@ -192,6 +205,9 @@ class EditPlaylistVM @Inject constructor(
             } else {
                 null
             },
+            // Same-group values are a no-op Rust-side; the move re-keys
+            // the playlist to the end of its destination group.
+            groupId = _groupId.value,
         ))
 
         closeModal()

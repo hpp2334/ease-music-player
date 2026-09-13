@@ -1236,6 +1236,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha2",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

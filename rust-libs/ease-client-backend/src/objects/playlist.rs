@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use ease_client_schema::{DataSourceKey, PlaylistId, StorageEntryLoc, StorageId};
+use ease_client_schema::{
+    DataSourceKey, PlaylistGroupId, PlaylistId, StorageEntryLoc, StorageId,
+};
 use serde::{Deserialize, Serialize};
 
 use super::music::MusicAbstract;
@@ -19,6 +21,26 @@ pub struct PlaylistMeta {
     /// Import-source restriction: `None` = all storages, `Some(ids)` =
     /// only the listed storages may be imported from into this playlist.
     pub storage_allowlist: Option<Vec<StorageId>>,
+    /// Owning group. `None` only transiently (pre-group databases,
+    /// before the ensure-default sweep ran).
+    #[serde(default)]
+    pub group_id: Option<PlaylistGroupId>,
+}
+
+/// Wire shape of a `playlist_group` row. The playlists themselves are
+/// not nested here — the Kotlin side joins them against
+/// `PlaylistMeta.group_id` from the flat `playlist.list`.
+#[serde_with::serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistGroupMeta {
+    pub id: PlaylistGroupId,
+    pub title: String,
+    #[serde_as(as = "serde_with::DurationMilliSeconds<u64>")]
+    pub created_time: Duration,
+    pub order: Vec<u32>,
+    /// Persisted UI expand/collapse state.
+    pub expanded: bool,
 }
 
 #[serde_with::serde_as]

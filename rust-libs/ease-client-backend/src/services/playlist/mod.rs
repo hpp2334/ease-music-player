@@ -5,7 +5,7 @@ use ease_client_schema::{DataSourceKey, MusicId, PlaylistId, PlaylistModel, Stor
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    objects::{MusicAbstract, Playlist, PlaylistAbstract, PlaylistMeta},
+    objects::{MusicAbstract, Playlist, PlaylistAbstract, PlaylistGroupMeta, PlaylistMeta},
 };
 
 use super::music::build_music_abstract;
@@ -46,6 +46,7 @@ pub(crate) fn build_playlist_meta(
         created_time: Duration::from_millis(model.created_time as u64),
         order: model.order,
         storage_allowlist: model.storage_allowlist,
+        group_id: model.group_id,
     }
 }
 
@@ -104,4 +105,20 @@ pub(crate) async fn get_all_playlist_abstracts(
     }
 
     Ok(ret)
+}
+
+/// All playlist groups in order-key order (wire shape). Playlist
+/// membership is derived Kotlin-side from `PlaylistMeta.group_id`.
+pub async fn get_all_playlist_groups(cx: &BackendContext) -> BResult<Vec<PlaylistGroupMeta>> {
+    let models = cx.database_server().load_playlist_groups().await?;
+    Ok(models
+        .into_iter()
+        .map(|m| PlaylistGroupMeta {
+            id: m.id,
+            title: m.title,
+            created_time: Duration::from_millis(m.created_time as u64),
+            order: m.order,
+            expanded: m.expanded,
+        })
+        .collect())
 }

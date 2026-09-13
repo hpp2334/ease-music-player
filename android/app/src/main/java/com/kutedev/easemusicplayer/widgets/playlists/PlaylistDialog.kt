@@ -53,9 +53,12 @@ import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.viewmodels.EditPlaylistVM
 import com.kutedev.easemusicplayer.singleton.types.CreatePlaylistMode
 import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.PlaylistGroupMeta
+import com.kutedev.easemusicplayer.singleton.types.PlaylistGroupId
 import com.kutedev.easemusicplayer.singleton.types.Storage
 import com.kutedev.easemusicplayer.singleton.types.StorageAllowlistMode
 import com.kutedev.easemusicplayer.singleton.types.StorageId
+import androidx.compose.runtime.LaunchedEffect
 
 @Composable
 private fun Tab(
@@ -204,6 +207,34 @@ private fun AllowlistStorageRow(
             onChange = { _ -> onToggle() },
             disabled = locked,
         )
+    }
+}
+
+/**
+ * Group picker for the create/edit playlist dialogs: exclusive choice
+ * across all groups (radio rows). A playlist is always created in — and
+ * can be moved between — groups.
+ */
+@Composable
+private fun GroupPickerBlock(
+    groups: List<PlaylistGroupMeta>,
+    selected: PlaylistGroupId?,
+    onSelect: (PlaylistGroupId) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+    ) {
+        FullImportHeader(
+            text = stringResource(R.string.playlists_dialog_group),
+        )
+        for (group in groups) {
+            AllowlistModeRow(
+                text = group.title,
+                selected = selected == group.id,
+                onClick = { onSelect(group.id) },
+            )
+        }
     }
 }
 
@@ -410,6 +441,16 @@ fun CreatePlaylistsDialog(
     val allowlistStorages by createPlaylistVM.allowlistStorages.collectAsState()
     val lockedAllowlistStorages by createPlaylistVM.lockedAllowlistStorages.collectAsState()
     val storages by createPlaylistVM.storages.collectAsState()
+    val groups by createPlaylistVM.groups.collectAsState()
+    val groupId by createPlaylistVM.groupId.collectAsState()
+
+    // The dialog may open before the first reload lands (groups still
+    // empty) — default-select the first group once it arrives.
+    LaunchedEffect(groups, groupId) {
+        if (groupId == null && groups.isNotEmpty()) {
+            createPlaylistVM.updateGroupId(groups.first().id)
+        }
+    }
 
     val onDismissRequest = {
         createPlaylistVM.closeModal()
@@ -455,6 +496,12 @@ fun CreatePlaylistsDialog(
                     }
                 )
             }
+            Box(modifier = Modifier.height(12.dp))
+            GroupPickerBlock(
+                groups = groups,
+                selected = groupId,
+                onSelect = { id -> createPlaylistVM.updateGroupId(id) },
+            )
             Box(modifier = Modifier.height(12.dp))
             PlaylistAdvancedBlock(
                 advancedOpen = advancedOpen,
@@ -528,6 +575,16 @@ fun EditPlaylistsDialog(
     val allowlistStorages by editPlaylistVM.allowlistStorages.collectAsState()
     val lockedAllowlistStorages by editPlaylistVM.lockedAllowlistStorages.collectAsState()
     val storages by editPlaylistVM.storages.collectAsState()
+    val groups by editPlaylistVM.groups.collectAsState()
+    val groupId by editPlaylistVM.groupId.collectAsState()
+
+    // Defensive: a legacy orphan playlist (no group) or a dialog opened
+    // before groups load — default-select the first group.
+    LaunchedEffect(groups, groupId) {
+        if (groupId == null && groups.isNotEmpty()) {
+            editPlaylistVM.updateGroupId(groups.first().id)
+        }
+    }
 
     val onDismissRequest = {
         editPlaylistVM.closeModal()
@@ -569,6 +626,12 @@ fun EditPlaylistsDialog(
                 onRemove = {
                     editPlaylistVM.clearCover()
                 }
+            )
+            Box(modifier = Modifier.height(12.dp))
+            GroupPickerBlock(
+                groups = groups,
+                selected = groupId,
+                onSelect = { id -> editPlaylistVM.updateGroupId(id) },
             )
             Box(modifier = Modifier.height(12.dp))
             PlaylistAdvancedBlock(

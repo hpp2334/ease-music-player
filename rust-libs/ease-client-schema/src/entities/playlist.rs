@@ -14,6 +14,10 @@ pub struct Model {
     /// JSON-encoded `Vec<i64>` of storage row ids; NULL = allow all
     /// storages (see `PlaylistModel::storage_allowlist`).
     pub storage_allowlist: Option<String>,
+    /// Owning `playlist_group` row id. NULL only transiently (pre-group
+    /// databases) — the runtime ensure-default sweep reassigns orphans
+    /// to the first group.
+    pub group_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

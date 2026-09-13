@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 
 use ease_client_schema::{
-    BlobId, DbKeyAlloc, MusicId, MusicModel, PlayMode, PlaylistId, PlaylistModel, PreferenceModel,
-    StorageEntryLoc, StorageId,
+    BlobId, DbKeyAlloc, MusicId, MusicModel, PlayMode, PlaylistGroupId, PlaylistGroupModel,
+    PlaylistId, PlaylistModel, PreferenceModel, StorageEntryLoc, StorageId,
 };
 
-use ease_client_schema::entities::{blob, id_alloc, music, playlist, playlist_music, preference};
+use ease_client_schema::entities::{
+    blob, id_alloc, music, playlist, playlist_group, playlist_music, preference,
+};
 
 const FALSE_I32: i32 = 0;
 const TRUE_I32: i32 = 1;
@@ -61,6 +63,7 @@ pub fn playlist_from(m: PlaylistModel) -> playlist::ActiveModel {
         picture_path: sea_orm::ActiveValue::Set(m.picture.map(|p| p.path)),
         order: sea_orm::ActiveValue::Set(encode_order(&m.order)),
         storage_allowlist: sea_orm::ActiveValue::Set(encode_storage_allowlist(m.storage_allowlist.as_deref())),
+        group_id: sea_orm::ActiveValue::Set(m.group_id.map(|g| *g.as_ref())),
     }
 }
 
@@ -86,6 +89,27 @@ pub fn playlist_to_model(row: playlist::Model) -> PlaylistModel {
         },
         order: decode_order(&row.order),
         storage_allowlist: decode_storage_allowlist(&row.storage_allowlist),
+        group_id: row.group_id.map(PlaylistGroupId::wrap),
+    }
+}
+
+pub fn playlist_group_from(m: PlaylistGroupModel) -> playlist_group::ActiveModel {
+    playlist_group::ActiveModel {
+        id: sea_orm::ActiveValue::Set(*m.id.as_ref()),
+        title: sea_orm::ActiveValue::Set(m.title),
+        created_time: sea_orm::ActiveValue::Set(m.created_time),
+        order: sea_orm::ActiveValue::Set(encode_order(&m.order)),
+        expanded: sea_orm::ActiveValue::Set(if m.expanded { TRUE_I32 } else { FALSE_I32 }),
+    }
+}
+
+pub fn playlist_group_to_model(row: playlist_group::Model) -> PlaylistGroupModel {
+    PlaylistGroupModel {
+        id: PlaylistGroupId::wrap(row.id),
+        title: row.title,
+        created_time: row.created_time,
+        order: decode_order(&row.order),
+        expanded: row.expanded != FALSE_I32,
     }
 }
 

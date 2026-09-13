@@ -57,6 +57,10 @@ impl MigratorTrait for Migrator {
             // Real post-collapse schema change (playlist import-source
             // allowlist) — applies to both fresh and existing databases.
             Box::new(migrations::PlaylistStorageAllowlistMigration),
+            // Real post-collapse schema change (playlist groups + the
+            // expand/collapse persistence column) — applies to both
+            // fresh and existing databases.
+            Box::new(migrations::PlaylistGroupMigration),
         ]
     }
 }

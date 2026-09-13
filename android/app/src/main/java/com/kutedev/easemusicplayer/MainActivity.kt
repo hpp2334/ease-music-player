@@ -93,6 +93,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             playerRepository.reload()
             storageRepository.reload()
+            // The localized name of the auto-created Default playlist
+            // group must be known before the first playlist reload runs
+            // the `playlistGroup.ensureDefault` self-heal.
+            playlistRepository.setDefaultGroupTitle(getString(R.string.playlist_group_default))
             playlistRepository.reload()
             setupCantodeEngine()
             // Connect the plugin event bus after the player repo is wired

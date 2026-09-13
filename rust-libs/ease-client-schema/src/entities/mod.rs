@@ -2,6 +2,7 @@ pub mod blob;
 pub mod id_alloc;
 pub mod music;
 pub mod playlist;
+pub mod playlist_group;
 pub mod playlist_music;
 pub mod plugin_kv_key;
 pub mod plugin_kv_multi;

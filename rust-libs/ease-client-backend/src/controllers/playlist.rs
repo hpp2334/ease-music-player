@@ -8,7 +8,9 @@ use crate::{
     ctx::BackendContext,
     error::{BError, BResult},
     objects::{Playlist, PlaylistAbstract},
-    repositories::{music::ArgDBAddMusic, playlist::AddedMusic},
+    repositories::{
+        music::ArgDBAddMusic, playlist::AddedMusic, playlist::ArgDBCreatePlaylist,
+    },
     services::{
         get_all_playlist_abstracts, get_playlist, ArgAddMusicsToPlaylist, ArgCreatePlaylist,
         ArgRemoveMusicFromPlaylist, ArgUpdatePlaylist,
@@ -35,6 +37,12 @@ pub async fn ct_update_playlist(cx: Arc<Backend>, arg: ArgUpdatePlaylist) -> BRe
             cx.database_server()
                 .update_playlist(arg.id, arg.title, arg.cover, arg.storage_allowlist)
                 .await?;
+            // Optional group move (`None` = keep the current group).
+            if let Some(group_id) = arg.group_id {
+                cx.database_server()
+                    .move_playlist_to_group(arg.id, group_id)
+                    .await?;
+            }
             Ok(())
         })
         .await
@@ -86,22 +94,32 @@ pub async fn ct_create_playlist(
                 })
                 .collect();
 
+            // Playlists are always created inside a group.
+            cx.database_server()
+                .load_playlist_group(arg.group_id)
+                .await?
+                .ok_or(BError::GroupNotFound(arg.group_id))?;
+
+            // Append after the group's current last playlist (the order
+            // ladder is global; the group's slice is what the user sees).
             let last_order = get_all_playlist_abstracts(cx)
                 .await?
-                .last()
+                .iter()
+                .rfind(|v| v.meta.group_id == Some(arg.group_id))
                 .map(|v| OrderKey::wrap(v.meta.order.clone()))
                 .unwrap_or_default();
 
             let (playlist_id, music_ids) = cx
                 .database_server()
-                .create_playlist(
-                    arg.title,
-                    arg.cover.clone(),
+                .create_playlist(ArgDBCreatePlaylist {
+                    title: arg.title,
+                    picture: arg.cover.clone(),
                     musics,
                     current_time_ms,
-                    OrderKey::greater(&last_order),
-                    arg.storage_allowlist,
-                )
+                    order: OrderKey::greater(&last_order),
+                    storage_allowlist: arg.storage_allowlist,
+                    group_id: arg.group_id,
+                })
                 .await?;
 
             Ok(RetCreatePlaylist {

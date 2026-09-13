@@ -13,16 +13,23 @@ import com.kutedev.easemusicplayer.singleton.types.ArgPluginInstallZipPath
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetEnable
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSetLyricParserSelection
 import com.kutedev.easemusicplayer.singleton.types.ArgPluginSourceAddCustom
+import com.kutedev.easemusicplayer.singleton.types.ArgMovePlaylistToGroup
+import com.kutedev.easemusicplayer.singleton.types.ArgRemovePlaylistGroup
 import com.kutedev.easemusicplayer.singleton.types.PluginListResult
 import com.kutedev.easemusicplayer.singleton.types.PluginMutationResult
 import com.kutedev.easemusicplayer.singleton.types.PluginSourcesResult
 import com.kutedev.easemusicplayer.singleton.types.RegistryEntriesResult
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderMusic
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylistGroup
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicDuration
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgCreatePlaylistGroup
+import com.kutedev.easemusicplayer.singleton.types.ArgEnsurePlaylistGroups
+import com.kutedev.easemusicplayer.singleton.types.ArgSetPlaylistGroupExpanded
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylistGroup
 import com.kutedev.easemusicplayer.singleton.types.ArgOauthExchange
 import com.kutedev.easemusicplayer.singleton.types.ArgOauthUrl
 import com.kutedev.easemusicplayer.singleton.types.ListLogFiles
@@ -31,6 +38,8 @@ import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
 import com.kutedev.easemusicplayer.singleton.types.MusicId
 import com.kutedev.easemusicplayer.singleton.types.MusicLyric
 import com.kutedev.easemusicplayer.singleton.types.PlaylistAbstract
+import com.kutedev.easemusicplayer.singleton.types.PlaylistGroupMeta
+import com.kutedev.easemusicplayer.singleton.types.PlaylistGroupId
 import com.kutedev.easemusicplayer.singleton.types.PlaylistId
 import com.kutedev.easemusicplayer.singleton.types.PlayMode
 import com.kutedev.easemusicplayer.singleton.types.PluginOauthExchangeResult
@@ -121,6 +130,21 @@ object BridgeMethods {
             bridgeSpecArg<ArgRemoveMusicFromPlaylist, Unit>("playlist.removeMusic")
         val REORDER = bridgeSpecArg<ArgReorderPlaylist, Unit>("playlist.reorder")
         val REORDER_MUSIC = bridgeSpecArg<ArgReorderMusic, Unit>("playlist.reorderMusic")
+    }
+
+    /** `playlistGroup.*` — playlist-group CRUD + expand/collapse state. */
+    object PlaylistGroup {
+        val LIST = bridgeSpecNoArg<List<PlaylistGroupMeta>>("playlistGroup.list")
+        val CREATE = bridgeSpecArg<ArgCreatePlaylistGroup, PlaylistGroupId>("playlistGroup.create")
+        val UPDATE = bridgeSpecArg<ArgUpdatePlaylistGroup, Unit>("playlistGroup.update")
+        val REMOVE = bridgeSpecArg<ArgRemovePlaylistGroup, Unit>("playlistGroup.remove")
+        val REORDER = bridgeSpecArg<ArgReorderPlaylistGroup, Unit>("playlistGroup.reorder")
+        val SET_EXPANDED =
+            bridgeSpecArg<ArgSetPlaylistGroupExpanded, Unit>("playlistGroup.setExpanded")
+        val ENSURE_DEFAULT =
+            bridgeSpecArg<ArgEnsurePlaylistGroups, PlaylistGroupId>("playlistGroup.ensureDefault")
+        val MOVE_PLAYLIST =
+            bridgeSpecArg<ArgMovePlaylistToGroup, Unit>("playlistGroup.movePlaylist")
     }
 
     /** `music.*` — music metadata access + updates. */
