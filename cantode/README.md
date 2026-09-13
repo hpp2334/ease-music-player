@@ -29,6 +29,16 @@ both halves.
   always drives the system audio device via cpal, and callers don't pick
   or implement sinks. This keeps the audio path honest: every test, every
   embedder, every CI run goes through the real cpal backend.
+- **Prebuffered playback.** `PlayerConfig::min_buffer_duration`
+  (default 2 s) is the cushion playback waits for: an autoplay load and
+  an underrun resume park in `Buffering` until the source's buffered
+  window (plus decoded audio still in the sink ring) covers that much
+  media time ahead of the audible position — instead of resuming on the
+  first byte and stuttering again a beat later. Non-window sources
+  (memory / local files), unknown durations, and windows that already
+  cover the rest of the track are exempt; keep the value below what the
+  source's readahead window can hold (the default 2 s sits far under
+  `BufferedSource`'s 4 MiB default readahead).
 - **No async runtime.** The engine runs on dedicated `std::thread`
   workers (one per player). Audio output is hard real-time and belongs
   on a dedicated, predictable thread, not a co-op-scheduled task. The
