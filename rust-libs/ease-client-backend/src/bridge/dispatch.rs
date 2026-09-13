@@ -55,8 +55,8 @@ use crate::{
         },
         plugin_manager,
         preference::{
-            get_preference_language, get_preference_playmode, save_preference_language,
-            save_preference_playmode,
+            get_preference_language, get_preference_last_import_loc, get_preference_playmode,
+            save_preference_language, save_preference_last_import_loc, save_preference_playmode,
         },
     },
     Backend, PlayerContextHandle, PlayerHandle,
@@ -535,6 +535,22 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx_cx = cx.get_context().clone();
             let tag = get_preference_language(&cx_cx).await?;
             Ok((serde_json::to_value(tag)?, vec![]))
+        }
+        "preference.saveLastImportLoc" => {
+            // Folder (storage + path) the user last imported from; the
+            // Import page reopens there, falling back to `/` when it no
+            // longer opens.
+            let loc: StorageEntryLoc = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            save_preference_last_import_loc(&cx_cx, loc).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "preference.getLastImportLoc" => {
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            let loc = get_preference_last_import_loc(&cx_cx).await?;
+            Ok((serde_json::to_value(loc)?, vec![]))
         }
 
         // ====================================================================

@@ -171,6 +171,10 @@ object BridgeMethods {
         /** BCP-47 tag of the in-app language override; `null` = system default. */
         val GET_LANGUAGE = bridgeSpecNoArg<String?>("preference.getLanguage")
         val SAVE_LANGUAGE = bridgeSpecArg<String?, Unit>("preference.saveLanguage")
+
+        /** Folder (storage + path) the user last imported from; `null` = never. */
+        val GET_LAST_IMPORT_LOC = bridgeSpecNoArg<StorageEntryLoc?>("preference.getLastImportLoc")
+        val SAVE_LAST_IMPORT_LOC = bridgeSpecArg<StorageEntryLoc, Unit>("preference.saveLastImportLoc")
     }
 
     /**
