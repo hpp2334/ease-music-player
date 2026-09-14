@@ -11,8 +11,10 @@
 //! Coverage map:
 //!
 //! - **T0** (no player): one session per play-through (the headline);
-//!   demand follows reads; seek inside the window touches no network;
-//!   seek outside closes + reopens at the target; rapid scrub leaves
+//!   demand follows reads; seek inside the window touches no network
+//!   (and keeps the live session); seek outside closes + reopens at the
+//!   target, parking the abandoned window so a seek back restores it
+//!   with no network (the isomp4-prologue shape); rapid scrub leaves
 //!   only the final session serving; temporal `len()` and seek-from-end
 //!   rejection while unknown; lying-EOF retry; retry budget → sticky
 //!   error → seek recovery; watchdog reopen; over-delivery rejection;
@@ -639,6 +641,151 @@ fn seek_inside_window_hits_no_network() {
     assert_eq!(again, data[1024..5 * 1024]);
     assert_eq!(h.opens(), vec![0], "in-window seek must not open a session");
     assert_eq!(h.closes(), 0, "in-window seek must not close the session");
+}
+
+#[test]
+fn in_window_seek_keeps_live_session() {
+    // The module doc's contract, pinned for a LIVE session
+    // (`seek_inside_window_hits_no_network` above covers one that has
+    // already delivered to EOF): mid-stream, with the session still
+    // open, an in-window seek is a cursor move — no Close, no new Open
+    // — and the data read back is correct. Demuxers with
+    // non-sequential sample layouts (isomp4 `next_packet` on
+    // interleaved chunks) seek like this constantly; a miss inside the
+    // readahead window must not cost an HTTP request.
+    let data = pattern(64 * 1024, |i| (i * 7) as u8);
+    let (fake, h) = fake(Arc::clone(&data)).finish();
+    let mut src = BufferedSource::with_readahead(16 * 1024, fake);
+
+    let first = read_n(&mut src, 4 * 1024).unwrap();
+    assert_eq!(first, data[..4 * 1024]);
+    assert_eq!(h.opens(), vec![0]);
+
+    // Backward, still inside the window.
+    src.seek(SeekFrom::Start(1024)).unwrap();
+    let again = read_n(&mut src, 4 * 1024).unwrap();
+    assert_eq!(again, data[1024..5 * 1024]);
+    assert_eq!(h.opens(), vec![0], "in-window seek must not open a session");
+    assert_eq!(h.closes(), 0, "in-window seek must not close the session");
+}
+
+#[test]
+fn seek_back_into_abandoned_window_restores_without_network() {
+    // An out-of-window seek parks the abandoned window in the retention
+    // slot; a seek back into it restores the bytes with no session.
+    // This is symphonia's isomp4 prologue shape exactly: skip forward
+    // past `mdat` (a tail probe), then return to byte 0 for the second
+    // atom scan — the header region must not be re-fetched.
+    let data = pattern(128 * 1024, |i| (i * 11) as u8);
+    let (fake, h) = fake(Arc::clone(&data)).finish();
+    let mut src = BufferedSource::with_readahead(32 * 1024, fake);
+
+    // Window [0, 36 KiB): the construction session (32 KiB) plus the
+    // 4 KiB top-up the first read's drain grants. Wait for it to fill
+    // — a seek racing the delivery would stash a partial span.
+    let _ = read_n(&mut src, 4 * 1024).unwrap();
+    assert_eq!(h.opens(), vec![0]);
+    assert!(
+        wait_until(Duration::from_secs(2), || {
+            src.buffered_range().is_some_and(|r| r.end == 36 * 1024)
+        }),
+        "window must fill to cursor+readahead: {:?}",
+        src.buffered_range()
+    );
+
+    // Skip forward, far past the window: one close, one new session.
+    src.seek(SeekFrom::Start(96 * 1024)).unwrap();
+    assert!(
+        wait_until(Duration::from_secs(2), || h.opens() == vec![0, 96 * 1024]),
+        "expected sessions [0, 96 KiB]: {:?}",
+        h.opens()
+    );
+    assert!(h.closes() >= 1, "the abandoned session must be closed");
+    let got = read_n(&mut src, 1024).unwrap();
+    assert_eq!(got, data[96 * 1024..96 * 1024 + 1024]);
+
+    // Return to the header region: served from the retained window.
+    src.seek(SeekFrom::Start(0)).unwrap();
+    assert!(
+        h.log.wait_for_quiet(Duration::from_millis(80)),
+        "no session work expected after the restore: {:?}",
+        h.log.all()
+    );
+    assert_eq!(
+        h.opens(),
+        vec![0, 96 * 1024],
+        "the restore must not open a session"
+    );
+    let got = read_n(&mut src, 8 * 1024).unwrap();
+    assert_eq!(got, data[..8 * 1024], "restored bytes must be correct");
+
+    // Reads past the restored span resume with ONE continuation
+    // session at the window end — never a re-fetch of byte 0.
+    assert!(
+        wait_until(Duration::from_secs(2), || h.opens().len() == 3),
+        "expected the continuation session: {:?}",
+        h.opens()
+    );
+    assert_eq!(h.opens(), vec![0, 96 * 1024, 36 * 1024]);
+}
+
+#[test]
+fn ping_pong_seeks_swap_the_two_retained_spans() {
+    // After a restore, the outgoing window takes the retention slot, so
+    // alternating between two regions settles into two fetches: every
+    // return is a swap, not a re-fetch (plus at most one continuation
+    // per region as reads drain its window).
+    let data = pattern(128 * 1024, |i| (i * 17) as u8);
+    let (fake, h) = fake(Arc::clone(&data)).finish();
+    let mut src = BufferedSource::with_readahead(32 * 1024, fake);
+
+    let _ = read_n(&mut src, 4 * 1024).unwrap();
+    assert!(
+        wait_until(Duration::from_secs(2), || {
+            src.buffered_range().is_some_and(|r| r.end == 36 * 1024)
+        }),
+        "window must fill before the first bounce: {:?}",
+        src.buffered_range()
+    );
+    src.seek(SeekFrom::Start(96 * 1024)).unwrap();
+    assert!(
+        wait_until(Duration::from_secs(2), || h.opens() == vec![0, 96 * 1024]),
+        "two sessions so far: {:?}",
+        h.opens()
+    );
+    let _ = read_n(&mut src, 1024).unwrap();
+
+    // Bounce A ↔ B several times, reading a little each time.
+    for (pos, len) in [
+        (2 * 1024u64, 1024usize),
+        (97 * 1024, 1024),
+        (4 * 1024, 1024),
+    ] {
+        src.seek(SeekFrom::Start(pos)).unwrap();
+        let got = read_n(&mut src, len).unwrap();
+        assert_eq!(
+            got,
+            data[pos as usize..pos as usize + len],
+            "bounce read at {pos}"
+        );
+    }
+
+    assert!(
+        h.log.wait_for_quiet(Duration::from_millis(80)),
+        "seeks must settle: {:?}",
+        h.log.all()
+    );
+    assert!(
+        h.opens().len() <= 4,
+        "ping-pong must reuse the two spans: {:?}",
+        h.opens()
+    );
+    assert_eq!(
+        h.opens().iter().filter(|o| **o == 0).count(),
+        1,
+        "byte 0 fetched exactly once: {:?}",
+        h.opens()
+    );
 }
 
 #[test]

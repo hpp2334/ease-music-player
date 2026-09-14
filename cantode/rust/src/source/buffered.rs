@@ -22,6 +22,11 @@
 //! seek in-window ── cursor move only; session lives                    │ to the end)
 //! seek out-of-window ── close() ─► abort the transport ───────────────┘
 //!                        └─ open(target, reply) ─► new request
+//!                        └─ the abandoned window is parked (≤ 2× readahead);
+//!                           a seek back into it restores the bytes with no
+//!                           network, so demuxers that scan forward past
+//!                           media data and then re-seek to 0 (isomp4's
+//!                           prologue) stop re-fetching their header region
 //! stall / failed session ── close() + open(window_end)  (retry-bounded)
 //! ```
 //!
@@ -41,10 +46,15 @@
 //!   that lands short of a reported [`StreamReply::set_total_len`] is
 //!   treated as a failed session and retried — a dropped connection no
 //!   longer masquerades as the end of the stream.
-//! - **Seeks cancel in-flight work.** A seek outside the window supersedes
+//! - **Seeks cancel in-flight work — only when they leave the window.**
+//!   A seek landing inside the window is a cursor move with no network
+//!   at all: the live session keeps streaming, and a backward seek
+//!   shrinks the window's free space (excess pushes are rejected, not
+//!   truncated — see [`Pushed`]). A seek outside the window supersedes
 //!   the live session (late deliveries are generation-dropped) and the
-//!   session thread closes it before opening the target range; a seek
-//!   landing inside the window is a cursor move with no network at all.
+//!   session thread closes it before opening the target range — but the
+//!   abandoned window's bytes are *parked*: a later seek back into the
+//!   parked span restores them without touching the network.
 //!
 //! Total length is *discovered*, not declared: HTTP only learns
 //! `Content-Length` when the response lands, so demanding it up front
@@ -205,6 +215,12 @@ struct Inner {
     /// Read cursor (absolute). Invariant: `window_start <= pos <=
     /// window_start + window.len()`.
     pos: u64,
+    /// Retention slot: the most recently abandoned window (`(start,
+    /// bytes)`), bounded to the same `2 × readahead` cap the window's
+    /// own eviction uses. A seek back into the span swaps it back in as
+    /// the live window with no network — the outgoing window takes its
+    /// place in the slot.
+    retained: Option<(u64, Vec<u8>)>,
     /// Reported resource length, once discovered.
     total_len: Option<u64>,
     /// Trusted end-of-resource offset, once known (a consistent
@@ -264,6 +280,7 @@ impl BufferedSource {
                 window: Vec::new(),
                 window_start: 0,
                 pos: 0,
+                retained: None,
                 total_len: None,
                 eof: None,
                 session_open: false,
@@ -305,8 +322,9 @@ impl BufferedSource {
     /// contiguous data are buffered starting at absolute `offset`.
     ///
     /// Intended for embedder UI ("buffered amount" bars). The offset
-    /// only moves forward (consumed-prefix eviction); a seek resets it to
-    /// the seek target.
+    /// only moves forward (consumed-prefix eviction); an out-of-window
+    /// seek resets it (to the seek target, or to the start of the
+    /// retained span a restore served from).
     pub fn loaded_window(&self) -> (u64, usize) {
         match self.buffered_range() {
             Some(r) => (r.start, (r.end - r.start) as usize),
@@ -408,13 +426,76 @@ impl Seek for BufferedSource {
         }
 
         let window_end = st.window_start + st.window.len() as u64;
-        let in_window = target >= st.window_start && target < window_end;
-        if !in_window {
-            // Reset the window to the target — one contiguous session
-            // from here, no stitching with stale bytes.
-            st.window.clear();
+        if target >= st.window_start && target < window_end {
+            // In-window: a cursor move only. The live session keeps
+            // streaming — a backward seek shrinks the window's free
+            // space, and `StreamReply::push` already handles the
+            // resulting over-delivery by rejecting (not truncating) the
+            // excess, so demand and window accounting stay coherent.
+            st.pos = target;
+            // Any seek gives the network a fresh chance: clear the
+            // sticky error and the retry budget (mirroring the
+            // out-of-window path below).
+            st.retries = 0;
+            st.error = None;
+            self.shared.cv.notify_all();
+            return Ok(target);
+        }
+
+        // Out of window. The live session appends its pushes at THIS
+        // window's end, so it cannot serve a different region and must
+        // be superseded (older generations are dropped; the session
+        // thread closes it before the next opens). Before discarding
+        // the buffered bytes, park them in the retention slot — a seek
+        // back into recently buffered data then restores them with no
+        // network. Demuxers that scan forward past the media data and
+        // then re-seek to 0 (symphonia's isomp4 prologue) otherwise
+        // re-fetch the whole header region on every load.
+        let outgoing = bounded_span(
+            st.window_start,
+            std::mem::take(&mut st.window),
+            2 * st.readahead,
+        );
+        let incumbent = st.retained.take();
+        // A target inside the parked span swaps the two: the parked
+        // bytes become the window, the outgoing window gets parked.
+        // (The cursor that read the outgoing window forward may have
+        // pushed it past one readahead — the span is bounded to the
+        // same 2x cap the window's own eviction uses, so the prefix a
+        // prologue returns to survives the parking.)
+        let restore_hit = incumbent.as_ref().is_some_and(|(r_start, r_bytes)| {
+            target >= *r_start && target < *r_start + r_bytes.len() as u64
+        });
+        let (restore, parked) = if restore_hit {
+            (incumbent, outgoing)
+        } else {
+            // Keep whichever span is larger parked (the slot is single,
+            // and both candidates are already bounded).
+            let larger = match (incumbent, outgoing) {
+                (Some((s1, b1)), Some((s2, b2))) => {
+                    if b1.len() >= b2.len() {
+                        Some((s1, b1))
+                    } else {
+                        Some((s2, b2))
+                    }
+                }
+                (incumbent, outgoing) => incumbent.or(outgoing),
+            };
+            (None, larger)
+        };
+
+        if let Some((r_start, r_bytes)) = restore {
+            st.window = r_bytes;
+            st.window_start = r_start;
+            tracing::info!(
+                target,
+                window_start = r_start,
+                "buffered source: seek served from the retained window (no session opened)"
+            );
+        } else {
             st.window_start = target;
         }
+        st.retained = parked;
         st.pos = target;
         // Supersede in-flight work: older generations are dropped, and
         // the (now dead) live session is closed before the next opens.
@@ -430,6 +511,22 @@ impl Seek for BufferedSource {
         st.error = None;
         self.shared.cv.notify_all();
         Ok(target)
+    }
+}
+
+/// Bound a buffered span to `cap` bytes by dropping the oldest bytes;
+/// `None` for an empty span. Used to park abandoned windows in the
+/// retention slot (see [`BufferedSource`]'s `Seek` impl).
+fn bounded_span(start: u64, mut bytes: Vec<u8>, cap: usize) -> Option<(u64, Vec<u8>)> {
+    if bytes.is_empty() {
+        return None;
+    }
+    if bytes.len() > cap {
+        let drop = bytes.len() - cap;
+        bytes.drain(..drop);
+        Some((start + drop as u64, bytes))
+    } else {
+        Some((start, bytes))
     }
 }
 
@@ -600,6 +697,10 @@ fn decide(shared: &Arc<Shared>) -> Action {
 /// treating a panic as a failed session.
 fn open_session(shared: &Arc<Shared>, inner: &dyn RemoteAudioSource, offset: u64) {
     let session_gen = shared.st.lock().unwrap().session_gen;
+    // One line per HTTP range request — the key diagnostic for network
+    // playback issues (session churn shows up here immediately). Kept at
+    // INFO: steady state opens none, so this is low-frequency.
+    tracing::info!(offset, gen = session_gen, "buffered source: open session");
     let reply = StreamReply {
         shared: Arc::clone(shared),
         session_gen,
