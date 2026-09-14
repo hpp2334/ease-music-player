@@ -10,13 +10,24 @@
 //! On underflow (consumer empties faster than the producer fills), the
 //! callback writes silence rather than blocking — preferable to glitching
 //! the whole output subsystem or stalling the audio thread.
+//!
+//! ## Disconnect recovery
+//!
+//! cpal's hosts (AAudio included) never reopen a stream that the system
+//! disconnected — headphones unplugged, BT device change, an MMAP stream
+//! torn down when the screen goes off, internal errors. The data callback
+//! simply stops firing. The error callback here just flips the shared
+//! [`CpalSink`] `disconnected` flag; the worker-side methods (`write`,
+//! `resume`) poll it and reopen the stream (same negotiated config, fresh
+//! ring + clock) so playback continues on the new route. Without this the
+//! deck would show "playing" over dead silence until the next track load.
 
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use cpal::{
@@ -171,6 +182,15 @@ pub(crate) struct CpalSink {
     /// stream is open (see [`OutputClock`]).
     clock: Option<Arc<OutputClock>>,
     format: Option<AudioFormat>,
+    /// Set by the cpal error callback when the stream died (device
+    /// disconnect / teardown / internal error). Worker-side methods poll
+    /// it and reopen — see [`CpalSink::reopen_stream`].
+    disconnected: Arc<AtomicBool>,
+    /// The negotiated config captured at `start()`, replayed verbatim by
+    /// [`CpalSink::reopen_stream`]. The channel count must not drift on
+    /// reopen: the session's channel conversion pinned `device_channels`
+    /// at load.
+    supported: Option<SupportedStreamConfig>,
 }
 
 impl CpalSink {
@@ -194,6 +214,8 @@ impl CpalSink {
             flush_gen: Arc::new(AtomicU32::new(0)),
             clock: None,
             format: None,
+            disconnected: Arc::new(AtomicBool::new(false)),
+            supported: None,
         }
     }
 }
@@ -201,6 +223,87 @@ impl CpalSink {
 impl Default for CpalSink {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// How long one `write` call may spend reopening a disconnected stream
+/// before giving up (dropping that chunk; the next write retries). While
+/// blocked the worker parks — bounded, like the existing `MAX_STALL`
+/// backpressure cap — so transport commands still land within seconds.
+const RECONNECT_WINDOW: Duration = Duration::from_secs(5);
+
+/// Poll interval between reopen attempts inside [`RECONNECT_WINDOW`].
+const RECONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+
+impl CpalSink {
+    /// Reopen the device stream after the cpal error callback marked it
+    /// dead (headphones unplugged, BT device change, MMAP teardown,
+    /// internal error).
+    ///
+    /// The old ring — up to `buffer_secs` of decoded-but-unheard audio —
+    /// dies with the dead stream; the listener skips that span, the same
+    /// trade a stream restart in oboe makes. The next `write` anchors
+    /// the fresh [`OutputClock`], so position tracking resumes
+    /// seamlessly. The negotiated config captured at `start()` is
+    /// replayed verbatim (on a fresh default-device resolve — the sink
+    /// always targets the host default): the channel count must not
+    /// drift, or the session's pinned channel conversion would corrupt
+    /// the mix.
+    ///
+    /// `then_play`: the playing path needs the rebuilt stream started
+    /// immediately or its callback never drains the new ring; the resume
+    /// path defers to its own `play()`.
+    fn reopen_stream(&mut self, then_play: bool) -> crate::Result<()> {
+        let supported = self
+            .supported
+            .clone()
+            .ok_or_else(|| CantodeError::Sink("reopen: no captured config".into()))?;
+        let fmt = self
+            .format
+            .ok_or_else(|| CantodeError::Sink("reopen: no format".into()))?;
+
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .ok_or(CantodeError::NoOutputDevice)?;
+
+        // Drop the dead stream FIRST — closing it releases the old device
+        // route and joins the (already-stopped) callback thread.
+        self.stream = None;
+        self.producer = None;
+        self.clock = None;
+
+        let stream_config = supported.config();
+        let cap_samples = (((self.buffer_secs * stream_config.sample_rate as f32) as usize)
+            * stream_config.channels as usize)
+            .next_power_of_two()
+            .max(1024);
+        let rb = HeapRb::<f32>::new(cap_samples);
+        let (producer, consumer) = rb.split();
+        let clock = Arc::new(OutputClock::new(
+            stream_config.sample_rate as u64 * stream_config.channels as u64,
+        ));
+        let stream = build_stream_for(
+            &device,
+            &supported,
+            consumer,
+            self.volume.clone(),
+            self.flush_gen.clone(),
+            self.disconnected.clone(),
+            clock.clone(),
+        )?;
+        if then_play {
+            stream
+                .play()
+                .map_err(|e| CantodeError::Sink(format!("start reopened stream: {e}")))?;
+        }
+        self.stream = Some(stream);
+        self.producer = Some(producer);
+        self.clock = Some(clock);
+        self.format = Some(fmt);
+        // Fresh clock — anchor history from the dead timeline is void.
+        self.last_anchor_ts = None;
+        Ok(())
     }
 }
 
@@ -235,98 +338,22 @@ impl AudioSink for CpalSink {
         let clock = Arc::new(OutputClock::new(
             actual.sample_rate as u64 * actual.channels as u64,
         ));
-        let stream = match supported.sample_format() {
-            cpal::SampleFormat::F32 => build_stream::<f32>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::I16 => build_stream::<i16>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::U16 => build_stream::<u16>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::F64 => build_stream::<f64>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::I32 => build_stream::<i32>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::U32 => build_stream::<u32>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::I8 => build_stream::<i8>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::U8 => build_stream::<u8>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::I64 => build_stream::<i64>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            cpal::SampleFormat::U64 => build_stream::<u64>(
-                &device,
-                &stream_config,
-                consumer,
-                volume,
-                flush_gen,
-                clock.clone(),
-            )?,
-            other => {
-                return Err(CantodeError::StreamConfig(format!(
-                    "unsupported sample format: {other:?}"
-                )));
-            }
-        };
+        let stream = build_stream_for(
+            &device,
+            &supported,
+            consumer,
+            volume,
+            flush_gen,
+            self.disconnected.clone(),
+            clock.clone(),
+        )?;
 
         self.stream = Some(stream);
         self.producer = Some(producer);
         self.clock = Some(clock);
         self.format = Some(actual);
+        self.supported = Some(supported);
+        self.disconnected.store(false, Ordering::Release);
         Ok(actual)
     }
 
@@ -335,10 +362,51 @@ impl AudioSink for CpalSink {
         self.producer = None;
         self.clock = None;
         self.format = None;
+        self.supported = None;
+        self.disconnected.store(false, Ordering::Release);
         Ok(())
     }
 
     fn write(&mut self, frames: &[f32], start_ts: Duration) -> crate::Result<()> {
+        // Disconnect recovery: the cpal error callback marked the stream
+        // dead (device change, teardown, internal error). cpal never
+        // reopens on its own — without this the callback thread is gone
+        // for good, the ring fills, and the deck shows "playing" over
+        // silence until the next track load. Retry inside a bounded
+        // window; on persistent failure drop this chunk and let the next
+        // write retry — one chunk per window keeps decode pinned near
+        // realtime, so the position cannot run away from the (silent)
+        // output during a long outage.
+        // Guard on the captured config, not on `producer`: a failed
+        // reopen attempt clears the ring/producer, and recovery must
+        // still retry on subsequent writes.
+        if self.supported.is_some() && self.disconnected.load(Ordering::Acquire) {
+            let began = Instant::now();
+            loop {
+                match self.reopen_stream(true) {
+                    Ok(()) => {
+                        self.disconnected.store(false, Ordering::Release);
+                        tracing::warn!(
+                            waited_ms = began.elapsed().as_millis() as u64,
+                            "cpal sink: output stream reopened after disconnect"
+                        );
+                        break;
+                    }
+                    Err(e) => {
+                        if began.elapsed() >= RECONNECT_WINDOW {
+                            tracing::warn!(
+                                error = %e,
+                                waited_ms = began.elapsed().as_millis() as u64,
+                                "cpal sink: reopen failed within window; dropping chunk, will retry"
+                            );
+                            return Ok(());
+                        }
+                        std::thread::sleep(RECONNECT_RETRY_INTERVAL);
+                    }
+                }
+            }
+        }
+
         let Some(producer) = self.producer.as_mut() else {
             // Pre-start writes are silently discarded; callers don't need
             // to special-case initial buffering.
@@ -456,6 +524,18 @@ impl AudioSink for CpalSink {
     }
 
     fn resume(&mut self) -> crate::Result<()> {
+        // A disconnect that landed while paused: reopen first so play
+        // resumes on a live stream. Single attempt — if it fails the
+        // error propagates (same as a failed play() below) and the
+        // playing-path write retries with backoff. Guard on the captured
+        // config (a failed earlier attempt may have cleared the ring).
+        if self.supported.is_some()
+            && self.disconnected.load(Ordering::Acquire)
+            && self.reopen_stream(false).is_ok()
+        {
+            self.disconnected.store(false, Ordering::Release);
+            tracing::warn!("cpal sink: output stream reopened before resume");
+        }
         if let Some(s) = self.stream.as_ref() {
             s.play()
                 .map_err(|e| CantodeError::Sink(format!("resume stream: {e}")))?;
@@ -550,7 +630,59 @@ fn pick_supported_config(
         .map_err(|e| CantodeError::StreamConfig(format!("default output config: {e}")))
 }
 
-/// Build a cpal output stream of the given device sample type `T`.
+/// Dispatch on the negotiated config's sample format and build the
+/// stream via [`build_stream`]. Shared by [`CpalSink::start`] (fresh
+/// open) and [`CpalSink::reopen_stream`] (post-disconnect rebuild) so
+/// both produce identical wiring.
+fn build_stream_for(
+    device: &cpal::Device,
+    supported: &SupportedStreamConfig,
+    consumer: HeapCons<f32>,
+    volume: Arc<AtomicU32>,
+    flush_gen: Arc<AtomicU32>,
+    disconnected: Arc<AtomicBool>,
+    clock: Arc<OutputClock>,
+) -> crate::Result<Stream> {
+    let stream_config = supported.config();
+    match supported.sample_format() {
+        cpal::SampleFormat::F32 => build_stream::<f32>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::I16 => build_stream::<i16>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::U16 => build_stream::<u16>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::F64 => build_stream::<f64>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::I32 => build_stream::<i32>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::U32 => build_stream::<u32>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::I8 => build_stream::<i8>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::U8 => build_stream::<u8>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::I64 => build_stream::<i64>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        cpal::SampleFormat::U64 => build_stream::<u64>(
+            device, &stream_config, consumer, volume, flush_gen, disconnected, clock,
+        ),
+        other => Err(CantodeError::StreamConfig(format!(
+            "unsupported sample format: {other:?}"
+        ))),
+    }
+}
+
+/// Build a cpal output stream for the given device and negotiated
+/// config, dispatching on the config's sample type `T`.
 ///
 /// The callback drains the ring buffer's consumer into `out`, applying the
 /// current volume (read atomically) and converting f32 → `T` via
@@ -562,19 +694,29 @@ fn pick_supported_config(
 /// `flush_gen` is a generation counter shared with [`CpalSink::flush`]. When
 /// the worker bumps it, the callback drains-and-discards the entire ring
 /// buffer on its next invocation before producing output.
+///
+/// `disconnected` is set by the error callback below — cpal's hosts never
+/// reopen a dead stream themselves, so [`CpalSink`] polls the flag from its
+/// worker-side methods and reopens. Any error is treated as fatal for the
+/// stream (the oboe guidance: stop, close, reopen — regardless of code).
 fn build_stream<T>(
     device: &cpal::Device,
     config: &StreamConfig,
     consumer: HeapCons<f32>,
     volume: Arc<AtomicU32>,
     flush_gen: Arc<AtomicU32>,
+    disconnected: Arc<AtomicBool>,
     clock: Arc<OutputClock>,
 ) -> crate::Result<Stream>
 where
     T: SizedSample + cpal::FromSample<f32> + Send + 'static,
 {
     let mut consumer = consumer;
-    let err_fn = |err: cpal::StreamError| tracing::error!("cpal stream error: {err}");
+    let err_disconnected = Arc::clone(&disconnected);
+    let err_fn = move |err: cpal::StreamError| {
+        tracing::error!("cpal stream error: {err} — marked for reopen");
+        err_disconnected.store(true, Ordering::Release);
+    };
 
     // Last flush_gen value observed by the callback. When the worker-side
     // counter changes, the callback discards the entire buffer once. We
