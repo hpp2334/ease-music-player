@@ -51,6 +51,23 @@
       "apiVersion": 1
     },
     {
+      "id": "com.ease.s3",
+      "name": {
+        "en-US": "S3",
+        "zh-CN": "S3"
+      },
+      "version": "0.1.1",
+      "apiVersion": 1,
+      "description": {
+        "en-US": "Amazon S3 / S3-compatible object storage provider (ListObjectsV2 directory listing + SigV4 signed byte-range download; works with AWS S3, Cloudflare R2, MinIO, B2, ...) implemented as a headless JS plugin.",
+        "zh-CN": "S3 / 兼容 S3 的对象存储插件（ListObjectsV2 目录列表 + SigV4 签名区间下载；支持 AWS S3、Cloudflare R2、MinIO、B2 等）。"
+      },
+      "zip": "zips/com.ease.s3-0.1.1.zip",
+      "sha256": "613544554276af047173a9947409a140620a9db9f00755d14561e337a1ac095d",
+      "size": 371986,
+      "icon": "icons/com.ease.s3.png"
+    },
+    {
       "id": "com.ease.webdav",
       "name": {
         "en-US": "WebDAV",
