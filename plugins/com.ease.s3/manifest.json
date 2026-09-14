@@ -1,0 +1,27 @@
+{
+  "id": "com.ease.s3",
+  "name": { "en-US": "S3", "zh-CN": "S3" },
+  "version": "0.1.1",
+  "apiVersion": 1,
+  "description": {
+    "en-US": "Amazon S3 / S3-compatible object storage provider (ListObjectsV2 directory listing + SigV4 signed byte-range download; works with AWS S3, Cloudflare R2, MinIO, B2, ...) implemented as a headless JS plugin.",
+    "zh-CN": "S3 / 兼容 S3 的对象存储插件（ListObjectsV2 目录列表 + SigV4 签名区间下载；支持 AWS S3、Cloudflare R2、MinIO、B2 等）。"
+  },
+  "author": "ease",
+  "icon": "icon.png",
+  "backend": "backend.js",
+  "events": [],
+  "contributions": {
+    "storages": [
+      {
+        "id": "s3",
+        "title": { "en-US": "S3", "zh-CN": "S3" },
+        "desc": {
+          "en-US": "Connect to Amazon S3 or any S3-compatible storage (R2, MinIO, ...)",
+          "zh-CN": "连接 Amazon S3 或任意兼容 S3 的对象存储（R2、MinIO 等）"
+        },
+        "view": "view.js"
+      }
+    ]
+  }
+}
