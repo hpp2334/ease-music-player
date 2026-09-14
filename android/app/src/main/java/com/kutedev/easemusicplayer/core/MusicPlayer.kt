@@ -13,6 +13,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -71,6 +72,7 @@ class PlaybackService : android.app.Service() {
     private var notificationManager: NotificationManager? = null
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     @Volatile private var lastMusic: Music? = null
     @Volatile private var lastPlaylist: Playlist? = null
@@ -130,6 +132,7 @@ class PlaybackService : android.app.Service() {
         serviceScope.cancel()
         unregisterBecomingNoisy()
         abandonAudioFocus()
+        releaseWakeLock()
         mediaSession?.run {
             isActive = false
             release()
@@ -211,6 +214,9 @@ class PlaybackService : android.app.Service() {
         serviceScope.launch {
             while (true) {
                 updateSessionState()
+                // Keep the wake lock decision fresh even if a state
+                // collector was missed (bounded-acquire re-arm).
+                ensureWakeLock()
                 delay(POSITION_TICK_INTERVAL_MS)
             }
         }
@@ -219,6 +225,51 @@ class PlaybackService : android.app.Service() {
     private fun onPlayStateChanged() {
         if (lastPlaying) {
             registerBecomingNoisy()
+        }
+        ensureWakeLock()
+    }
+
+    // ----- wake lock -----
+
+    /**
+     * Hold a partial wake lock while a track is loaded and playback is
+     * active (`playing` **or** loading/buffering). Decode and network
+     * readahead run on ordinary Rust/tokio threads — without a wake lock
+     * the CPU can suspend once the screen goes off, the sink ring drains,
+     * and playback silently dies (the network refill stalls too, so
+     * `Buffering` never resolves until the screen comes back).
+     *
+     * The lock also covers the loading/buffering window on purpose: a
+     * screen-off readahead refill needs the CPU just as much as decode.
+     *
+     * Re-evaluated on every state change and on the position ticker
+     * (self-healing), with a bounded acquire timeout as leak insurance:
+     * if a release is ever missed, the ticker re-arms it on the next
+     * tick while playback is still active.
+     */
+    private fun ensureWakeLock() {
+        val shouldHold = lastMusic != null && (lastPlaying || lastLoading)
+        if (shouldHold) {
+            val lock = wakeLock ?: getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
+                .apply {
+                    setReferenceCounted(false)
+                    wakeLock = this
+                }
+            if (!lock.isHeld) {
+                lock.acquire(WAKE_LOCK_TIMEOUT_MS)
+                bridge.logRaw("info", "playback wake lock acquired")
+            }
+        } else {
+            releaseWakeLock()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        val lock = wakeLock ?: return
+        if (lock.isHeld) {
+            lock.release()
+            bridge.logRaw("info", "playback wake lock released")
         }
     }
 
@@ -229,6 +280,7 @@ class PlaybackService : android.app.Service() {
      */
     private fun refreshForeground() {
         updateSessionState()
+        ensureWakeLock()
         val notification = buildNotification()
         if (lastMusic != null) {
             // First time we promote to foreground for this service lifetime:
@@ -476,6 +528,10 @@ class PlaybackService : android.app.Service() {
         private const val NOTIFICATION_ID = 1
         private const val NOTIFICATION_CHANNEL_ID = "EaseMusicPlaybackChannel"
         private const val POSITION_TICK_INTERVAL_MS = 500L
+        private const val WAKE_LOCK_TAG = "ease:playback"
+
+        /** Leak insurance: re-armed by the position ticker while playing. */
+        private const val WAKE_LOCK_TIMEOUT_MS = 60L * 60L * 1000L
 
         /**
          * Convenience for starting the service from
