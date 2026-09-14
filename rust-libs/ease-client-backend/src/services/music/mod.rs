@@ -201,10 +201,74 @@ pub struct ArgUpdateMusicCover {
     pub id: MusicId,
     pub cover: Vec<u8>,
 }
+
+/// Largest cover blob accepted at write time. Covers ride in full over
+/// the bridge buffer channel and are decoded on the UI thread; multi-MB
+/// artwork is pathological (and the usual cause of decode OOMs).
+const MAX_COVER_BYTES: usize = 4 * 1024 * 1024;
+
+/// Pure gate used by [`update_music_cover`]: `Err(reason)` for bytes that
+/// cannot be a raster image. Keep this the single choke point — import
+/// probes, `music.updateCover` and the player loadMusic writeback all
+/// land here, so a rejected cover simply never enters the DB and
+/// `Music.cover` / `has_cover` keep meaning "a cover that will render".
+fn validate_cover_bytes(cover: &[u8]) -> Result<(), &'static str> {
+    if cover.len() > MAX_COVER_BYTES {
+        return Err("too large");
+    }
+    if !sniffs_as_image(cover) {
+        return Err("unrecognized image data");
+    }
+    Ok(())
+}
+
+/// Magic-number sniff — deliberately cheap and dependency-free. WebP /
+/// HEIC / AVIF acceptance is a container check only; whether the device
+/// actually decodes it stays BitmapFactory's call, and the Kotlin side
+/// treats a failed decode as terminal (default art + warn log).
+fn sniffs_as_image(buf: &[u8]) -> bool {
+    const PNG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    if buf.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return true; // JPEG
+    }
+    if buf.starts_with(&PNG) {
+        return true;
+    }
+    if buf.starts_with(b"GIF87a") || buf.starts_with(b"GIF89a") {
+        return true;
+    }
+    if buf.starts_with(b"BM") && buf.len() >= 14 {
+        return true; // BMP (BITMAPFILEHEADER alone is 14 bytes)
+    }
+    if buf.len() >= 12 && &buf[0..4] == b"RIFF" && &buf[8..12] == b"WEBP" {
+        return true;
+    }
+    // ISO-BMFF containers: "ftyp" box at 0, major brand at 8.
+    if buf.len() >= 12 && &buf[4..8] == b"ftyp" {
+        return matches!(
+            &buf[8..12],
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"avif" | b"mif1" | b"msf1"
+        );
+    }
+    false
+}
+
 pub(crate) async fn update_music_cover(
     cx: &BackendContext,
     arg: ArgUpdateMusicCover,
 ) -> BResult<()> {
+    // Best-effort by contract: a non-image (e.g. an ID3v2 APIC link entry
+    // carrying a URL string, or an HTML error page mis-saved as art) is
+    // dropped with a warn instead of poisoning the DB with bytes no
+    // client can decode.
+    if let Err(reason) = validate_cover_bytes(&arg.cover) {
+        tracing::warn!(
+            "rejected cover for music {:?}: {} bytes ({reason})",
+            arg.id,
+            arg.cover.len()
+        );
+        return Ok(());
+    }
     cx.database_server()
         .update_music_cover(arg.id, arg.cover.clone())
         .await?;
@@ -631,6 +695,110 @@ mod tests {
         );
         // Removed lyric (default cleared, no loc) resolves to nothing.
         assert!(resolve_lyric_locs(&music_model(None, false), &exts(&["lrc"])).is_empty());
+    }
+
+    // -- cover validation (see validate_cover_bytes / sniffs_as_image) ----
+
+    fn png_magic() -> Vec<u8> {
+        let mut v = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        v.extend_from_slice(&[0, 0, 0, 13, b'I', b'H', b'D', b'R']);
+        v
+    }
+
+    #[test]
+    fn cover_sniff_accepts_common_rasters() {
+        assert!(sniffs_as_image(&[0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3])); // JPEG
+        assert!(sniffs_as_image(&png_magic())); // PNG
+        assert!(sniffs_as_image(b"GIF89a......")); // GIF
+        assert!(sniffs_as_image(b"GIF87a......"));
+        let mut webp = b"RIFF\x00\x00\x00\x00WEBPVP8 ".to_vec();
+        webp.extend_from_slice(&[0; 8]);
+        assert!(sniffs_as_image(&webp));
+        let mut bmp = b"BM".to_vec();
+        bmp.extend_from_slice(&[0; 12]);
+        assert!(sniffs_as_image(&bmp));
+        let mut heic = b"\x00\x00\x00\x18ftypheic".to_vec();
+        heic.extend_from_slice(&[0; 8]);
+        assert!(sniffs_as_image(&heic));
+        let mut avif = b"\x00\x00\x00\x18ftypavif".to_vec();
+        avif.extend_from_slice(&[0; 8]);
+        assert!(sniffs_as_image(&avif));
+    }
+
+    #[test]
+    fn cover_sniff_rejects_real_world_garbage() {
+        // An ID3v2 APIC of picture type "linked" carries a URL string,
+        // not pixels — symphonia hands it over verbatim.
+        assert!(!sniffs_as_image(b"--> https://example.com/art.jpg"));
+        // An HTML error page mis-served as art by a WebDAV server.
+        assert!(!sniffs_as_image(
+            b"<!DOCTYPE html><html><head><title>404</title></head></html>"
+        ));
+        assert!(!sniffs_as_image(b""));
+        // Truncated magics.
+        assert!(!sniffs_as_image(&[0xFF, 0xD8])); // JPEG preamble only
+        assert!(!sniffs_as_image(&png_magic()[..4]));
+        assert!(!sniffs_as_image(b"RIFF????WAVE")); // RIFF, not WEBP
+        assert!(!sniffs_as_image(b"\x00\x00\x00\x18ftypisomxxxx")); // plain mp4
+    }
+
+    #[test]
+    fn cover_validation_enforces_size_cap() {
+        assert_eq!(validate_cover_bytes(&png_magic()), Ok(()));
+        let big = vec![0u8; MAX_COVER_BYTES + 1];
+        assert_eq!(validate_cover_bytes(&big), Err("too large"));
+        assert_eq!(
+            validate_cover_bytes(b"--> https://example.com/art.jpg"),
+            Err("unrecognized image data")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_music_cover_rejects_non_image_at_the_choke_point() {
+        use crate::repositories::music::ArgDBAddMusic;
+        use ease_order_key::OrderKey;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cx = BackendContext::new();
+        cx.database_server()
+            .init(dir.path().to_str().unwrap().to_string())
+            .await
+            .unwrap();
+        let (id, _) = cx
+            .database_server()
+            .add_music_impl(
+                ArgDBAddMusic {
+                    loc: StorageEntryLoc {
+                        storage_id: StorageId::wrap(1),
+                        path: "/Music/song.mp3".to_string(),
+                    },
+                    title: "song".to_string(),
+                    lyric: None,
+                },
+                OrderKey::default(),
+            )
+            .await
+            .unwrap();
+
+        // Garbage: best-effort Ok, but nothing written.
+        update_music_cover(
+            &cx,
+            ArgUpdateMusicCover {
+                id,
+                cover: b"--> https://example.com/art.jpg".to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+        let m = cx.database_server().load_music(id).await.unwrap().unwrap();
+        assert!(m.cover.is_none(), "a non-image cover must not be stored");
+
+        // A real raster passes and lands in the DB.
+        update_music_cover(&cx, ArgUpdateMusicCover { id, cover: png_magic() })
+            .await
+            .unwrap();
+        let m = cx.database_server().load_music(id).await.unwrap().unwrap();
+        assert!(m.cover.is_some(), "a sniffable cover must be stored");
     }
 }
 

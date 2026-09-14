@@ -2,6 +2,7 @@ package com.kutedev.easemusicplayer.viewmodels
 
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.ViewModel
+import com.kutedev.easemusicplayer.singleton.AssetBitmap
 import com.kutedev.easemusicplayer.singleton.AssetRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
@@ -16,7 +17,7 @@ class AssetVM @Inject constructor(
     suspend fun load(key: DataSourceKey): ByteArray? {
         return assetRepository.load(key)
     }
-    suspend fun loadBitmap(key: DataSourceKey): ImageBitmap? {
+    suspend fun loadAsset(key: DataSourceKey): AssetBitmap {
         return assetRepository.loadBitmap(key)
     }
     fun get(key: DataSourceKey): ByteArray? {
@@ -24,5 +25,8 @@ class AssetVM @Inject constructor(
     }
     fun getBitmap(key: DataSourceKey): ImageBitmap? {
         return assetRepository.getBitmap(key)
+    }
+    fun getCachedAsset(key: DataSourceKey): AssetBitmap? {
+        return assetRepository.getCachedAsset(key)
     }
 }
