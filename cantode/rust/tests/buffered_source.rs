@@ -17,7 +17,8 @@
 //!   with no network (the isomp4-prologue shape); rapid scrub leaves
 //!   only the final session serving; temporal `len()` and seek-from-end
 //!   rejection while unknown; lying-EOF retry; retry budget → sticky
-//!   error → seek recovery; watchdog reopen; over-delivery rejection;
+//!   error → seek recovery; delivered progress resetting the budget;
+//!   watchdog reopen; over-delivery rejection;
 //!   inline (synchronous) delivery from inside `request`; `Drop` closes.
 //! - **B/O** (device-free player): play-through bit-exactness with
 //!   exactly one session; the phantom-`Ended` fix (a premature close of
@@ -969,6 +970,57 @@ fn watchdog_exhausts_to_sticky_error() {
         "a permanently stalled source must surface a read error"
     );
     let _ = h; // gate deliberately never released
+}
+
+#[test]
+fn delivered_progress_resets_the_retry_budget() {
+    // The progress reward, discriminated: two watchdog strikes first
+    // (gated delivery, nothing accepted), then a good spell streaming
+    // ≥ 1 MiB on the recovered session, then an armed failure storm.
+    // The storm must get the FULL budget — the live session's strike
+    // plus three reopen strikes before sticky — instead of inheriting
+    // the earlier strikes (which would stick almost immediately).
+    let data = pattern(2 * 1024 * 1024, |i| (i * 7) as u8);
+    let (fake, h) = fake(Arc::clone(&data)).gate_at(0).finish();
+    let mut src =
+        BufferedSource::with_readahead(64 * 1024, fake).watchdog(Duration::from_millis(150));
+
+    // Strikes: the construction session and its watchdog reopens park on
+    // the gate. Open #1 = construction; #2/#3 = watchdog reopens ⇒ two
+    // strikes banked before the good spell.
+    assert!(
+        h.log.wait_for_opens(3),
+        "the watchdog must reopen twice: {:?}",
+        h.opens()
+    );
+    h.release_gate();
+
+    // The recovered session streams past the reward threshold.
+    let want = 1024 * 1024 + 64 * 1024;
+    let got = read_n(&mut src, want).unwrap();
+    assert_eq!(got, data[..want], "the recovered stream must be exact");
+    let opens_after_reward = h.opens().len();
+
+    // Arm failures at the fake's cursor and drain the window: opens
+    // repeat at the window end until the budget dies.
+    let fail_at = h.st.lock().unwrap().cursor;
+    h.st.lock().unwrap().fail_from = Some(fail_at);
+    let sticky = wait_until(Duration::from_secs(3), || {
+        src.read(&mut [0u8; 4096]).is_err()
+    });
+    assert!(sticky, "the failure storm must end sticky");
+
+    let storm_opens = h.opens().len() - opens_after_reward;
+    // The storm's FIRST strike is invisible in the open log: it fails a
+    // `request` on the live session (no new open). A rewarded budget
+    // therefore logs three opens (reopens at the window end: strikes
+    // 2, 3, sticky on 4); a budget still carrying the two pre-reward
+    // strikes would log exactly one before going sticky.
+    assert!(
+        storm_opens >= 3,
+        "a rewarded budget must survive three reopen strikes after the live-session strike, got {storm_opens}: {:?}",
+        h.opens()
+    );
 }
 
 #[test]

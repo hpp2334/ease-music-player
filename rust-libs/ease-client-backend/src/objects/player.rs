@@ -216,6 +216,19 @@ async fn forward_chunks(
     }
 }
 
+/// Read-timeout policy for network playback, owned here: cantode's
+/// no-progress watchdog (a live session with outstanding demand that
+/// delivers nothing for this long is closed and the range retried)
+/// doubles as the read timeout, because the HTTP layer deliberately
+/// has none — a *total* timeout would kill long-lived bodies, and
+/// progress-based detection honors TCP backpressure. 10 s bounds the
+/// reconnect latency a user sees once the buffer is drained (a dead
+/// socket mid-play is invisible while the 4 MiB window still holds
+/// audio). Retries stay bounded by cantode's budget, which a session
+/// resets after delivering ~1 MiB (see cantode's
+/// `RETRY_RESET_PROGRESS_BYTES`).
+const NETWORK_SESSION_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Build the byte source for a music asset: a [`BufferedSource`] (the
 /// cantode-owned windowed source) over an [`AssetRemoteAudio`] session
 /// provider.
@@ -225,6 +238,7 @@ pub(crate) fn remote_music_source(cx: Arc<BackendContext>, key: DataSourceKey) -
         key,
         cur: Mutex::new(None),
     }))
+    .watchdog(NETWORK_SESSION_WATCHDOG)
 }
 
 // ============================================================================
