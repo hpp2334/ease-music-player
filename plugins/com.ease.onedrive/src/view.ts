@@ -112,7 +112,8 @@ function AliasField() {
                 .placeholder("OneDrive")
                 .fontSize(15)
                 .color(COLOR_TEXT)
-                .placeholderColor(COLOR_TEXT_MUTED)
+                // No explicit `placeholderColor`: the engine default derives
+                // it from the text color at 50% alpha (tur #230).
                 .cursorColor(COLOR_PRIMARY)
                 .build(),
         ])

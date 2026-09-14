@@ -19,10 +19,10 @@ anyhow = { workspace = true }
 
 # See `ease-client-backend/Cargo.toml` for the tur engine pin notes
 # (JS API contract, tokio-free core, dedup against tur-net-native).
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "dfa218f91638fe66bdefe52e322d9d431567a2a6" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "dfa218f91638fe66bdefe52e322d9d431567a2a6" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "dfa218f91638fe66bdefe52e322d9d431567a2a6" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "dfa218f91638fe66bdefe52e322d9d431567a2a6" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "a9139c7332148d634ebb377a39ff3b7d2b557fcc" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "a9139c7332148d634ebb377a39ff3b7d2b557fcc" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "a9139c7332148d634ebb377a39ff3b7d2b557fcc" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "a9139c7332148d634ebb377a39ff3b7d2b557fcc" }
 
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
