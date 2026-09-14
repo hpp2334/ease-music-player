@@ -148,7 +148,8 @@ private fun PlaylistHeader(
                     modifier = Modifier
                         .fillMaxSize(),
                     dataSourceKey = cover,
-                    contentScale = ContentScale.FillWidth
+                    contentScale = ContentScale.FillWidth,
+                    fallback = painterResource(id = R.drawable.cover_default_playlist_image),
                 )
                 Box(
                     modifier = Modifier
