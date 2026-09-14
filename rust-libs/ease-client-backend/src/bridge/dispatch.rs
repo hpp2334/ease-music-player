@@ -126,6 +126,7 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let args: Args = serde_json::from_value(req.args)?;
             match args.level.as_str() {
                 "error" => tracing::error!("{}", args.message),
+                "warn" | "warning" => tracing::warn!("{}", args.message),
                 _ => tracing::info!("{}", args.message),
             }
             Ok((Value::Null, vec![]))
