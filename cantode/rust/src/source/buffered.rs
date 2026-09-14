@@ -46,6 +46,12 @@
 //!   that lands short of a reported [`StreamReply::set_total_len`] is
 //!   treated as a failed session and retried — a dropped connection no
 //!   longer masquerades as the end of the stream.
+//! - **Retries are bounded, but delivery forgives.** Failures (errors,
+//!   lying EOFs, stalls) count against a small budget; exhausting it
+//!   makes reads fail until the next seek. A session that has provably
+//!   delivered [`RETRY_RESET_PROGRESS_BYTES`] of media resets the
+//!   budget, so a long track on a flaky network never accumulates its
+//!   way into a sticky error.
 //! - **Seeks cancel in-flight work — only when they leave the window.**
 //!   A seek landing inside the window is a cursor move with no network
 //!   at all: the live session keeps streaming, and a backward seek
@@ -78,8 +84,19 @@ use super::{AudioSource, BufferedRange, Readiness};
 const DEFAULT_READAHEAD_BYTES: usize = 4 * 1024 * 1024;
 
 /// Additional session attempts after a failure (error, lying EOF, stall)
-/// before the source goes sticky-error. The next seek resets the budget.
+/// before the source goes sticky-error. The next seek resets the budget —
+/// and so does a session that has provably delivered media (see
+/// [`RETRY_RESET_PROGRESS_BYTES`]).
 const MAX_SESSION_RETRIES: u32 = 3;
+
+/// Progress reward: accepted bytes a session epoch must deliver to reset
+/// the retry budget. A connection that provably moved a megabyte of media
+/// shouldn't inherit a dead predecessor's strikes, and a long track on a
+/// flaky network must not accumulate its way into a sticky error over
+/// hours. Immediate-failure storms (nothing delivered) still exhaust the
+/// budget exactly as before. Roughly 6–30 s of compressed audio
+/// depending on bitrate.
+const RETRY_RESET_PROGRESS_BYTES: usize = 1024 * 1024;
 
 /// Default no-progress watchdog: a live session with outstanding demand
 /// that delivers nothing for this long is considered hung — it is closed
@@ -241,6 +258,13 @@ struct Inner {
     last_progress: Instant,
     /// Failures since the last seek.
     retries: u32,
+    /// Session epoch the progress accumulator belongs to; lags one
+    /// generation behind a bump so [`StreamReply::push`] can detect the
+    /// epoch change (every generation bump starts a fresh accumulator).
+    progress_gen: u64,
+    /// Accepted bytes delivered by the current session epoch, for the
+    /// progress reward (see [`RETRY_RESET_PROGRESS_BYTES`]).
+    epoch_accepted: usize,
     /// Sticky failure after the retry budget is exhausted; cleared by the
     /// next seek.
     error: Option<String>,
@@ -288,6 +312,8 @@ impl BufferedSource {
                 outstanding: 0,
                 last_progress: Instant::now(),
                 retries: 0,
+                progress_gen: 0,
+                epoch_accepted: 0,
                 error: None,
                 shutdown: false,
                 read_deadline: None,
@@ -804,6 +830,19 @@ impl StreamReply {
             st.window.extend_from_slice(&bytes[..n]);
             st.outstanding = st.outstanding.saturating_sub(n);
             st.last_progress = Instant::now();
+            // Progress reward: attribute the delivery to the current
+            // session epoch (a generation bump starts a fresh
+            // accumulator), and once the epoch has provably delivered
+            // this much media, wipe the retry slate.
+            if st.progress_gen != st.session_gen {
+                st.progress_gen = st.session_gen;
+                st.epoch_accepted = 0;
+            }
+            st.epoch_accepted += n;
+            if st.epoch_accepted >= RETRY_RESET_PROGRESS_BYTES {
+                st.epoch_accepted = 0;
+                st.retries = 0;
+            }
             self.shared.cv.notify_all();
         }
         Pushed::Accepted(n)
