@@ -42,7 +42,12 @@ class KeepBackendService : Service() {
             .setOngoing(true)
             .build();
 
-        startForeground(1, notification)
+        // Own notification id — PlaybackService uses 1. Sharing one id
+        // made the two foreground services fight over (and tear down)
+        // each other's notification: whichever posted last replaced the
+        // other's binding, and a stopForeground on one could remove the
+        // other's notification entirely.
+        startForeground(BACKEND_NOTIFICATION_ID, notification)
 
         bridge.initialize()
         bridge.logRaw("info", "KeepBackendService started")
@@ -112,5 +117,8 @@ class KeepBackendService : Service() {
 
     private companion object {
         private const val TAG = "KeepBackendService"
+
+        /** Distinct from PlaybackService's NOTIFICATION_ID = 1. */
+        private const val BACKEND_NOTIFICATION_ID = 2
     }
 }

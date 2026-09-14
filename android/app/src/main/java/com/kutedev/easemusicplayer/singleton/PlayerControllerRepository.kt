@@ -327,9 +327,25 @@ class PlayerControllerRepository @Inject constructor(
                     playerRepository.updateMusicExtractedMeta(id, extracted)
                     playlistRepository.scheduleReload()
                 }
+            } else if (music == null || playlist == null) {
+                // Fetch FAILURE (backend busy / restarting / handle
+                // invalidated), not proof the music is gone. Resetting
+                // here is the "miniplayer disappears + playing page goes
+                // empty" failure mode: this path runs on unattended
+                // auto-advance too, e.g. while the screen is off. Keep
+                // the current track's UI, surface the failure, and let
+                // the user retry. The engine was already stopped above,
+                // so nothing sounds — but the deck stays readable.
+                bridge.logRaw(
+                    "error",
+                    "play($id): music/playlist fetch failed; keeping current state",
+                )
+                playerRepository.setIsLoading(false)
+                toastRepository.emitToast("play failed")
             } else {
-                // Music/playlist gone: reset the UI and the loading flag —
-                // the engine was already stopped above; nothing to load.
+                // Music/playlist really gone (removed meanwhile): reset
+                // the UI and the loading flag — the engine was already
+                // stopped above; nothing to load.
                 playerRepository.setIsLoading(false)
                 playerRepository.resetCurrent()
             }
