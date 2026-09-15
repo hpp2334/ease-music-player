@@ -170,7 +170,12 @@ class PlayerControllerRepository @Inject constructor(
                 // Engine truth → app state: the state mapping is app
                 // policy, so it lives here, not inside cantode.
                 _scope.launch {
+                    var last: PlayerState? = null
                     engine.state.collect { st ->
+                        if (last != null && last != st) {
+                            bridge.logRaw("info", "engine state: $last → $st")
+                        }
+                        last = st
                         playerRepository.setIsPlaying(st == PlayerState.PLAYING)
                     }
                 }
@@ -240,6 +245,7 @@ class PlayerControllerRepository @Inject constructor(
 
     fun play(id: MusicId, playlistId: PlaylistId, autoAdvance: Boolean = false, attempt: Int = 0) {
         val generation = ++playGeneration
+        bridge.logRaw("info", "play(${id.value}): start (autoAdvance=$autoAdvance attempt=$attempt)")
         if (playerId < 0) {
             bridge.logRaw("error", "play: cantode player not ready"); return
         }
@@ -254,6 +260,7 @@ class PlayerControllerRepository @Inject constructor(
         val ended = engine.state.value == PlayerState.ENDED
         val errorState = engine.state.value == PlayerState.ERROR
         if (!ended && !errorState && _music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
+            bridge.logRaw("info", "play(${id.value}): same track → resume")
             resume(); return
         }
 
@@ -324,6 +331,10 @@ class PlayerControllerRepository @Inject constructor(
                     // flag / BUFFERING spinner forever. Nothing is playing:
                     // reset the state and surface a visible failure.
                     playerRepository.setIsLoading(false)
+                    bridge.logRaw(
+                        "error",
+                        "play(${id.value}): loadMusic failed (attempt $attempt)",
+                    )
                     // A screen-off auto-advance can fail on a throttled
                     // fresh connection (MIUI background limits stall the
                     // new track's probe until the watchdog gives up). Ride
@@ -336,6 +347,11 @@ class PlayerControllerRepository @Inject constructor(
                         _scope.launch {
                             delay(ADVANCE_LOAD_RETRY_DELAY_MS)
                             if (playGeneration == generation) {
+                                bridge.logRaw(
+                                    "info",
+                                    "play(${id.value}): auto-advance retry " +
+                                        "(attempt ${attempt + 1})",
+                                )
                                 play(id, playlistId, autoAdvance = true, attempt = attempt + 1)
                             }
                         }
@@ -412,7 +428,9 @@ class PlayerControllerRepository @Inject constructor(
         // position instead of an instant re-error. Without it the
         // sticky source would fail the very next read.
         if (engine.error.value != null) {
-            runCatching { engine.seek(getCurrentPosition()) }
+            val pos = getCurrentPosition()
+            bridge.logRaw("info", "resume: source error outstanding — seek to ${pos}ms (retry epoch) then play")
+            runCatching { engine.seek(pos) }
                 .onFailure { bridge.logRaw("error", "resume-after-error seek failed: $it") }
         }
         engine.play()
@@ -450,6 +468,7 @@ class PlayerControllerRepository @Inject constructor(
     private fun playOnComplete() {
         val m = playerRepository.onCompleteMusic.value ?: return
         val p = _playlist.value ?: return
+        bridge.logRaw("info", "track completed → auto-advance to ${m.meta.id.value}")
         // autoAdvance: an advance failing on a screen-off throttle retries
         // with a backoff instead of silently ending the session (the user
         // isn't watching; nobody would see the toast until much later).
