@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        bridge.logRaw("info", "MainActivity onStart")
         ensurePostNotificationsPermission()
 
         lifecycleScope.launch {
@@ -154,6 +155,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        bridge.logRaw("info", "MainActivity onStop")
         // No teardown needed: the cantode engine / context live in
         // PlayerControllerRepository (singleton-scoped), not tied to this
         // activity's lifetime. PlaybackService still owns the MediaSession.

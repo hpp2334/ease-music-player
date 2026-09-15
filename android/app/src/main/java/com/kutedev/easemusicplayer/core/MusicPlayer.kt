@@ -106,6 +106,7 @@ class PlaybackService : android.app.Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        bridge.logRaw("info", "Playback service onStartCommand action=${intent?.action ?: "-"}")
         // MediaButton intents (Bluetooth / wired-headset media keys)
         // are forwarded to the active MediaSession by androidx.media.
         if (intent != null) {
@@ -133,6 +134,7 @@ class PlaybackService : android.app.Service() {
             bridge.logRaw("info", "task removed — playback active, keeping the service")
             return
         }
+        bridge.logRaw("info", "task removed — idle, stopping the service")
         stopSelf()
     }
 

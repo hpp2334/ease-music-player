@@ -98,6 +98,7 @@ class KeepBackendService : Service() {
             bridge.logRaw("info", "task removed — playback active, keeping the backend")
             return
         }
+        bridge.logRaw("info", "task removed — idle, stopping the backend")
         stopSelf()
     }
 
