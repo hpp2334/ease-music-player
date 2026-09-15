@@ -124,6 +124,15 @@ class PlaybackService : android.app.Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        // Task removal (a swipe, or MIUI's lock-screen memory cleanup,
+        // which removes the app's task a few minutes after lock) must
+        // not kill an active player: the foreground media service
+        // outlives its task on purpose. Only an idle player lets the
+        // stop through.
+        if (playerRepository.isActive()) {
+            bridge.logRaw("info", "task removed — playback active, keeping the service")
+            return
+        }
         stopSelf()
     }
 
@@ -257,7 +266,12 @@ class PlaybackService : android.app.Service() {
      * them on the next tick while playback is still active.
      */
     private fun ensureWakeLock() {
-        val shouldHold = lastMusic != null && (lastPlaying || lastLoading)
+        // isActive() spans playing/loading plus the auto-advance grace
+        // window: the next track's storage probe runs before the engine
+        // publishes LOADING, and with the screen off that window must
+        // stay protected (locks + task-removal guard) or MIUI kills the
+        // handoff and playback ends with the playlist.
+        val shouldHold = playerRepository.isActive()
         if (shouldHold) {
             val lock = wakeLock ?: getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)

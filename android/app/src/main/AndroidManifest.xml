@@ -31,8 +31,18 @@
         tools:targetApi="34">
         <service
             android:name=".core.PlaybackService"
-            android:exported="false"
+            android:exported="true"
             android:foregroundServiceType="mediaPlayback">
+            <!-- Required by androidx.media.session.MediaButtonReceiver:
+                 a media button delivered when no session is live is
+                 forwarded to the service matching this filter — without
+                 it the receiver throws IllegalStateException and
+                 crash-loops the app (headset play key after process
+                 death). handleIntent() in onStartCommand translates the
+                 key event into session callbacks. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
         </service>
         <service
             android:name=".core.KeepBackendService"
