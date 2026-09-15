@@ -129,12 +129,20 @@ fn poll_json(p: &Player, since_seq: u64) -> String {
         .map(|(seq, st)| format!(r#"{{"seq":{seq},"state":"{}"}}"#, state_str(*st)))
         .collect();
     format!(
-        r#"{{"state":"{}","stateSeq":{state_seq},"transitions":[{}],"positionMs":{},"durationMs":{},"bufferedMs":{}}}"#,
+        r#"{{"state":"{}","stateSeq":{state_seq},"transitions":[{}],"positionMs":{},"durationMs":{},"bufferedMs":{},"error":{}}}"#,
         state_str(p.state()),
         transitions.join(","),
         p.position().as_millis(),
         p.duration().map(|d| d.as_millis().to_string()).unwrap_or_else(|| "null".into()),
         p.buffered_position().map(|d| d.as_millis().to_string()).unwrap_or_else(|| "null".into()),
+        p.source_error()
+            .map(|e| {
+                // Minimal JSON string escaping — the message is engine
+                // text, but never trust it into a hand-built envelope.
+                let e = e.replace('\\', "\\\\").replace('"', "\\\"");
+                format!(r#""{e}""#)
+            })
+            .unwrap_or_else(|| "null".into()),
     )
 }
 

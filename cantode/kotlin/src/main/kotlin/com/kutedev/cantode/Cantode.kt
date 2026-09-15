@@ -71,6 +71,15 @@ class Cantode(
      */
     val ended: SharedFlow<Unit> = _ended.asSharedFlow()
 
+    private val _error = MutableStateFlow<String?>(null)
+    /**
+     * The engine's outstanding hard source error, if any (network died,
+     * file vanished — the terminal signal; transient starvation never
+     * sets it). Cleared engine-side by a successful seek (the retry) or
+     * a new load, and mirrored here on the next poll tick.
+     */
+    val error: StateFlow<String?> = _error.asStateFlow()
+
     @Volatile
     var isReleased = false
         private set
@@ -184,6 +193,10 @@ class Cantode(
         // The buffered frontier is a plain observable, not a
         // transition-derived value: apply it once per poll.
         _bufferedMs.value = poll.bufferedMs
+
+        // Same for the hard source error — engine truth, cleared
+        // engine-side (seek / new load) and mirrored here.
+        _error.value = poll.error
 
         // One-tick visibility hold: surface a Loading/Buffering excursion
         // that already completed between polls for this single tick.

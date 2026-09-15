@@ -84,6 +84,15 @@ struct Drain {
     /// Armed on the first no-progress tick; the drain gives up once
     /// `DRAIN_MAX_STALL` elapses without progress.
     stalled_since: Option<Instant>,
+    /// What the post-drain landing is: the normal EOF drain ends the
+    /// track; the hard-source-error drain parks it (the error message
+    /// is already poll-visible by then).
+    then: DrainEnd,
+}
+
+enum DrainEnd {
+    End,
+    Pause,
 }
 
 pub(super) struct Worker {
@@ -344,8 +353,11 @@ impl Worker {
         let actual = loaded.seek(target)?;
         self.sinks.emit(PlayerEvent::PositionChanged(actual));
         // A successful seek is the classic user-driven recovery — the
-        // source-error episode (if any) is over.
+        // source-error episode (if any) is over: the latch drops and the
+        // poll-visible message clears (the seek itself already re-opened
+        // the source with a fresh retry budget).
         self.error_latched = false;
+        self.shared.set_source_error(None);
         Ok(actual)
     }
 
@@ -407,6 +419,7 @@ impl Worker {
                             target,
                             last_pos: Duration::ZERO,
                             stalled_since: None,
+                            then: DrainEnd::End,
                         });
                     }
                     None => self.finish_end_of_stream(),
@@ -419,6 +432,43 @@ impl Worker {
             }
             PumpOutcome::Skipped(err) => {
                 if let Some(e) = err {
+                    // A hard source error (`CantodeError::Source`) is
+                    // terminal — transient starvation surfaces as
+                    // `WouldBlock` long before a hard error escapes the
+                    // source. Publish the message for the poll (the
+                    // embedder can react without an event subscription),
+                    // then land on `Paused`: while `Playing` with a
+                    // position-tracking sink the decoded tail first
+                    // drains (same choreography as the EOF drain, minus
+                    // the end — cutting already-buffered audio short
+                    // would click), everywhere else the park is
+                    // immediate (nothing is sounding). The position and
+                    // session survive either way, and the next play is
+                    // the user-driven retry (the app seeks first, which
+                    // re-opens the source with a fresh retry budget).
+                    // Decode errors keep the historical
+                    // skip-and-continue.
+                    if let CantodeError::Source(msg) = &e {
+                        self.shared.set_source_error(Some(msg.clone()));
+                        let drain_target = self.machine.loaded_mut().and_then(|loaded| {
+                            loaded.output_position().map(|_| loaded.decoded_through())
+                        });
+                        match drain_target {
+                            Some(target) => {
+                                tracing::info!(
+                                    frontier_ms = target.as_millis() as u64,
+                                    "source-error drain armed"
+                                );
+                                self.drain = Some(Drain {
+                                    target,
+                                    last_pos: Duration::ZERO,
+                                    stalled_since: None,
+                                    then: DrainEnd::Pause,
+                                });
+                            }
+                            None => self.machine.pause(),
+                        }
+                    }
                     self.report_source_error(e);
                 }
             }
@@ -470,8 +520,19 @@ impl Worker {
                     "tail drain finished"
                 );
             }
-            self.finish_end_of_stream();
+            match self.drain.take().map(|d| d.then) {
+                Some(DrainEnd::Pause) => self.finish_drain_pause(),
+                _ => self.finish_end_of_stream(),
+            }
         }
+    }
+
+    /// Leave the playing phases into `Paused` after a drained hard
+    /// source error: the tail has sounded, the error message is already
+    /// poll-visible, and the next play is the user-driven retry.
+    fn finish_drain_pause(&mut self) {
+        self.drain = None;
+        self.machine.pause();
     }
 
     /// Emit `Ended` (once, via the session latch) and leave the playing
@@ -507,12 +568,63 @@ impl Worker {
         if let Some(pos) = live {
             self.shared.set_position(pos);
         }
-        let refilled = self
+        let readiness = self
             .machine
             .loaded_mut()
-            .is_some_and(|loaded| loaded.readiness() == crate::Readiness::Ready);
-        if refilled && self.buffered_ahead_sufficient() {
-            self.machine.buffer_refilled();
+            .map(|loaded| loaded.readiness());
+        match readiness {
+            Some(crate::Readiness::Ready) => {
+                if self.buffered_ahead_sufficient() {
+                    self.machine.buffer_refilled();
+                }
+            }
+            // The source is in its terminal-error state (readiness is
+            // the only window the worker has onto it from `Buffering`):
+            // give the pump one tick so the hard error surfaces through
+            // the normal decode path and the worker parks, instead of
+            // buffering forever on a dead source (the screen-off network
+            // death, exactly).
+            Some(crate::Readiness::Failed) => self.pump_buffering_once(),
+            _ => {}
+        }
+    }
+
+    /// One decode attempt from `Buffering` when the source reports
+    /// [`Readiness::Failed`] — the terminal-error state. The attempt
+    /// surfaces the sticky error through the normal decode path (the
+    /// read returns it immediately; nothing decodes ahead), and the
+    /// worker parks. Without this the playing pump never runs from
+    /// `Buffering` and the player would buffer forever on a dead
+    /// source (the screen-off network death, exactly).
+    fn pump_buffering_once(&mut self) {
+        let outcome = {
+            let Some(loaded) = self.machine.loaded_mut() else {
+                return;
+            };
+            // A scratch emit clock: position events are a Playing-tick
+            // concern; this attempt only decodes (or surfaces the error).
+            loaded.pump(&mut Instant::now(), Duration::MAX)
+        };
+        match outcome {
+            PumpOutcome::Frame { position, .. } => self.shared.set_position(position),
+            PumpOutcome::NeedsData => {}
+            PumpOutcome::EndOfStream => {
+                // A dead source that reports EOF (or a stream whose tail
+                // drained below the threshold at the true end): end the
+                // track instead of buffering forever.
+                self.finish_end_of_stream();
+            }
+            PumpOutcome::Skipped(err) => {
+                if let Some(e) = err {
+                    if let CantodeError::Source(msg) = &e {
+                        // Nothing is sounding in `Buffering` — park
+                        // immediately (no drain).
+                        self.shared.set_source_error(Some(msg.clone()));
+                        self.machine.pause();
+                    }
+                    self.report_source_error(e);
+                }
+            }
         }
     }
 
@@ -677,6 +789,64 @@ mod tests {
     }
 
     #[test]
+    fn hard_source_error_parks_on_paused_and_records_the_message() {
+        // A hard source error is terminal: the worker parks on `Paused`
+        // (position and session survive) and publishes the message for
+        // the poll. A seek is the user-driven recovery — fresh source
+        // epoch, error message cleared.
+        let (loaded, fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: Some(crate::CantodeError::Source("network died".into())),
+                eof: true,
+                buffered: None,
+            },
+            2,
+            2,
+        );
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+
+        worker.pump_once(); // the stub's hard source error
+
+        assert_eq!(worker.machine.state(), PlayerState::Paused);
+        assert_eq!(fx.shared.state(), PlayerState::Paused);
+        assert_eq!(fx.shared.source_error().as_deref(), Some("network died"));
+
+        worker.do_seek(Duration::from_secs(1)).unwrap();
+        assert_eq!(fx.shared.source_error(), None);
+    }
+
+    #[test]
+    fn decode_errors_keep_skipping_without_parking() {
+        // Decode failures are not terminal: the historical
+        // skip-and-continue stands — no park, no poll-visible error.
+        let (loaded, fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: Some(crate::CantodeError::Decode("corrupt".into())),
+                eof: true,
+                buffered: None,
+            },
+            2,
+            2,
+        );
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+
+        worker.pump_once();
+
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        assert_eq!(fx.shared.source_error(), None);
+    }
+
+    #[test]
     fn eof_with_output_tracking_ends_only_after_the_tail_drains() {
         // The stub decoder yields one frame (ts 9 s, 480 frames @ 48 kHz
         // = 10 ms), then EOF. The tracking sink reports the instant-play
@@ -766,6 +936,7 @@ mod tests {
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
                 fail_once: None,
+                eof: true,
                 buffered: Some(range),
             },
             2,
@@ -793,6 +964,7 @@ mod tests {
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
                 fail_once: None,
+                eof: true,
                 buffered: Some(range),
             },
             2,
@@ -842,6 +1014,7 @@ mod tests {
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
                 fail_once: None,
+                eof: false,
                 buffered,
             },
             2,

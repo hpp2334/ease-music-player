@@ -41,6 +41,11 @@ pub enum Readiness {
     /// The cursor sits at the end of the buffered window while the source
     /// is still alive — a read would park until data arrives.
     NeedsData,
+    /// The source has failed terminally (its sticky error is set): a
+    /// read at the cursor returns the error immediately. Distinct from
+    /// [`Readiness::Ready`] so embedders can tell "data available" from
+    /// "broken" without attempting a read.
+    Failed,
 }
 
 /// The contiguous buffered byte window of a buffering source.

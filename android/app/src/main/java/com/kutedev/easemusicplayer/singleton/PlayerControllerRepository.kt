@@ -176,6 +176,20 @@ class PlayerControllerRepository @Inject constructor(
                         playerRepository.setIsLoading(loading)
                     }
                 }
+                _scope.launch {
+                    engine.error.collect { err ->
+                        if (err != null) {
+                            // The engine has already parked on `Paused`
+                            // (the terminal source-error contract): the
+                            // loading state cleared and the wake lock
+                            // releases through the state change. Surface
+                            // the stall once per episode — the next play
+                            // is the retry (see [resume]).
+                            bridge.logRaw("error", "source error: $err")
+                            toastRepository.emitToast("playback stalled — tap play to retry")
+                        }
+                    }
+                }
                 _cantodeEngine.value = engine
                 playerRepository.reload()
                 bridge.logRaw("info", "cantode engine setup complete (ctx=$ctxId player=$pId)")
@@ -230,9 +244,12 @@ class PlayerControllerRepository @Inject constructor(
         // A natural-end replay (repeat-one auto-replay, or re-tapping the
         // finished track) must go through the fresh-load branch below so it
         // emits a countable MusicPlay — only a PAUSED current track resumes
-        // in place.
+        // in place. An ERROR current track does too: the machine wedges
+        // play/pause in `Error` (a failed load ends there), so the only
+        // way forward is a fresh load.
         val ended = engine.state.value == PlayerState.ENDED
-        if (!ended && _music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
+        val errorState = engine.state.value == PlayerState.ERROR
+        if (!ended && !errorState && _music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
             resume(); return
         }
 
@@ -354,15 +371,28 @@ class PlayerControllerRepository @Inject constructor(
 
     fun resume() {
         val engine = _cantodeEngine.value ?: return
-        // The engine wedges play/pause once `Ended` (by design — see the
-        // state machine's Ended row): without this, the play button at
-        // end-of-track / end-of-playlist was a dead no-op. Replay the
-        // current track from the top instead.
+        // The engine wedges play/pause once `Ended` or `Error` (by
+        // design — see the state machine's rows for both; a failed load
+        // ends in `Error`): without this, the play button at
+        // end-of-track / end-of-playlist — or after a failed load — was
+        // a dead no-op. Replay the current track via a fresh load
+        // instead (a brand-new source epoch; the engine's poll error
+        // slot clears with the new session).
         val m = _music.value
         val p = _playlist.value
-        if (engine.state.value == PlayerState.ENDED && m != null && p != null) {
+        if ((engine.state.value == PlayerState.ENDED || engine.state.value == PlayerState.ERROR) && m != null && p != null) {
             play(m.meta.id, p.abstr.meta.id)
             return
+        }
+        // A session parked on a hard source error resumes through a
+        // seek: the seek is the engine's retry epoch (it re-opens the
+        // source with a fresh retry budget and clears the error), so
+        // the play that follows is a genuine fresh attempt at the same
+        // position instead of an instant re-error. Without it the
+        // sticky source would fail the very next read.
+        if (engine.error.value != null) {
+            runCatching { engine.seek(getCurrentPosition()) }
+                .onFailure { bridge.logRaw("error", "resume-after-error seek failed: $it") }
         }
         engine.play()
         _pluginEvents.tryEmit(
