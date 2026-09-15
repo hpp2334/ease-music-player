@@ -8,6 +8,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import com.kutedev.easemusicplayer.singleton.PluginManager
 import com.kutedev.easemusicplayer.singleton.EaseBackend
 import dagger.hilt.android.AndroidEntryPoint
@@ -24,6 +25,7 @@ class KeepBackendService : Service() {
     @Inject lateinit var bridge: Bridge
     @Inject lateinit var pluginManager: PluginManager
     @Inject lateinit var easeBackend: EaseBackend
+    @Inject lateinit var playerRepository: PlayerRepository
     private val _channelId: String = "EaseMusicBackendServiceChannel"
 
     /** Runs the first-run bootstrap (bundled installs) off the main thread. */
@@ -88,6 +90,14 @@ class KeepBackendService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        // Mirror PlaybackService: MIUI's lock-screen memory cleanup
+        // removes the app's task with the screen off — stopping here
+        // tears the whole backend down mid-listen (playback dies even
+        // for local tracks). Only an idle player lets the stop through.
+        if (playerRepository.isActive()) {
+            bridge.logRaw("info", "task removed — playback active, keeping the backend")
+            return
+        }
         stopSelf()
     }
 

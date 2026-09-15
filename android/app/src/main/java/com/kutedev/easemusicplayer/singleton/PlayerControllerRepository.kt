@@ -65,6 +65,9 @@ class PlayerControllerRepository @Inject constructor(
 
     private var _sleepJob: Job? = null
     private var lyricJob: Job? = null
+    /** Bumped on every [play] — lets a scheduled auto-advance retry detect
+     *  that a newer play superseded it while it was backing off. */
+    @Volatile private var playGeneration = 0L
     private val nextMusic = playerRepository.nextMusic
     private val previousMusic = playerRepository.previousMusic
 
@@ -235,7 +238,8 @@ class PlayerControllerRepository @Inject constructor(
         return engine.bufferedMs.value ?: engine.durationMs.value ?: 0L
     }
 
-    fun play(id: MusicId, playlistId: PlaylistId) {
+    fun play(id: MusicId, playlistId: PlaylistId, autoAdvance: Boolean = false, attempt: Int = 0) {
+        val generation = ++playGeneration
         if (playerId < 0) {
             bridge.logRaw("error", "play: cantode player not ready"); return
         }
@@ -320,6 +324,23 @@ class PlayerControllerRepository @Inject constructor(
                     // flag / BUFFERING spinner forever. Nothing is playing:
                     // reset the state and surface a visible failure.
                     playerRepository.setIsLoading(false)
+                    // A screen-off auto-advance can fail on a throttled
+                    // fresh connection (MIUI background limits stall the
+                    // new track's probe until the watchdog gives up). Ride
+                    // short throttles out with a backoff instead of ending
+                    // the listening session; user-initiated plays surface
+                    // the failure immediately (they're watching). The
+                    // generation check keeps a stale retry from fighting
+                    // a newer play().
+                    if (autoAdvance && attempt < ADVANCE_LOAD_RETRY_MAX) {
+                        _scope.launch {
+                            delay(ADVANCE_LOAD_RETRY_DELAY_MS)
+                            if (playGeneration == generation) {
+                                play(id, playlistId, autoAdvance = true, attempt = attempt + 1)
+                            }
+                        }
+                        return@launch
+                    }
                     toastRepository.emitToast("play failed")
                     return@launch
                 }
@@ -429,7 +450,10 @@ class PlayerControllerRepository @Inject constructor(
     private fun playOnComplete() {
         val m = playerRepository.onCompleteMusic.value ?: return
         val p = _playlist.value ?: return
-        play(m.meta.id, p.abstr.meta.id)
+        // autoAdvance: an advance failing on a screen-off throttle retries
+        // with a backoff instead of silently ending the session (the user
+        // isn't watching; nobody would see the toast until much later).
+        play(m.meta.id, p.abstr.meta.id, autoAdvance = true)
     }
 
     fun playNext() {
@@ -515,5 +539,12 @@ class PlayerControllerRepository @Inject constructor(
 
         /** Give up on the override after this long (failed/unsupported seeks revert to engine truth). */
         private const val SEEK_SETTLE_TIMEOUT_MS = 3_000L
+
+        /** Auto-advance load retries: a screen-off advance can fail on a
+         *  throttled fresh connection (MIUI background limits stall the
+         *  probe until the watchdog gives up); ride it out with a backoff
+         *  instead of ending the listening session. */
+        private const val ADVANCE_LOAD_RETRY_MAX = 2
+        private const val ADVANCE_LOAD_RETRY_DELAY_MS = 5_000L
     }
 }

@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.singleton
 
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +39,9 @@ class PlayerRepository @Inject constructor(
     private val _music = MutableStateFlow(null as Music?)
     private val _playlist = MutableStateFlow(null as Playlist?)
     private val _playing = MutableStateFlow(false)
+    /// ElapsedRealtime of the last `playing`/`loading` true — the anchor
+    /// for [isActive]'s auto-advance grace window.
+    private var lastActiveElapsed = 0L
     private val _musicIndex = combine(_music, _playlist) {
             music, playlist ->
         if (music == null || playlist == null) {
@@ -97,11 +101,36 @@ class PlayerRepository @Inject constructor(
     }.stateIn(_scope, SharingStarted.Eagerly, null)
 
     fun setIsPlaying(playing: Boolean) {
+        if (playing) {
+            lastActiveElapsed = SystemClock.elapsedRealtime()
+        }
         _playing.value = playing
     }
 
     fun setIsLoading(loading: Boolean) {
+        if (loading) {
+            lastActiveElapsed = SystemClock.elapsedRealtime()
+        }
         _loading.value = loading
+    }
+
+    /**
+     * Playback is active or within the auto-advance grace window: playing,
+     * loading, or a track ended so recently that the next track's load is
+     * still in flight. The load's storage probe runs before the engine
+     * publishes `LOADING`, so a pure `playing || loading` check leaves the
+     * handoff uncovered — exactly where a screen-off cleanup (MIUI's
+     * lock-screen memory cleanup removes the app's task) or a throttled
+     * connection kills playback. The services' task-removal guards and
+     * the wake/wifi locks key off this.
+     */
+    fun isActive(): Boolean {
+        if (_playing.value || _loading.value) {
+            lastActiveElapsed = SystemClock.elapsedRealtime()
+            return true
+        }
+        return _music.value != null &&
+            SystemClock.elapsedRealtime() - lastActiveElapsed < ADVANCE_GRACE_MS
     }
 
     fun notifyDurationChanged() {
@@ -238,5 +267,11 @@ class PlayerRepository @Inject constructor(
         _scope.launch {
             _durationChanged.emit(Unit)
         }
+    }
+
+    private companion object {
+        /** How long after the last playing/loading tick the player is
+         *  still considered active — the auto-advance handoff window. */
+        const val ADVANCE_GRACE_MS = 30_000L
     }
 }
