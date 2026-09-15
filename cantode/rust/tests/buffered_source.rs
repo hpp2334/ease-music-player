@@ -1220,7 +1220,7 @@ fn stall_freezes_then_resumes_with_continuity() {
 }
 
 #[test]
-fn persistent_error_stays_playing_silent() {
+fn persistent_error_parks_paused_with_the_error_visible() {
     let data = wav(2.0);
     let cut = 88_244usize; // ~0.5s
     let (fake, _h) = fake(Arc::clone(&data)).fail_from(cut as u64).finish();
@@ -1235,14 +1235,21 @@ fn persistent_error_stays_playing_silent() {
         frozen > Duration::from_millis(300) && frozen < Duration::from_secs(2),
         "froze at {frozen:?}, expected near the ~0.5s failure point"
     );
-    // The failing source settles back to Playing (silent) — possibly via
-    // a brief Buffering while the sticky error lands — and stays there.
+    // The failing source parks on `Paused` — the terminal contract: the
+    // spinner clears, the message is poll-visible, and the next play is
+    // the user-driven retry. (Possibly via a brief `Buffering` while the
+    // sticky error lands.) It must never reach `Ended` and never resume
+    // playing on its own.
     assert!(
         wait_until(Duration::from_secs(2), || {
-            harness.player.state() == PlayerState::Playing
+            harness.player.state() == PlayerState::Paused
         }),
-        "persistent errors must stay playing-silent (state: {:?})",
+        "persistent errors must park on Paused (state: {:?})",
         harness.player.state()
+    );
+    assert!(
+        harness.player.source_error().is_some(),
+        "the sticky error message must be poll-visible"
     );
 
     // The failure is surfaced — exactly once (dedup latch): a failing
@@ -1263,6 +1270,34 @@ fn persistent_error_stays_playing_silent() {
     }
     assert!(!saw_ended, "persistent session errors must not emit Ended");
     assert_eq!(errors, 1, "expected exactly one Error event, got {errors}");
+}
+
+#[test]
+fn sticky_error_while_buffering_parks_paused() {
+    // The network dies just past the probe window: the load succeeds but
+    // the startup prebuffer (2 s) can never fill, so the player sits in
+    // `Buffering` — when the source goes sticky, the buffering tick must
+    // surface the failure and park (the screen-off stall, exactly), not
+    // buffer forever.
+    let data = wav(2.0);
+    let (fake, _h) = fake(Arc::clone(&data)).fail_from(4096).finish();
+    let harness = harness_with_config(fake, 16 * 1024, Duration::from_secs(2), true);
+
+    assert!(
+        wait_until(Duration::from_secs(15), || {
+            harness.player.state() == PlayerState::Paused
+        }),
+        "a sticky error during startup buffering must park (state: {:?})",
+        harness.player.state()
+    );
+    assert!(
+        harness.player.source_error().is_some(),
+        "the sticky error must be poll-visible"
+    );
+    assert!(
+        !wait_for_ended(&harness.events, Duration::from_millis(300)),
+        "must not emit Ended"
+    );
 }
 
 #[test]

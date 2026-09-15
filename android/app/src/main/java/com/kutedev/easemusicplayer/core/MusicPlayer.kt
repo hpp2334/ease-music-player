@@ -14,6 +14,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.net.wifi.WifiManager
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -73,6 +74,7 @@ class PlaybackService : android.app.Service() {
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     @Volatile private var lastMusic: Music? = null
     @Volatile private var lastPlaylist: Playlist? = null
@@ -242,10 +244,17 @@ class PlaybackService : android.app.Service() {
      * The lock also covers the loading/buffering window on purpose: a
      * screen-off readahead refill needs the CPU just as much as decode.
      *
-     * Re-evaluated on every state change and on the position ticker
-     * (self-healing), with a bounded acquire timeout as leak insurance:
-     * if a release is ever missed, the ticker re-arms it on the next
-     * tick while playback is still active.
+     * Hold a Wi-Fi lock alongside: with the screen off the Wi-Fi radio
+     * drops into power-save and streaming throughput collapses (or dies
+     * outright on aggressive OEM builds) a few minutes in — exactly the
+     * "plays a while, then buffers forever" stall. The high-perf mode
+     * keeps the radio at full performance for the same window the CPU
+     * lock covers. No manifest permission needed.
+     *
+     * Both locks are re-evaluated on every state change and on the
+     * position ticker (self-healing), with a bounded acquire timeout as
+     * leak insurance: if a release is ever missed, the ticker re-arms
+     * them on the next tick while playback is still active.
      */
     private fun ensureWakeLock() {
         val shouldHold = lastMusic != null && (lastPlaying || lastLoading)
@@ -260,6 +269,18 @@ class PlaybackService : android.app.Service() {
                 lock.acquire(WAKE_LOCK_TIMEOUT_MS)
                 bridge.logRaw("info", "playback wake lock acquired")
             }
+            val wfLock = wifiLock ?: getSystemService(WifiManager::class.java)
+                .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, WAKE_LOCK_TAG + ":wifi")
+                .apply {
+                    setReferenceCounted(false)
+                    wifiLock = this
+                }
+            // No acquire(timeout) on WifiLock — the release path is the
+            // state change below (and onDestroy); the ticker re-arms it.
+            if (!wfLock.isHeld) {
+                wfLock.acquire()
+                bridge.logRaw("info", "playback wifi lock acquired")
+            }
         } else {
             releaseWakeLock()
         }
@@ -270,6 +291,12 @@ class PlaybackService : android.app.Service() {
         if (lock.isHeld) {
             lock.release()
             bridge.logRaw("info", "playback wake lock released")
+        }
+        wifiLock?.let { wfLock ->
+            if (wfLock.isHeld) {
+                wfLock.release()
+                bridge.logRaw("info", "playback wifi lock released")
+            }
         }
     }
 

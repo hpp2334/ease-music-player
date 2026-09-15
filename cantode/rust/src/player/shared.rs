@@ -45,6 +45,14 @@ pub(super) struct SharedStatus {
     /// Contiguous buffered window of the loaded source (when it maintains
     /// one); mirrored by the worker on its ticks, reset by `Loaded::drop`.
     buffered: Mutex<Option<BufferedRange>>,
+    /// Message of the last hard source error (`CantodeError::Source`) —
+    /// the terminal "the network died / the file vanished" signal, as
+    /// opposed to transient starvation (which is `WouldBlock` long before
+    /// a hard error escapes the source). Set by the worker when the pump
+    /// surfaces one; cleared by a successful seek (fresh source epoch)
+    /// and by session teardown. Poll-visible so embedders can react
+    /// (toast / surface a stalled state) without an event subscription.
+    source_error: Mutex<Option<String>>,
     /// Monotonic transition counter — bumped once per real state change
     /// (the machine only commits on change), never reset.
     transition_seq: AtomicU64,
@@ -62,6 +70,7 @@ impl SharedStatus {
             position: AtomicPosition::new(),
             duration: Mutex::new(None),
             buffered: Mutex::new(None),
+            source_error: Mutex::new(None),
             transition_seq: AtomicU64::new(0),
             transitions: Mutex::new(VecDeque::new()),
         }
@@ -130,13 +139,26 @@ impl SharedStatus {
         *self.buffered.lock().unwrap() = r;
     }
 
+    /// The last hard source error, if one is outstanding. Worker writes,
+    /// poller reads.
+    pub(super) fn source_error(&self) -> Option<String> {
+        self.source_error.lock().unwrap().clone()
+    }
+
+    /// Publish / clear the hard source error. Cleared by a successful
+    /// seek (the user-driven fresh epoch) and by session teardown.
+    pub(super) fn set_source_error(&self, e: Option<String>) {
+        *self.source_error.lock().unwrap() = e;
+    }
+
     /// Reset the session-scoped observables (position, duration,
-    /// buffered window). `Loaded::drop` only — session death is the one
-    /// reset point.
+    /// buffered window, source error). `Loaded::drop` only — session
+    /// death is the one reset point.
     pub(super) fn reset_session_observables(&self) {
         self.position.store(Duration::ZERO);
         *self.duration.lock().unwrap() = None;
         *self.buffered.lock().unwrap() = None;
+        *self.source_error.lock().unwrap() = None;
     }
 }
 

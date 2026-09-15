@@ -364,6 +364,16 @@ impl Player {
         buffered_media_time(&range, duration)
     }
 
+    /// The last hard source error, if one is outstanding — the terminal
+    /// "the source is broken" signal (network died, file vanished), as
+    /// distinct from transient starvation (which parks in `Buffering`
+    /// and never produces this). Session-scoped: cleared by a successful
+    /// seek (fresh source epoch) or session teardown. The worker also
+    /// parks on `Paused` when this fires.
+    pub fn source_error(&self) -> Option<String> {
+        self.shared.source_error()
+    }
+
     // ---- internals ----
 
     fn send(&self, cmd: Command) -> crate::Result<()> {

@@ -48,4 +48,7 @@ internal data class FfiPollSnapshot(
     /** Buffered frontier in media time; `null` for non-buffering
      *  sources or while total length / duration is unknown. */
     val bufferedMs: Long? = null,
+    /** Outstanding hard source error message; `null` when healthy.
+     *  Cleared engine-side by a successful seek or a new load. */
+    val error: String? = null,
 )

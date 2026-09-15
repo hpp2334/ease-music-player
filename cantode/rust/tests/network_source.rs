@@ -730,7 +730,7 @@ fn stall_freezes_position_and_defers_pause() {
 }
 
 #[test]
-fn persistent_read_error_stays_playing_silent() {
+fn persistent_read_error_parks_paused_with_the_error_visible() {
     let data = wav(3.0);
     let h = harness_with(chunked_source(&data, 8 * 1024, Duration::ZERO), false);
     let fail_at = DATA_START + RATE as u64 * 2; // ~1s
@@ -738,8 +738,10 @@ fn persistent_read_error_stays_playing_silent() {
     load_shared(&h);
     h.player.play().unwrap();
 
-    // Decode reaches the failure point; the worker skips + retries, so
-    // the position freezes (after buffered bytes drain).
+    // Decode reaches the failure point; the worker parks on `Paused`
+    // (the terminal contract — the spinner clears and the message is
+    // poll-visible), so the position freezes (after buffered bytes
+    // drain).
     let frozen = wait_for_quiet(Duration::from_secs(6), Duration::from_millis(300), || {
         h.player.position()
     })
@@ -748,29 +750,36 @@ fn persistent_read_error_stays_playing_silent() {
         frozen > Duration::from_millis(500) && frozen < Duration::from_secs(2),
         "froze at {frozen:?}, expected near the 1s failure point"
     );
-    assert_eq!(h.player.state(), PlayerState::Playing);
+    assert!(
+        wait_until(Duration::from_secs(2), || h.player.state()
+            == PlayerState::Paused),
+        "persistent errors must park on Paused (state: {:?})",
+        h.player.state()
+    );
+    assert!(
+        h.player.source_error().is_some(),
+        "the hard source error must be poll-visible"
+    );
     assert!(
         !wait_for_ended(&h.events, Duration::from_millis(300)),
         "persistent errors must not emit Ended"
     );
 
-    // The worker loop stays responsive between retries.
+    // The worker loop stays responsive afterwards.
     h.player.pause().unwrap();
-    assert!(
-        wait_until(Duration::from_secs(2), || h.player.state()
-            == PlayerState::Paused),
-        "pause must work while the source is erroring"
-    );
+    assert_eq!(h.player.state(), PlayerState::Paused);
 
     h.player.stop().unwrap();
 }
 
-/// CHARACTERIZATION (known wart): a source that errors once and then
-/// reports EOF produces a premature `Ended` — the byte-level shape of a
-/// dropped HTTP chunk in the embedding app. The engine cannot currently
-/// distinguish this from a genuine end of stream.
+/// A source that errors once and then reports EOF (the byte-level shape
+/// of a dropped HTTP chunk in a raw source) parks on `Paused` with the
+/// error poll-visible — the hard error wins over the trailing EOF, so
+/// the old phantom-`Ended` wart (a premature end far short of the
+/// duration, silently skipping the rest of the track) is gone. The
+/// user's next play/seek retries from the parked position.
 #[test]
-fn error_then_eof_emits_phantom_ended() {
+fn error_then_eof_parks_paused_instead_of_phantom_ended() {
     let data = wav(3.0);
     let h = harness_with(chunked_source(&data, 8 * 1024, Duration::ZERO), false);
     let fail_at = DATA_START + RATE as u64 * 2; // ~1s into a 3s file
@@ -778,14 +787,31 @@ fn error_then_eof_emits_phantom_ended() {
     load_shared(&h);
     h.player.play().unwrap();
 
+    // Decode starts, runs to the failure point (~1s), and the hard
+    // error parks the player.
     assert!(
-        wait_for_ended(&h.events, Duration::from_secs(5)),
-        "error-then-EOF surfaces as Ended"
+        wait_until(Duration::from_secs(5), || h.player.state()
+            == PlayerState::Playing),
+        "playback must start (state: {:?})",
+        h.player.state()
     );
-    assert_eq!(h.player.state(), PlayerState::Ended);
+    assert!(
+        wait_until(Duration::from_secs(5), || h.player.state()
+            == PlayerState::Paused),
+        "error-then-EOF surfaces as Paused (state: {:?})",
+        h.player.state()
+    );
+    assert!(
+        h.player.source_error().is_some(),
+        "the hard source error must be poll-visible"
+    );
+    assert!(
+        !wait_for_ended(&h.events, Duration::from_millis(300)),
+        "must not emit Ended"
+    );
     assert!(
         h.player.position() < Duration::from_secs(2),
-        "ended far short of the 3s duration (position: {:?})",
+        "parked near the failure point, not at the 3s duration (position: {:?})",
         h.player.position()
     );
 }
@@ -999,7 +1025,7 @@ fn pause_gates_output_resume_reopens_it() {
 }
 
 #[test]
-fn error_then_eof_output_is_exact_prefix() {
+fn error_then_eof_output_is_exact_prefix_parked() {
     let data = wav(3.0);
     let h = harness_with(chunked_source(&data, 8 * 1024, Duration::ZERO), false);
     let fail_at = DATA_START + RATE as u64 * 2; // ~1s
@@ -1007,7 +1033,12 @@ fn error_then_eof_output_is_exact_prefix() {
     load_shared(&h);
     h.player.play().unwrap();
 
-    assert!(wait_for_ended(&h.events, Duration::from_secs(5)));
+    // The hard error parks the player (no phantom `Ended`); whatever
+    // sounded before the failure is still exact.
+    assert!(wait_until(
+        Duration::from_secs(5),
+        || h.player.state() == PlayerState::Paused
+    ));
     std::thread::sleep(Duration::from_millis(100));
 
     // Whatever did play is exactly the reference decode's prefix…
@@ -1019,11 +1050,13 @@ fn error_then_eof_output_is_exact_prefix() {
         &captured[..],
         "pre-failure audio must be untouched"
     );
-    // …and it cut off around the failure point, not at the file's end.
+    // …and it cut off at or before the failure point (wherever the
+    // decode-ahead happened to be when the error landed — the park
+    // stops the pipeline there), never at the file's end.
     let secs = captured.len() as f64 / RATE as f64;
     assert!(
-        (0.6..1.2).contains(&secs),
-        "cut off at {secs:.2}s (expected ~1s)"
+        (0.3..1.2).contains(&secs),
+        "cut off at {secs:.2}s (expected ≤ ~1s, the failure point)"
     );
 }
 

@@ -563,9 +563,14 @@ impl AudioSource for BufferedSource {
 
     fn readiness(&self) -> Readiness {
         let st = self.shared.st.lock().unwrap();
+        if st.error.is_some() {
+            // Terminal: a read returns the sticky error immediately.
+            // Reported distinctly so a buffering player can surface the
+            // failure instead of waiting on a refill that never comes.
+            return Readiness::Failed;
+        }
         let window_end = st.window_start + st.window.len() as u64;
         let starved = st.pos >= window_end
-            && st.error.is_none()
             && st.eof.is_none_or(|e| st.pos < e)
             && st.total_len.is_none_or(|t| st.pos < t)
             && !st.shutdown;

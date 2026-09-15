@@ -22,6 +22,9 @@ pub(super) struct StubDecoder {
     /// When set, `next_frame` yields this error once (for the pump's
     /// outcome mapping tests) and returns to EOF afterwards.
     pub(super) fail_once: Option<crate::CantodeError>,
+    /// When false, `next_frame` yields frames forever — an alive
+    /// source, for the buffering-tick tests (the default is EOF).
+    pub(super) eof: bool,
     /// What `buffered_range` reports (for the buffered-mirror tests);
     /// `None` = non-buffering source, the common default.
     pub(super) buffered: Option<BufferedRange>,
@@ -32,7 +35,10 @@ impl Decoder for StubDecoder {
         if let Some(e) = self.fail_once.take() {
             return Err(e);
         }
-        Ok(None)
+        if self.eof {
+            return Ok(None);
+        }
+        Ok(Some(DecodedFrame::empty_at(Duration::ZERO)))
     }
     fn seek(&mut self, target: Duration) -> crate::Result<Duration> {
         Ok(target)
@@ -202,6 +208,7 @@ pub(super) fn loaded_session(src: u16, device: u16) -> (Loaded, Fixture) {
         StubDecoder {
             fmt: AudioFormat::new(src, 48_000),
             fail_once: None,
+            eof: true,
             buffered: None,
         },
         src,

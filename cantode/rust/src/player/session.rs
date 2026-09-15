@@ -332,6 +332,7 @@ mod tests {
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
                 fail_once: None,
+                eof: true,
                 buffered: Some(range),
             },
             2,
@@ -460,6 +461,7 @@ mod tests {
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
                 fail_once: Some(crate::CantodeError::WouldBlock),
+                eof: true,
                 buffered: None,
             },
             2,
@@ -483,6 +485,7 @@ mod tests {
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
                 fail_once: Some(crate::CantodeError::Decode("corrupt".into())),
+                eof: true,
                 buffered: None,
             },
             2,

@@ -309,6 +309,14 @@ impl Decoder for SymphoniaDecoder {
                     // so the pump can treat it as "needs data".
                     return Err(CantodeError::WouldBlock);
                 }
+                Err(SymError::IoError(e)) => {
+                    // A hard source error: the source itself is broken
+                    // (network died, file vanished) — transient starvation
+                    // surfaces as `WouldBlock` long before this. Distinct
+                    // from decode failures so the worker can treat it as
+                    // terminal.
+                    return Err(CantodeError::Source(format!("read packet: {e}")));
+                }
                 Err(SymError::ResetRequired) => continue,
                 Err(e) => return Err(CantodeError::Decode(format!("read packet: {e}"))),
             };
