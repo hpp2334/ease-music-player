@@ -88,6 +88,13 @@ android {
         jniLibs {
             // make stacktrace available
             useLegacyPackaging = true
+            // Keep the Rust cdylib's symbol table in the packed APK: the
+            // panic hook (std::backtrace reads the extracted lib) and
+            // native tombstones (debuggerd) resolve frames from it —
+            // without this, AGP strips the lib and every frame of a Rust
+            // panic prints `<unknown>`. Debug-info sections are still
+            // stripped; this costs the .symtab (~10 MB) only.
+            keepDebugSymbols += "**/libease_client_android.so"
         }
     }
 
