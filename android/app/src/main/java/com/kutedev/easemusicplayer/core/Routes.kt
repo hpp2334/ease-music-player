@@ -4,7 +4,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.navigation.NavHostController
+import androidx.navigation.NavOptionsBuilder
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavController
+
+/**
+ * Navigate to [route] with `launchSingleTop` — a double-tap (or any double
+ * fire) of a card must NOT stack a second copy of the destination. Two
+ * live copies of a page hosting a [com.kutedev.easemusicplayer.turintegration.TurView]
+ * race their surface attaches and wgpu aborts the whole process on
+ * `ERROR_NATIVE_WINDOW_IN_USE_KHR` (the 2026-09-16/17 play-counts crash).
+ */
+fun NavController.navigateSingleTop(route: String, builder: (NavOptionsBuilder.() -> Unit)? = null) {
+    navigate(route) {
+        launchSingleTop = true
+        builder?.invoke(this)
+    }
+}
 
 fun RouteHome(): String {
     return "Home"

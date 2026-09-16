@@ -189,6 +189,12 @@ private fun DefaultTurLoadingIndicator() {
 private class TurSurfaceView(context: Context) : SurfaceView(context) {
     private var instance: TurInstance? = null
     private var dprValue: Double = 0.0
+    /** Whether [instance] currently has a live attached surface. Guards
+     *  against a duplicate `surfaceCreated` (no intervening destroy):
+     *  attaching twice to the same ANativeWindow panics inside wgpu
+     *  (`ERROR_NATIVE_WINDOW_IN_USE_KHR` — a second swapchain for one
+     *  window) and takes the process down. */
+    private var surfaceAttached = false
     /** Delivers PixelCopy's async completion on the main looper. */
     private val mainHandler = Handler(Looper.getMainLooper())
     /** Tracks the last IME state we drove so we only call the IMM on
@@ -252,6 +258,18 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
         baseColorArgb: Int,
         onFirstFrame: (() -> Unit)? = null,
     ) {
+        // Re-bind safety: a previous bind's instance MUST be torn down
+        // before a new one is created. Overwriting [instance] would leak
+        // the old instance WITH its attached surface — its swapchain keeps
+        // this view's ANativeWindow bound, and the next attach on that
+        // window panics inside wgpu (ERROR_NATIVE_WINDOW_IN_USE_KHR →
+        // SIGABRT; the 2026-09-16 play-counts crash, 3× in one day).
+        // unbind() is idempotent, and its close op is FIFO-ordered ahead
+        // of the new instance's build/attach on the tur-host thread.
+        if (instance != null) {
+            android.util.Log.w("TurView", "rebind — closing previous instance")
+            unbind()
+        }
         dprValue = dpr
         firstFrameCallback = onFirstFrame
         firstFrameFired = false
@@ -318,10 +336,18 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
     fun unbind() {
         stopFirstFramePoll()
         removeCallbacks(pollRunnable)
+        surfaceAttached = false
         holder.removeCallback(surfaceCallback)
         setOnTouchListener(null)
         instance?.setAfterPump(null)
-        instance?.close()
+        // Blocking teardown on page exit: the destroy op (renderer + wgpu
+        // surface dropped, ANativeWindow released) must have SETTLED before
+        // this returns, so a quick leave→reopen cannot attach a new surface
+        // onto a recycled ANativeWindow whose old swapchain is still dying
+        // (wgpu panics IN_USE and aborts the process — the play-counts
+        // crash). The op is lightweight; the main-thread block is the
+        // destroy round-trip, bounded well under the ANR threshold.
+        instance?.closeBlocking()
         instance = null
         imeActive = false
         // Drop (don't recycle) the probe: an async PixelCopy round may still
@@ -332,6 +358,13 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
     private val surfaceCallback = object : SurfaceHolder.Callback {
         override fun surfaceCreated(holder: SurfaceHolder) {
             val inst = instance ?: return
+            if (surfaceAttached) {
+                // Duplicate surfaceCreated without an intervening destroy —
+                // the surface is already attached; a second attach would
+                // panic IN_USE inside wgpu.
+                android.util.Log.w("TurView", "duplicate surfaceCreated — attach skipped")
+                return
+            }
             // `SurfaceHolder.surfaceFrame` reports *physical* pixels; the
             // engine's viewport is in *logical* px, so divide by dpr.
             val d = dprValue.coerceAtLeast(1.0)
@@ -341,6 +374,7 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
             // build, so the instance exists when it runs; the wgpu
             // surface/adapter/device init happens there.
             inst.attach(holder.surface, w, h, dprValue)
+            surfaceAttached = true
             // The surface exists (buffer-less) — start watching for its
             // first composited buffer (see the loading-indicator note).
             startFirstFramePoll()
@@ -360,6 +394,7 @@ private class TurSurfaceView(context: Context) : SurfaceView(context) {
             // survives the platform surface going away and re-attaches
             // when the surface is created again.
             stopFirstFramePoll()
+            surfaceAttached = false
             instance?.detach()
         }
     }

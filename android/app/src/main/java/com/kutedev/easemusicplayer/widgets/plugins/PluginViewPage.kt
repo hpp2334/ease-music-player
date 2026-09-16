@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -132,17 +131,24 @@ fun PluginViewPage(
                     fontSize = 14.sp,
                 )
             }
-            // Keyed on the source handle: an in-process backend-service
-            // restart mints fresh handles on rescan; re-keying rebuilds the
-            // TurView instead of keeping a blank failed mount.
-            else -> key(item.viewSourceHandle) {
-                TurView(
-                    runtime = pluginRuntime,
-                    sourceHandle = item.viewSourceHandle,
-                    pluginId = pluginId,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+            // NOT keyed on `item.viewSourceHandle` (a previous build
+            // keyed here): every `plugin.list` rescan re-mints module-source
+            // handles, so the key flipped ~40 ms into each page-open and
+            // rebuilt the TurView — a churn whose first instance attached
+            // a recycled ANativeWindow, failed benignly ("dead surface"),
+            // and leaked a connected VkSurface in wgpu — making the NEXT
+            // attach on that window abort the process
+            // (ERROR_NATIVE_WINDOW_IN_USE_KHR). One stable TurView per
+            // page-open instead: the handle read at bind time is the
+            // current one; a backend restart mid-view leaves a frozen
+            // mount until the page is re-opened (recoverable, vs. a
+            // process abort).
+            else -> TurView(
+                runtime = pluginRuntime,
+                sourceHandle = item.viewSourceHandle,
+                pluginId = pluginId,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
