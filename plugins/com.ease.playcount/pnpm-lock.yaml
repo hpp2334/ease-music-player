@@ -18,8 +18,8 @@ importers:
         specifier: ^0.0.9
         version: 0.0.9
       '@tur-ng/std':
-        specifier: ^0.0.16
-        version: 0.0.16
+        specifier: ^0.0.17
+        version: 0.0.17
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -269,8 +269,8 @@ packages:
   '@tur-ng/core@0.0.9':
     resolution: {integrity: sha512-j7UpckD4ELgsMMfCbEadnrPxaaPdUgDy8CtDaAHl4nQro0MHu3KF+/RV+fY7kq2kM8BhlReRvaPtoF4oj6Zikg==}
 
-  '@tur-ng/std@0.0.16':
-    resolution: {integrity: sha512-4kjAFxwwMJ/QiBoVFa2QRswg1Z1wzKDpsFbRwvyeeoWzIkCJqylCp2RK3G+ua87tHiNVCbDnTk250YDhdx55Zw==}
+  '@tur-ng/std@0.0.17':
+    resolution: {integrity: sha512-OWn6DbOuV+T8rrTHAPro5e7nxjhKUthx3hucButtm4xplueEHANEHW0CrynkSVL1vIAqN85XEQBpmI1XhTHimQ==}
 
   '@tybys/wasm-util@0.10.3':
     resolution: {integrity: sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==}
@@ -1388,7 +1388,7 @@ snapshots:
 
   '@tur-ng/core@0.0.9': {}
 
-  '@tur-ng/std@0.0.16':
+  '@tur-ng/std@0.0.17':
     dependencies:
       '@tur-ng/core': 0.0.9
 

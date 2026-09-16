@@ -14,7 +14,9 @@
 //
 // Reactivity note: NO module-level mutable state — everything flows through
 // reactive atoms (`source`/`derive`/`mutate` declarations that materialize
-// into the instance store). The list is a reactive `Each` over `entries$` —
+// into the instance store). (One documented exception: the cover resource
+// MEMO in the covers section below — resource ids, not rendered state.)
+// The list is a reactive `Each` over `entries$` —
 // item fragments mount/unmount on length change and SURVIVING fragments are
 // kept mounted, so every data- AND rank-dependent prop inside a row is a
 // `derive` over `entries$`/`maxCount$`/its index (mounted rows update IN
@@ -40,6 +42,7 @@ import {
     Color,
     Axis,
     Alignment,
+    BoxFit,
     CrossAxisAlignment,
     MainAxisAlignment,
     MainAxisSize,
@@ -49,12 +52,15 @@ import {
     Condition,
     Each,
     Fragment,
+    Image,
     ScrollView,
     view,
     source,
     derive,
     mutate,
+    imageResourceHandle,
 } from "tur:std";
+import type { ImageResourceHandle } from "tur:std";
 import type { Source, Readable, Element, StoreCtx } from "tur:core";
 import { db as Storage, themes, library } from "ease";
 import type { PlaylistInfo } from "ease";
@@ -187,6 +193,57 @@ function dateKeysForRange(range: RangeDef): string[] {
 // validated defensively below, not trusted.
 type PlayEventRow = Partial<EaseRpcSigArg<typeof MusicPlaySig>>;
 
+// ---------------------------------------------------------------------------
+// Covers — host-registered image resources (`ease.library.covers`, decoded
+// + thumbnailed Rust-side so pixel bytes never enter JS). Two pieces:
+//
+//   `coverHandles` — a module-level resource MEMO (musicId → handle). On
+//   purpose NOT an atom: it is not rendered state (the file-top rule
+//   targets rendered state) — tur image resources live for the instance
+//   lifetime with no free API, so re-registering on every range switch
+//   would mint orphan GPU uploads. Registered at most once per musicId per
+//   page-open; the module re-evals on close, so the memo dies with the
+//   instance and its resources.
+//
+//   `covers$` — the reactive snapshot the rows derive from (a fresh Map per
+//   refresh over the current top-of-list ids), so mounted rows swap their
+//   placeholder → cover IN PLACE when the resources land.
+// ---------------------------------------------------------------------------
+
+/** How many top entries get covers (visible screen ≈ 10 rows; the batch
+ *  decodes synchronously on the view's lane, so keep it modest). */
+const COVER_BATCH = 24;
+/** Thumbnail edge in logical px — matches the row's cover slot. */
+const COVER_SIZE = 44;
+
+const coverHandles = new Map<string, ImageResourceHandle | null>();
+const covers$: Source<Map<string, ImageResourceHandle | null>> = source(
+    new Map(),
+);
+
+/** Register covers for any not-yet-cached ids among `ids` and publish a
+ *  fresh snapshot for exactly those ids. Cover failures are cosmetic —
+ *  they leave the fallback disc and never break the count list. */
+function refreshCovers(ids: string[]): Map<string, ImageResourceHandle | null> {
+    const missing = ids.filter((id) => !coverHandles.has(id));
+    if (missing.length > 0) {
+        try {
+            for (const c of library.covers(missing)) {
+                coverHandles.set(
+                    c.musicId,
+                    c.id === null ? null : imageResourceHandle(c.id),
+                );
+            }
+        } catch {
+            // Host older than the covers API, or a rejected id — the rows
+            // keep the fallback art; uncached ids retry next refresh.
+        }
+    }
+    const snap = new Map<string, ImageResourceHandle | null>();
+    for (const id of ids) snap.set(id, coverHandles.get(id) ?? null);
+    return snap;
+}
+
 // A mutation (dispatched from `start({ store })` / the range selector) so it
 // can write through the instance store's ctx — there is no module-level store.
 export const refresh$ = mutate((ctx: StoreCtx): void => {
@@ -240,6 +297,14 @@ export const refresh$ = mutate((ctx: StoreCtx): void => {
             (a, b) => b.count - a.count,
         );
         ctx.set(entries$, sorted);
+
+        // Covers for the (new) top of the list — registered host-side via
+        // `library.covers` and published as a fresh snapshot so mounted
+        // rows swap placeholder → cover in place.
+        ctx.set(
+            covers$,
+            refreshCovers(sorted.slice(0, COVER_BATCH).map((e) => e.musicId)),
+        );
     } catch {
         ctx.set(entries$, []);
     } finally {
@@ -545,6 +610,40 @@ function RankBadge(props: { rank$: Readable<number> }): Element {
         .build();
 }
 
+// Cover thumbnail — the host-registered image resource (`library.covers`)
+// at a fixed square slot, with the page's fallback art (tonal disc + note
+// glyph, same visual language as the empty state) while the handle hasn't
+// landed / for tracks with no cover or an undecodable one. The two
+// `Condition`s are reactive, so the swap happens in place.
+function CoverThumb(props: { handle$: Readable<ImageResourceHandle | null> }): Element {
+    const { handle$ } = props;
+    return Container()
+        .width(COVER_SIZE)
+        .height(COVER_SIZE)
+        .alignment(Alignment.Center)
+        .color(Color.hex(themes.color("surfaceContainerHighest")))
+        .borderRadius(10)
+        .children([
+            Condition({ condition: derive((ctx) => ctx.get(handle$) !== null) })
+                .child(() =>
+                    Image()
+                        .resourceId(derive((ctx) => ctx.get(handle$) ?? undefined))
+                        .width(COVER_SIZE)
+                        .height(COVER_SIZE)
+                        .fit(BoxFit.Cover)
+                        .build())
+                .build(),
+            Condition({ condition: derive((ctx) => ctx.get(handle$) === null) })
+                .child(() =>
+                    Text({ text: "♪" })
+                        .fontSize(18)
+                        .color(withAlpha(themes.color("primary"), 170))
+                        .build())
+                .build(),
+        ])
+        .build();
+}
+
 // One ranked row. Reads `entries$` REACTIVELY by `index` (see the file-top
 // reactivity note): item fragments are kept mounted across data changes, so
 // EVERY rank- or data-dependent value below is a `derive` — title, count,
@@ -565,6 +664,9 @@ function RankedRow(props: RankedRowProps): Element {
 
     const entry$ = derive((ctx) => ctx.get(entries$)[index]);
     const title$ = derive((ctx) => ctx.get(entry$)?.title ?? "");
+    const coverHandle$ = derive(
+        (ctx) => ctx.get(covers$).get(ctx.get(entry$)?.musicId ?? "") ?? null,
+    );
     const count$ = derive((ctx) => ctx.get(entry$)?.count ?? 0);
     const fillFlex$ = derive((ctx) => ctx.get(count$));
     const trackFlex$ = derive((ctx) => Math.max(0, ctx.get(maxCount$) - ctx.get(count$)));
@@ -630,6 +732,10 @@ function RankedRow(props: RankedRowProps): Element {
                                 .crossAlignment(CrossAxisAlignment.Center)
                                 .children([
                                     RankBadge({ rank$ }),
+                                    SizedBox()
+                                        .width(12)
+                                        .build(),
+                                    CoverThumb({ handle$: coverHandle$ }),
                                     SizedBox()
                                         .width(12)
                                         .build(),
