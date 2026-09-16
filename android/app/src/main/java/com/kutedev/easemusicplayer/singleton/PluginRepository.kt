@@ -212,12 +212,25 @@ class PluginRepository @Inject constructor(
      *  [scanPlugins] and [PluginManager.setLyricParserSelection]. */
     val lyricParserSelection = _lyricParserSelection.asStateFlow()
 
+    /** Whether [bindPlayerEvents] already installed its collector. */
+    @Volatile private var playerEventsBound = false
+
     /**
-     * Connects the player's plugin-event bus. Called once from
-     * [com.kutedev.easemusicplayer.MainActivity] after both repositories
-     * have been constructed by Hilt.
+     * Connects the player's plugin-event bus. Called from
+     * [com.kutedev.easemusicplayer.MainActivity.onStart] — which runs on
+     * *every* activity start (unlock / app-switch return / language
+     * recreate) — so it is idempotent: the collector lives on the
+     * app-wide [_scope] (never cancelled), and a second `launch` here
+     * would add a second permanent forwarder, silently delivering every
+     * event ×N (measured: play counts inflated by exactly the activity
+     * -restart count of the process). The single collector reads
+     * [_enabledPlugins] per event, so plugin enable/disable/install
+     * changes apply live without rebinding.
      */
     fun bindPlayerEvents(playerController: PlayerControllerRepository) {
+        if (playerEventsBound) return
+        playerEventsBound = true
+        bridge.logRaw("info", "plugin event bus bound")
         _scope.launch(Dispatchers.Default) {
             playerController.pluginEvents.collect { event ->
                 val payload = event.toJsonElement()
