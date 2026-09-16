@@ -19,10 +19,20 @@ anyhow = { workspace = true }
 
 # See `ease-client-backend/Cargo.toml` for the tur engine pin notes
 # (JS API contract, tokio-free core, dedup against tur-net-native).
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "a9139c7332148d634ebb377a39ff3b7d2b557fcc" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "a9139c7332148d634ebb377a39ff3b7d2b557fcc" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "a9139c7332148d634ebb377a39ff3b7d2b557fcc" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "a9139c7332148d634ebb377a39ff3b7d2b557fcc" }
+# d319829 = host-side image registration (PR #231: TurApp::register_image +
+# the `imageResourceHandle` JS bridge) — the seam `ease.library.covers`
+# registers cover thumbnails through.
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "d319829c63d9dfe7d91fc94962e6a3326ea30b59" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "d319829c63d9dfe7d91fc94962e6a3326ea30b59" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "d319829c63d9dfe7d91fc94962e6a3326ea30b59" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "d319829c63d9dfe7d91fc94962e6a3326ea30b59" }
+
+# Cover thumbnail decode for `ease.library.covers` (library_bridge.rs) —
+# same crates.io 0.25 line tur's decoder uses (feature-unified by cargo),
+# with webp added so realistic album art decodes; formats the `image` crate
+# cannot decode (e.g. HEIC) surface as `null` in JS and render the plugin's
+# fallback art.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 # Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
 # our `use boa_engine::*` resolves to the exact same instance the engine
