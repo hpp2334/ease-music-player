@@ -1,6 +1,7 @@
 package com.kutedev.easemusicplayer.turintegration
 
 import java.io.Closeable
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -31,6 +32,13 @@ class TurRuntime(
      * spawned instance. `0` = engine default (one lane thread per instance).
      */
     val poolsHandle: Long get() = poolsCell.get()
+
+    /**
+     * Live VIEW instances keyed by `"<pluginId>/<instance>"`. See
+     * [createInstance] — at most one live instance per logical view.
+     * Headless instances ([createHeadlessInstance]) are not tracked here.
+     */
+    private val liveViews = ConcurrentHashMap<String, TurInstance>()
 
     /**
      * Register a JS module source on the runtime's shared registry and
@@ -80,6 +88,17 @@ class TurRuntime(
         baseColorArgb: Int,
     ): TurInstance {
         check(handle != 0L) { "runtime destroyed" }
+        // ONE live view instance per (pluginId, instance). A rebind of the
+        // same logical view (nav-transition re-compose, rescan key churn,
+        // a double-push that slips through) MUST tear its predecessor down
+        // first: two live attaches have raced the same recycled
+        // ANativeWindow and wgpu aborts the whole process on
+        // ERROR_NATIVE_WINDOW_IN_USE_KHR (the play-counts crash). The
+        // predecessor's close op is FIFO-queued HERE — ahead of the new
+        // instance's build/attach — so the old holder of the window can
+        // never outlive the new surface attach.
+        val viewKey = "$pluginId/$instance"
+        liveViews.remove(viewKey)?.close()
         val frameLoop = FrameLoop()
         val h = TurNative.createInstance(
             handle,
@@ -90,7 +109,9 @@ class TurRuntime(
             baseColorArgb,
         )
         check(h != 0L) { "createInstance returned 0 (see logcat)" }
-        return TurInstance(h, frameLoop)
+        val inst = TurInstance(h, frameLoop)
+        liveViews[viewKey] = inst
+        return inst
     }
 
     /**
@@ -109,6 +130,7 @@ class TurRuntime(
 
     /** Drop the runtime and free native resources. Destroy all instances first. Idempotent. */
     override fun close() {
+        liveViews.clear()
         val h = handleCell.getAndSet(0L)
         if (h != 0L) {
             TurNative.destroyRuntime(h)

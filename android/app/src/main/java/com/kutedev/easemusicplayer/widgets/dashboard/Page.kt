@@ -50,6 +50,7 @@ import com.kutedev.easemusicplayer.viewmodels.SleepModeLeftTime
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.core.LocalNavController
+import com.kutedev.easemusicplayer.core.navigateSingleTop
 import com.kutedev.easemusicplayer.core.RouteCreateStorage
 import com.kutedev.easemusicplayer.core.RouteEditStorage
 import com.kutedev.easemusicplayer.core.RoutePluginView
@@ -150,7 +151,7 @@ private fun DevicesBlock(
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable {
-                        navController.navigate(RouteCreateStorage())
+                        navController.navigateSingleTop(RouteCreateStorage())
                     }
             ) {
                 Row(
@@ -179,7 +180,7 @@ private fun DevicesBlock(
                     .fillMaxWidth()
                     .clickable(enabled = pluginAlive) {
                         if (pluginAlive) {
-                            navController.navigate(RouteEditStorage(item.id.value.toString()))
+                            navController.navigateSingleTop(RouteEditStorage(item.id.value.toString()))
                         }
                     },
                 verticalAlignment = Alignment.CenterVertically,
@@ -323,7 +324,7 @@ fun DashboardSubpage(
                         buttonType = EaseIconButtonType.Primary,
                         painter = painterResource(id = R.drawable.icon_plus),
                         onClick = {
-                            navController.navigate(RouteCreateStorage())
+                            navController.navigateSingleTop(RouteCreateStorage())
                         }
                     )
                 }
@@ -342,7 +343,7 @@ fun DashboardSubpage(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 for (item in dashboardItems) {
                     DashboardCard(item) {
-                        navController.navigate(
+                        navController.navigateSingleTop(
                             RoutePluginView(item.pluginId, item.contributionId)
                         )
                     }
