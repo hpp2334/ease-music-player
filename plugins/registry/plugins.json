@@ -39,14 +39,14 @@
         "en-US": "Play Counts",
         "zh-CN": "播放计数"
       },
-      "version": "0.0.7",
+      "version": "0.0.8",
       "description": {
         "en-US": "Counts how many times each music has been played, filterable by time period (Today through Last Year) and by playlist membership.",
         "zh-CN": "统计每首歌的播放次数，支持按时间段（今天到最近一年）和按播放列表成员过滤。"
       },
-      "zip": "zips/com.ease.playcount-0.0.7.zip",
-      "sha256": "6ca6866aa25b2c14d91d7187bbe38875fac516d82e13f843f26ab87bf559ade2",
-      "size": 58265,
+      "zip": "zips/com.ease.playcount-0.0.8.zip",
+      "sha256": "7012faeb795caf57e41b27598691cf7e0cf02cc659e90d2de6367b2805ee64be",
+      "size": 61179,
       "icon": "icons/com.ease.playcount.png",
       "apiVersion": 1
     },
