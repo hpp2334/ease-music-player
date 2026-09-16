@@ -179,6 +179,21 @@ declare module "ease" {
         musicIds: string[];
     }
 
+    /** Cover lookup result returned by [`library.covers`]. */
+    export interface CoverInfo {
+        /** The requested id, echoed back for pairing with the request. */
+        musicId: string;
+        /**
+         * Numeric engine image resource id for the cover thumbnail, or
+         * `null` when the music row is gone / has no cover / its bytes
+         * failed to decode. Wrap a non-null id with
+         * `imageResourceHandle(id)` (`tur:std`) and pass the handle to
+         * `Image().resourceId(...)`. Ids are valid for the calling
+         * instance's lifetime; register once per cover and reuse.
+         */
+        id: number | null;
+    }
+
     export const library: {
         /**
          * Snapshot of the host's playlists in the app's playlist order:
@@ -188,6 +203,15 @@ declare module "ease" {
          * at view load does not track later playlist edits.
          */
         playlists(): PlaylistInfo[];
+        /**
+         * Register the covers of the requested musics as engine image
+         * resources (decoded + thumbnailed host-side; pixel bytes never
+         * enter JS) and return their resource ids. Batch-capped (~64) —
+         * decodes run synchronously on the calling instance's lane, so
+         * fetch the visible top of a list, not a whole library. Register
+         * once per musicId and reuse the id for the instance's lifetime.
+         */
+        covers(musicIds: string[]): CoverInfo[];
     };
 
     // ---- context namespace ------------------------------------------------
