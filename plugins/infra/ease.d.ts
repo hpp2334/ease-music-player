@@ -60,7 +60,10 @@ declare module "ease" {
 
         // ----- multi-value (append-only) -----
         multiAppend(key: string, value: string): void;
-        multiAppendMulti(entries: StorageMultiEntry[]): void;
+        /** Appends one row per entry. NOTE: FLAT `{ key, value }` entries
+         *  (same shape as `StorageEntry`) — the Rust bridge reads
+         *  `entry.value` and rejects a `{ key, values }` grouping. */
+        multiAppendMulti(entries: StorageEntry[]): void;
         /** Returns all values for one key (in append order). */
         multiGetAll(key: string): string[];
         /** Returns all values for each of `keys`. */
