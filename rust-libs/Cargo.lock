@@ -1200,8 +1200,8 @@ dependencies = [
  "serde_json",
  "tracing",
  "tur-android",
- "tur-animation 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
+ "tur-animation",
+ "tur-engine",
  "tur-net-native",
 ]
 
@@ -1299,9 +1299,9 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
- "tur-integration-tests 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
- "tur-native 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
+ "tur-engine",
+ "tur-integration-tests",
+ "tur-native",
 ]
 
 [[package]]
@@ -1341,9 +1341,9 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
- "tur-integration-tests 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
- "tur-native 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
+ "tur-engine",
+ "tur-integration-tests",
+ "tur-native",
 ]
 
 [[package]]
@@ -5805,24 +5805,12 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "tur-animation 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
+ "tur-animation",
  "tur-clipboard-android",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
- "tur-native 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
+ "tur-engine",
+ "tur-native",
  "tur-net-native",
  "wgpu",
-]
-
-[[package]]
-name = "tur-animation"
-version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc#a9139c7332148d634ebb377a39ff3b7d2b557fcc"
-dependencies = [
- "boa_engine",
- "boa_gc",
- "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
- "vello_common",
 ]
 
 [[package]]
@@ -5833,7 +5821,7 @@ dependencies = [
  "boa_engine",
  "boa_gc",
  "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
+ "tur-engine",
  "vello_common",
 ]
 
@@ -5844,30 +5832,7 @@ source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a33
 dependencies = [
  "jni",
  "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
-]
-
-[[package]]
-name = "tur-engine"
-version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc#a9139c7332148d634ebb377a39ff3b7d2b557fcc"
-dependencies = [
- "boa_engine",
- "boa_gc",
- "futures",
- "glifo",
- "image",
- "num-derive 0.4.2",
- "num-traits",
- "parley",
- "resvg",
- "thiserror 2.0.20",
- "tracing",
- "unicode-segmentation",
- "usvg",
- "vello_common",
- "vello_hybrid",
- "wgpu",
+ "tur-engine",
 ]
 
 [[package]]
@@ -5896,37 +5861,11 @@ dependencies = [
 [[package]]
 name = "tur-filepicker-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc#a9139c7332148d634ebb377a39ff3b7d2b557fcc"
-dependencies = [
- "boa_engine",
- "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
-]
-
-[[package]]
-name = "tur-filepicker-capability"
-version = "0.1.0"
 source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
 dependencies = [
  "boa_engine",
  "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
-]
-
-[[package]]
-name = "tur-integration-tests"
-version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc#a9139c7332148d634ebb377a39ff3b7d2b557fcc"
-dependencies = [
- "boa_engine",
- "futures",
- "libc",
- "tokio",
- "tur-animation 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
- "tur-filepicker-capability 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
- "tur-native 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
- "tur-net-capability 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
+ "tur-engine",
 ]
 
 [[package]]
@@ -5938,22 +5877,11 @@ dependencies = [
  "futures",
  "libc",
  "tokio",
- "tur-animation 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
- "tur-filepicker-capability 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
- "tur-native 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
- "tur-net-capability 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
-]
-
-[[package]]
-name = "tur-native"
-version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc#a9139c7332148d634ebb377a39ff3b7d2b557fcc"
-dependencies = [
- "futures",
- "parley",
- "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
+ "tur-animation",
+ "tur-engine",
+ "tur-filepicker-capability",
+ "tur-native",
+ "tur-net-capability",
 ]
 
 [[package]]
@@ -5964,19 +5892,7 @@ dependencies = [
  "futures",
  "parley",
  "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
-]
-
-[[package]]
-name = "tur-net-capability"
-version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc#a9139c7332148d634ebb377a39ff3b7d2b557fcc"
-dependencies = [
- "boa_engine",
- "boa_gc",
- "futures",
- "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=a9139c7332148d634ebb377a39ff3b7d2b557fcc)",
+ "tur-engine",
 ]
 
 [[package]]
@@ -5988,7 +5904,7 @@ dependencies = [
  "boa_gc",
  "futures",
  "tracing",
- "tur-engine 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
+ "tur-engine",
 ]
 
 [[package]]
@@ -6000,7 +5916,7 @@ dependencies = [
  "reqwest 0.12.28",
  "tokio",
  "tracing",
- "tur-net-capability 0.1.0 (git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59)",
+ "tur-net-capability",
 ]
 
 [[package]]
