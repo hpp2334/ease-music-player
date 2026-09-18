@@ -5791,7 +5791,7 @@ dependencies = [
 [[package]]
 name = "tur-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "android_logger",
  "boa_engine",
@@ -5816,7 +5816,7 @@ dependencies = [
 [[package]]
 name = "tur-animation"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5828,7 +5828,7 @@ dependencies = [
 [[package]]
 name = "tur-clipboard-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "jni",
  "tracing",
@@ -5838,7 +5838,7 @@ dependencies = [
 [[package]]
 name = "tur-engine"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5861,7 +5861,7 @@ dependencies = [
 [[package]]
 name = "tur-filepicker-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "boa_engine",
  "tracing",
@@ -5871,7 +5871,7 @@ dependencies = [
 [[package]]
 name = "tur-integration-tests"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "boa_engine",
  "futures",
@@ -5887,7 +5887,7 @@ dependencies = [
 [[package]]
 name = "tur-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "futures",
  "parley",
@@ -5898,7 +5898,7 @@ dependencies = [
 [[package]]
 name = "tur-net-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -5910,7 +5910,7 @@ dependencies = [
 [[package]]
 name = "tur-net-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=d319829c63d9dfe7d91fc94962e6a3326ea30b59#d319829c63d9dfe7d91fc94962e6a3326ea30b59"
+source = "git+https://github.com/hpp2334/tur?rev=0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2#0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2"
 dependencies = [
  "futures",
  "reqwest 0.12.28",

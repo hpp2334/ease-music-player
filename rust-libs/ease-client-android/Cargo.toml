@@ -22,10 +22,10 @@ anyhow = { workspace = true }
 # d319829 = host-side image registration (PR #231: TurApp::register_image +
 # the `imageResourceHandle` JS bridge) — the seam `ease.library.covers`
 # registers cover thumbnails through.
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "d319829c63d9dfe7d91fc94962e6a3326ea30b59" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "d319829c63d9dfe7d91fc94962e6a3326ea30b59" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "d319829c63d9dfe7d91fc94962e6a3326ea30b59" }
-tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "d319829c63d9dfe7d91fc94962e6a3326ea30b59" }
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2" }
 
 # Cover thumbnail decode for `ease.library.covers` (library_bridge.rs) —
 # same crates.io 0.25 line tur's decoder uses (feature-unified by cargo),
