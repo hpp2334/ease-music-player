@@ -32,12 +32,16 @@ fun EaseImage(
     vm: AssetVM = hiltViewModel()
 ) {
     val keyH = DataSourceKeyH(dataSourceKey)
-    var oldKey: DataSourceKeyH by remember { mutableStateOf(keyH) }
-    var state: AssetBitmap? by remember { mutableStateOf(vm.getCachedAsset(dataSourceKey)) }
+    // `remember(keyH)` resets the slot on a data-source change within the
+    // same composition. An unkeyed remember kept rendering the PREVIOUS
+    // key's bitmap until the effect swapped it — one stale frame when the
+    // new asset is cached, and the whole previous cover during a slow
+    // remote fetch (the doc below promises nothing-while-loading, not
+    // wrong-cover-while-loading).
+    var state: AssetBitmap? by remember(keyH) { mutableStateOf(vm.getCachedAsset(dataSourceKey)) }
 
-    LaunchedEffect(keyH, state == null) {
-        if (keyH != oldKey || state == null) {
-            oldKey = keyH
+    LaunchedEffect(keyH) {
+        if (state == null) {
             state = vm.loadAsset(keyH.value())
         }
     }

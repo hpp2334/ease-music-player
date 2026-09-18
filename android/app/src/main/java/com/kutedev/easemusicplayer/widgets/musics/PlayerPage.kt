@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,6 +85,7 @@ import com.kutedev.easemusicplayer.singleton.types.LyricLoadState
 import com.kutedev.easemusicplayer.singleton.types.Lyrics
 import com.kutedev.easemusicplayer.singleton.types.PlayMode
 import java.time.Duration
+import kotlinx.coroutines.delay
 import kotlin.collections.emptyList
 import kotlin.math.absoluteValue
 import kotlin.math.sign
@@ -452,6 +454,28 @@ private fun MusicLyric(
     }
 }
 
+// How long the swipe-commit override may pin the dragged-in art before
+// dropping (by then the real content is on screen either way — same-track
+// resume replays never change `cover`, and a failed advance reveals the
+// old track's real art, which is the correct outcome).
+private const val SWIPE_COMMIT_OVERRIDE_TIMEOUT_MS = 600L
+
+// Structural comparison for the swipe-override handoff: identity of the
+// rendered art, compared via the MusicId payload so the check can't be
+// defeated by boxing or variant surprises.
+private fun sameCoverKey(a: DataSourceKey?, b: DataSourceKey?): Boolean {
+    if (a == null || b == null) {
+        return a == null && b == null
+    }
+    if (a is DataSourceKey.Cover && b is DataSourceKey.Cover) {
+        return a.id.value == b.id.value
+    }
+    if (a is DataSourceKey.Music && b is DataSourceKey.Music) {
+        return a.id.value == b.id.value
+    }
+    return a == b
+}
+
 @Composable
 private fun MusicPlayerBody(
     onPrev: () -> Unit,
@@ -487,6 +511,33 @@ private fun MusicPlayerBody(
     var dragStartX by remember { mutableFloatStateOf(0f) }
     var showLyric by remember { mutableStateOf(false) }
 
+    // Swipe-commit override. Snapping the drag straight back to 0 on
+    // settle used to flash the OLD track's art: playNext()/playPrevious()
+    // advance the flows a few frames later, and the current slot at
+    // offset 0 still held the previous cover — swiping from a covered
+    // track onto a coverless one visibly "spiked" the old cover back.
+    // Instead the settle snaps immediately while the current slot keeps
+    // rendering the art the user just dragged in (`overrideCover`), and
+    // the override drops once the real `cover` lands (same track → the
+    // handoff is pixel-identical) or at the deadline. Pinning the CURRENT
+    // slot — instead of parking the drag at the anchor — keeps the shown
+    // art immune to the flow landing repainting the off-screen prev/next
+    // slots (a parked next-slot repaints into the next-next track's art
+    // mid-handoff, and canPrev/canNext flips can tear its anchor away).
+    var commitArmed by remember { mutableStateOf(false) }
+    var overrideCover by remember { mutableStateOf<DataSourceKey?>(null) }
+    var overrideEpoch by remember { mutableIntStateOf(0) }
+
+    // The anchor callback below is registered once per updateAnchored()
+    // run — which only happens on canPrev/canNext/size changes — so it
+    // must NOT capture the cover parameters directly: they'd be stale by
+    // however many track advances happened since (seeding the override
+    // with an ancient key, typically null → default disc at commit).
+    // rememberUpdatedState keeps a always-current value readable at fire
+    // time instead.
+    val prevCoverState = rememberUpdatedState(prevCover)
+    val nextCoverState = rememberUpdatedState(nextCover)
+
     fun updateAnchored() {
         val anchors = listOfNotNull(
             0f to "DEFAULT",
@@ -501,18 +552,33 @@ private fun MusicPlayerBody(
         anchoredDraggableState.updateAnchors(
             anchors,
             { value ->
-                if (value == widgetWidth.toFloat()) {
+                // Fires on every settle-animation frame. Only a gesture
+                // that left the anchors arms a commit (arming happens in
+                // onDragStarted and on any off-anchor frame), so re-running
+                // updateAnchored — canPrev/canNext or size changes — can
+                // never re-fire a settled commit.
+                val prevAnchor = widgetWidth.toFloat()
+                val nextAnchor = -widgetWidth.toFloat()
+                if (commitArmed && value == prevAnchor) {
+                    commitArmed = false
+                    overrideCover = prevCoverState.value
+                    overrideEpoch += 1
                     nextTickOnMain {
                         onPrev()
                         anchoredDraggableState.update(0f)
                         showLyric = false
                     }
-                } else if (value == -widgetWidth.toFloat()) {
+                } else if (commitArmed && value == nextAnchor) {
+                    commitArmed = false
+                    overrideCover = nextCoverState.value
+                    overrideEpoch += 1
                     nextTickOnMain {
                         onNext()
                         anchoredDraggableState.update(0f)
                         showLyric = false
                     }
+                } else if (value != prevAnchor && value != nextAnchor) {
+                    commitArmed = true
                 }
             }
         )
@@ -520,6 +586,20 @@ private fun MusicPlayerBody(
 
     LaunchedEffect(canPrev, canNext) {
         updateAnchored()
+    }
+
+    // Drop the override when the real cover lands (same track → the swap
+    // is invisible) or when the deadline expires (see the constant).
+    LaunchedEffect(cover, overrideEpoch) {
+        if (overrideEpoch == 0) {
+            return@LaunchedEffect
+        }
+        if (sameCoverKey(cover, overrideCover)) {
+            overrideEpoch = 0
+        } else {
+            delay(SWIPE_COMMIT_OVERRIDE_TIMEOUT_MS)
+            overrideEpoch = 0
+        }
     }
 
     Box(
@@ -543,6 +623,10 @@ private fun MusicPlayerBody(
                 orientation = Orientation.Horizontal,
                 onDragStarted = {
                     dragStartX = anchoredDraggableState.value
+                    // Every gesture arms its settle (see the anchor
+                    // callback); a settle back onto DEFAULT just leaves
+                    // the latch armed, which is benign.
+                    commitArmed = true
                 },
                 onLimitDragEnded = { nextValue ->
                     val dis = (nextValue - dragStartX).absoluteValue.coerceIn(0f, widgetWidth.toFloat());
@@ -579,7 +663,11 @@ private fun MusicPlayerBody(
             contentAlignment = Alignment.Center,
         ) {
             if (!showLyric) {
-                CoverImage(dataSourceKey = cover)
+                // The swipe-commit override pins the dragged-in art here
+                // until the real `cover` lands (see the state block above).
+                CoverImage(
+                    dataSourceKey = if (overrideEpoch != 0) overrideCover else cover,
+                )
             } else {
                 MusicLyric(
                     lyricIndex = lyricIndex,
