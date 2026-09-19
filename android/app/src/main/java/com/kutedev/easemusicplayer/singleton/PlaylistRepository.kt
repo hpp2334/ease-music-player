@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.time.debounce
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
@@ -33,6 +35,7 @@ import com.kutedev.easemusicplayer.singleton.types.MusicId
 import com.kutedev.easemusicplayer.singleton.types.PlaylistId
 import com.kutedev.easemusicplayer.singleton.types.RetCreatePlaylist
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -49,6 +52,25 @@ class PlaylistRepository @Inject constructor(
     private val _debouncedReloadEvent = MutableSharedFlow<Unit>()
     private val _preRemovePlaylistEvent = MutableSharedFlow<PlaylistId>()
     private val _preRemoveMusicEvent = MutableSharedFlow<ArgRemoveMusicFromPlaylist>()
+
+    /**
+     * Bounds the post-import duration probes (`probeAndPersistDuration` →
+     * `player.probeDurationMs`). Previously the fan-out was unbounded (one
+     * coroutine per music) with an emergent ~4 in-flight sessions from the
+     * runtime shape (4 tokio worker threads, 2-lane JS plugin backend pool);
+     * the cap is now explicit. Each probe holds a `Dispatchers.IO` thread for
+     * its blocking JNI bridge call, so this also bounds IO-pool occupancy —
+     * keep it well under the IO dispatcher's 64-thread ceiling.
+     */
+    private val probePermits = Semaphore(PROBE_CONCURRENCY)
+
+    /** Music ids currently queued or probing — dedupes overlapping requests. */
+    private val probingIds = ConcurrentHashMap.newKeySet<MusicId>()
+
+    private companion object {
+        /** See [probePermits]. Matches the previously-observed effective cap. */
+        const val PROBE_CONCURRENCY = 4
+    }
 
     val playlists = _playlists.asStateFlow()
     val groups = _groups.asStateFlow()
@@ -107,10 +129,32 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
+    /**
+     * Queues duration probes for newly-added musics (the callers of
+     * `playlist.create` / `playlist.addMusics`), capped at
+     * [PROBE_CONCURRENCY] concurrent probes ([probePermits]) and deduped
+     * against in-flight ones ([probingIds]) — re-adding a music to a second
+     * playlist while its first probe is queued/running skips the duplicate;
+     * the original probe persists the duration and emits [syncedTotalDuration].
+     */
     fun requestTotalDuration(added: List<AddedMusic>) {
         for (item in added) {
-            if (!item.existed) {
-                _scope.launch { probeAndPersistDuration(item.id) }
+            if (item.existed) continue
+            if (!probingIds.add(item.id)) continue
+            _scope.launch {
+                try {
+                    probePermits.withPermit {
+                        runCatching { probeAndPersistDuration(item.id) }
+                            .onFailure { e ->
+                                bridge.logRaw(
+                                    "warn",
+                                    "duration probe failed for ${item.id.value}: $e",
+                                )
+                            }
+                    }
+                } finally {
+                    probingIds.remove(item.id)
+                }
             }
         }
     }
