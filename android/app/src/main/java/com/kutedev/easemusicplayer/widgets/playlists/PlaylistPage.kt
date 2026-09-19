@@ -78,9 +78,9 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.ScrollMoveMode
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import sh.calvin.reorderable.rememberReorderableLazyListState
-import uniffi.ease_client_schema.DataSourceKey
-import uniffi.ease_client_backend.MusicAbstract
-import uniffi.ease_client_schema.MusicId
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
+import com.kutedev.easemusicplayer.singleton.types.MusicId
 
 @Composable
 private fun RemovePlaylistDialog(
@@ -148,7 +148,8 @@ private fun PlaylistHeader(
                     modifier = Modifier
                         .fillMaxSize(),
                     dataSourceKey = cover,
-                    contentScale = ContentScale.FillWidth
+                    contentScale = ContentScale.FillWidth,
+                    fallback = painterResource(id = R.drawable.cover_default_playlist_image),
                 )
                 Box(
                     modifier = Modifier
@@ -192,7 +193,7 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
-                                    playlistVM.prepareImportMusics(context)
+                                    playlistVM.prepareImportMusics()
                                     navController.navigate(RouteImport(RouteImportType.Music))
                                 }
                             ),

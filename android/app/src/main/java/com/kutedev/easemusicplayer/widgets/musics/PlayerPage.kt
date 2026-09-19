@@ -1,6 +1,11 @@
 package com.kutedev.easemusicplayer.widgets.musics
 
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
@@ -37,6 +42,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,12 +79,13 @@ import com.kutedev.easemusicplayer.core.RouteImport
 import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.utils.formatDuration
 import com.kutedev.easemusicplayer.utils.toMusicDurationMs
-import uniffi.ease_client_schema.DataSourceKey
-import uniffi.ease_client_backend.LyricLine
-import uniffi.ease_client_backend.LyricLoadState
-import uniffi.ease_client_backend.Lyrics
-import uniffi.ease_client_schema.PlayMode
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.LyricLine
+import com.kutedev.easemusicplayer.singleton.types.LyricLoadState
+import com.kutedev.easemusicplayer.singleton.types.Lyrics
+import com.kutedev.easemusicplayer.singleton.types.PlayMode
 import java.time.Duration
+import kotlinx.coroutines.delay
 import kotlin.collections.emptyList
 import kotlin.math.absoluteValue
 import kotlin.math.sign
@@ -138,6 +145,7 @@ private fun MusicPlayerHeader(
                                 stringId = R.string.music_lyric_add,
                                 onClick = {
                                     if (currentPlaying?.meta?.id != null) {
+                                        playerVM.prepareAddLyric()
                                         navController.navigate(
                                             RouteImport(RouteImportType.Lyric)
                                         )
@@ -167,10 +175,15 @@ private fun MusicSlider(
     totalDuration: String,
     totalDurationMS: ULong,
     onChangeMusicPosition: (ms: ULong) -> Unit,
+    loading: Boolean = false,
 ) {
     val handleSize = 12.dp
     val sliderHeight = 4.dp
-    val sliderContainerHeight = 16.dp
+    // 48dp gesture band (Material touch-target size) centered around the
+    // 4dp visual bar — the bar itself is far too thin to tap reliably.
+    // The bar and thumb are offset to the band's center, so the visuals
+    // are unchanged; only the tap/drag surface grows.
+    val sliderContainerHeight = 48.dp
 
     var isDragging by remember { mutableStateOf(false) }
     var draggingCurrentDurationMS by remember { mutableStateOf(_currentDurationMS) }
@@ -195,6 +208,11 @@ private fun MusicSlider(
         sliderWidth.toDp()
     }
 
+    // While loading/buffering, a short band sweeps across the track
+    // (indeterminate Material-style) — duration-independent, so it reads
+    // as "activity" even before the track duration is known. The infinite
+    // transition is only composed while loading, so the frame clock can
+    // idle otherwise.
     val draggableState = rememberDraggableState { deltaPx ->
         val delta = (deltaPx.toDouble() / sliderWidth.toDouble() * totalDurationMS.toDouble()).toLong()
         var nextMS = draggingCurrentDurationMS.toLong() + delta
@@ -257,6 +275,28 @@ private fun MusicSlider(
                         .fillMaxHeight()
                         .background(MaterialTheme.colorScheme.primary)
                 )
+                if (loading) {
+                    val loadingTransition = rememberInfiniteTransition(label = "sliderLoading")
+                    val loadingBandRate by loadingTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1100, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart,
+                        ),
+                        label = "sliderLoadingBand",
+                    )
+                    val loadingBandWidth = sliderWidthDp * 0.3f
+                    Box(
+                        modifier = Modifier
+                            .offset(
+                                x = -loadingBandWidth + (sliderWidthDp + loadingBandWidth) * loadingBandRate
+                            )
+                            .width(loadingBandWidth)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
             }
             Box(
                 modifier = Modifier
@@ -414,6 +454,28 @@ private fun MusicLyric(
     }
 }
 
+// How long the swipe-commit override may pin the dragged-in art before
+// dropping (by then the real content is on screen either way — same-track
+// resume replays never change `cover`, and a failed advance reveals the
+// old track's real art, which is the correct outcome).
+private const val SWIPE_COMMIT_OVERRIDE_TIMEOUT_MS = 600L
+
+// Structural comparison for the swipe-override handoff: identity of the
+// rendered art, compared via the MusicId payload so the check can't be
+// defeated by boxing or variant surprises.
+private fun sameCoverKey(a: DataSourceKey?, b: DataSourceKey?): Boolean {
+    if (a == null || b == null) {
+        return a == null && b == null
+    }
+    if (a is DataSourceKey.Cover && b is DataSourceKey.Cover) {
+        return a.id.value == b.id.value
+    }
+    if (a is DataSourceKey.Music && b is DataSourceKey.Music) {
+        return a.id.value == b.id.value
+    }
+    return a == b
+}
+
 @Composable
 private fun MusicPlayerBody(
     onPrev: () -> Unit,
@@ -449,6 +511,33 @@ private fun MusicPlayerBody(
     var dragStartX by remember { mutableFloatStateOf(0f) }
     var showLyric by remember { mutableStateOf(false) }
 
+    // Swipe-commit override. Snapping the drag straight back to 0 on
+    // settle used to flash the OLD track's art: playNext()/playPrevious()
+    // advance the flows a few frames later, and the current slot at
+    // offset 0 still held the previous cover — swiping from a covered
+    // track onto a coverless one visibly "spiked" the old cover back.
+    // Instead the settle snaps immediately while the current slot keeps
+    // rendering the art the user just dragged in (`overrideCover`), and
+    // the override drops once the real `cover` lands (same track → the
+    // handoff is pixel-identical) or at the deadline. Pinning the CURRENT
+    // slot — instead of parking the drag at the anchor — keeps the shown
+    // art immune to the flow landing repainting the off-screen prev/next
+    // slots (a parked next-slot repaints into the next-next track's art
+    // mid-handoff, and canPrev/canNext flips can tear its anchor away).
+    var commitArmed by remember { mutableStateOf(false) }
+    var overrideCover by remember { mutableStateOf<DataSourceKey?>(null) }
+    var overrideEpoch by remember { mutableIntStateOf(0) }
+
+    // The anchor callback below is registered once per updateAnchored()
+    // run — which only happens on canPrev/canNext/size changes — so it
+    // must NOT capture the cover parameters directly: they'd be stale by
+    // however many track advances happened since (seeding the override
+    // with an ancient key, typically null → default disc at commit).
+    // rememberUpdatedState keeps a always-current value readable at fire
+    // time instead.
+    val prevCoverState = rememberUpdatedState(prevCover)
+    val nextCoverState = rememberUpdatedState(nextCover)
+
     fun updateAnchored() {
         val anchors = listOfNotNull(
             0f to "DEFAULT",
@@ -463,18 +552,33 @@ private fun MusicPlayerBody(
         anchoredDraggableState.updateAnchors(
             anchors,
             { value ->
-                if (value == widgetWidth.toFloat()) {
+                // Fires on every settle-animation frame. Only a gesture
+                // that left the anchors arms a commit (arming happens in
+                // onDragStarted and on any off-anchor frame), so re-running
+                // updateAnchored — canPrev/canNext or size changes — can
+                // never re-fire a settled commit.
+                val prevAnchor = widgetWidth.toFloat()
+                val nextAnchor = -widgetWidth.toFloat()
+                if (commitArmed && value == prevAnchor) {
+                    commitArmed = false
+                    overrideCover = prevCoverState.value
+                    overrideEpoch += 1
                     nextTickOnMain {
                         onPrev()
                         anchoredDraggableState.update(0f)
                         showLyric = false
                     }
-                } else if (value == -widgetWidth.toFloat()) {
+                } else if (commitArmed && value == nextAnchor) {
+                    commitArmed = false
+                    overrideCover = nextCoverState.value
+                    overrideEpoch += 1
                     nextTickOnMain {
                         onNext()
                         anchoredDraggableState.update(0f)
                         showLyric = false
                     }
+                } else if (value != prevAnchor && value != nextAnchor) {
+                    commitArmed = true
                 }
             }
         )
@@ -482,6 +586,20 @@ private fun MusicPlayerBody(
 
     LaunchedEffect(canPrev, canNext) {
         updateAnchored()
+    }
+
+    // Drop the override when the real cover lands (same track → the swap
+    // is invisible) or when the deadline expires (see the constant).
+    LaunchedEffect(cover, overrideEpoch) {
+        if (overrideEpoch == 0) {
+            return@LaunchedEffect
+        }
+        if (sameCoverKey(cover, overrideCover)) {
+            overrideEpoch = 0
+        } else {
+            delay(SWIPE_COMMIT_OVERRIDE_TIMEOUT_MS)
+            overrideEpoch = 0
+        }
     }
 
     Box(
@@ -505,6 +623,10 @@ private fun MusicPlayerBody(
                 orientation = Orientation.Horizontal,
                 onDragStarted = {
                     dragStartX = anchoredDraggableState.value
+                    // Every gesture arms its settle (see the anchor
+                    // callback); a settle back onto DEFAULT just leaves
+                    // the latch armed, which is benign.
+                    commitArmed = true
                 },
                 onLimitDragEnded = { nextValue ->
                     val dis = (nextValue - dragStartX).absoluteValue.coerceIn(0f, widgetWidth.toFloat());
@@ -541,7 +663,11 @@ private fun MusicPlayerBody(
             contentAlignment = Alignment.Center,
         ) {
             if (!showLyric) {
-                CoverImage(dataSourceKey = cover)
+                // The swipe-commit override pins the dragged-in art here
+                // until the real `cover` lands (see the state block above).
+                CoverImage(
+                    dataSourceKey = if (overrideEpoch != 0) overrideCover else cover,
+                )
             } else {
                 MusicLyric(
                     lyricIndex = lyricIndex,
@@ -608,15 +734,25 @@ private fun MusicPanel(
                 playerVM.playPrevious()
             }
         )
+        // Loading/buffering is surfaced on the play/pause button itself:
+        // a spinner replaces the icon. Mid-play buffering (`Buffering`
+        // state surfaced as playing+loading) keeps the button tappable —
+        // pausing during a buffer stall is legal; initial load
+        // (`!playing && loading`) keeps it disabled since resume is a
+        // no-op while the engine is preparing.
         if (!playing) {
             EaseIconButton(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_play),
+                loading = loading,
                 disabled = loading,
                 overrideColors = if (loading) {
+                    // Keep the primary look (instead of the usual disabled
+                    // wash-out) so the spinner reads as "working", not "off".
                     EaseIconButtonColors(
-                        buttonDisabledBg = MaterialTheme.colorScheme.secondary,
+                        buttonDisabledBg = MaterialTheme.colorScheme.primary,
+                        iconDisabledTint = Color.White,
                     )
                 } else {
                     null
@@ -631,6 +767,7 @@ private fun MusicPanel(
                 sizeType = EaseIconButtonSize.Large,
                 buttonType = EaseIconButtonType.Primary,
                 painter = painterResource(id = R.drawable.icon_pause),
+                loading = loading,
                 onClick = {
                     playerVM.pause()
                 }
@@ -662,12 +799,15 @@ fun MusicPlayerPage(
 ) {
     val navController = LocalNavController.current
     val currentMusic by playerVM.music.collectAsState()
-    val currentDuration by playerVM.currentDuration.collectAsState()
+    val currentMs by playerVM.currentMs.collectAsState()
     val previousMusic by playerVM.previousMusic.collectAsState()
     val nextMusic by playerVM.nextMusic.collectAsState()
-    val bufferDuration by playerVM.bufferDuration.collectAsState()
+    val bufferMs by playerVM.bufferMs.collectAsState()
+    val loading by playerVM.loading.collectAsState()
     val currentLyricIndex by playerVM.lyricIndex.collectAsState()
-    val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.LOADING
+    // `lyric == null` (no parser plugin enabled / no resolvable location)
+    // renders the MISSING pane with its add CTA — not an eternal spinner.
+    val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.MISSING
     val lyrics = currentMusic?.lyric?.data?.lines ?: emptyList()
 
     val hasLyric = lyricLoadedState != LyricLoadState.MISSING
@@ -703,6 +843,7 @@ fun MusicPlayerPage(
                     lyrics = lyrics,
                     onClickAddLyric = {
                         if (currentMusic != null) {
+                            playerVM.prepareAddLyric()
                             navController.navigate(RouteImport(RouteImportType.Lyric))
                         }
                     }
@@ -719,14 +860,15 @@ fun MusicPlayerPage(
                     modifier = Modifier.padding(0.dp, 10.dp)
                 )
                 MusicSlider(
-                    currentDuration = formatDuration(currentDuration),
-                    _currentDurationMS = toMusicDurationMs(currentDuration),
-                    bufferDurationMS = bufferDuration.toMillis().toULong(),
+                    currentDuration = formatDuration(currentMs),
+                    _currentDurationMS = currentMs.toULong(),
+                    bufferDurationMS = bufferMs.toULong(),
                     totalDuration = formatDuration(currentMusic),
                     totalDurationMS = toMusicDurationMs(currentMusic),
                     onChangeMusicPosition = { nextMS ->
                         playerVM.seek(nextMS)
-                    }
+                    },
+                    loading = loading,
                 )
             }
             Row(
@@ -857,22 +999,22 @@ private fun MusicLyricPreview() {
     var lyricIndex by remember { mutableIntStateOf(0) }
     val lyricLines = remember {
         listOf(
-            LyricLine(Duration.ofMillis(1000), "> Task :app:preBuild UP-TO-DATE"),
-            LyricLine(Duration.ofMillis(3000), "> Task :app:preDebugBuild UP-TO-DATE"),
-            LyricLine(Duration.ofMillis(4000), "> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE"),
-            LyricLine(Duration.ofMillis(4500), "> Task :app:checkDebugAarMetadata UP-TO-DATE"),
-            LyricLine(Duration.ofMillis(5000), "> Task :app:generateDebugResValues UP-TO-DATE"),
+            LyricLine(1000L, "> Task :app:preBuild UP-TO-DATE"),
+            LyricLine(3000L, "> Task :app:preDebugBuild UP-TO-DATE"),
+            LyricLine(4000L, "> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE"),
+            LyricLine(4500L, "> Task :app:checkDebugAarMetadata UP-TO-DATE"),
+            LyricLine(5000L, "> Task :app:generateDebugResValues UP-TO-DATE"),
             LyricLine(
-                Duration.ofMillis(5500),
+                5500L,
                 "For more on this, please refer to https://docs.gradle.org/8.9/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation."
             ),
-            LyricLine(Duration.ofMillis(6000), "> Task :app:generateDebugResValues UP-TO-DATE"),
+            LyricLine(6000L, "> Task :app:generateDebugResValues UP-TO-DATE"),
             LyricLine(
-                Duration.ofMillis(7000),
+                7000L,
                 "You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins."
             ),
-            LyricLine(Duration.ofMillis(8000), "> Task :app:createDebugApkListingFileRedirect UP-TO-DATE"),
-            LyricLine(Duration.ofMillis(9000), "> Task :app:assembleDebug"),
+            LyricLine(8000L, "> Task :app:createDebugApkListingFileRedirect UP-TO-DATE"),
+            LyricLine(9000L, "> Task :app:assembleDebug"),
         )
     }
     var widgetHeight by remember { mutableIntStateOf(0) }

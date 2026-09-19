@@ -28,13 +28,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,20 +46,18 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseCheckbox
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
 import com.kutedev.easemusicplayer.viewmodels.ImportVM
-import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.viewmodels.VImportStorageEntry
 import com.kutedev.easemusicplayer.viewmodels.entryTyp
 import com.kutedev.easemusicplayer.core.LocalNavController
-import uniffi.ease_client_backend.CurrentStorageStateType
-import uniffi.ease_client_backend.StorageEntry
-import uniffi.ease_client_backend.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.CurrentStorageStateType
+import com.kutedev.easemusicplayer.singleton.types.StorageEntry
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
 
 @Composable
 private fun ImportEntriesSkeleton() {
@@ -300,22 +302,43 @@ private fun ImportEntries(
 
 @Composable
 private fun ImportStorages(
-    storagesVM: StoragesVM = hiltViewModel(),
     importVM: ImportVM = hiltViewModel()
 ) {
-    val storageItems by storagesVM.storages.collectAsState()
+    val storageItems by importVM.storages.collectAsState()
+    val disabledStorageIds by importVM.disabledStorageIds.collectAsState()
     val selectedStorageId by importVM.selectedStorageId.collectAsState()
+
+    val storageRowScroll = rememberScrollState()
+    val density = LocalDensity.current
+    // Bring the selected card into view — notably on entry, when the
+    // restored last-import storage sits past the first screenful of
+    // cards (the picker otherwise still starts scrolled to the left).
+    LaunchedEffect(selectedStorageId, storageItems) {
+        val index = storageItems.indexOfFirst { it.id == selectedStorageId }
+        if (index <= 0) {
+            return@LaunchedEffect
+        }
+        withFrameNanos { } // let the row's first layout pass settle
+        if (storageRowScroll.maxValue == 0) {
+            return@LaunchedEffect // everything fits, nothing to scroll
+        }
+        // Card stride = width (142dp) + row spacing (12dp).
+        val stride = with(density) { (142.dp + 12.dp).toPx() }
+        val target = (index * stride).toInt().coerceIn(0, storageRowScroll.maxValue)
+        storageRowScroll.animateScrollTo(target)
+    }
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier
             .padding(28.dp, 0.dp)
-            .horizontalScroll(rememberScrollState())
+            .horizontalScroll(storageRowScroll)
     ) {
         for (_item in storageItems) {
             val item = VImportStorageEntry(_item)
+            val disabled = disabledStorageIds.contains(item.id)
 
-            val selected = selectedStorageId == item.id
+            val selected = !disabled && selectedStorageId == item.id
 
             val bgColor = if (selected) {
                 MaterialTheme.colorScheme.primary
@@ -330,8 +353,13 @@ private fun ImportStorages(
 
             Box(
                 modifier = Modifier
+                    .alpha(if (disabled) {
+                        0.4F
+                    } else {
+                        1F
+                    })
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable {
+                    .clickable(enabled = !disabled) {
                         importVM.selectStorage(item.id)
                     }
                     .background(bgColor)
@@ -466,8 +494,7 @@ private fun ImportMusicsError(
 
 @Composable
 fun ImportMusicsPage(
-    importVM: ImportVM = hiltViewModel(),
-    storagesVM: StoragesVM = hiltViewModel()
+    importVM: ImportVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val selectedCount by importVM.selectedCount.collectAsState()

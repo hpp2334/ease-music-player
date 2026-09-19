@@ -1,10 +1,9 @@
-use std::{io::ErrorKind, process::Output};
+use std::io::ErrorKind;
 
 use bytes::Bytes;
 use ease_client_tokio::tokio_runtime;
 use futures_util::future::BoxFuture;
 use reqwest::StatusCode;
-use tokio::sync::oneshot::error;
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -17,6 +16,10 @@ pub struct Entry {
 enum StreamFileInner {
     Response(reqwest::Response),
     Total(bytes::Bytes),
+    /// Chunks sourced externally (e.g. pushed by a JS storage-provider plugin
+    /// over the RPC byte bridge). The receiver is consumed as-is; `total` /
+    /// `byte_offset` on the parent `StreamFile` carry metadata only.
+    Channel(async_channel::Receiver<StorageBackendResult<Bytes>>),
 }
 
 pub struct StreamFile {
@@ -31,18 +34,22 @@ pub struct StreamFile {
 pub enum StorageBackendError {
     #[error(transparent)]
     RequestFail(#[from] reqwest::Error),
-    #[error("Parse XML Fail")]
-    ParseXMLFail,
+    /// Auth rejected by the remote (JS storage-provider plugins signal this
+    /// with an `UNAUTHORIZED`-prefixed error message).
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+    /// Request timed out (JS storage-provider plugins signal this with a
+    /// `TIMEOUT`-prefixed error message).
+    #[error("timeout: {0}")]
+    Timeout(String),
     #[error(transparent)]
     TokioIO(#[from] tokio::io::Error),
     #[error(transparent)]
     TokioJoinError(#[from] tokio::task::JoinError),
-    #[error("Url Parse Error")]
-    UrlParseError(String),
     #[error("Serde Json Error: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
-    #[error("QuickXML De Error: {0}")]
-    QuickXMLDeError(#[from] quick_xml::DeError),
+    #[error("{0}")]
+    Other(String),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -57,17 +64,19 @@ pub type StorageBackendResult<T> = std::result::Result<T, StorageBackendError>;
 
 impl StorageBackendError {
     pub fn is_timeout(&self) -> bool {
-        if let StorageBackendError::RequestFail(e) = self {
-            return e.is_timeout();
+        match self {
+            StorageBackendError::RequestFail(e) => e.is_timeout(),
+            StorageBackendError::Timeout(_) => true,
+            _ => false,
         }
-        false
     }
 
     pub fn is_unauthorized(&self) -> bool {
-        if let StorageBackendError::RequestFail(e) = self {
-            return e.status() == Some(StatusCode::UNAUTHORIZED);
+        match self {
+            StorageBackendError::RequestFail(e) => e.status() == Some(StatusCode::UNAUTHORIZED),
+            StorageBackendError::Unauthorized(_) => true,
+            _ => false,
         }
-        false
     }
 
     pub fn is_not_found(&self) -> bool {
@@ -115,8 +124,32 @@ impl StreamFile {
             byte_offset: byte_offset.min(total as u64),
         }
     }
+    /// Wrap an externally-produced chunk channel (e.g. bytes pushed by a JS
+    /// storage-provider plugin). `total` is the full underlying size (for
+    /// `total_size`); `byte_offset` is the offset the chunks already start at
+    /// (used only for `size()` reporting — the chunks are NOT re-skipped).
+    pub fn new_from_rx(
+        rx: async_channel::Receiver<StorageBackendResult<Bytes>>,
+        total: Option<usize>,
+        byte_offset: u64,
+        name: &str,
+        content_type: Option<String>,
+    ) -> Self {
+        Self {
+            inner: StreamFileInner::Channel(rx),
+            total,
+            content_type,
+            name: name.to_string(),
+            byte_offset,
+        }
+    }
     pub fn size(&self) -> Option<usize> {
         self.total.map(|total| total - self.byte_offset as usize)
+    }
+
+    /// The full size of the underlying resource, ignoring `byte_offset`.
+    pub fn total_size(&self) -> Option<usize> {
+        self.total
     }
     pub fn content_type(&self) -> Option<&str> {
         self.content_type.as_deref()
@@ -126,6 +159,11 @@ impl StreamFile {
     }
 
     pub fn into_rx(self) -> async_channel::Receiver<StorageBackendResult<Bytes>> {
+        // Externally-sourced channel: chunks already arrive ready; no spawn.
+        if let StreamFileInner::Channel(rx) = self.inner {
+            return rx;
+        }
+
         let (mut tx, rx) = async_channel::bounded::<StorageBackendResult<Bytes>>(10);
 
         let _ = tokio_runtime().spawn(async move {
@@ -155,6 +193,8 @@ impl StreamFile {
                             tx.send(Ok(buf)).await?;
                         }
                     }
+                    // Handled by the early return above; unreachable here.
+                    StreamFileInner::Channel(_) => unreachable!(),
                 }
 
                 Ok(())
@@ -177,9 +217,22 @@ impl StreamFile {
     }
 
     pub async fn bytes(self) -> StorageBackendResult<Bytes> {
+        // Channel chunks already start at byte_offset — collect and return as-is.
+        if let StreamFileInner::Channel(mut rx) = self.inner {
+            let mut out = Vec::new();
+            while let Ok(chunk) = rx.recv().await {
+                match chunk {
+                    Ok(b) => out.extend_from_slice(&b),
+                    Err(e) => return Err(e),
+                }
+            }
+            return Ok(bytes::Bytes::from(out));
+        }
+
         let buf = match self.inner {
             StreamFileInner::Response(response) => response.bytes().await?,
             StreamFileInner::Total(buf) => buf,
+            StreamFileInner::Channel(_) => unreachable!(),
         };
 
         let offset = (self.byte_offset as usize).min(buf.len());

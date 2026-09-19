@@ -22,6 +22,19 @@
 
 -keep class uniffi.** { *; }
 -keep class com.sun.jna.** { *; }
+
+# --- Hand-written JNI surface (rust-libs/ease-client-backend) ---
+# The Rust backend looks these up BY NAME via JNI: `bridge/jni.rs`
+# find_class("com/kutedev/easemusicplayer/singleton/NativeBridgeResult")
+# on every call, and `plugin_runtime/host_cache.rs` +
+# themes/oauth/context bridges make static upcalls into the turintegration
+# host classes. R8 renaming them aborts the app at startup
+# (FindClass -> pending exception -> SIGABRT in EaseBridge_call).
+# AGP's default rules only preserve names of classes WITH native methods,
+# which does not cover these. Keep classes + members verbatim.
+-keep class com.kutedev.easemusicplayer.singleton.NativeBridgeResult { *; }
+-keep class com.kutedev.easemusicplayer.turintegration.** { *; }
+
 -dontwarn java.awt.Component
 -dontwarn java.awt.GraphicsEnvironment
 -dontwarn java.awt.HeadlessException

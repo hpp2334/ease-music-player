@@ -1,216 +1,331 @@
 use std::{sync::Arc, time::Duration};
 
+use ease_client_migration::converter;
+use ease_client_schema::entities::{music, playlist_music};
+use ease_client_schema::{BlobId, MusicId, MusicModel, PlaylistId, StorageEntryLoc};
 use ease_order_key::OrderKey;
-use redb::{ReadTransaction, ReadableMultimapTable, ReadableTable, WriteTransaction};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder,
+};
 
 use crate::error::BResult;
 
 use super::core::DatabaseServer;
-use ease_client_schema::{
-    BinSerde, BlobId, DbKeyAlloc, MusicId, MusicModel, PlaylistId, StorageEntryLoc, TABLE_MUSIC,
-    TABLE_MUSIC_BY_LOC, TABLE_PLAYLIST_MUSIC, TABLE_STORAGE_MUSIC,
-};
 
 #[derive(Debug)]
 pub struct ArgDBAddMusic {
     pub loc: StorageEntryLoc,
     pub title: String,
+    /// Sibling lyric detected at import time (see
+    /// `services::music::detect_import_sibling_lyrics`). Stored as the
+    /// music's lyric while `lyric_default` stays set — the loc is a
+    /// resolution snapshot, not a user pick, so play-time probing still
+    /// falls through if the file later disappears.
+    pub lyric: Option<StorageEntryLoc>,
 }
 
 impl DatabaseServer {
-    pub fn load_musics_by_playlist_id(
+    pub async fn load_musics_by_playlist_id(
         self: &Arc<Self>,
         playlist_id: PlaylistId,
     ) -> BResult<Vec<MusicModel>> {
-        let db = self.db().begin_read()?;
-        let table_playlist_musics = db.open_multimap_table(TABLE_PLAYLIST_MUSIC)?;
-        let table_music = db.open_table(TABLE_MUSIC)?;
-        let iter = table_playlist_musics.get(playlist_id)?;
-        let mut ret: Vec<MusicModel> = Vec::with_capacity(iter.len() as usize);
+        let db = self.db();
+        let pid = *playlist_id.as_ref();
 
-        for item in iter {
-            let id = item?.value();
+        let edges = playlist_music::Entity::find()
+            .filter(playlist_music::Column::PlaylistId.eq(pid))
+            .all(&db)
+            .await?;
 
-            let music = table_music.get(id)?.unwrap().value();
-            ret.push(music);
+        let mut ret: Vec<MusicModel> = Vec::with_capacity(edges.len());
+        for edge in edges {
+            if let Some(row) = music::Entity::find_by_id(edge.music_id).one(&db).await? {
+                ret.push(converter::music_to_model(row));
+            }
         }
 
         ret.sort_by(|lhs, rhs| lhs.order.cmp(&rhs.order));
-
         Ok(ret)
     }
 
-    pub fn load_music(self: &Arc<Self>, id: MusicId) -> BResult<Option<MusicModel>> {
-        let db = self.db().begin_read()?;
-        self.load_music_impl(&db, id)
+    pub async fn load_music(self: &Arc<Self>, id: MusicId) -> BResult<Option<MusicModel>> {
+        let db = self.db();
+        let row = music::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        Ok(row.map(converter::music_to_model))
     }
 
-    pub fn load_music_impl(
+    async fn load_music_by_loc(
         self: &Arc<Self>,
-        db: &ReadTransaction,
-        id: MusicId,
-    ) -> BResult<Option<MusicModel>> {
-        let table_music = db.open_table(TABLE_MUSIC)?;
-        let model = table_music.get(id)?.map(|v| v.value()).clone();
-
-        Ok(model)
-    }
-
-    fn load_music_by_key_impl(
-        self: &Arc<Self>,
-        db: &ReadTransaction,
         loc: StorageEntryLoc,
     ) -> BResult<Option<MusicModel>> {
-        let id = {
-            let table = db.open_table(TABLE_MUSIC_BY_LOC)?;
-            table.get(loc)?.map(|v| v.value())
-        };
-
-        if let Some(id) = id {
-            self.load_music_impl(db, id)
-        } else {
-            Ok(None)
-        }
+        let db = self.db();
+        let row = music::Entity::find()
+            .filter(music::Column::LocStorageId.eq(*loc.storage_id.as_ref()))
+            .filter(music::Column::LocPath.eq(loc.path.clone()))
+            .one(&db)
+            .await?;
+        Ok(row.map(converter::music_to_model))
     }
 
-    pub fn add_music_impl(
+    pub async fn add_music_impl(
         self: &Arc<Self>,
-        db: &WriteTransaction,
-        rdb: &ReadTransaction,
         arg: ArgDBAddMusic,
         order: OrderKey,
     ) -> BResult<(MusicId, bool)> {
-        let music = self.load_music_by_key_impl(rdb, arg.loc.clone())?;
-        if let Some(music) = music {
-            return Ok((music.id, true));
+        if let Some(existing) = self.load_music_by_loc(arg.loc.clone()).await? {
+            // Heal: attach a sibling lyric detected by this import to an
+            // existing row that never had one resolved. Auto-detect only —
+            // a user pick or an explicit removal cleared `lyric_default`,
+            // and that decision must survive re-imports.
+            if existing.lyric.is_none() && existing.lyric_default {
+                if let Some(lyric) = arg.lyric {
+                    self.attach_detected_music_lyric(existing.id, lyric)
+                        .await?;
+                }
+            }
+            return Ok((existing.id, true));
         }
 
-        let id = self.alloc_id(db, DbKeyAlloc::Music)?;
-        let id = MusicId::wrap(id);
-        let mut table_music = db.open_table(TABLE_MUSIC)?;
-        let mut table_music_by_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
-        let mut table_storage_music = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
-        table_music.insert(
-            id,
-            MusicModel {
-                id,
-                loc: arg.loc.clone(),
-                title: arg.title,
-                duration: None,
-                cover: None,
-                lyric: None,
-                lyric_default: true,
-                order: order.into_raw(),
-            },
-        )?;
-        table_storage_music.insert(arg.loc.storage_id, id)?;
-        table_music_by_loc.insert(arg.loc, id)?;
-
-        Ok((id, false))
+        let db = self.db();
+        let am = music::ActiveModel {
+            id: ActiveValue::NotSet,
+            loc_storage_id: ActiveValue::Set(*arg.loc.storage_id.as_ref()),
+            loc_path: ActiveValue::Set(arg.loc.path.clone()),
+            title: ActiveValue::Set(arg.title),
+            duration_ms: ActiveValue::Set(None),
+            cover_blob_id: ActiveValue::Set(None),
+            lyric_storage_id: ActiveValue::Set(arg.lyric.as_ref().map(|l| *l.storage_id.as_ref())),
+            lyric_path: ActiveValue::Set(arg.lyric.map(|l| l.path)),
+            lyric_default: ActiveValue::Set(1),
+            order: ActiveValue::Set(serde_json::to_string(&order.into_raw())?),
+        };
+        let inserted = am.insert(&db).await?;
+        Ok((MusicId::wrap(inserted.id), false))
     }
 
-    pub fn update_music_total_duration(
+    /// Persist an import-detected sibling lyric, keeping `lyric_default`
+    /// set (contrast [`Self::update_music_lyric`], which records a user's
+    /// explicit decision and clears the flag).
+    async fn attach_detected_music_lyric(
+        self: &Arc<Self>,
+        id: MusicId,
+        loc: StorageEntryLoc,
+    ) -> BResult<()> {
+        let db = self.db();
+        let row = music::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        if let Some(row) = row {
+            let mut am: music::ActiveModel = row.into();
+            am.lyric_storage_id = ActiveValue::Set(Some(*loc.storage_id.as_ref()));
+            am.lyric_path = ActiveValue::Set(Some(loc.path));
+            am.lyric_default = ActiveValue::Set(1);
+            am.update(&db).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_music_total_duration(
         self: &Arc<Self>,
         id: MusicId,
         duration: Duration,
     ) -> BResult<()> {
-        let db = self.db().begin_write()?;
-        {
-            let mut table = db.open_table(TABLE_MUSIC)?;
-            let m = table.get(id)?.map(|v| v.value());
-
-            if let Some(mut m) = m {
-                m.duration = Some(duration);
-                table.insert(id, m)?;
-            }
+        let db = self.db();
+        let row = music::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        if let Some(row) = row {
+            let mut am: music::ActiveModel = row.into();
+            am.duration_ms = ActiveValue::Set(Some(duration.as_millis() as i64));
+            am.update(&db).await?;
         }
-        db.commit()?;
-
         Ok(())
     }
 
-    pub fn update_music_cover(self: &Arc<Self>, id: MusicId, cover: Vec<u8>) -> BResult<()> {
-        let db = self.db().begin_write()?;
-        {
-            let mut table_music = db.open_table(TABLE_MUSIC)?;
-            let m = table_music.get(id)?.map(|v| v.value());
+    pub async fn update_music_cover(self: &Arc<Self>, id: MusicId, cover: Vec<u8>) -> BResult<()> {
+        let db = self.db();
+        let row = music::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        if let Some(row) = row {
+            let existing_cover = row.cover_blob_id;
+            let mut am: music::ActiveModel = row.into();
 
-            if let Some(mut m) = m {
-                if let Some(id) = m.cover {
-                    self.blob().remove(id)?;
-                }
-
-                let cover_id = self.blob().write(cover)?;
-
-                m.cover = Some(cover_id);
-                table_music.insert(id, m)?;
+            if let Some(old) = existing_cover {
+                self.blob().remove(BlobId::wrap(old))?;
             }
+            let cover_id = self.blob().write(cover).await?;
+            am.cover_blob_id = ActiveValue::Set(Some(*cover_id.as_ref()));
+            am.update(&db).await?;
         }
-        db.commit()?;
-
         Ok(())
     }
 
-    pub fn update_music_lyric(
+    pub async fn update_music_lyric(
         self: &Arc<Self>,
         id: MusicId,
         loc: Option<StorageEntryLoc>,
     ) -> BResult<()> {
-        let db = self.db().begin_write()?;
-        {
-            let mut table_music = db.open_table(TABLE_MUSIC)?;
-            let m = table_music.get(id)?.map(|v| v.value());
-
-            if let Some(mut m) = m {
-                m.lyric = loc;
-                m.lyric_default = false;
-                table_music.insert(id, m)?;
-            }
+        let db = self.db();
+        let row = music::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        if let Some(row) = row {
+            let mut am: music::ActiveModel = row.into();
+            am.lyric_storage_id = ActiveValue::Set(loc.as_ref().map(|l| *l.storage_id.as_ref()));
+            am.lyric_path = ActiveValue::Set(loc.map(|l| l.path));
+            am.lyric_default = ActiveValue::Set(0);
+            am.update(&db).await?;
         }
-        db.commit()?;
-
         Ok(())
     }
 
-    pub fn set_music_order(self: &Arc<Self>, id: MusicId, order: OrderKey) -> BResult<()> {
-        let db = self.db().begin_write()?;
-
-        {
-            let mut table_music = db.open_table(TABLE_MUSIC)?;
-            let m = table_music.get(id)?.map(|v| v.value());
-
-            if let Some(mut m) = m {
-                m.order = order.into_raw();
-                table_music.insert(id, m)?;
-            }
-        };
-        db.commit()?;
+    pub async fn set_music_order(self: &Arc<Self>, id: MusicId, order: OrderKey) -> BResult<()> {
+        let db = self.db();
+        let row = music::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        if let Some(row) = row {
+            let mut am: music::ActiveModel = row.into();
+            am.order = ActiveValue::Set(serde_json::to_string(&order.into_raw())?);
+            am.update(&db).await?;
+        }
         Ok(())
     }
 
-    pub fn compact_music_impl(
-        self: &Arc<Self>,
-        db: &WriteTransaction,
-        rdb: &ReadTransaction,
-        table_mp: &mut redb::MultimapTable<'_, BinSerde<MusicId>, BinSerde<PlaylistId>>,
-        to_remove_blobs: &mut Vec<BlobId>,
-        id: MusicId,
-    ) -> BResult<()> {
-        let ref_playlists = table_mp.get(id)?.len();
+    /// Remove the music if it has no remaining playlist references. Returns
+    /// the cover blob id to remove (if any).
+    pub(crate) async fn compact_music(self: &Arc<Self>, id: MusicId) -> BResult<Option<BlobId>> {
+        let db = self.db();
+        let mid = *id.as_ref();
+        let ref_count = playlist_music::Entity::find()
+            .filter(playlist_music::Column::MusicId.eq(mid))
+            .count(&db)
+            .await?;
 
-        if ref_playlists == 0 {
-            let m = self.load_music_impl(rdb, id)?.unwrap();
-
-            let mut table_loc = db.open_table(TABLE_MUSIC_BY_LOC)?;
-            let mut table_storage = db.open_multimap_table(TABLE_STORAGE_MUSIC)?;
-            let mut table_m = db.open_table(TABLE_MUSIC)?;
-            table_storage.remove(m.loc.storage_id, m.id)?;
-            table_loc.remove(m.loc)?;
-            table_m.remove(m.id)?;
-            if let Some(id) = m.cover {
-                to_remove_blobs.push(id);
+        if ref_count == 0 {
+            if let Some(row) = music::Entity::find_by_id(mid).one(&db).await? {
+                let cover = row.cover_blob_id;
+                music::Entity::delete_by_id(mid).exec(&db).await?;
+                return Ok(cover.map(BlobId::wrap));
             }
         }
-        Ok(())
+        Ok(None)
+    }
+
+    #[allow(dead_code)]
+    pub async fn list_music_ordered(self: &Arc<Self>) -> BResult<Vec<MusicModel>> {
+        let db = self.db();
+        let rows = music::Entity::find()
+            .order_by_asc(music::Column::Id)
+            .all(&db)
+            .await?;
+        Ok(rows.into_iter().map(converter::music_to_model).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ease_client_schema::StorageId;
+
+    async fn server() -> (std::sync::Arc<DatabaseServer>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let server = DatabaseServer::new();
+        server
+            .init(dir.path().to_str().unwrap().to_string())
+            .await
+            .unwrap();
+        (server, dir)
+    }
+
+    fn add_arg(path: &str, lyric: Option<StorageEntryLoc>) -> ArgDBAddMusic {
+        ArgDBAddMusic {
+            loc: StorageEntryLoc {
+                storage_id: StorageId::wrap(1),
+                path: path.to_string(),
+            },
+            title: path.to_string(),
+            lyric,
+        }
+    }
+
+    fn lyric(path: &str) -> Option<StorageEntryLoc> {
+        Some(StorageEntryLoc {
+            storage_id: StorageId::wrap(1),
+            path: path.to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn insert_persists_detected_lyric_keeping_default_flag() {
+        let (server, _dir) = server().await;
+
+        let (id, existing) = server
+            .add_music_impl(add_arg("/Music/a.mp3", lyric("/Music/a.lrc")), OrderKey::default())
+            .await
+            .unwrap();
+        assert!(!existing);
+        let m = server.load_music(id).await.unwrap().unwrap();
+        assert_eq!(m.lyric, lyric("/Music/a.lrc"));
+        // Detected ≠ user-picked: the flag stays set so play-time probing
+        // still falls through if the file later disappears.
+        assert!(m.lyric_default);
+
+        // No detected sibling → plain row, exactly like before.
+        let (id, _) = server
+            .add_music_impl(add_arg("/Music/b.mp3", None), OrderKey::default())
+            .await
+            .unwrap();
+        let m = server.load_music(id).await.unwrap().unwrap();
+        assert_eq!(m.lyric, None);
+        assert!(m.lyric_default);
+    }
+
+    #[tokio::test]
+    async fn reimport_heals_existing_row_without_lyric() {
+        let (server, _dir) = server().await;
+
+        let (id, _) = server
+            .add_music_impl(add_arg("/Music/a.mp3", None), OrderKey::default())
+            .await
+            .unwrap();
+        // The lyric appeared later (or detection is new): a re-import that
+        // detects it attaches it to the existing row.
+        let (id2, existing) = server
+            .add_music_impl(add_arg("/Music/a.mp3", lyric("/Music/a.lrc")), OrderKey::default())
+            .await
+            .unwrap();
+        assert!(existing);
+        assert_eq!(id, id2);
+        let m = server.load_music(id).await.unwrap().unwrap();
+        assert_eq!(m.lyric, lyric("/Music/a.lrc"));
+        assert!(m.lyric_default);
+    }
+
+    #[tokio::test]
+    async fn reimport_never_clobbers_user_decision() {
+        let (server, _dir) = server().await;
+
+        let (id, _) = server
+            .add_music_impl(add_arg("/Music/a.mp3", None), OrderKey::default())
+            .await
+            .unwrap();
+
+        // User picks an explicit lyric (clears `lyric_default`) ...
+        server
+            .update_music_lyric(id, lyric("/Music/custom.lrc"))
+            .await
+            .unwrap();
+        // ... a later re-import must not overwrite it.
+        server
+            .add_music_impl(add_arg("/Music/a.mp3", lyric("/Music/a.lrc")), OrderKey::default())
+            .await
+            .unwrap();
+        let m = server.load_music(id).await.unwrap().unwrap();
+        assert_eq!(m.lyric, lyric("/Music/custom.lrc"));
+        assert!(!m.lyric_default);
+
+        // Same for an explicit removal: `lyric == None` with the flag
+        // cleared stays untouched.
+        server.update_music_lyric(id, None).await.unwrap();
+        server
+            .add_music_impl(add_arg("/Music/a.mp3", lyric("/Music/a.lrc")), OrderKey::default())
+            .await
+            .unwrap();
+        let m = server.load_music(id).await.unwrap().unwrap();
+        assert_eq!(m.lyric, None);
+        assert!(!m.lyric_default);
     }
 }
