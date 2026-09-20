@@ -100,6 +100,23 @@ pub trait AudioSink: Send {
     fn output_position(&self) -> Option<Duration> {
         None
     }
+
+    /// The media-time duration of decoded-but-unheard audio the sink
+    /// still holds — ring occupancy mapped through the negotiated
+    /// format. `None` when the sink can't tell.
+    ///
+    /// The end-of-stream tail drain uses this to tell the NORMAL end
+    /// apart from a wedged device once the output clock freezes: an
+    /// empty ring means everything decoded has sounded (any remaining
+    /// gap to the ts-derived drain target is bookkeeping drift between
+    /// container timestamps and counted samples), while a non-empty
+    /// ring means audio is still waiting on a stalled device. Must
+    /// never be called from the audio callback; occupancy reads are
+    /// plain atomics/indices. [`CpalSink`] implements it from its
+    /// producer-side ring occupancy.
+    fn undrained(&self) -> Option<Duration> {
+        None
+    }
 }
 
 /// Constructs one [`AudioSink`] per loaded source.

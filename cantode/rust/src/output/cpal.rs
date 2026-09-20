@@ -138,6 +138,12 @@ impl OutputClock {
             return Duration::from_nanos(nanos.min(u64::MAX as u128) as u64);
         }
     }
+
+    /// Interleaved samples per second of the negotiated device format —
+    /// the divisor that turns ring occupancy into media time.
+    fn samples_per_sec(&self) -> u64 {
+        self.samples_per_sec
+    }
 }
 
 /// A hardware [`AudioSink`] backed by cpal.
@@ -551,6 +557,19 @@ impl AudioSink for CpalSink {
 
     fn output_position(&self) -> Option<Duration> {
         self.clock.as_ref().map(|c| c.position())
+    }
+
+    fn undrained(&self) -> Option<Duration> {
+        let producer = self.producer.as_ref()?;
+        let clock = self.clock.as_ref()?;
+        // Ring occupancy in interleaved device-format samples → media
+        // time. Audio already popped but sitting in the device's own
+        // (short) output buffer is not visible here; the output clock
+        // leads audibility by that span, and the drain's settle
+        // tolerance covers it.
+        Some(Duration::from_secs_f64(
+            producer.occupied_len() as f64 / clock.samples_per_sec() as f64,
+        ))
     }
 }
 

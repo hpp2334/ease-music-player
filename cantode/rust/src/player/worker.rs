@@ -27,12 +27,15 @@
 //! decode speed to playback speed once its ring is full, and the 5 ms
 //! quantum just guarantees the worker re-enters `recv_timeout` between
 //! every frame so queued commands preempt within one pump. A starved
-//! source surfaces as `Playing → Buffering` (readiness pre-check, or the
+//! starved source surfaces as `Playing → Buffering` (readiness pre-check, or the
 //! 250 ms play-path read deadline) and back on refill — the sink keeps
 //! draining its ring across the morph. When decode hits EOF on a
 //! position-tracking sink, the loop keeps ticking as a **tail drain**:
-//! `Ended` fires only once the sink's realtime output position reaches
-//! the end of what was decoded, so the listener hears the full track.
+//! `Ended` fires only once the listener has actually heard the decoded
+//! tail — the output position reaches the end of what was decoded, or
+//! the sink's ring is found empty under a frozen clock (bookkeeping
+//! drift between container timestamps and counted samples), or the
+//! no-progress stall budget lapses.
 
 use std::{
     sync::{Arc, mpsc},
@@ -58,9 +61,19 @@ use super::shared::SharedStatus;
 const POSITION_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How long the end-of-stream tail drain may make no output progress
-/// (device stalled or paused mid-drain) before giving up and ending
-/// anyway. Generous compared to the sink ring buffer's ~3 s capacity.
+/// (device stalled mid-drain with audio still in the ring) before
+/// giving up and ending anyway. Only the wedged-device path waits this
+/// out: a frozen clock whose ring has emptied (or that sits within
+/// [`DRAIN_SETTLE_TOLERANCE`] of the target) is the *normal* end and
+/// finishes immediately — see [`Worker::drain_tick`].
 const DRAIN_MAX_STALL: Duration = Duration::from_secs(8);
+
+/// A gap between the ts-derived drain target and the frozen output
+/// clock within this window is bookkeeping drift (container timestamps
+/// vs counted samples), not unheard audio: settle instead of waiting
+/// out the stall budget. Larger real shortfalls end via the sink's
+/// empty-ring report (or the stall budget when the sink can't report).
+const DRAIN_SETTLE_TOLERANCE: Duration = Duration::from_millis(200);
 
 /// How often the worker refreshes the buffered-window observable while
 /// `Paused` with a buffering source. The 5 ms playing/buffering ticks
@@ -81,8 +94,10 @@ struct Drain {
     /// Last observed output position (progress detection).
     last_pos: Duration,
     /// When output progress was last observed; `None` while advancing.
-    /// Armed on the first no-progress tick; the drain gives up once
-    /// `DRAIN_MAX_STALL` elapses without progress.
+    /// Armed on the first frozen tick that neither the settle tolerance
+    /// nor the empty-ring check already resolves; the drain gives up
+    /// once `DRAIN_MAX_STALL` elapses without progress (wedged device,
+    /// or a sink that can't report occupancy).
     stalled_since: Option<Instant>,
     /// What the post-drain landing is: the normal EOF drain ends the
     /// track; the hard-source-error drain parks it (the error message
@@ -476,8 +491,18 @@ impl Worker {
     }
 
     /// One tail-drain tick: watch the sink's realtime output position
-    /// until it reaches the decode frontier's end (the tail has sounded),
-    /// then end. Gives up after [`DRAIN_MAX_STALL`] without progress.
+    /// until the tail has sounded, then end. "Has sounded" is any of:
+    /// the position reached the decode frontier's end (the normal
+    /// path); the position froze **and** the sink reports an empty ring
+    /// — everything decoded has sounded, so any remaining gap to the
+    /// target is bookkeeping drift between container timestamps and
+    /// counted samples (the frozen-short-of-target end that used to
+    /// wait out the full stall budget and added ~8 s of dead air after
+    /// the last audible sample); the frozen position sits within
+    /// [`DRAIN_SETTLE_TOLERANCE`] of the target (sub-perceptible
+    /// drift); or no progress for [`DRAIN_MAX_STALL`] with audio still
+    /// held (device wedged, or a sink that can't report occupancy).
+    /// Gives up after [`DRAIN_MAX_STALL`] without progress.
     /// The observed position is mirrored into the observable so the
     /// progress glides to the end instead of freezing ~ring-fill short.
     fn drain_tick(&mut self) {
@@ -497,11 +522,19 @@ impl Worker {
                         drain.last_pos = pos;
                         drain.stalled_since = None;
                         false
-                    } else if drain.stalled_since.is_none() {
-                        drain.stalled_since = Some(Instant::now());
-                        false
                     } else {
-                        drain.stalled_since.unwrap().elapsed() >= DRAIN_MAX_STALL
+                        // Output froze: normal end vs wedged device.
+                        let settled =
+                            drain.target.saturating_sub(pos) <= DRAIN_SETTLE_TOLERANCE;
+                        let ring_empty = loaded.undrained().is_some_and(|d| d.is_zero());
+                        if settled || ring_empty {
+                            true
+                        } else if drain.stalled_since.is_none() {
+                            drain.stalled_since = Some(Instant::now());
+                            false
+                        } else {
+                            drain.stalled_since.unwrap().elapsed() >= DRAIN_MAX_STALL
+                        }
                     }
                 }
             },
@@ -514,11 +547,18 @@ impl Worker {
             self.shared.set_position(pos);
         }
         if finish {
-            if let Some(drain) = &self.drain {
-                tracing::info!(
+            match (&self.drain, live_pos) {
+                (Some(drain), Some(pos)) => tracing::info!(
                     target_ms = drain.target.as_millis() as u64,
+                    achieved_ms = pos.as_millis() as u64,
+                    shortfall_ms = drain.target.saturating_sub(pos).as_millis() as u64,
                     "tail drain finished"
-                );
+                ),
+                (Some(drain), None) => tracing::info!(
+                    target_ms = drain.target.as_millis() as u64,
+                    "tail drain finished (sink stopped reporting positions)"
+                ),
+                _ => {}
             }
             match self.drain.take().map(|d| d.then) {
                 Some(DrainEnd::Pause) => self.finish_drain_pause(),
@@ -851,7 +891,9 @@ mod tests {
         // The stub decoder yields one frame (ts 9 s, 480 frames @ 48 kHz
         // = 10 ms), then EOF. The tracking sink reports the instant-play
         // model, so the drain completes once its reported position
-        // reaches the frame's end (9.01 s).
+        // reaches the frame's end (9.01 s). Held mid-drain, the sink
+        // still holds audio and the position sits 510 ms short — beyond
+        // the settle tolerance — so the drain keeps waiting.
         let (loaded, fx) = loaded_session_with(
             FrameDecoder {
                 frame: DecodedFrame {
@@ -865,6 +907,7 @@ mod tests {
             2,
         );
         fx.enable_output_tracking();
+        fx.set_undrained(Some(Duration::from_secs(1)));
         let mut worker = worker_with(
             Machine::paused(loaded, Arc::clone(&fx.shared)),
             Arc::clone(&fx.shared),
@@ -875,14 +918,14 @@ mod tests {
         assert_eq!(worker.machine.state(), PlayerState::Playing);
 
         // Hold the tail mid-buffer: EOF arms the drain, no end yet.
-        fx.set_output_position(Some(Duration::from_secs(9)));
+        fx.set_output_position(Some(Duration::from_secs_f64(8.5)));
         worker.pump_once(); // EOF → drain armed
         assert_eq!(worker.machine.state(), PlayerState::Playing);
-        worker.pump_once(); // drain tick: 9 s < 9.01 s — still playing
+        worker.pump_once(); // frozen 510 ms short, ring holds audio — still waiting
         assert_eq!(worker.machine.state(), PlayerState::Playing);
         // The drain tick mirrors the live output position so the
         // progress glides to the end instead of freezing short.
-        assert_eq!(fx.shared.position(), Duration::from_secs(9));
+        assert_eq!(fx.shared.position(), Duration::from_secs_f64(8.5));
 
         // The tail has sounded: 9.01 s ≥ target → Ended.
         fx.set_output_position(Some(Duration::from_millis(9_010)));
@@ -893,6 +936,115 @@ mod tests {
         // Exactly once: another tick changes nothing.
         worker.pump_once();
         assert_eq!(worker.machine.state(), PlayerState::Ended);
+    }
+
+    #[test]
+    fn drain_frozen_short_of_target_ends_once_the_ring_empties() {
+        // The regression behind "position pinned at the end, then ~8 s
+        // of dead air": a clock that freezes a hair short of the
+        // ts-derived target used to wait out the whole DRAIN_MAX_STALL,
+        // because the finish test had no tolerance. An empty ring means
+        // everything decoded has sounded — end immediately regardless
+        // of the remaining gap.
+        let (loaded, fx) = loaded_session_with(
+            FrameDecoder {
+                frame: DecodedFrame {
+                    data: vec![0.0; 2 * 480],
+                    frames: 480,
+                    timestamp: Duration::from_secs(9),
+                },
+                yielded: false,
+            },
+            2,
+            2,
+        );
+        fx.enable_output_tracking();
+        fx.set_undrained(Some(Duration::from_secs(1)));
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+
+        worker.pump_once(); // decode + write → position 9.01 s
+        fx.set_output_position(Some(Duration::from_secs_f64(8.5)));
+        worker.pump_once(); // EOF → drain armed
+        worker.pump_once(); // first drain tick: progress (last_pos starts at zero)
+        worker.pump_once(); // frozen short, ring holds audio → stall armed, waiting
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+
+        // The device drained the ring: end NOW, not after the stall budget.
+        fx.set_undrained(Some(Duration::ZERO));
+        worker.pump_once();
+        assert_eq!(worker.machine.state(), PlayerState::Ended);
+        assert!(worker.machine.loaded_mut().unwrap().has_ended());
+    }
+
+    #[test]
+    fn drain_settles_within_tolerance_of_the_target() {
+        // A frozen clock within DRAIN_SETTLE_TOLERANCE of the target is
+        // bookkeeping drift, not unheard audio: the drain settles on the
+        // first frozen tick even though the sink still reports audio.
+        let (loaded, fx) = loaded_session_with(
+            FrameDecoder {
+                frame: DecodedFrame {
+                    data: vec![0.0; 2 * 480],
+                    frames: 480,
+                    timestamp: Duration::from_secs(9),
+                },
+                yielded: false,
+            },
+            2,
+            2,
+        );
+        fx.enable_output_tracking();
+        fx.set_undrained(Some(Duration::from_secs(1)));
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+
+        worker.pump_once(); // decode + write → position 9.01 s
+        fx.set_output_position(Some(Duration::from_millis(9_000))); // 10 ms short
+        worker.pump_once(); // EOF → drain armed
+        worker.pump_once(); // first drain tick: progress (last_pos starts at zero)
+        worker.pump_once(); // frozen 10 ms short → settle immediately
+        assert_eq!(worker.machine.state(), PlayerState::Ended);
+    }
+
+    #[test]
+    fn drain_keeps_waiting_while_the_ring_still_holds_audio() {
+        // A frozen clock with a real shortfall and audio still held is
+        // the wedged-device case: the drain must NOT end early — the
+        // stall budget (not tested here; it needs a real clock) stays
+        // the backstop. Progress resumes the wait too.
+        let (loaded, fx) = loaded_session_with(
+            FrameDecoder {
+                frame: DecodedFrame {
+                    data: vec![0.0; 2 * 480],
+                    frames: 480,
+                    timestamp: Duration::from_secs(9),
+                },
+                yielded: false,
+            },
+            2,
+            2,
+        );
+        fx.enable_output_tracking();
+        fx.set_undrained(Some(Duration::from_secs(1)));
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+
+        worker.pump_once(); // decode + write → position 9.01 s
+        fx.set_output_position(Some(Duration::from_secs_f64(8.0))); // 1.01 s short
+        worker.pump_once(); // EOF → drain armed
+        worker.pump_once(); // progress tick
+        worker.pump_once(); // frozen, ring holds audio → armed, waiting
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
     }
 
     #[test]
