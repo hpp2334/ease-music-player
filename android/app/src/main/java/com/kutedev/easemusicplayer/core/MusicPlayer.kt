@@ -12,6 +12,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.AudioPlaybackConfiguration
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -22,10 +23,14 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
 import com.kutedev.easemusicplayer.MainActivity
 import com.kutedev.easemusicplayer.R
+import com.kutedev.easemusicplayer.core.DataSourceKeyH
+import com.kutedev.easemusicplayer.singleton.AssetBitmap
+import com.kutedev.easemusicplayer.singleton.AssetRepository
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
 import com.kutedev.easemusicplayer.singleton.PlayerRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -37,8 +42,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import com.kutedev.easemusicplayer.singleton.types.Music
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
 import com.kutedev.easemusicplayer.singleton.types.Playlist
 import javax.inject.Inject
+import kotlinx.coroutines.withContext
 
 
 /**
@@ -67,6 +74,7 @@ import javax.inject.Inject
 class PlaybackService : android.app.Service() {
     @Inject lateinit var playerRepository: PlayerRepository
     @Inject lateinit var playerControllerRepository: PlayerControllerRepository
+    @Inject lateinit var assetRepository: AssetRepository
     @Inject lateinit var bridge: com.kutedev.easemusicplayer.singleton.Bridge
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
@@ -83,6 +91,18 @@ class PlaybackService : android.app.Service() {
     @Volatile private var lastPlaylist: Playlist? = null
     @Volatile private var lastPlaying: Boolean = false
     @Volatile private var lastLoading: Boolean = false
+
+    /** Cover currently baked into the notification / session metadata. */
+    @Volatile private var lastCoverKey: DataSourceKeyH? = null
+    @Volatile private var lastCoverBitmap: Bitmap? = null
+
+    /**
+     * Identity of the metadata last pushed to the session (music id +
+     * duration + playlist id + art presence). Metadata now carries
+     * artwork bitmaps; re-setting it from the 500 ms position ticker
+     * would re-parcel hundreds of KB through binder twice a second.
+     */
+    @Volatile private var lastMetaStamp: String? = null
     @Volatile private var focusHeld: Boolean = false
 
     /**
@@ -235,6 +255,11 @@ class PlaybackService : android.app.Service() {
             playerRepository.music.collectLatest { m ->
                 lastMusic = m
                 refreshForeground()
+                // Art loads asynchronously (cover bytes may still be on
+                // their way — first-play extraction patches `music` with
+                // the cover key only after the load resolves); when it
+                // lands this re-posts the notification with it.
+                refreshCoverArt(m?.cover)
             }
         }
         serviceScope.launch {
@@ -285,6 +310,93 @@ class PlaybackService : android.app.Service() {
             registerBecomingNoisy()
         }
         ensureWakeLock()
+    }
+
+    /**
+     * Load the current track's cover into [lastCoverBitmap] and re-post
+     * the notification / session metadata once it lands. Every
+     * [refreshForeground] in between builds artless; the artwork arrives
+     * through the second refresh here (`setOnlyAlertOnce` keeps that
+     * second post from flickering or re-alerting).
+     *
+     * The tricky part is the same-key re-emission: `player.loadMusic`'s
+     * patch (`updateMusicExtractedMeta`) and lyric arrivals re-emit
+     * `music` with the cover key this function already took, and
+     * `collectLatest` uses that re-emission to CANCEL the in-flight load
+     * — taking the key before the load (required, to dedupe) means the
+     * re-emission must not naively early-return, or the previous
+     * track's bitmap strands for the whole track. So a same-key
+     * re-emission adopts whatever the upstream cache resolved meanwhile
+     * and retries only when it did not resolve.
+     *
+     * A null key (coverless track, or no track) just clears any previous
+     * track's art so it can't leak into the next notification.
+     * [AssetBitmap.Failed] (bytes missing or undecodable) is
+     * terminal-cached upstream and simply means no art.
+     */
+    private suspend fun refreshCoverArt(cover: DataSourceKey?) {
+        val keyH = cover?.let { DataSourceKeyH(it) }
+        if (keyH == null) {
+            if (lastCoverBitmap != null || lastCoverKey != null) {
+                lastCoverKey = null
+                lastCoverBitmap = null
+                refreshForeground()
+            }
+            return
+        }
+        if (keyH == lastCoverKey) {
+            // Same track re-emitted. Art already up — nothing to do.
+            if (lastCoverBitmap != null) return
+            // A load for this key was started but its bitmap never
+            // landed (cancelled mid-flight by exactly this kind of
+            // re-emission): adopt the upstream cache if it resolved.
+            val cached = assetRepository.getCachedAsset(keyH.value())
+            if (cached is AssetBitmap.Loaded) {
+                lastCoverBitmap =
+                    scaleBitmapForNotification(cached.bitmap.asAndroidBitmap())
+                refreshForeground()
+                return
+            }
+            // Failed (terminal-cached) or an uncached transient miss —
+            // fall through: the load below is then a cheap cache hit or
+            // a retry, matching the repository's retry philosophy.
+        } else {
+            // New key: drop the PREVIOUS track's art BEFORE the async
+            // load, so a slow or failed fetch can never leave the old
+            // art on the new track. (The collector's first
+            // refreshForeground ran with the old bitmap still set, but
+            // this artless re-post follows it with no suspension in
+            // between, so it wins.)
+            lastCoverKey = keyH
+            lastCoverBitmap = null
+            refreshForeground()
+        }
+
+        // The fetch rides the bridge (IO internally); the decode is
+        // CPU-bound, so keep it off the main thread.
+        val bitmap = withContext(Dispatchers.Default) {
+            (assetRepository.loadBitmap(keyH.value()) as? AssetBitmap.Loaded)
+                ?.bitmap?.asAndroidBitmap()
+                ?.let(::scaleBitmapForNotification)
+        }
+        lastCoverBitmap = bitmap
+        refreshForeground()
+    }
+
+    /**
+     * Notification artwork renders small, and session-metadata bitmaps
+     * are parceled through binder — cap the edge so a huge embedded
+     * cover can't produce a transaction-too-large metadata drop. The
+     * original is never recycled: it is shared with the Compose-side
+     * [AssetRepository] cache.
+     */
+    private fun scaleBitmapForNotification(bitmap: Bitmap): Bitmap {
+        val maxEdge = maxOf(bitmap.width, bitmap.height)
+        if (maxEdge <= NOTIFICATION_ART_MAX_EDGE_PX) return bitmap
+        val scale = NOTIFICATION_ART_MAX_EDGE_PX.toFloat() / maxEdge
+        val w = (bitmap.width * scale).toInt().coerceAtLeast(1)
+        val h = (bitmap.height * scale).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bitmap, w, h, true)
     }
 
     // ----- wake lock -----
@@ -434,6 +546,15 @@ class PlaybackService : android.app.Service() {
         session.setPlaybackState(playbackState)
 
         if (music != null) {
+            // Metadata content identity: rebuild only when it changed.
+            // The art-presence flag covers the "cover extracted after
+            // first play" patch, which flips the stamp once the bitmap
+            // lands (see [refreshCoverArt]).
+            val stamp = "${music.meta.id}:${music.meta.duration}:" +
+                "${lastPlaylist?.abstr?.meta?.id}:${lastCoverBitmap != null}"
+            if (stamp == lastMetaStamp) return
+            lastMetaStamp = stamp
+
             val meta = MediaMetadataCompat.Builder()
                 .putString(
                     MediaMetadataCompat.METADATA_KEY_TITLE,
@@ -451,9 +572,21 @@ class PlaybackService : android.app.Service() {
                     MediaMetadataCompat.METADATA_KEY_DURATION,
                     music.meta.duration ?: 0L,
                 )
+                .also { b ->
+                    // Different system surfaces read different keys (the
+                    // Android 13+ media carousel, the lock screen, and
+                    // legacy MediaStyle consumers) — set them all.
+                    lastCoverBitmap?.let { art ->
+                        b.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art)
+                        b.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
+                        b.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
+                    }
+                }
                 .build()
             session.setMetadata(meta)
         } else {
+            if (lastMetaStamp == null) return
+            lastMetaStamp = null
             session.setMetadata(null)
         }
     }
@@ -509,6 +642,11 @@ class PlaybackService : android.app.Service() {
                 R.drawable.icon_play_next, "Next",
                 mediaButtonPendingIntent(PlaybackStateCompat.ACTION_SKIP_TO_NEXT),
             )
+
+        // Notification artwork: the large icon covers the notification
+        // itself; the Android 13+ media carousel instead reads art from
+        // the session metadata (set in [updateSessionState]).
+        lastCoverBitmap?.let { builder.setLargeIcon(it) }
 
         if (session != null) {
             builder.setStyle(
@@ -693,6 +831,9 @@ class PlaybackService : android.app.Service() {
         private const val NOTIFICATION_ID = 1
         private const val NOTIFICATION_CHANNEL_ID = "EaseMusicPlaybackChannel"
         private const val POSITION_TICK_INTERVAL_MS = 500L
+
+        /** Max edge (px) of the notification / metadata artwork bitmap. */
+        private const val NOTIFICATION_ART_MAX_EDGE_PX = 320
         private const val WAKE_LOCK_TAG = "ease:playback"
 
         /** Leak insurance: re-armed by the position ticker while playing. */
