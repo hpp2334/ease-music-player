@@ -44,7 +44,7 @@ let lastIdentity = null;
 hostRpc.registerHandler("storage:list", (args) => {
   lastIdentity = { pluginId: args.pluginId, storageId: args.storageId };
   return [
-    { name: "song.flac", path: args.dir + "/song.flac", size: 2048, isDir: false },
+    { name: "song.flac", path: args.dir + "/song.flac", size: 2048, isDir: false, createdAt: 1700000000000, modifiedAt: 1700000001000 },
     { name: "sub", path: args.dir + "/sub", isDir: true },
   ];
 });
@@ -113,7 +113,13 @@ fn js_backend_list_and_get() {
     assert_eq!(entries[0].path, "/music/song.flac");
     assert_eq!(entries[0].size, Some(2048));
     assert!(!entries[0].is_dir);
+    // camelCase `createdAt` / `modifiedAt` decode into the optional fields.
+    assert_eq!(entries[0].created_at, Some(1700000000000));
+    assert_eq!(entries[0].modified_at, Some(1700000001000));
     assert!(entries[1].is_dir);
+    // Absent timestamps decode as `None` — old plugins keep working.
+    assert_eq!(entries[1].created_at, None);
+    assert_eq!(entries[1].modified_at, None);
 
     // the identity payload must arrive verbatim — pluginId + storageId, no
     // composition anywhere

@@ -12,7 +12,7 @@
         "zh-CN": "LRC、SRT、WebVTT 歌词文件解析器。应用的歌词显示完全由本插件驱动，应用内没有内置解析器。"
       },
       "zip": "zips/com.ease.lyricformats-0.2.1.zip",
-      "sha256": "32923b95189170a6cd73a094ca6caa0a2a8048b03d088a69b9f86b436bfed5b0",
+      "sha256": "142aa1d5b6bccbc32ea7734655f08e71f5e9b7687e9d8b001ba89f71351cc8c9",
       "size": 35868,
       "apiVersion": 1
     },
@@ -22,14 +22,14 @@
         "en-US": "OneDrive",
         "zh-CN": "OneDrive"
       },
-      "version": "0.0.6",
+      "version": "0.0.7",
       "description": {
         "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless JS plugin.",
         "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
       },
-      "zip": "zips/com.ease.onedrive-0.0.6.zip",
-      "sha256": "335f843e9a53211c3e3cf9607bf7b7c6780e6647da8b07d38d6e397bb3147ee2",
-      "size": 52736,
+      "zip": "zips/com.ease.onedrive-0.0.7.zip",
+      "sha256": "b65e8f7825a19d2fc1e796047e3e37e6c9b5fe4362207d4ed19ac4b004ef4255",
+      "size": 57389,
       "icon": "icons/com.ease.onedrive.png",
       "apiVersion": 1
     },
@@ -45,7 +45,7 @@
         "zh-CN": "统计每首歌的播放次数，支持按时间段（今天到最近一年）和按播放列表成员过滤。"
       },
       "zip": "zips/com.ease.playcount-0.0.9.zip",
-      "sha256": "2a8c70c3804131b553df9dbe1ffea1a71d1c85a4d0ac4f64da5b7bb5fc62a4c7",
+      "sha256": "103cded4c4248c573ec53152eb057a8a15717ccacdf11850cbbee13654b61ead",
       "size": 65123,
       "icon": "icons/com.ease.playcount.png",
       "apiVersion": 1
@@ -56,15 +56,15 @@
         "en-US": "S3",
         "zh-CN": "S3"
       },
-      "version": "0.1.1",
+      "version": "0.1.2",
       "apiVersion": 1,
       "description": {
         "en-US": "Amazon S3 / S3-compatible object storage provider (ListObjectsV2 directory listing + SigV4 signed byte-range download; works with AWS S3, Cloudflare R2, MinIO, B2, ...) implemented as a headless JS plugin.",
         "zh-CN": "S3 / 兼容 S3 的对象存储插件（ListObjectsV2 目录列表 + SigV4 签名区间下载；支持 AWS S3、Cloudflare R2、MinIO、B2 等）。"
       },
-      "zip": "zips/com.ease.s3-0.1.1.zip",
-      "sha256": "976bad1967f2cccd85afed8846574336e126c7a7ae2035a3ce6dc193acf88858",
-      "size": 372091,
+      "zip": "zips/com.ease.s3-0.1.2.zip",
+      "sha256": "24b9710e1c815472f8fb5f8cbe4b9c63959f19d58e153bc97cb78cf313794bce",
+      "size": 376507,
       "icon": "icons/com.ease.s3.png"
     },
     {
@@ -73,14 +73,14 @@
         "en-US": "WebDAV",
         "zh-CN": "WebDAV"
       },
-      "version": "0.0.6",
+      "version": "0.0.7",
       "description": {
         "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless JS plugin.",
         "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
       },
-      "zip": "zips/com.ease.webdav-0.0.6.zip",
-      "sha256": "95bb2aebf9996041d835fda37a003371e2a2a53338e08b224eed866d8ca493dc",
-      "size": 340443,
+      "zip": "zips/com.ease.webdav-0.0.7.zip",
+      "sha256": "4183d1296cf4efde399ed85a92cec1e35c5620f1948c6b0aa292181e003fbad2",
+      "size": 345179,
       "icon": "icons/com.ease.webdav.png",
       "apiVersion": 1
     }

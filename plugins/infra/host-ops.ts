@@ -33,6 +33,10 @@ export interface StorageEntry {
     path: string;
     size?: number;
     isDir: boolean;
+    /** Milliseconds since the Unix epoch, when the backend knows it
+     *  (all fields optional — absent means "unknown", never a fallback). */
+    createdAt?: number;
+    modifiedAt?: number;
 }
 
 /** `storage:get` stream meta — replied up front, before the body flows

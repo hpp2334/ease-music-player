@@ -232,6 +232,10 @@ data class StorageEntry(
     val path: String,
     val size: ULong? = null,
     val isDir: Boolean,
+    /** Milliseconds since the Unix epoch, when the storage knows it. */
+    val createdAt: ULong? = null,
+    /** Milliseconds since the Unix epoch, when the storage knows it. */
+    val modifiedAt: ULong? = null,
 )
 
 @Serializable

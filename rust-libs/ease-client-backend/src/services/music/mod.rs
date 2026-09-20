@@ -410,6 +410,8 @@ async fn list_storage_children(
                 path: entry.path,
                 size: entry.size.map(|s| s as u64),
                 is_dir: entry.is_dir,
+                created_at: entry.created_at,
+                modified_at: entry.modified_at,
             })
             .collect(),
     )
@@ -482,6 +484,8 @@ mod tests {
             path: format!("/Music/{name}"),
             size: None,
             is_dir,
+            created_at: None,
+            modified_at: None,
         }
     }
 

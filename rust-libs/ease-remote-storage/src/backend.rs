@@ -11,6 +11,10 @@ pub struct Entry {
     pub path: String,
     pub size: Option<usize>,
     pub is_dir: bool,
+    /// Milliseconds since the Unix epoch, when the backend knows it.
+    pub created_at: Option<u64>,
+    /// Milliseconds since the Unix epoch, when the backend knows it.
+    pub modified_at: Option<u64>,
 }
 
 enum StreamFileInner {

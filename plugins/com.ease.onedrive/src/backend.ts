@@ -50,6 +50,7 @@ import {
     OauthExchangeSig,
 } from "../../infra/host-ops";
 import type { StorageEntry, StorageGetMeta } from "../../infra/host-ops";
+import { parseIsoDate } from "../../infra/http-dates";
 import { db, secret, context } from "ease";
 import { takePending } from "./oauth-pending";
 import { v4 as uuidv4 } from "uuid";
@@ -238,10 +239,16 @@ async function listImpl(token: string, dir: string): Promise<StorageEntry[]> {
         for (const item of value) {
             const name: string = item.name;
             const path = `${dir}/${name}`;
+            // Graph returns RFC 3339 timestamps — createdDateTime exists on
+            // both files and folders, so it maps for every entry here.
+            const createdAt =
+                typeof item.createdDateTime === "string" ? parseIsoDate(item.createdDateTime) : undefined;
+            const modifiedAt =
+                typeof item.lastModifiedDateTime === "string" ? parseIsoDate(item.lastModifiedDateTime) : undefined;
             if (item.file) {
-                out.push({ name, path, size: item.size, isDir: false });
+                out.push({ name, path, size: item.size, isDir: false, createdAt, modifiedAt });
             } else if (item.folder) {
-                out.push({ name, path, isDir: true });
+                out.push({ name, path, isDir: true, createdAt, modifiedAt });
             }
         }
         if (typeof j["@odata.nextLink"] === "string") {

@@ -18,6 +18,7 @@
 
 import { XMLParser } from "fast-xml-parser";
 import type { StorageEntry } from "../../infra/host-ops";
+import { parseIsoDate } from "../../infra/http-dates.ts";
 import { s3Decode } from "./s3path.ts";
 
 const xmlParser = new XMLParser({
@@ -53,7 +54,7 @@ function pickAll(obj: unknown, name: string): unknown[] {
 
 /** One page of a ListObjectsV2 response, after decoding. */
 export interface ListPage {
-    keys: Array<{ key: string; size?: number }>;
+    keys: Array<{ key: string; size?: number; modifiedAt?: number }>;
     prefixes: string[];
     truncated: boolean;
     nextToken: string | null;
@@ -69,7 +70,7 @@ export function parseListPage(xml: string): ListPage {
         throw new Error("s3: ListObjectsV2 response has no ListBucketResult root");
     }
 
-    const keys: Array<{ key: string; size?: number }> = [];
+    const keys: Array<{ key: string; size?: number; modifiedAt?: number }> = [];
     for (const contents of roots.flatMap((r) => pickAll(r, "contents"))) {
         const key = pick(contents, "key");
         if (typeof key !== "string" || key === "") continue;
@@ -78,7 +79,10 @@ export function parseListPage(xml: string): ListPage {
         if (typeof sizeStr === "string" && /^\d+$/.test(sizeStr.trim())) {
             size = parseInt(sizeStr.trim(), 10);
         }
-        keys.push({ key: s3Decode(key), size });
+        const lastmodStr = pick(contents, "lastmodified");
+        const modifiedAt =
+            typeof lastmodStr === "string" ? parseIsoDate(lastmodStr) : undefined;
+        keys.push({ key: s3Decode(key), size, modifiedAt });
     }
 
     const prefixes: string[] = [];
@@ -114,7 +118,7 @@ export function pageToEntries(page: ListPage, prefix: string): StorageEntry[] {
     const out: StorageEntry[] = [];
     const seen = new Set<string>();
 
-    for (const { key, size } of page.keys) {
+    for (const { key, size, modifiedAt } of page.keys) {
         if (key === prefix) continue; // the listed dir's own marker
         if (key.endsWith("/")) continue; // nested folder markers, not files
         if (seen.has(key)) continue;
@@ -124,6 +128,8 @@ export function pageToEntries(page: ListPage, prefix: string): StorageEntry[] {
             path: "/" + key,
             size,
             isDir: false,
+            // S3 has no creation time; LastModified is the only timestamp.
+            modifiedAt,
         });
     }
     for (const p of page.prefixes) {

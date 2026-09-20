@@ -10,6 +10,10 @@ pub struct StorageEntry {
     pub path: String,
     pub size: Option<u64>,
     pub is_dir: bool,
+    /// Milliseconds since the Unix epoch, when the storage knows it.
+    pub created_at: Option<u64>,
+    /// Milliseconds since the Unix epoch, when the storage knows it.
+    pub modified_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Deserialize)]

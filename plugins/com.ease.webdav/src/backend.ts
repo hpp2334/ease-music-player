@@ -62,6 +62,7 @@ import {
     StorageRemoveInstanceSig,
 } from "../../infra/host-ops";
 import type { StorageEntry, StorageGetMeta } from "../../infra/host-ops";
+import { parseHttpOrIsoDate, parseIsoDate } from "../../infra/http-dates";
 import { WebdavTestSig, WebdavConnectSig } from "./rpc";
 import type {
     TestOutcome,
@@ -404,6 +405,8 @@ interface RawEntry {
     displayName?: string;
     isDir: boolean;
     size?: number;
+    createdAt?: number;
+    modifiedAt?: number;
 }
 
 // fast-xml-parser configuration:
@@ -471,12 +474,20 @@ function parseMultistatus(xml: string): RawEntry[] {
         if (typeof lengthStr === "string" && /^\d+$/.test(lengthStr.trim())) {
             size = parseInt(lengthStr.trim(), 10);
         }
+        // `getlastmodified` is RFC 1123 (some servers emit RFC 3339 — accept
+        // both), `creationdate` RFC 3339. Many servers omit the latter (or
+        // alias it to mtime, which passes through as-is: best-effort data,
+        // the app sorts unknowns last).
+        const lastmodStr = pick(props, "getlastmodified");
+        const createdStr = pick(props, "creationdate");
         const displayName = pick(props, "displayname");
         out.push({
             href: href.trim(),
             displayName: typeof displayName === "string" ? displayName : undefined,
             isDir,
             size,
+            modifiedAt: typeof lastmodStr === "string" ? parseHttpOrIsoDate(lastmodStr) : undefined,
+            createdAt: typeof createdStr === "string" ? parseIsoDate(createdStr) : undefined,
         });
     }
     return out;
@@ -520,7 +531,14 @@ async function listImpl(conf: InstanceConfig, dir: string): Promise<StorageEntry
         } else {
             name = urlDecode(name);
         }
-        out.push({ name, path, size: item.size, isDir: item.isDir });
+        out.push({
+            name,
+            path,
+            size: item.size,
+            isDir: item.isDir,
+            createdAt: item.createdAt,
+            modifiedAt: item.modifiedAt,
+        });
     }
 
     // dirs first, then by path — matches the previous Rust ordering.

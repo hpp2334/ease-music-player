@@ -99,6 +99,10 @@ struct JsEntry {
     size: Option<usize>,
     #[serde(rename = "isDir", default)]
     is_dir: bool,
+    #[serde(rename = "createdAt", default)]
+    created_at: Option<u64>,
+    #[serde(rename = "modifiedAt", default)]
+    modified_at: Option<u64>,
 }
 
 impl From<JsEntry> for Entry {
@@ -108,6 +112,8 @@ impl From<JsEntry> for Entry {
             path: j.path,
             size: j.size,
             is_dir: j.is_dir,
+            created_at: j.created_at,
+            modified_at: j.modified_at,
         }
     }
 }
