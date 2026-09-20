@@ -136,6 +136,9 @@ struct StubSink {
     /// `Some(d)` = "everything written through `d` has sounded" — each
     /// write advances it to that write's end (instant-play model).
     out_pos: Arc<Mutex<Option<Duration>>>,
+    /// Simulated ring occupancy (`AudioSink::undrained`). `None` (the
+    /// default) = the sink can't tell.
+    undrained: Arc<Mutex<Option<Duration>>>,
 }
 
 impl AudioSink for StubSink {
@@ -175,6 +178,9 @@ impl AudioSink for StubSink {
     fn output_position(&self) -> Option<Duration> {
         *self.out_pos.lock().unwrap()
     }
+    fn undrained(&self) -> Option<Duration> {
+        *self.undrained.lock().unwrap()
+    }
 }
 
 /// A `Loaded` session backed by stubs, plus the handles to observe it.
@@ -183,6 +189,8 @@ pub(super) struct Fixture {
     pub(super) shared: Arc<SharedStatus>,
     /// The stub sink's simulated output clock (see [`StubSink`]).
     out_pos: Arc<Mutex<Option<Duration>>>,
+    /// The stub sink's simulated ring occupancy (see [`StubSink`]).
+    undrained: Arc<Mutex<Option<Duration>>>,
 }
 
 impl Fixture {
@@ -196,6 +204,11 @@ impl Fixture {
     /// tracking again).
     pub(super) fn set_output_position(&self, pos: Option<Duration>) {
         *self.out_pos.lock().unwrap() = pos;
+    }
+
+    /// Force the stub sink's reported ring occupancy (`AudioSink::undrained`).
+    pub(super) fn set_undrained(&self, held: Option<Duration>) {
+        *self.undrained.lock().unwrap() = held;
     }
 }
 
@@ -226,9 +239,11 @@ pub(super) fn loaded_session_with(
     let log = SinkLog::default();
     let shared = Arc::new(SharedStatus::new());
     let out_pos = Arc::new(Mutex::new(None));
+    let undrained = Arc::new(Mutex::new(None));
     let sink = Box::new(StubSink {
         log: log.clone(),
         out_pos: Arc::clone(&out_pos),
+        undrained: Arc::clone(&undrained),
     });
     let loaded = Loaded::new(
         Box::new(decoder),
@@ -242,6 +257,7 @@ pub(super) fn loaded_session_with(
             log,
             shared,
             out_pos,
+            undrained,
         },
     )
 }

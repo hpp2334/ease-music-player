@@ -197,6 +197,13 @@ impl Loaded {
         self.decoded_through
     }
 
+    /// Media time of decoded-but-unheard audio the sink still holds
+    /// (`None` when the sink can't tell). The drain's empty-ring check
+    /// rides on this — see `Worker::drain_tick`.
+    pub(super) fn undrained(&self) -> Option<Duration> {
+        self.sink.undrained()
+    }
+
     /// Forward of [`Decoder::readiness`]: can the source satisfy a read
     /// at the cursor without parking?
     pub(super) fn readiness(&self) -> Readiness {
