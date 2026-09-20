@@ -1,6 +1,8 @@
 // Node-runnable selftest for the pure modules (`src/sigv4.ts`,
-// `src/s3path.ts`, `src/listing.ts` — no tur imports involved; listing's
-// only local runtime import, `./s3path.ts`, is Node-resolvable). Run:
+// `src/s3path.ts`, `src/listing.ts` + the shared `infra/http-dates.ts` date
+// parser listing depends on — no tur imports involved; listing's
+// only local runtime imports, `./s3path.ts` and `../../infra/http-dates.ts`,
+// are Node-resolvable). Run:
 // pnpm test   (node executes .TS via native type stripping)
 //
 // Two layers of verification:
@@ -14,6 +16,7 @@
 
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
+import { parseHttpDate, parseIsoDate, parseHttpOrIsoDate } from "../../infra/http-dates.ts";
 import {
     EMPTY_PAYLOAD_SHA256,
     amzTimestamps,
@@ -438,6 +441,8 @@ test("parseListPage: final page has no token", () => {
     // MinIO-style raw key (with spaces, no percent-escapes) stays verbatim.
     assert.equal(page.keys[0].key, "music/track 2+final.flac");
     assert.equal(page.keys[0].size, 42);
+    // LastModified parses to ms since the epoch (RFC 3339 shape).
+    assert.equal(page.keys[0].modifiedAt, Date.UTC(2015, 0, 1, 0, 0, 0));
 });
 
 test("parseListPage: throws on non-ListBucketResult XML", () => {
@@ -454,6 +459,12 @@ test("pageToEntries: URL-encoded keys decode; markers elided; dirs first", () =>
             { name: "音楽.mp3", path: "/music/音楽.mp3", isDir: false, size: 1048576 },
         ],
     );
+    // S3 has no creation time; LastModified rides modifiedAt.
+    assert.deepEqual(
+        entries.map((e) => e.modifiedAt),
+        [undefined, Date.UTC(2014, 10, 21, 19, 40, 5)],
+    );
+    assert.ok(entries.every((e) => e.createdAt === undefined));
 });
 
 test("pageToEntries: nested folder markers elided across pages", () => {
@@ -488,6 +499,39 @@ test("parseS3Error: extracts Code/Message", () => {
     assert.ok(err?.message.includes("too large"));
     assert.equal(parseS3Error("<ListBucketResult/>"), null);
     assert.equal(parseS3Error("not xml <<<"), null);
+});
+
+// ---------------------------------------------------------------------------
+// infra/http-dates.ts — shared date parser (WebDAV `getlastmodified` /
+// `creationdate`, Graph `createdDateTime`, S3 `LastModified` all feed the
+// host entry timestamps; sorted by the app's import page)
+// ---------------------------------------------------------------------------
+
+test("parseHttpDate: RFC 1123 (WebDAV getlastmodified)", () => {
+    assert.equal(parseHttpDate("Sun, 06 Nov 1994 08:49:37 GMT"), 784111777000);
+    assert.equal(parseHttpDate("Tue, 15 Nov 1994 12:45:26 GMT"), Date.UTC(1994, 10, 15, 12, 45, 26));
+    assert.equal(parseHttpDate("Fri, 21 Nov 2014 19:40:05 GMT"), Date.UTC(2014, 10, 21, 19, 40, 5));
+    assert.equal(parseHttpDate("garbage"), undefined);
+});
+
+test("parseIsoDate: RFC 3339 / ISO 8601 (creationdate, Graph, S3)", () => {
+    assert.equal(parseIsoDate("1994-11-06T08:49:37Z"), 784111777000);
+    assert.equal(parseIsoDate("1994-11-06T08:49:37.123Z"), 784111777123);
+    // UTC offset: 08:49:37-05:00 === 13:49:37Z
+    assert.equal(parseIsoDate("1994-11-06T08:49:37-05:00"), 784111777000 + 5 * 3600 * 1000);
+    assert.equal(parseIsoDate("1994-11-06T16:49:37+08:00"), 784111777000);
+    // space instead of `T` (some servers)
+    assert.equal(parseIsoDate("1994-11-06 08:49:37Z"), 784111777000);
+    // leap-year civil math
+    assert.equal(parseIsoDate("2000-02-29T00:00:00Z"), Date.UTC(2000, 1, 29));
+    assert.equal(parseIsoDate("nonsense"), undefined);
+    assert.equal(parseIsoDate("1994-13-06T08:49:37Z"), undefined);
+});
+
+test("parseHttpOrIsoDate: accepts either shape", () => {
+    assert.equal(parseHttpOrIsoDate("Sun, 06 Nov 1994 08:49:37 GMT"), 784111777000);
+    assert.equal(parseHttpOrIsoDate("1994-11-06T08:49:37Z"), 784111777000);
+    assert.equal(parseHttpOrIsoDate("nope"), undefined);
 });
 
 // ---------------------------------------------------------------------------

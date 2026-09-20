@@ -34,6 +34,25 @@ data class SplitPathItem(
     val name: String,
 )
 
+/** Sort key offered by the import page's sort dialog. */
+enum class ImportSortField {
+    /** Entry name, case-insensitive. */
+    NAME,
+
+    /** Storage-reported creation time (`createdAt`; unknowns sort last). */
+    CREATED,
+
+    /** Storage-reported last-modified time (`modifiedAt`; unknowns last). */
+    MODIFIED,
+}
+
+enum class ImportSortDir { ASC, DESC }
+
+data class ImportSort(
+    val field: ImportSortField = ImportSortField.NAME,
+    val dir: ImportSortDir = ImportSortDir.ASC,
+)
+
 private fun defaultSplitPaths(): List<SplitPathItem> {
     return listOf()
 }
@@ -74,13 +93,18 @@ class ImportVM @Inject constructor(
         importRepository.allowedStorageIds.value
     ).firstOrNull()?.id)
     private val _loadState = MutableStateFlow(CurrentStorageStateType.LOADING)
-    // Toggle-all is disabled when there is nothing *selectable* — entries
-    // whose type the current import accepts (dirs and mismatched files,
-    // e.g. a .wma during a music import, are never selectable).
-    private val _disabledToggleAll =
-        combine(_entries, importRepository.allowTypes) { entries, types ->
-            selectableEntries(entries, types).isEmpty()
-        }.stateIn(viewModelScope, SharingStarted.Lazily, true)
+    private val _sort = MutableStateFlow(ImportSort())
+    private val _searchQuery = MutableStateFlow("")
+    private val _searchOpen = MutableStateFlow(false)
+
+    /** Entries after the active search filter (empty query = everything). */
+    private val filteredEntries = combine(_entries, _searchQuery) { entries, query ->
+        if (query.isBlank()) {
+            entries
+        } else {
+            entries.filter { entry -> entry.name.contains(query, ignoreCase = true) }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     private val _undoStack = MutableStateFlow(persistentListOf<String>())
 
     /**
@@ -158,11 +182,18 @@ class ImportVM @Inject constructor(
         entries.count { entry -> selected.contains(entry.path) }
     }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
     val entries = _entries.asStateFlow()
+
+    /** The listing as shown: search-filtered, then sorted (dirs first). */
+    val displayEntries = combine(filteredEntries, _sort) { list, sort ->
+        list.sortedWith(sortComparator(sort))
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val sort = _sort.asStateFlow()
+    val searchQuery = _searchQuery.asStateFlow()
+    val searchOpen = _searchOpen.asStateFlow()
     val selected = _selected.asStateFlow()
     val allowTypes = importRepository.allowTypes
     val selectedStorageId = _selectedStorageId.asStateFlow()
     val loadState = _loadState.asStateFlow()
-    val disabledToggleAll = _disabledToggleAll
     val canUndo =
         _undoStack.map {
             undoStack -> undoStack.isNotEmpty()
@@ -288,7 +319,8 @@ class ImportVM @Inject constructor(
         // Only selectable entries participate: dirs and entries whose type
         // the current import does not accept (e.g. a .wma during a music
         // import) have no checkbox and must neither be selected nor counted.
-        val selectable = selectableEntries(_entries.value, allowTypes.value).map { it.path }
+        // Scoped to the *visible* (search-filtered) set.
+        val selectable = selectableEntries(filteredEntries.value, allowTypes.value).map { it.path }
         if (selectable.isEmpty()) {
             return
         }
@@ -300,6 +332,54 @@ class ImportVM @Inject constructor(
                 selected.clear().addAll(selectable)
             }
         }
+    }
+
+    fun setSort(field: ImportSortField, dir: ImportSortDir) {
+        _sort.value = ImportSort(field, dir)
+    }
+
+    fun openSearch() {
+        _searchOpen.value = true
+    }
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    /** Exit search mode; the query goes with it. */
+    fun closeSearch() {
+        _searchOpen.value = false
+        _searchQuery.value = ""
+    }
+
+    /** Dirs always first; within each group, by the chosen key/direction.
+     *  Timestamp-unknown entries always sort last (either direction). */
+    private fun sortComparator(sort: ImportSort): Comparator<StorageEntry> {
+        return compareByDescending<StorageEntry> { it.isDir }
+            .thenComparator { a, b ->
+                when (sort.field) {
+                    ImportSortField.NAME -> {
+                        val r = a.name.compareTo(b.name, ignoreCase = true)
+                        if (sort.dir == ImportSortDir.DESC) -r else r
+                    }
+                    ImportSortField.CREATED -> compareTimestamp(a, b, { it.createdAt }, sort.dir)
+                    ImportSortField.MODIFIED -> compareTimestamp(a, b, { it.modifiedAt }, sort.dir)
+                }
+            }
+    }
+
+    private fun compareTimestamp(
+        a: StorageEntry,
+        b: StorageEntry,
+        keyOf: (StorageEntry) -> ULong?,
+        dir: ImportSortDir,
+    ): Int {
+        val av = keyOf(a)
+        val bv = keyOf(b)
+        if (av == null && bv == null) return 0
+        if (av == null) return 1
+        if (bv == null) return -1
+        return if (dir == ImportSortDir.DESC) bv.compareTo(av) else av.compareTo(bv)
     }
 
     private fun selectableEntries(

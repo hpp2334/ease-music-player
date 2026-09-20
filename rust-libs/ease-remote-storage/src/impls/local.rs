@@ -25,6 +25,16 @@ impl Default for LocalBackend {
     }
 }
 
+/// Milliseconds since the Unix epoch, best-effort: `None` when the
+/// platform/filesystem cannot report it (e.g. birth time on many
+/// Android filesystems).
+fn file_time_ms(time: std::io::Result<std::time::SystemTime>) -> Option<u64> {
+    time.ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as u64)
+}
+
 impl LocalBackend {
     pub fn new() -> Self {
         Self
@@ -63,6 +73,8 @@ impl LocalBackend {
                         path: path.replace('\\', "/"),
                         size: Some(metadata.len() as usize),
                         is_dir: metadata.is_dir(),
+                        created_at: file_time_ms(metadata.created()),
+                        modified_at: file_time_ms(metadata.modified()),
                     });
                 }
 

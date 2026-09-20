@@ -61,6 +61,8 @@ pub async fn ct_list_storage_entry_children(
                             path: entry.path,
                             size: entry.size.map(|s| s as u64),
                             is_dir: entry.is_dir,
+                            created_at: entry.created_at,
+                            modified_at: entry.modified_at,
                         })
                         .collect();
                     Ok(ListStorageEntryChildrenResp::Ok { data: entries })
