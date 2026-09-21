@@ -33,6 +33,7 @@ impl DatabaseServer {
         let db = self.db();
         let existing = preference::Entity::find_by_id(0).one(&db).await?;
         let pm = playmode_to_i32(model.playmode);
+        let sta = if model.show_track_artist { 1 } else { 0 };
         let last_import_loc =
             converter::preference_loc_to_json(model.last_import_loc);
         match existing {
@@ -41,6 +42,7 @@ impl DatabaseServer {
                 am.playmode = ActiveValue::Set(pm);
                 am.language = ActiveValue::Set(model.language);
                 am.last_import_loc = ActiveValue::Set(last_import_loc);
+                am.show_track_artist = ActiveValue::Set(sta);
                 am.update(&db).await?;
             }
             None => {
@@ -49,6 +51,7 @@ impl DatabaseServer {
                     playmode: ActiveValue::Set(pm),
                     language: ActiveValue::Set(model.language),
                     last_import_loc: ActiveValue::Set(last_import_loc),
+                    show_track_artist: ActiveValue::Set(sta),
                 };
                 am.insert(&db).await?;
             }

@@ -93,6 +93,7 @@ impl DatabaseServer {
             loc_storage_id: ActiveValue::Set(*arg.loc.storage_id.as_ref()),
             loc_path: ActiveValue::Set(arg.loc.path.clone()),
             title: ActiveValue::Set(arg.title),
+            artist: ActiveValue::Set(String::new()),
             duration_ms: ActiveValue::Set(None),
             cover_blob_id: ActiveValue::Set(None),
             lyric_storage_id: ActiveValue::Set(arg.lyric.as_ref().map(|l| *l.storage_id.as_ref())),
@@ -134,6 +135,17 @@ impl DatabaseServer {
         if let Some(row) = row {
             let mut am: music::ActiveModel = row.into();
             am.duration_ms = ActiveValue::Set(Some(duration.as_millis() as i64));
+            am.update(&db).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn update_music_artist(self: &Arc<Self>, id: MusicId, artist: String) -> BResult<()> {
+        let db = self.db();
+        let row = music::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        if let Some(row) = row {
+            let mut am: music::ActiveModel = row.into();
+            am.artist = ActiveValue::Set(artist);
             am.update(&db).await?;
         }
         Ok(())

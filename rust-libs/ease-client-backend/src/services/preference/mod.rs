@@ -45,3 +45,18 @@ pub(crate) async fn get_preference_last_import_loc(
     let data = cx.database_server().load_preference().await?;
     Ok(data.last_import_loc)
 }
+
+pub(crate) async fn save_preference_show_track_artist(
+    cx: &BackendContext,
+    arg: bool,
+) -> BResult<()> {
+    let mut data = cx.database_server().load_preference().await?;
+    data.show_track_artist = arg;
+    cx.database_server().save_preference(data).await?;
+    Ok(())
+}
+
+pub(crate) async fn get_preference_show_track_artist(cx: &BackendContext) -> BResult<bool> {
+    let data = cx.database_server().load_preference().await?;
+    Ok(data.show_track_artist)
+}

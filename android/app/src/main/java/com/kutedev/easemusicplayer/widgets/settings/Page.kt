@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -48,6 +49,7 @@ import com.kutedev.easemusicplayer.core.RouteLog
 import com.kutedev.easemusicplayer.core.RouteLyricParser
 import com.kutedev.easemusicplayer.core.RoutePluginManagement
 import com.kutedev.easemusicplayer.singleton.AppLanguage
+import com.kutedev.easemusicplayer.singleton.ArtistDisplaySetting
 import com.kutedev.easemusicplayer.singleton.LanguageSetting
 
 
@@ -122,6 +124,45 @@ private fun Item(
         }
     }
 }
+
+/**
+ * Settings row with a trailing [Switch] — same chrome as [Item] (icon +
+ * title), toggling instead of navigating. Whole row is clickable.
+ */
+@Composable
+private fun SwitchItem(
+    iconPainter: Painter,
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+    ) {
+        Box(modifier = Modifier.height(56.dp))
+        Icon(
+            painter = iconPainter,
+            contentDescription = null,
+            modifier = Modifier
+                .size(24.dp)
+        )
+        Box(
+            modifier = Modifier.width(12.dp)
+        )
+        Text(
+            text = title,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
 @Composable
 fun SettingSubpage() {
     val context = LocalContext.current
@@ -139,6 +180,7 @@ fun SettingSubpage() {
         val language by LanguageSetting.language.collectAsState()
         val scope = rememberCoroutineScope()
         var languageDialogOpen by remember { mutableStateOf(false) }
+        val showTrackArtist by ArtistDisplaySetting.show.collectAsState()
         Item(
             iconPainter = painterResource(R.drawable.icon_language),
             title = stringResource(id = R.string.setting_language),
@@ -155,6 +197,14 @@ fun SettingSubpage() {
                 onDismiss = { languageDialogOpen = false },
             )
         }
+        SwitchItem(
+            iconPainter = painterResource(R.drawable.icon_music_note),
+            title = stringResource(id = R.string.setting_show_track_artist),
+            checked = showTrackArtist,
+            onCheckedChange = { checked ->
+                scope.launch { ArtistDisplaySetting.save(checked) }
+            }
+        )
         Item(
             iconPainter = painterResource(R.drawable.icon_extension),
             title = stringResource(id = R.string.setting_plugin_management),

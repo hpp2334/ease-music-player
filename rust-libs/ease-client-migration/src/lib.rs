@@ -65,6 +65,14 @@ impl MigratorTrait for Migrator {
             // the preference row) — applies to both fresh and existing
             // databases.
             Box::new(migrations::PreferenceLastImportLocMigration),
+            // Real post-collapse schema change (track artist column on
+            // music, filled by the play-time metadata writeback) —
+            // applies to both fresh and existing databases.
+            Box::new(migrations::MusicArtistMigration),
+            // Real post-collapse schema change (show-track-artist
+            // display preference, default on) — applies to both fresh
+            // and existing databases.
+            Box::new(migrations::PreferenceShowTrackArtistMigration),
         ]
     }
 }

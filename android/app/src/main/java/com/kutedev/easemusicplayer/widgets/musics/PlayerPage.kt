@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -76,6 +77,7 @@ import com.kutedev.easemusicplayer.viewmodels.PlayerVM
 import com.kutedev.easemusicplayer.viewmodels.SleepModeVM
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteImport
+import com.kutedev.easemusicplayer.singleton.ArtistDisplaySetting
 import com.kutedev.easemusicplayer.singleton.RouteImportType
 import com.kutedev.easemusicplayer.utils.formatDuration
 import com.kutedev.easemusicplayer.utils.toMusicDurationMs
@@ -805,6 +807,7 @@ fun MusicPlayerPage(
     val bufferMs by playerVM.bufferMs.collectAsState()
     val loading by playerVM.loading.collectAsState()
     val currentLyricIndex by playerVM.lyricIndex.collectAsState()
+    val showArtist by ArtistDisplaySetting.show.collectAsState()
     // `lyric == null` (no parser plugin enabled / no resolvable location)
     // renders the MISSING pane with its add CTA — not an eternal spinner.
     val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.MISSING
@@ -859,6 +862,17 @@ fun MusicPlayerPage(
                     fontSize = 20.sp,
                     modifier = Modifier.padding(0.dp, 10.dp)
                 )
+                val artist = currentMusic?.meta?.artist.orEmpty()
+                if (showArtist && artist.isNotBlank()) {
+                    Text(
+                        text = artist,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(0.dp, 0.dp, 0.dp, 6.dp)
+                    )
+                }
                 MusicSlider(
                     currentDuration = formatDuration(currentMs),
                     _currentDurationMS = currentMs.toULong(),

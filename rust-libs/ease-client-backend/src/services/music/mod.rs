@@ -137,6 +137,7 @@ pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     MusicMeta {
         id: model.id,
         title: model.title,
+        artist: model.artist,
         duration: model.duration,
         order: model.order,
     }
@@ -193,6 +194,60 @@ pub(crate) async fn update_music_duration(
         .update_music_total_duration(arg.id, arg.duration)
         .await?;
     Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArgUpdateMusicArtist {
+    pub id: MusicId,
+    pub artist: String,
+}
+
+/// Persist a probed track artist. The **only-if-empty guard lives here**
+/// — the single choke point shared by the `player.loadMusic` writeback
+/// and the `music.updateArtist` bridge arm — so a probed artist never
+/// clobbers a value already in the DB (mirrors the duration/cover
+/// writeback policy). Blank probes are dropped silently.
+pub(crate) async fn update_music_artist(
+    cx: &BackendContext,
+    arg: ArgUpdateMusicArtist,
+) -> BResult<()> {
+    let artist = arg.artist.trim();
+    if artist.is_empty() {
+        return Ok(());
+    }
+    let Some(m) = cx.database_server().load_music(arg.id).await? else {
+        return Ok(());
+    };
+    if !m.artist.is_empty() {
+        return Ok(());
+    }
+    cx.database_server()
+        .update_music_artist(arg.id, artist.to_string())
+        .await?;
+    Ok(())
+}
+
+/// Extract the artist from probed container tags. cantode normalizes tag
+/// keys to symphonia-standard names via `std_key` (ID3 `TPE1` arrives as
+/// `Artist`, MP4 `aART` as `Artist`, ...), so a case-insensitive match on
+/// those names covers the common containers. `Artist` wins; `AlbumArtist`
+/// is the fallback for compilations / files with an empty per-track tag.
+/// Multi-value tags (FLAC Vorbis comments) are joined with `", "`.
+/// `None` = nothing usable — the DB keeps its empty artist.
+pub(crate) fn extract_artist_tag(tags: &[cantode::Tag]) -> Option<String> {
+    for key in ["Artist", "AlbumArtist"] {
+        let values: Vec<&str> = tags
+            .iter()
+            .filter(|t| t.key.eq_ignore_ascii_case(key))
+            .map(|t| t.value.trim())
+            .filter(|v| !v.is_empty())
+            .collect();
+        if !values.is_empty() {
+            return Some(values.join(", "));
+        }
+    }
+    None
 }
 
 #[derive(Serialize, Deserialize)]
@@ -497,6 +552,7 @@ mod tests {
                 path: "/Music/song.mp3".to_string(),
             },
             title: "song".to_string(),
+            artist: String::new(),
             duration: None,
             cover: None::<BlobId>,
             lyric,
@@ -803,6 +859,108 @@ mod tests {
             .unwrap();
         let m = cx.database_server().load_music(id).await.unwrap().unwrap();
         assert!(m.cover.is_some(), "a sniffable cover must be stored");
+    }
+
+    // -- artist extraction (see extract_artist_tag / update_music_artist) --
+
+    fn tag(key: &str, value: &str) -> cantode::Tag {
+        cantode::Tag {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    #[test]
+    fn artist_tag_prefers_artist_over_album_artist() {
+        let tags = vec![
+            tag("Album", "Greatest Hits"),
+            tag("AlbumArtist", "Various Artists"),
+            tag("Artist", "Alice"),
+        ];
+        assert_eq!(extract_artist_tag(&tags).as_deref(), Some("Alice"));
+    }
+
+    #[test]
+    fn artist_tag_falls_back_to_album_artist() {
+        // Compilations often carry only the album-level artist.
+        let tags = vec![tag("AlbumArtist", "Various Artists")];
+        assert_eq!(
+            extract_artist_tag(&tags).as_deref(),
+            Some("Various Artists")
+        );
+    }
+
+    #[test]
+    fn artist_tag_matches_keys_case_insensitively() {
+        let tags = vec![tag("ARTIST", "Alice")];
+        assert_eq!(extract_artist_tag(&tags).as_deref(), Some("Alice"));
+    }
+
+    #[test]
+    fn artist_tag_joins_multiple_values() {
+        // FLAC Vorbis comments repeat the field per value.
+        let tags = vec![tag("Artist", "Alice"), tag("Artist", "Bob")];
+        assert_eq!(extract_artist_tag(&tags).as_deref(), Some("Alice, Bob"));
+    }
+
+    #[test]
+    fn artist_tag_ignores_blank_values_and_unknown_keys() {
+        assert_eq!(extract_artist_tag(&[]), None);
+        assert_eq!(extract_artist_tag(&[tag("Title", "Song")]), None);
+        // Whitespace-only and empty values never count as found.
+        assert_eq!(extract_artist_tag(&[tag("Artist", "   ")]), None);
+        // A blank Artist falls through to a real AlbumArtist.
+        let tags = vec![tag("Artist", ""), tag("AlbumArtist", " Various ")];
+        assert_eq!(extract_artist_tag(&tags).as_deref(), Some("Various"));
+    }
+
+    #[tokio::test]
+    async fn update_music_artist_never_clobbers_and_drops_blanks() {
+        use crate::repositories::music::ArgDBAddMusic;
+        use ease_order_key::OrderKey;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cx = BackendContext::new();
+        cx.database_server()
+            .init(dir.path().to_str().unwrap().to_string())
+            .await
+            .unwrap();
+        let (id, _) = cx
+            .database_server()
+            .add_music_impl(
+                ArgDBAddMusic {
+                    loc: StorageEntryLoc {
+                        storage_id: StorageId::wrap(1),
+                        path: "/Music/song.mp3".to_string(),
+                    },
+                    title: "song".to_string(),
+                    lyric: None,
+                },
+                OrderKey::default(),
+            )
+            .await
+            .unwrap();
+
+        // Blank probes are dropped silently.
+        update_music_artist(&cx, ArgUpdateMusicArtist { id, artist: "  ".to_string() })
+            .await
+            .unwrap();
+        let m = cx.database_server().load_music(id).await.unwrap().unwrap();
+        assert_eq!(m.artist, "");
+
+        // The first real value lands.
+        update_music_artist(&cx, ArgUpdateMusicArtist { id, artist: " Alice ".to_string() })
+            .await
+            .unwrap();
+        let m = cx.database_server().load_music(id).await.unwrap().unwrap();
+        assert_eq!(m.artist, "Alice");
+
+        // ... and a later probe never clobbers it.
+        update_music_artist(&cx, ArgUpdateMusicArtist { id, artist: "Bob".to_string() })
+            .await
+            .unwrap();
+        let m = cx.database_server().load_music(id).await.unwrap().unwrap();
+        assert_eq!(m.artist, "Alice");
     }
 }
 

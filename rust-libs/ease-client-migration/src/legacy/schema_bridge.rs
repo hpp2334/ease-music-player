@@ -72,6 +72,9 @@ impl From<v3::MusicModel> for schema::MusicModel {
             id: v.id.into(),
             loc: v.loc.into(),
             title: v.title,
+            // The legacy redb schemas predate the track artist column —
+            // the play-time metadata writeback backfills it on demand.
+            artist: String::new(),
             duration: v.duration,
             cover: v.cover.map(Into::into),
             lyric: v.lyric.map(Into::into),
@@ -102,10 +105,12 @@ impl From<v3::PreferenceModel> for schema::PreferenceModel {
     fn from(v: v3::PreferenceModel) -> Self {
         schema::PreferenceModel {
             playmode: v.playmode.into(),
-            // The legacy schemas predate the language override and the
-            // last-import-folder preference.
+            // The legacy schemas predate the language override, the
+            // last-import-folder preference and the show-track-artist
+            // display preference (which defaults to on via Default).
             language: None,
             last_import_loc: None,
+            show_track_artist: true,
         }
     }
 }

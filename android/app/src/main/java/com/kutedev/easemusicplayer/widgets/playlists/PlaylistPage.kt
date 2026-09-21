@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
+import com.kutedev.easemusicplayer.singleton.ArtistDisplaySetting
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
@@ -285,6 +286,8 @@ private fun ReorderableCollectionItemScope.PlaylistItem(
     val playlistAbstr by playlistVM.playlistAbstr.collectAsState()
     val id = item.meta.id
     val title = item.meta.title
+    val artist = item.meta.artist
+    val showArtist by ArtistDisplaySetting.show.collectAsState()
     val duration = item.durationStr()
 
     val anchoredDraggableState = with(density) {
@@ -309,6 +312,11 @@ private fun ReorderableCollectionItemScope.PlaylistItem(
         Color.Transparent
     }
     val durationColor = if (playing) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val artistColor = if (playing) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
@@ -368,13 +376,26 @@ private fun ReorderableCollectionItemScope.PlaylistItem(
                     maxLines = 1,
                     fontSize = 14.sp,
                 )
-                Text(
-                    text = title,
-                    color = color,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    fontSize = 14.sp,
-                )
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = title,
+                        color = color,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = 14.sp,
+                    )
+                    if (showArtist && artist.isNotBlank()) {
+                        Text(
+                            text = artist,
+                            color = artistColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
             }
             Box(modifier = Modifier.width(16.dp))
             Text(

@@ -49,14 +49,17 @@ use crate::{
     services::{
         app::ArgInitializeApp,
         music::{
-            get_music_abstract, update_music_cover, update_music_duration, ArgAddMusicsToPlaylist,
-            ArgCreatePlaylist, ArgRemoveMusicFromPlaylist, ArgUpdateMusicCover,
-            ArgUpdateMusicDuration, ArgUpdateMusicLyric, ArgUpdatePlaylist,
+            get_music_abstract, update_music_artist, update_music_cover, update_music_duration,
+            ArgAddMusicsToPlaylist, ArgCreatePlaylist, ArgRemoveMusicFromPlaylist,
+            ArgUpdateMusicArtist, ArgUpdateMusicCover, ArgUpdateMusicDuration,
+            ArgUpdateMusicLyric, ArgUpdatePlaylist,
         },
         plugin_manager,
         preference::{
-            get_preference_language, get_preference_last_import_loc, get_preference_playmode,
-            save_preference_language, save_preference_last_import_loc, save_preference_playmode,
+            get_preference_language, get_preference_last_import_loc,
+            get_preference_playmode, get_preference_show_track_artist,
+            save_preference_language, save_preference_last_import_loc,
+            save_preference_playmode, save_preference_show_track_artist,
         },
     },
     Backend, PlayerContextHandle, PlayerHandle,
@@ -190,6 +193,16 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx = must_backend(handle)?;
             let cx_cx = cx.get_context().clone();
             update_music_cover(&cx_cx, ArgUpdateMusicCover { id: args.id, cover }).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "music.updateArtist" => {
+            let arg: ArgUpdateMusicArtist = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            // Inside our dispatcher we're already on the tokio runtime
+            // (block_on at the JNI layer); call the async service fn
+            // directly instead of going through the cts_ block_on wrapper.
+            update_music_artist(&cx_cx, arg).await?;
             Ok((Value::Null, vec![]))
         }
 
@@ -552,6 +565,21 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx_cx = cx.get_context().clone();
             let loc = get_preference_last_import_loc(&cx_cx).await?;
             Ok((serde_json::to_value(loc)?, vec![]))
+        }
+        "preference.saveShowTrackArtist" => {
+            // Whether track artist lines are shown in the UI (playlist
+            // rows, the now-playing subtitle); default on.
+            let show: bool = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            save_preference_show_track_artist(&cx_cx, show).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "preference.getShowTrackArtist" => {
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            let show = get_preference_show_track_artist(&cx_cx).await?;
+            Ok((serde_json::to_value(show)?, vec![]))
         }
 
         // ====================================================================

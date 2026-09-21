@@ -131,6 +131,8 @@ sealed class DataSourceKey {
 data class MusicMeta(
     val id: MusicId,
     val title: String,
+    /** Track artist from container tags; empty = not probed yet / no tag. */
+    val artist: String = "",
     val duration: Long? = null,
     val order: List<Long> = emptyList(),
 )
@@ -446,6 +448,12 @@ data class ArgPluginEvent(
 data class ArgUpdateMusicDuration(
     val id: MusicId,
     val duration: Long,
+)
+
+@Serializable
+data class ArgUpdateMusicArtist(
+    val id: MusicId,
+    val artist: String,
 )
 
 // ============================================================================

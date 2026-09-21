@@ -32,8 +32,8 @@ use crate::{
     error::BError,
     objects::music::MetadataRecord,
     services::{
-        get_asset_file, get_music, update_music_cover, update_music_duration, ArgUpdateMusicCover,
-        ArgUpdateMusicDuration,
+        extract_artist_tag, get_asset_file, get_music, update_music_artist, update_music_cover,
+        update_music_duration, ArgUpdateMusicArtist, ArgUpdateMusicCover, ArgUpdateMusicDuration,
     },
     Backend, BackendContext,
 };
@@ -388,19 +388,20 @@ pub async fn ct_player_load_music(
     })??;
 
     // Metadata writeback: if the probe found embedded cover art AND/OR a
-    // duration that the DB doesn't yet have, fill them in now — inline,
-    // before this call resolves. The caller re-fetches the music right
-    // after `player.loadMusic` returns and patches the player UI, so the
-    // writeback must already be visible in the DB by then; the previous
-    // fire-and-forget spawn made freshly extracted covers linger
-    // invisibly until an unrelated reload re-read them. The UI reads
-    // duration from `music.meta.duration` (the DB column), so without
-    // this writeback newly-imported tracks show "--:--:--" until first
-    // play. The blob/DB writes are local and quick, and they run after
-    // the engine has already started (autoplay) — they never gate audio.
-    // Best-effort — failures are logged, not surfaced.
+    // duration AND/OR an artist that the DB doesn't yet have, fill them
+    // in now — inline, before this call resolves. The caller re-fetches
+    // the music right after `player.loadMusic` returns and patches the
+    // player UI, so the writeback must already be visible in the DB by
+    // then; the previous fire-and-forget spawn made freshly extracted
+    // covers linger invisibly until an unrelated reload re-read them.
+    // The UI reads duration from `music.meta.duration` (the DB column),
+    // so without this writeback newly-imported tracks show "--:--:--"
+    // until first play. The blob/DB writes are local and quick, and they
+    // run after the engine has already started (autoplay) — they never
+    // gate audio. Best-effort — failures are logged, not surfaced.
     let probed_duration = metadata.duration;
-    if metadata.cover_art.is_some() || probed_duration.is_some() {
+    let probed_artist = extract_artist_tag(&metadata.tags);
+    if metadata.cover_art.is_some() || probed_duration.is_some() || probed_artist.is_some() {
         let cx = backend.get_context().clone();
         match get_music(&cx, music_id).await {
             Ok(Some(m)) => {
@@ -436,6 +437,25 @@ pub async fn ct_player_load_music(
                         .await
                         {
                             tracing::warn!("cover writeback for {music_id:?} failed: {e:?}");
+                        }
+                    }
+                }
+                // Artist: only write if the DB has none yet. The
+                // service re-checks — this is the single backfill path
+                // for track artists (the import-time probe stays
+                // duration-only).
+                if let Some(artist) = probed_artist.as_deref() {
+                    if m.meta.artist.is_empty() {
+                        if let Err(e) = update_music_artist(
+                            &cx,
+                            ArgUpdateMusicArtist {
+                                id: music_id,
+                                artist: artist.to_string(),
+                            },
+                        )
+                        .await
+                        {
+                            tracing::warn!("artist writeback for {music_id:?} failed: {e:?}");
                         }
                     }
                 }

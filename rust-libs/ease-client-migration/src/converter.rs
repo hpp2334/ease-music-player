@@ -119,6 +119,7 @@ pub fn music_from(m: MusicModel) -> music::ActiveModel {
         loc_storage_id: sea_orm::ActiveValue::Set(*m.loc.storage_id.as_ref()),
         loc_path: sea_orm::ActiveValue::Set(m.loc.path),
         title: sea_orm::ActiveValue::Set(m.title),
+        artist: sea_orm::ActiveValue::Set(m.artist),
         duration_ms: sea_orm::ActiveValue::Set(m.duration.map(|d| d.as_millis() as i64)),
         cover_blob_id: sea_orm::ActiveValue::Set(m.cover.map(|c| *c.as_ref())),
         lyric_storage_id: sea_orm::ActiveValue::Set(m.lyric.as_ref().map(|l| *l.storage_id.as_ref())),
@@ -136,6 +137,7 @@ pub fn music_to_model(row: music::Model) -> MusicModel {
             path: row.loc_path,
         },
         title: row.title,
+        artist: row.artist,
         duration: row.duration_ms.map(|ms| std::time::Duration::from_millis(ms as u64)),
         cover: row.cover_blob_id.map(BlobId::wrap),
         lyric: match (row.lyric_storage_id, row.lyric_path) {
@@ -177,6 +179,7 @@ pub fn preference_from(m: PreferenceModel) -> preference::ActiveModel {
         playmode: sea_orm::ActiveValue::Set(play_mode_index(m.playmode)),
         language: sea_orm::ActiveValue::Set(m.language),
         last_import_loc: sea_orm::ActiveValue::Set(preference_loc_to_json(m.last_import_loc)),
+        show_track_artist: sea_orm::ActiveValue::Set(if m.show_track_artist { TRUE_I32 } else { FALSE_I32 }),
     }
 }
 
@@ -185,6 +188,7 @@ pub fn preference_to_model(row: preference::Model) -> PreferenceModel {
         playmode: play_mode_from_index(row.playmode),
         language: row.language,
         last_import_loc: preference_loc_from_json(row.last_import_loc),
+        show_track_artist: row.show_track_artist != FALSE_I32,
     }
 }
 
