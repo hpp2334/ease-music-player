@@ -12,6 +12,9 @@ use super::lyric::Lyrics;
 pub struct MusicMeta {
     pub id: MusicId,
     pub title: String,
+    /// Track artist from container tags (empty = never probed / no tag).
+    #[serde(default)]
+    pub artist: String,
     #[serde_as(as = "Option<serde_with::DurationMilliSeconds<u64>>")]
     pub duration: Option<Duration>,
     pub order: Vec<u32>,

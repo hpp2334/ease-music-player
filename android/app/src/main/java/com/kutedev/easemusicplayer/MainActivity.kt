@@ -16,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import com.kutedev.cantode.Cantode
 import com.kutedev.easemusicplayer.core.KeepBackendService
 import com.kutedev.easemusicplayer.singleton.Bridge
+import com.kutedev.easemusicplayer.singleton.ArtistDisplaySetting
 import com.kutedev.easemusicplayer.singleton.LanguageSetting
 import com.kutedev.easemusicplayer.singleton.PermissionRepository
 import com.kutedev.easemusicplayer.singleton.PlayerControllerRepository
@@ -233,7 +234,11 @@ class EaseMusicPlayerApplication : Application() {
         // one recreate. MainActivity.onCreate's initialize() is an
         // idempotent no-op after this.
         LanguageSetting.bridge = bridge
+        ArtistDisplaySetting.bridge = bridge
         bridge.initialize()
-        appScope.launch { LanguageSetting.load() }
+        appScope.launch {
+            LanguageSetting.load()
+            ArtistDisplaySetting.load()
+        }
     }
 }

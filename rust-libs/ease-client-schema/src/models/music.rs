@@ -9,6 +9,8 @@ pub struct MusicModel {
     pub id: MusicId,
     pub loc: StorageEntryLoc,
     pub title: String,
+    /// Track artist from container tags (empty = never probed / no tag).
+    pub artist: String,
     pub duration: Option<Duration>,
     pub cover: Option<BlobId>,
     pub lyric: Option<StorageEntryLoc>,

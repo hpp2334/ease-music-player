@@ -16,6 +16,9 @@ pub struct Model {
     /// Stored as text (not columns) the same way `playlist_group.order`
     /// keeps its order ladder — the pair is only ever read/written whole.
     pub last_import_loc: Option<String>,
+    /// 0/1 boolean — whether track artist lines are shown in the UI.
+    /// Ships `DEFAULT 1` (shown).
+    pub show_track_artist: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

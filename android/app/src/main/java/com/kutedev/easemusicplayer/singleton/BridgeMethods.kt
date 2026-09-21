@@ -23,6 +23,7 @@ import com.kutedev.easemusicplayer.singleton.types.ArgReorderMusic
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgReorderPlaylistGroup
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicArtist
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicDuration
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylist
@@ -161,6 +162,7 @@ object BridgeMethods {
         val LOAD_LYRIC = bridgeSpecArg<MusicId, MusicLyric?>("music.loadLyric")
         val UPDATE_LYRIC = bridgeSpecArg<ArgUpdateMusicLyric, Unit>("music.updateLyric")
         val UPDATE_DURATION = bridgeSpecArg<ArgUpdateMusicDuration, Unit>("music.updateDuration")
+        val UPDATE_ARTIST = bridgeSpecArg<ArgUpdateMusicArtist, Unit>("music.updateArtist")
     }
 
     /** `preference.*` — user preferences (PlayMode, in-app language). */
@@ -175,6 +177,10 @@ object BridgeMethods {
         /** Folder (storage + path) the user last imported from; `null` = never. */
         val GET_LAST_IMPORT_LOC = bridgeSpecNoArg<StorageEntryLoc?>("preference.getLastImportLoc")
         val SAVE_LAST_IMPORT_LOC = bridgeSpecArg<StorageEntryLoc, Unit>("preference.saveLastImportLoc")
+
+        /** Whether track artist lines are shown in the UI; default on. */
+        val GET_SHOW_TRACK_ARTIST = bridgeSpecNoArg<Boolean>("preference.getShowTrackArtist")
+        val SAVE_SHOW_TRACK_ARTIST = bridgeSpecArg<Boolean, Unit>("preference.saveShowTrackArtist")
     }
 
     /**

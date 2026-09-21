@@ -548,9 +548,10 @@ class PlaybackService : android.app.Service() {
         if (music != null) {
             // Metadata content identity: rebuild only when it changed.
             // The art-presence flag covers the "cover extracted after
-            // first play" patch, which flips the stamp once the bitmap
-            // lands (see [refreshCoverArt]).
-            val stamp = "${music.meta.id}:${music.meta.duration}:" +
+            // first play" patch, and the artist covers the artist
+            // writeback landing mid-session — both flip the stamp once
+            // the value lands (see [refreshCoverArt]).
+            val stamp = "${music.meta.id}:${music.meta.artist}:${music.meta.duration}:" +
                 "${lastPlaylist?.abstr?.meta?.id}:${lastCoverBitmap != null}"
             if (stamp == lastMetaStamp) return
             lastMetaStamp = stamp
@@ -562,7 +563,11 @@ class PlaybackService : android.app.Service() {
                 )
                 .putString(
                     MediaMetadataCompat.METADATA_KEY_ARTIST,
-                    lastPlaylist?.abstr?.meta?.title ?: "",
+                    // The real track artist; the playlist title is the
+                    // fallback for tracks not yet probed (or with no
+                    // artist tag). Never gated by the in-app
+                    // show-artist display preference.
+                    music.meta.artist.ifBlank { lastPlaylist?.abstr?.meta?.title ?: "" },
                 )
                 .putString(
                     MediaMetadataCompat.METADATA_KEY_ALBUM,

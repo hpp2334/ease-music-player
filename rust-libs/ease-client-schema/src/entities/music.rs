@@ -8,6 +8,8 @@ pub struct Model {
     pub loc_storage_id: i64,
     pub loc_path: String,
     pub title: String,
+    /// Track artist from container tags (empty = never probed / no tag).
+    pub artist: String,
     /// Duration in milliseconds (NULL if unknown).
     pub duration_ms: Option<i64>,
     /// Foreign key into the blob id allocator; the actual bytes live on disk.
