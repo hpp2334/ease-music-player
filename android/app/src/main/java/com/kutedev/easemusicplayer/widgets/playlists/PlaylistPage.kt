@@ -102,7 +102,7 @@ private fun RemovePlaylistDialog(
         }
     ) {
         Text(
-            text = "${stringResource(id = R.string.playlist_remove_dialog_text)} “${playlistAbstr.meta.title}”"
+            text = stringResource(id = R.string.playlist_remove_dialog_text, playlistAbstr.meta.title)
         )
     }
 }

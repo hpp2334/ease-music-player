@@ -194,7 +194,7 @@ class PlayerControllerRepository @Inject constructor(
                             // the stall once per episode — the next play
                             // is the retry (see [resume]).
                             bridge.logRaw("error", "source error: $err")
-                            toastRepository.emitToast("playback stalled — tap play to retry")
+                            toastRepository.emitToast("Playback stalled — tap play to retry")
                         }
                     }
                 }
@@ -204,7 +204,7 @@ class PlayerControllerRepository @Inject constructor(
             } catch (e: Exception) {
                 setupStarted = false
                 bridge.logRaw("error", "cantode engine setup failed: $e")
-                _scope.launch { toastRepository.emitToast("player setup failed: $e") }
+                _scope.launch { toastRepository.emitToast("Player setup failed: $e") }
             }
         }
     }
@@ -357,7 +357,7 @@ class PlayerControllerRepository @Inject constructor(
                         }
                         return@launch
                     }
-                    toastRepository.emitToast("play failed")
+                    toastRepository.emitToast("Play failed")
                     return@launch
                 }
 
@@ -395,7 +395,7 @@ class PlayerControllerRepository @Inject constructor(
                     "play($id): music/playlist fetch failed; keeping current state",
                 )
                 playerRepository.setIsLoading(false)
-                toastRepository.emitToast("play failed")
+                toastRepository.emitToast("Play failed")
             } else {
                 // Music/playlist really gone (removed meanwhile): reset
                 // the UI and the loading flag — the engine was already
