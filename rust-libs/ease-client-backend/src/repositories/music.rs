@@ -99,6 +99,7 @@ impl DatabaseServer {
             lyric_storage_id: ActiveValue::Set(arg.lyric.as_ref().map(|l| *l.storage_id.as_ref())),
             lyric_path: ActiveValue::Set(arg.lyric.map(|l| l.path)),
             lyric_default: ActiveValue::Set(1),
+            embedded_lyric: ActiveValue::Set(None),
             order: ActiveValue::Set(serde_json::to_string(&order.into_raw())?),
         };
         let inserted = am.insert(&db).await?;
@@ -146,6 +147,26 @@ impl DatabaseServer {
         if let Some(row) = row {
             let mut am: music::ActiveModel = row.into();
             am.artist = ActiveValue::Set(artist);
+            am.update(&db).await?;
+        }
+        Ok(())
+    }
+
+    /// Persist an embedded tag lyric captured by the `player.loadMusic`
+    /// probe. Plain setter — the only-if-NULL guard lives in the single
+    /// caller (the metadata writeback), mirroring the duration/cover
+    /// policy: a probed value never rewrites one already in the DB, and
+    /// a probed-but-tagless track keeps the column NULL.
+    pub async fn update_music_embedded_lyric(
+        self: &Arc<Self>,
+        id: MusicId,
+        lyric: String,
+    ) -> BResult<()> {
+        let db = self.db();
+        let row = music::Entity::find_by_id(*id.as_ref()).one(&db).await?;
+        if let Some(row) = row {
+            let mut am: music::ActiveModel = row.into();
+            am.embedded_lyric = ActiveValue::Set(Some(lyric));
             am.update(&db).await?;
         }
         Ok(())

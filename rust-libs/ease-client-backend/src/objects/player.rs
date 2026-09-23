@@ -32,8 +32,9 @@ use crate::{
     error::BError,
     objects::music::MetadataRecord,
     services::{
-        extract_artist_tag, get_asset_file, get_music, update_music_artist, update_music_cover,
-        update_music_duration, ArgUpdateMusicArtist, ArgUpdateMusicCover, ArgUpdateMusicDuration,
+        extract_artist_tag, extract_lyric_tag, get_asset_file, update_music_artist,
+        update_music_cover, update_music_duration, update_music_embedded_lyric,
+        ArgUpdateMusicArtist, ArgUpdateMusicCover, ArgUpdateMusicDuration,
     },
     Backend, BackendContext,
 };
@@ -401,16 +402,24 @@ pub async fn ct_player_load_music(
     // gate audio. Best-effort — failures are logged, not surfaced.
     let probed_duration = metadata.duration;
     let probed_artist = extract_artist_tag(&metadata.tags);
-    if metadata.cover_art.is_some() || probed_duration.is_some() || probed_artist.is_some() {
+    let probed_lyric = extract_lyric_tag(&metadata.tags);
+    if metadata.cover_art.is_some()
+        || probed_duration.is_some()
+        || probed_artist.is_some()
+        || probed_lyric.is_some()
+    {
         let cx = backend.get_context().clone();
-        match get_music(&cx, music_id).await {
+        // The raw DB model, not the `Music` object: the writeback must
+        // see the `embedded_lyric` column (and `cover` as the raw blob
+        // id) that the object graph doesn't carry.
+        match cx.database_server().load_music(music_id).await {
             Ok(Some(m)) => {
                 // Duration: only write if the DB column is currently null and
                 // the probe produced a non-zero duration. Overwriting an
                 // existing value would be surprising for users who manually
                 // fixed it.
                 if let Some(dur) = probed_duration {
-                    if !dur.is_zero() && m.meta.duration.is_none() {
+                    if !dur.is_zero() && m.duration.is_none() {
                         if let Err(e) = update_music_duration(
                             &cx,
                             ArgUpdateMusicDuration {
@@ -445,7 +454,7 @@ pub async fn ct_player_load_music(
                 // for track artists (the import-time probe stays
                 // duration-only).
                 if let Some(artist) = probed_artist.as_deref() {
-                    if m.meta.artist.is_empty() {
+                    if m.artist.is_empty() {
                         if let Err(e) = update_music_artist(
                             &cx,
                             ArgUpdateMusicArtist {
@@ -456,6 +465,24 @@ pub async fn ct_player_load_music(
                         .await
                         {
                             tracing::warn!("artist writeback for {music_id:?} failed: {e:?}");
+                        }
+                    }
+                }
+                // Embedded lyric: only write if the DB column is still
+                // NULL (never probed). Probed-but-tagless tracks keep
+                // NULL — the lyric fallback simply re-reads the column
+                // and stays on the sidecar/MISSING path. This is data
+                // capture, not a rendering decision: it lands even when
+                // a sidecar lyric exists; sidecar-beats-embedded is
+                // applied at read time (`load_music_lyric`).
+                if let Some(lyric) = probed_lyric.as_deref() {
+                    if m.embedded_lyric.is_none() {
+                        if let Err(e) =
+                            update_music_embedded_lyric(&cx, music_id, lyric.to_string()).await
+                        {
+                            tracing::warn!(
+                                "embedded lyric writeback for {music_id:?} failed: {e:?}"
+                            );
                         }
                     }
                 }

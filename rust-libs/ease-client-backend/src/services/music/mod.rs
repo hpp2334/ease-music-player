@@ -9,11 +9,14 @@ use serde::{Deserialize, Serialize};
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    objects::{LyricLoadState, Music, MusicAbstract, MusicLyric, MusicMeta},
+    objects::{LyricLine, LyricLoadState, Lyrics, Music, MusicAbstract, MusicLyric, MusicMeta},
     StorageEntry,
 };
 
-use super::{lyrics::parse_lyric_content, storage::get_storage_backend, storage::load_storage_entry_data};
+use super::{
+    lyrics::{parse_lyric_content, MAX_LINES, MAX_LYRIC_BYTES},
+    storage::{get_storage_backend, load_storage_entry_data},
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,6 +136,70 @@ async fn load_lyric(
     })
 }
 
+/// Embedded-tag fallback for [`load_music_lyric`]: the lyric text
+/// captured from the audio's own container tags (`music.embedded_lyric`,
+/// filled by the `player.loadMusic` writeback). LRC-shaped text is
+/// dispatched through the plugin chain under a synthesized `.lrc` name —
+/// parsers stay plugin-owned and the user's parser selection applies;
+/// anything no parser claims renders as unsynchronized plain text (all
+/// lines at t=0, `Lyrics.synced = false`). Returns `None` when no tag
+/// text was captured (or it is blank).
+async fn embedded_music_lyric(cx: &BackendContext, model: &MusicModel) -> Option<MusicLyric> {
+    let text = model.embedded_lyric.as_deref()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let loc = model.loc.clone();
+    let audio_name = loc.path.rsplit('/').next().unwrap_or(loc.path.as_str());
+    // `"song.mp3" -> "song.mp3.lrc"`: `parse_lyric_content` dispatches by
+    // file extension only, and the full-name form mirrors how sibling
+    // candidates are built.
+    let lrc_name = format!("{audio_name}.lrc");
+    let data = match parse_lyric_content(cx, &lrc_name, text.as_bytes()).await {
+        Ok(data) => data,
+        Err(e) => {
+            // Expected for plain USLT text (no timed lines) — the info
+            // level keeps the log readable; this is the designed path.
+            tracing::info!(
+                "embedded lyric of '{audio_name}' has no synced parse ({e}); using plain text"
+            );
+            unsynced_lyrics_from_text(text)
+        }
+    };
+    Some(MusicLyric {
+        loc,
+        data,
+        loaded_state: LyricLoadState::Loaded,
+    })
+}
+
+/// Build unsynchronized [`Lyrics`] from plain tag text: split on line
+/// terminators (`\n`, `\r\n` or a lone `\r` — same set the plugin
+/// parsers accept), trim, drop blanks, every line at t=0
+/// (`synced = false` — the client renders it without highlight /
+/// auto-scroll). Splitting plain text is not lyric-format knowledge;
+/// every *synced* format stays plugin-owned. Lines are capped at
+/// [`MAX_LINES`].
+fn unsynced_lyrics_from_text(text: &str) -> Lyrics {
+    // `str::lines` misses the lone-\r terminator some taggers emit.
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let lines: Vec<LyricLine> = normalized
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(MAX_LINES)
+        .map(|l| LyricLine {
+            duration: Duration::ZERO,
+            text: l.to_string(),
+        })
+        .collect();
+    Lyrics {
+        metdata: Default::default(),
+        lines,
+        synced: false,
+    }
+}
+
 pub(crate) fn build_music_meta(model: MusicModel) -> MusicMeta {
     MusicMeta {
         id: model.id,
@@ -228,6 +295,22 @@ pub(crate) async fn update_music_artist(
     Ok(())
 }
 
+/// Persist an embedded tag lyric captured by the `player.loadMusic`
+/// writeback. Plain setter — the only-if-NULL guard lives in the single
+/// caller (the metadata writeback), mirroring the duration/cover policy.
+/// Not bridge-exposed: embedded lyrics are data capture, never user
+/// input.
+pub(crate) async fn update_music_embedded_lyric(
+    cx: &BackendContext,
+    id: MusicId,
+    lyric: String,
+) -> BResult<()> {
+    cx.database_server()
+        .update_music_embedded_lyric(id, lyric)
+        .await?;
+    Ok(())
+}
+
 /// Extract the artist from probed container tags. cantode normalizes tag
 /// keys to symphonia-standard names via `std_key` (ID3 `TPE1` arrives as
 /// `Artist`, MP4 `aART` as `Artist`, ...), so a case-insensitive match on
@@ -246,6 +329,33 @@ pub(crate) fn extract_artist_tag(tags: &[cantode::Tag]) -> Option<String> {
         if !values.is_empty() {
             return Some(values.join(", "));
         }
+    }
+    None
+}
+
+/// Extract embedded lyrics from probed container tags. cantode normalizes
+/// tag keys to symphonia-standard names, and symphonia maps ID3v2 `USLT`
+/// (MP3), the Vorbis comments `lyrics` / `unsyncedlyrics` (FLAC / OGG)
+/// and the MP4 `©lyr` atom all to `Lyrics`. The first non-empty value
+/// wins (multiple USLT frames = multiple languages; there is no language
+/// preference). Text over [`MAX_LYRIC_BYTES`] is dropped — the
+/// sidecar/missing paths remain. `None` = nothing usable. (ID3v2 `SYLT`
+/// and WMA never surface here: symphonia skips SYLT frames and has no
+/// ASF demuxer at all.)
+pub(crate) fn extract_lyric_tag(tags: &[cantode::Tag]) -> Option<String> {
+    for t in tags.iter().filter(|t| t.key.eq_ignore_ascii_case("Lyrics")) {
+        let v = t.value.trim();
+        if v.is_empty() {
+            continue;
+        }
+        if v.len() > MAX_LYRIC_BYTES {
+            tracing::warn!(
+                "embedded lyric dropped: {len} bytes > {MAX_LYRIC_BYTES}",
+                len = v.len()
+            );
+            return None;
+        }
+        return Some(v.to_string());
     }
     None
 }
@@ -557,6 +667,7 @@ mod tests {
             cover: None::<BlobId>,
             lyric,
             lyric_default,
+            embedded_lyric: None,
             order: vec![],
         }
     }
@@ -962,6 +1073,122 @@ mod tests {
         let m = cx.database_server().load_music(id).await.unwrap().unwrap();
         assert_eq!(m.artist, "Alice");
     }
+
+    // -- embedded lyrics (see extract_lyric_tag / embedded_music_lyric) --
+
+    #[test]
+    fn lyric_tag_extracts_first_non_empty_trimmed_value() {
+        let tags = vec![
+            tag("Title", "Song"),
+            tag("Lyrics", ""),
+            tag("Lyrics", "  \n "),
+            tag("Lyrics", " la la "),
+        ];
+        assert_eq!(extract_lyric_tag(&tags).as_deref(), Some("la la"));
+    }
+
+    #[test]
+    fn lyric_tag_matches_keys_case_insensitively_and_ignores_unknown() {
+        assert_eq!(extract_lyric_tag(&[]), None);
+        assert_eq!(extract_lyric_tag(&[tag("Title", "Song")]), None);
+        // symphonia maps USLT / Vorbis `lyrics` / MP4 `©lyr` here.
+        assert_eq!(extract_lyric_tag(&[tag("Lyrics", "x")]).as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn lyric_tag_drops_oversized_text() {
+        let big = "a".repeat(MAX_LYRIC_BYTES + 1);
+        assert_eq!(extract_lyric_tag(&[tag("Lyrics", &big)]), None);
+    }
+
+    #[test]
+    fn unsynced_text_splits_trims_and_flags() {
+        let lyrics = unsynced_lyrics_from_text("\r\n First  \n\nsecond\rthird\n");
+        assert!(!lyrics.synced);
+        assert_eq!(lyrics.metdata, Default::default());
+        assert!(
+            lyrics.lines.iter().all(|l| l.duration.is_zero()),
+            "unsynced lines all sit at t=0"
+        );
+        let texts: Vec<&str> = lyrics.lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, vec!["First", "second", "third"]);
+    }
+
+    #[tokio::test]
+    async fn load_music_lyric_embedded_fallback_and_explicit_pick_precedence() {
+        use crate::repositories::music::ArgDBAddMusic;
+        use ease_order_key::OrderKey;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cx = BackendContext::new();
+        cx.database_server()
+            .init(dir.path().to_str().unwrap().to_string())
+            .await
+            .unwrap();
+        let add = |cx: &BackendContext, path: &str| {
+            let cx = cx.clone();
+            let path = path.to_string();
+            async move {
+                let (id, _) = cx
+                    .database_server()
+                    .add_music_impl(
+                        ArgDBAddMusic {
+                            loc: StorageEntryLoc {
+                                storage_id: StorageId::wrap(1),
+                                path,
+                            },
+                            title: "song".to_string(),
+                            lyric: None,
+                        },
+                        OrderKey::default(),
+                    )
+                    .await
+                    .unwrap();
+                id
+            }
+        };
+
+        // No sidecar candidate + no embedded tag -> None (MISSING pane).
+        let id_none = add(&cx, "/Music/none.mp3").await;
+        assert!(load_music_lyric(&cx, id_none).await.unwrap().is_none());
+
+        // Embedded tag text, no sidecar candidate -> LOADED, unsynced,
+        // located on the audio file itself. (No parser plugins live in
+        // this test context, so LRC-shaped text also lands here — see
+        // the plugins' own selftests for the synced parse.)
+        let id_emb = add(&cx, "/Music/embedded.flac").await;
+        cx.database_server()
+            .update_music_embedded_lyric(
+                id_emb,
+                "First line\n\n  Second line  \n".to_string(),
+            )
+            .await
+            .unwrap();
+        let lyric = load_music_lyric(&cx, id_emb).await.unwrap().unwrap();
+        assert_eq!(lyric.loaded_state, LyricLoadState::Loaded);
+        assert_eq!(lyric.loc.path, "/Music/embedded.flac");
+        assert!(!lyric.data.synced);
+        let texts: Vec<&str> = lyric.data.lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, vec!["First line", "Second line"]);
+
+        // An explicit pick that fails to FETCH stays terminal (Failed) —
+        // embedded text must not silently paper over a broken user pick.
+        let id_pick = add(&cx, "/Music/picked.mp3").await;
+        let pick_loc = StorageEntryLoc {
+            storage_id: StorageId::wrap(1),
+            path: "/Music/picked.lrc".to_string(),
+        };
+        cx.database_server()
+            .update_music_lyric(id_pick, Some(pick_loc))
+            .await
+            .unwrap();
+        cx.database_server()
+            .update_music_embedded_lyric(id_pick, "embedded".to_string())
+            .await
+            .unwrap();
+        let lyric = load_music_lyric(&cx, id_pick).await.unwrap().unwrap();
+        assert_eq!(lyric.loaded_state, LyricLoadState::Failed);
+    }
 }
 
 /// DB-only music fetch. The lyric arrives as a [`LyricLoadState::Loading`]
@@ -988,6 +1215,21 @@ pub(crate) async fn get_music(cx: &BackendContext, id: MusicId) -> BResult<Optio
             loc,
             data: Default::default(),
             loaded_state: LyricLoadState::Loading,
+        })
+        .or_else(|| {
+            // No sidecar candidate at all — but the play-time writeback
+            // may already have captured embedded tag lyrics. The pane
+            // must show its LOADING spinner (not flash MISSING) until
+            // `music.loadLyric` resolves the tag text.
+            model
+                .embedded_lyric
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .map(|_| MusicLyric {
+                    loc: model.loc.clone(),
+                    data: Default::default(),
+                    loaded_state: LyricLoadState::Loading,
+                })
         });
     let loc = model.loc;
 
@@ -1013,7 +1255,16 @@ pub(crate) async fn load_music_lyric(
         return Ok(None);
     };
     let candidates = resolve_lyric_locs(&model, &cx.plugin_manager().lyric_sibling_extensions());
-    Ok(load_lyric(cx, candidates).await)
+    if let Some(lyric) = load_lyric(cx, candidates).await {
+        // `Missing` = every fallback candidate missed — embedded tag
+        // lyrics may still win below. `Failed` is terminal: the file the
+        // user explicitly picked exists but nothing can parse it, and
+        // silently swapping in other text would hide that.
+        if lyric.loaded_state != LyricLoadState::Missing {
+            return Ok(Some(lyric));
+        }
+    }
+    Ok(embedded_music_lyric(cx, &model).await)
 }
 
 pub(crate) async fn get_music_abstract(

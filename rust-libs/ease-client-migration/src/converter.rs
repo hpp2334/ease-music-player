@@ -125,6 +125,7 @@ pub fn music_from(m: MusicModel) -> music::ActiveModel {
         lyric_storage_id: sea_orm::ActiveValue::Set(m.lyric.as_ref().map(|l| *l.storage_id.as_ref())),
         lyric_path: sea_orm::ActiveValue::Set(m.lyric.map(|l| l.path)),
         lyric_default: sea_orm::ActiveValue::Set(if m.lyric_default { TRUE_I32 } else { FALSE_I32 }),
+        embedded_lyric: sea_orm::ActiveValue::Set(m.embedded_lyric),
         order: sea_orm::ActiveValue::Set(encode_order(&m.order)),
     }
 }
@@ -148,6 +149,7 @@ pub fn music_to_model(row: music::Model) -> MusicModel {
             _ => None,
         },
         lyric_default: row.lyric_default != FALSE_I32,
+        embedded_lyric: row.embedded_lyric,
         order: decode_order(&row.order),
     }
 }

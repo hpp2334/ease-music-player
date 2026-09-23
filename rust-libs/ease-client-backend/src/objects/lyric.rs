@@ -28,4 +28,14 @@ pub struct LyricLine {
 pub struct Lyrics {
     pub metdata: LrcMetadata,
     pub lines: Vec<LyricLine>,
+    /// False = unsynchronized plain text (every line carries t=0): the
+    /// client renders it without highlight / auto-scroll. Defaults to
+    /// `true` on the wire so older payloads (and the plugin result
+    /// mapping, which only ever produces synced lines) decode unchanged.
+    #[serde(default = "default_true")]
+    pub synced: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
