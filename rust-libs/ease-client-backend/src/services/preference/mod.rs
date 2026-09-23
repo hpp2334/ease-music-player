@@ -1,15 +1,62 @@
-use ease_client_schema::PlayMode;
+use ease_client_schema::{PlayMode, StorageEntryLoc};
 
 use crate::{ctx::BackendContext, error::BResult};
 
-pub(crate) fn save_preference_playmode(cx: &BackendContext, arg: PlayMode) -> BResult<()> {
-    let mut data = cx.database_server().load_preference()?;
+pub(crate) async fn save_preference_playmode(cx: &BackendContext, arg: PlayMode) -> BResult<()> {
+    let mut data = cx.database_server().load_preference().await?;
     data.playmode = arg;
-    cx.database_server().save_preference(data)?;
+    cx.database_server().save_preference(data).await?;
     Ok(())
 }
 
-pub(crate) fn get_preference_playmode(cx: &BackendContext) -> BResult<PlayMode> {
-    let data = cx.database_server().load_preference()?;
+pub(crate) async fn get_preference_playmode(cx: &BackendContext) -> BResult<PlayMode> {
+    let data = cx.database_server().load_preference().await?;
     Ok(data.playmode)
+}
+
+pub(crate) async fn save_preference_language(
+    cx: &BackendContext,
+    arg: Option<String>,
+) -> BResult<()> {
+    let mut data = cx.database_server().load_preference().await?;
+    data.language = arg;
+    cx.database_server().save_preference(data).await?;
+    Ok(())
+}
+
+pub(crate) async fn get_preference_language(cx: &BackendContext) -> BResult<Option<String>> {
+    let data = cx.database_server().load_preference().await?;
+    Ok(data.language)
+}
+
+pub(crate) async fn save_preference_last_import_loc(
+    cx: &BackendContext,
+    arg: StorageEntryLoc,
+) -> BResult<()> {
+    let mut data = cx.database_server().load_preference().await?;
+    data.last_import_loc = Some(arg);
+    cx.database_server().save_preference(data).await?;
+    Ok(())
+}
+
+pub(crate) async fn get_preference_last_import_loc(
+    cx: &BackendContext,
+) -> BResult<Option<StorageEntryLoc>> {
+    let data = cx.database_server().load_preference().await?;
+    Ok(data.last_import_loc)
+}
+
+pub(crate) async fn save_preference_show_track_artist(
+    cx: &BackendContext,
+    arg: bool,
+) -> BResult<()> {
+    let mut data = cx.database_server().load_preference().await?;
+    data.show_track_artist = arg;
+    cx.database_server().save_preference(data).await?;
+    Ok(())
+}
+
+pub(crate) async fn get_preference_show_track_artist(cx: &BackendContext) -> BResult<bool> {
+    let data = cx.database_server().load_preference().await?;
+    Ok(data.show_track_artist)
 }

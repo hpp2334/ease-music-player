@@ -1,11 +1,11 @@
 use std::time::Duration;
 
-use ease_client_schema::{DataSourceKey, MusicId, PlaylistId, PlaylistModel};
+use ease_client_schema::{DataSourceKey, MusicId, PlaylistId, PlaylistModel, StorageId};
 
 use crate::{
     ctx::BackendContext,
     error::BResult,
-    objects::{MusicAbstract, Playlist, PlaylistAbstract, PlaylistMeta},
+    objects::{MusicAbstract, Playlist, PlaylistAbstract, PlaylistGroupMeta, PlaylistMeta},
 };
 
 use super::music::build_music_abstract;
@@ -45,16 +45,24 @@ pub(crate) fn build_playlist_meta(
         show_cover,
         created_time: Duration::from_millis(model.created_time as u64),
         order: model.order,
+        storage_allowlist: model.storage_allowlist,
+        group_id: model.group_id,
     }
 }
 
-pub(crate) fn build_playlist_abstract(
+pub(crate) async fn build_playlist_abstract(
     cx: &BackendContext,
     model: PlaylistModel,
 ) -> BResult<(PlaylistAbstract, Vec<MusicAbstract>)> {
     let id = model.id;
-    let musics = cx.database_server().load_musics_by_playlist_id(id)?;
+    let musics = cx.database_server().load_musics_by_playlist_id(id).await?;
     let first_cover_music_id = musics.iter().find(|m| m.cover.is_some()).map(|v| v.id);
+    // Distinct storages the playlist's musics live on — feeds the edit
+    // dialog's rule that referenced storages can't be unchecked from
+    // the allowlist. Sorted + deduped for deterministic output.
+    let mut music_storage_ids: Vec<StorageId> = musics.iter().map(|m| m.loc.storage_id).collect();
+    music_storage_ids.sort_unstable();
+    music_storage_ids.dedup();
     let meta = build_playlist_meta(cx, model, first_cover_music_id);
 
     let musics = musics
@@ -66,32 +74,51 @@ pub(crate) fn build_playlist_abstract(
     let abstr = PlaylistAbstract {
         meta,
         music_count: musics.len() as u64,
+        music_storage_ids,
         duration,
     };
 
     Ok((abstr, musics))
 }
 
-pub fn get_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
-    let model = cx.database_server().load_playlist(arg)?;
+pub async fn get_playlist(cx: &BackendContext, arg: PlaylistId) -> BResult<Option<Playlist>> {
+    let model = cx.database_server().load_playlist(arg).await?;
 
     if model.is_none() {
         return Ok(None);
     }
     let model = model.unwrap();
-    let (abstr, musics) = build_playlist_abstract(cx, model)?;
+    let (abstr, musics) = build_playlist_abstract(cx, model).await?;
 
     Ok(Some(Playlist { abstr, musics }))
 }
 
-pub(crate) fn get_all_playlist_abstracts(cx: &BackendContext) -> BResult<Vec<PlaylistAbstract>> {
-    let models = cx.database_server().load_playlists()?;
+pub(crate) async fn get_all_playlist_abstracts(
+    cx: &BackendContext,
+) -> BResult<Vec<PlaylistAbstract>> {
+    let models = cx.database_server().load_playlists().await?;
 
     let mut ret: Vec<PlaylistAbstract> = Default::default();
     for model in models {
-        let (abstr, _) = build_playlist_abstract(cx, model)?;
+        let (abstr, _) = build_playlist_abstract(cx, model).await?;
         ret.push(abstr)
     }
 
     Ok(ret)
+}
+
+/// All playlist groups in order-key order (wire shape). Playlist
+/// membership is derived Kotlin-side from `PlaylistMeta.group_id`.
+pub async fn get_all_playlist_groups(cx: &BackendContext) -> BResult<Vec<PlaylistGroupMeta>> {
+    let models = cx.database_server().load_playlist_groups().await?;
+    Ok(models
+        .into_iter()
+        .map(|m| PlaylistGroupMeta {
+            id: m.id,
+            title: m.title,
+            created_time: Duration::from_millis(m.created_time as u64),
+            order: m.order,
+            expanded: m.expanded,
+        })
+        .collect())
 }

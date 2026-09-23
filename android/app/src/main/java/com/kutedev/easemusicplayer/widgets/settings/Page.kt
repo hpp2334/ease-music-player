@@ -14,26 +14,43 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.core.LocalNavController
 import com.kutedev.easemusicplayer.core.RouteDebugMore
 import com.kutedev.easemusicplayer.core.RouteLog
+import com.kutedev.easemusicplayer.core.RouteLyricParser
+import com.kutedev.easemusicplayer.core.RoutePluginManagement
+import com.kutedev.easemusicplayer.singleton.AppLanguage
+import com.kutedev.easemusicplayer.singleton.ArtistDisplaySetting
+import com.kutedev.easemusicplayer.singleton.LanguageSetting
 
 
 private val paddingX = SettingPaddingX
@@ -107,6 +124,45 @@ private fun Item(
         }
     }
 }
+
+/**
+ * Settings row with a trailing [Switch] — same chrome as [Item] (icon +
+ * title), toggling instead of navigating. Whole row is clickable.
+ */
+@Composable
+private fun SwitchItem(
+    iconPainter: Painter,
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+    ) {
+        Box(modifier = Modifier.height(56.dp))
+        Icon(
+            painter = iconPainter,
+            contentDescription = null,
+            modifier = Modifier
+                .size(24.dp)
+        )
+        Box(
+            modifier = Modifier.width(12.dp)
+        )
+        Text(
+            text = title,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
 @Composable
 fun SettingSubpage() {
     val context = LocalContext.current
@@ -120,6 +176,51 @@ fun SettingSubpage() {
             .padding(paddingX, paddingX)
             .verticalScroll(rememberScrollState())
     ) {
+        Title(title = stringResource(id = R.string.setting_general))
+        val language by LanguageSetting.language.collectAsState()
+        val scope = rememberCoroutineScope()
+        var languageDialogOpen by remember { mutableStateOf(false) }
+        val showTrackArtist by ArtistDisplaySetting.show.collectAsState()
+        Item(
+            iconPainter = painterResource(R.drawable.icon_language),
+            title = stringResource(id = R.string.setting_language),
+            content = languageLabel(language),
+            onClick = { languageDialogOpen = true }
+        )
+        if (languageDialogOpen) {
+            LanguageDialog(
+                current = language,
+                onSelect = { selected ->
+                    languageDialogOpen = false
+                    scope.launch { LanguageSetting.save(selected) }
+                },
+                onDismiss = { languageDialogOpen = false },
+            )
+        }
+        SwitchItem(
+            iconPainter = painterResource(R.drawable.icon_music_note),
+            title = stringResource(id = R.string.setting_show_track_artist),
+            checked = showTrackArtist,
+            onCheckedChange = { checked ->
+                scope.launch { ArtistDisplaySetting.save(checked) }
+            }
+        )
+        Item(
+            iconPainter = painterResource(R.drawable.icon_extension),
+            title = stringResource(id = R.string.setting_plugin_management),
+            content = null,
+            onClick = {
+                navController.navigate(RoutePluginManagement())
+            }
+        )
+        Item(
+            iconPainter = painterResource(R.drawable.icon_lyrics),
+            title = stringResource(id = R.string.setting_lyric_parser),
+            content = null,
+            onClick = {
+                navController.navigate(RouteLyricParser())
+            }
+        )
         Title(title = stringResource(id = R.string.setting_debug))
         Item(
             iconPainter = painterResource(R.drawable.icon_log),
@@ -152,5 +253,55 @@ fun SettingSubpage() {
             content = getAppVersion(context),
             onClick = {}
         )
+    }
+}
+
+@Composable
+private fun languageLabel(language: AppLanguage): String = when (language) {
+    AppLanguage.SYSTEM -> stringResource(id = R.string.language_system_default)
+    AppLanguage.ENGLISH -> stringResource(id = R.string.language_english)
+    AppLanguage.SIMPLIFIED_CHINESE -> stringResource(id = R.string.language_simplified_chinese)
+}
+
+@Composable
+private fun LanguageDialog(
+    current: AppLanguage,
+    onSelect: (AppLanguage) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(20.dp, 16.dp),
+        ) {
+            Text(
+                text = stringResource(id = R.string.setting_language),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Box(modifier = Modifier.height(8.dp))
+            for (language in AppLanguage.entries) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSelect(language) }
+                        .padding(8.dp, 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (language == current) "● " else "○ ",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = languageLabel(language),
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+        }
     }
 }

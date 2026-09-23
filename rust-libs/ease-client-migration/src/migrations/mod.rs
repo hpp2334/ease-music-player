@@ -1,0 +1,23 @@
+pub mod m20260715_000001_init;
+pub mod m20260726_000002_plugin_kv;
+pub mod m20260801_000003_storage_registry;
+pub mod m20260816_000004_webdav_plugin;
+pub mod m20260905_000005_preference_language;
+pub mod m20260911_000006_playlist_storage_allowlist;
+pub mod m20260912_000007_playlist_group;
+pub mod m20260913_000008_preference_last_import_loc;
+pub mod m20260921_000009_music_artist;
+pub mod m20260921_000010_preference_show_track_artist;
+pub mod m20260922_000011_music_embedded_lyric;
+
+pub use m20260715_000001_init::Migration as InitMigration;
+pub use m20260726_000002_plugin_kv::Migration as PluginKvMigration;
+pub use m20260801_000003_storage_registry::Migration as StorageRegistryMigration;
+pub use m20260816_000004_webdav_plugin::Migration as WebdavPluginMigration;
+pub use m20260905_000005_preference_language::Migration as PreferenceLanguageMigration;
+pub use m20260911_000006_playlist_storage_allowlist::Migration as PlaylistStorageAllowlistMigration;
+pub use m20260912_000007_playlist_group::Migration as PlaylistGroupMigration;
+pub use m20260913_000008_preference_last_import_loc::Migration as PreferenceLastImportLocMigration;
+pub use m20260921_000009_music_artist::Migration as MusicArtistMigration;
+pub use m20260921_000010_preference_show_track_artist::Migration as PreferenceShowTrackArtistMigration;
+pub use m20260922_000011_music_embedded_lyric::Migration as MusicEmbeddedLyricMigration;
