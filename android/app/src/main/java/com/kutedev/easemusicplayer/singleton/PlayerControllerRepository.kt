@@ -7,6 +7,7 @@ import com.kutedev.cantode.PlayerState
 import com.kutedev.easemusicplayer.core.PlaybackService
 import com.kutedev.easemusicplayer.singleton.SleepModeState
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
+import com.kutedev.easemusicplayer.singleton.types.LyricLoadState
 import com.kutedev.easemusicplayer.singleton.types.Music
 import com.kutedev.easemusicplayer.singleton.types.Playlist
 import com.kutedev.easemusicplayer.singleton.types.MusicId
@@ -25,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -65,6 +67,25 @@ class PlayerControllerRepository @Inject constructor(
 
     private var _sleepJob: Job? = null
     private var lyricJob: Job? = null
+
+    /**
+     * Fetch + parse the current track's lyric over the storage seam (and
+     * the embedded-tag fallback) in the background and patch the result
+     * into the current music. Superseded by each new [play] and
+     * id-guarded at apply time, so a stale fetch can't land on a newer
+     * track.
+     */
+    private fun launchLyricFetch(id: MusicId) {
+        lyricJob?.cancel()
+        lyricJob = _scope.launch {
+            val lyric = bridge.call(BridgeMethods.Music.LOAD_LYRIC, id)
+                .unwrapOrNull()?.payload
+            if (_music.value?.meta?.id == id) {
+                playerRepository.updateMusicLyric(id, lyric)
+            }
+        }
+    }
+
     /** Bumped on every [play] — lets a scheduled auto-advance retry detect
      *  that a newer play superseded it while it was backing off. */
     @Volatile private var playGeneration = 0L
@@ -302,14 +323,7 @@ class PlayerControllerRepository @Inject constructor(
                 // music — the pane shows its LOADING spinner meanwhile.
                 // Superseded by each new play() and id-guarded at apply
                 // time, so a stale fetch can't land on a newer track.
-                lyricJob?.cancel()
-                lyricJob = _scope.launch {
-                    val lyric = bridge.call(BridgeMethods.Music.LOAD_LYRIC, id)
-                        .unwrapOrNull()?.payload
-                    if (_music.value?.meta?.id == id) {
-                        playerRepository.updateMusicLyric(id, lyric)
-                    }
-                }
+                launchLyricFetch(id)
 
                 // The load itself stays on the backend bridge — source
                 // construction (storage plugins) and the metadata→DB
@@ -380,6 +394,35 @@ class PlayerControllerRepository @Inject constructor(
                 bridge.call(BridgeMethods.Music.GET, id).unwrapOrNull()?.payload?.let { extracted ->
                     playerRepository.updateMusicExtractedMeta(id, extracted)
                     playlistRepository.scheduleReload()
+                }
+
+                // The same writeback also captures embedded tag lyrics —
+                // which the earlier lyric fetch could not have seen on a
+                // track's FIRST play (it races the load; the column was
+                // still NULL). If that fetch ended MISSING and the probe
+                // found lyric tags, re-run it once — the embedded text is
+                // in the DB now. Gating on the probed tags keeps this a
+                // no-op for the common lyricless/sidecar cases.
+                val probeFoundLyricTag = runCatching {
+                    loaded?.payload?.jsonObject?.get("tags")
+                        ?.jsonArray
+                        ?.any { tag ->
+                            val obj = tag.jsonObject
+                            obj["key"]?.jsonPrimitive?.content == "Lyrics" &&
+                                !obj["value"]?.jsonPrimitive?.content.isNullOrBlank()
+                        } ?: false
+                }.getOrDefault(false)
+                if (probeFoundLyricTag) {
+                    // LOADING: the fetch launched before `loadMusic` is
+                    // still in flight — but it read the DB before the
+                    // writeback committed, so it is doomed to land
+                    // MISSING; supersede it. MISSING: it already did.
+                    // (First plays only — later plays always find the
+                    // column filled on the first fetch.)
+                    val state = _music.value?.takeIf { it.meta.id == id }?.lyric?.loadedState
+                    if (state == null || state == LyricLoadState.LOADING || state == LyricLoadState.MISSING) {
+                        launchLyricFetch(id)
+                    }
                 }
             } else if (music == null || playlist == null) {
                 // Fetch FAILURE (backend busy / restarting / handle

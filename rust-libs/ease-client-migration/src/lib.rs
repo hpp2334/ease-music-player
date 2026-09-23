@@ -73,6 +73,10 @@ impl MigratorTrait for Migrator {
             // display preference, default on) — applies to both fresh
             // and existing databases.
             Box::new(migrations::PreferenceShowTrackArtistMigration),
+            // Real post-collapse schema change (embedded tag lyric text
+            // on music, filled by the play-time metadata writeback) —
+            // applies to both fresh and existing databases.
+            Box::new(migrations::MusicEmbeddedLyricMigration),
         ]
     }
 }

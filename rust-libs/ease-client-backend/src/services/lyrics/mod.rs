@@ -41,7 +41,7 @@ pub(crate) const MAX_LYRIC_BYTES: usize = 2 * 1024 * 1024;
 const PARSE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Cap on result lines accepted from a plugin.
-const MAX_LINES: usize = 65_536;
+pub(crate) const MAX_LINES: usize = 65_536;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum LyricDispatchError {
@@ -197,6 +197,9 @@ fn map_plugin_result(value: &serde_json::Value) -> Option<Lyrics> {
             offset: m.offset,
         },
         lines,
+        // The plugin contract is timed lines only — an unsynchronized
+        // result never comes from a parser.
+        synced: true,
     })
 }
 

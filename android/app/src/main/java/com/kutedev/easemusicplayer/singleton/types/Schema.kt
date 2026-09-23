@@ -179,6 +179,12 @@ data class LyricLine(
 data class Lyrics(
     val metdata: LrcMetadata = LrcMetadata(),
     val lines: List<LyricLine> = emptyList(),
+    /**
+     * False = unsynchronized plain text (embedded tag lyrics without
+     * timestamps): rendered without highlight / auto-scroll. Defaults to
+     * true — the plugin parsers only ever produce timed lines.
+     */
+    val synced: Boolean = true,
 )
 
 @Serializable

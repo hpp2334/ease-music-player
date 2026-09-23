@@ -356,6 +356,7 @@ private fun MusicLyric(
     lyrics: List<LyricLine>,
     lyricIndex: Int,
     lyricLoadedState: LyricLoadState,
+    lyricSynced: Boolean,
     onClickAdd: () -> Unit,
     widgetHeight: Int,
 ) {
@@ -366,7 +367,9 @@ private fun MusicLyric(
     val listState = rememberLazyListState()
 
     LaunchedEffect(lyricIndex, widgetHeight, lyricLoadedState) {
-        if (lyricLoadedState == LyricLoadState.LOADED) {
+        // Unsynced lyrics (plain tag text) carry no timeline — pinning a
+        // "current" line would be noise, so no auto-scroll either.
+        if (lyricLoadedState == LyricLoadState.LOADED && lyricSynced) {
             listState.animateScrollToItem(lyricIndex + 1, -(widgetHeight / 2))
         }
     }
@@ -428,13 +431,15 @@ private fun MusicLyric(
                 state = listState,
                 modifier = Modifier
                     .fillMaxWidth(),
-                userScrollEnabled = false,
+                // Synced lyrics are position-driven (the current line
+                // follows playback); unsynced plain text is free-scrolled.
+                userScrollEnabled = !lyricSynced,
             ) {
                 item {
                     Box(modifier = Modifier.height(widgetHeightDp / 2))
                 }
                 itemsIndexed(lyrics) { index, lyric ->
-                    val isCurrent = index == lyricIndex
+                    val isCurrent = lyricSynced && index == lyricIndex
                     val textColor =
                         if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -490,6 +495,7 @@ private fun MusicPlayerBody(
     lyricIndex: Int,
     lyrics: List<LyricLine>,
     lyricLoadedState: LyricLoadState,
+    lyricSynced: Boolean = true,
     onClickAddLyric: () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -675,6 +681,7 @@ private fun MusicPlayerBody(
                     lyricIndex = lyricIndex,
                     lyrics = lyrics,
                     lyricLoadedState = lyricLoadedState,
+                    lyricSynced = lyricSynced,
                     onClickAdd = onClickAddLyric,
                     widgetHeight = widgetHeight,
                 )
@@ -812,6 +819,9 @@ fun MusicPlayerPage(
     // renders the MISSING pane with its add CTA — not an eternal spinner.
     val lyricLoadedState = currentMusic?.lyric?.loadedState ?: LyricLoadState.MISSING
     val lyrics = currentMusic?.lyric?.data?.lines ?: emptyList()
+    // Unsynced lyrics (embedded plain text) render without highlight or
+    // auto-scroll; see `MusicLyric`.
+    val lyricSynced = currentMusic?.lyric?.data?.synced ?: true
 
     val hasLyric = lyricLoadedState != LyricLoadState.MISSING
 
@@ -843,6 +853,7 @@ fun MusicPlayerPage(
                     canNext = nextMusic != null,
                     lyricIndex = currentLyricIndex,
                     lyricLoadedState = lyricLoadedState,
+                    lyricSynced = lyricSynced,
                     lyrics = lyrics,
                     onClickAddLyric = {
                         if (currentMusic != null) {
@@ -1077,6 +1088,7 @@ private fun MusicLyricPreview() {
                 lyricIndex = lyricIndex,
                 lyrics = lyricLines,
                 lyricLoadedState = lyricLoadedState,
+                lyricSynced = true,
                 widgetHeight = widgetHeight,
                 onClickAdd = {}
             )

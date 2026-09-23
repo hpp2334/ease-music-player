@@ -15,5 +15,8 @@ pub struct MusicModel {
     pub cover: Option<BlobId>,
     pub lyric: Option<StorageEntryLoc>,
     pub lyric_default: bool,
+    /// Embedded lyric text captured from container tags (None = never
+    /// probed / no tag).
+    pub embedded_lyric: Option<String>,
     pub order: Vec<u32>,
 }

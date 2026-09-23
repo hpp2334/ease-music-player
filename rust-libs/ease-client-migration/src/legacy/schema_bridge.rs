@@ -79,6 +79,8 @@ impl From<v3::MusicModel> for schema::MusicModel {
             cover: v.cover.map(Into::into),
             lyric: v.lyric.map(Into::into),
             lyric_default: v.lyric_default,
+            // Same for embedded tag lyrics: backfilled on first play.
+            embedded_lyric: None,
             order: v.order,
         }
     }

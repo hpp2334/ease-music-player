@@ -18,6 +18,9 @@ pub struct Model {
     pub lyric_path: Option<String>,
     /// 0/1 boolean.
     pub lyric_default: i32,
+    /// Embedded lyric text captured from container tags (NULL = never
+    /// probed / no tag).
+    pub embedded_lyric: Option<String>,
     /// JSON-encoded `Vec<u32>` (ease-order-key raw).
     pub order: String,
 }
