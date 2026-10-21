@@ -34,7 +34,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -323,22 +322,10 @@ private fun MusicLyric(
         widgetHeight.toDp()
     }
     val listState = rememberLazyListState()
-    val itemHeights = remember { mutableStateMapOf<Int, Int>() }
-    val currentItemHeight = itemHeights[lyricIndex]
 
-    LaunchedEffect(lyrics) {
-        itemHeights.clear()
-    }
-
-    LaunchedEffect(lyricIndex, currentItemHeight, widgetHeight, lyricLoadedState) {
+    LaunchedEffect(lyricIndex, widgetHeight, lyricLoadedState) {
         if (lyricLoadedState == LyricLoadState.LOADED) {
-            // Center the whole (possibly multi-line) entry vertically.
-            val offset = if (currentItemHeight != null && currentItemHeight > 0) {
-                -((widgetHeight - currentItemHeight) / 2)
-            } else {
-                -(widgetHeight / 2)
-            }
-            listState.animateScrollToItem(lyricIndex + 1, offset)
+            listState.animateScrollToItem(lyricIndex + 1, -(widgetHeight / 2))
         }
     }
 
@@ -413,11 +400,6 @@ private fun MusicLyric(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 8.dp)
-                            .onSizeChanged { size ->
-                                if (itemHeights[index] != size.height) {
-                                    itemHeights[index] = size.height
-                                }
-                            }
                     ) {
                         Text(
                             text = lyric.text,
@@ -876,10 +858,7 @@ private fun MusicLyricPreview() {
     val lyricLines = remember {
         listOf(
             LyricLine(Duration.ofMillis(1000), "> Task :app:preBuild UP-TO-DATE"),
-            LyricLine(
-                Duration.ofMillis(3000),
-                "> Task :app:preDebugBuild UP-TO-DATE\n> Task :app:preReleaseBuild UP-TO-DATE"
-            ),
+            LyricLine(Duration.ofMillis(3000), "> Task :app:preDebugBuild UP-TO-DATE"),
             LyricLine(Duration.ofMillis(4000), "> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE"),
             LyricLine(Duration.ofMillis(4500), "> Task :app:checkDebugAarMetadata UP-TO-DATE"),
             LyricLine(Duration.ofMillis(5000), "> Task :app:generateDebugResValues UP-TO-DATE"),
@@ -893,10 +872,7 @@ private fun MusicLyricPreview() {
                 "You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins."
             ),
             LyricLine(Duration.ofMillis(8000), "> Task :app:createDebugApkListingFileRedirect UP-TO-DATE"),
-            LyricLine(
-                Duration.ofMillis(9000),
-                "> Task :app:assembleDebug\n> BUILD SUCCESSFUL in 2s\n> 28 actionable tasks: 28 executed"
-            ),
+            LyricLine(Duration.ofMillis(9000), "> Task :app:assembleDebug"),
         )
     }
     var widgetHeight by remember { mutableIntStateOf(0) }

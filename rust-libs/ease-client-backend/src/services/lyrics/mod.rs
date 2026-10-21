@@ -105,13 +105,11 @@ pub(crate) fn parse_lrc(lyric: impl Into<String>) -> Result<Lyrics, LrcParseErro
                         let milliseconds = Duration::from_millis(milliseconds);
                         let time = minute + sec + milliseconds;
 
-                        // `\n` escapes in the text become line breaks of a
-                        // single multi-line entry.
-                        let text = text.replace("\\n", "\n").trim().to_string();
+                        let text = text.trim().to_string();
                         if !text.is_empty() {
                             lyrics.lines.push(LyricLine {
                                 duration: time,
-                                text,
+                                text: text.to_string(),
                             });
                         }
                     }
@@ -121,32 +119,7 @@ pub(crate) fn parse_lrc(lyric: impl Into<String>) -> Result<Lyrics, LrcParseErro
         };
     }
 
-    merge_lines(&mut lyrics.lines);
-
     Ok(lyrics)
-}
-
-/// Sort lines by start time (stable), then merge lines sharing the same
-/// timestamp into a single multi-line entry whose text is joined by `\n`.
-/// Text identical to the previous sub-line at the same timestamp is
-/// collapsed, so duplicated tags such as `[00:12.00][00:12.00]chorus`
-/// don't render the same line twice.
-fn merge_lines(lines: &mut Vec<LyricLine>) {
-    lines.sort_by_key(|l| l.duration);
-    let mut merged: Vec<LyricLine> = Vec::with_capacity(lines.len());
-    for line in lines.drain(..) {
-        match merged.last_mut() {
-            Some(last) if last.duration == line.duration => {
-                let is_duplicate = last.text.rsplit('\n').next() == Some(line.text.as_str());
-                if !is_duplicate {
-                    last.text.push('\n');
-                    last.text.push_str(&line.text);
-                }
-            }
-            _ => merged.push(line),
-        }
-    }
-    *lines = merged;
 }
 #[cfg(test)]
 mod tests {
@@ -247,95 +220,5 @@ mod tests {
             })
         );
         assert_eq!(line.next(), None);
-    }
-
-    #[test]
-    fn lrc_4() {
-        // `\n` escapes split a single entry into multiple stacked lines,
-        // escape-only text is dropped
-        let res = parse_lrc("[00:12.00]Line A\\nLine B\n[00:14.00]\\n");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert_eq!(
-            res.lines,
-            vec![LyricLine {
-                duration: Duration::from_secs(12),
-                text: "Line A\nLine B".to_string(),
-            }]
-        );
-    }
-
-    #[test]
-    fn lrc_5() {
-        // lines sharing the same timestamp are merged into one entry
-        let res = parse_lrc("[00:12.00]Line A\n[00:12.00]Line B\n[00:13.00]Line C");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert_eq!(
-            res.lines,
-            vec![
-                LyricLine {
-                    duration: Duration::from_secs(12),
-                    text: "Line A\nLine B".to_string(),
-                },
-                LyricLine {
-                    duration: Duration::from_secs(13),
-                    text: "Line C".to_string(),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn lrc_6() {
-        // out-of-order lines are sorted, non-adjacent same timestamps are
-        // merged, and identical duplicates collapse
-        let res = parse_lrc(
-            "[00:13.00]B
-            [00:12.00]A
-            [00:15.00]C
-            [00:12.00]A2
-            [00:12.00]A2",
-        );
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        let mut line = res.lines.into_iter();
-        assert_eq!(
-            line.next(),
-            Some(LyricLine {
-                duration: Duration::from_secs(12),
-                text: "A\nA2".to_string(),
-            })
-        );
-        assert_eq!(
-            line.next(),
-            Some(LyricLine {
-                duration: Duration::from_secs(13),
-                text: "B".to_string(),
-            })
-        );
-        assert_eq!(
-            line.next(),
-            Some(LyricLine {
-                duration: Duration::from_secs(15),
-                text: "C".to_string(),
-            })
-        );
-        assert_eq!(line.next(), None);
-    }
-
-    #[test]
-    fn lrc_7() {
-        // duplicated identical tags don't duplicate the line
-        let res = parse_lrc("[00:12.00][00:12.00]chorus");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert_eq!(
-            res.lines,
-            vec![LyricLine {
-                duration: Duration::from_secs(12),
-                text: "chorus".to_string(),
-            }]
-        );
     }
 }
