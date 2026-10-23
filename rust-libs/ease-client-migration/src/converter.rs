@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use ease_client_schema::{
-    BlobId, DbKeyAlloc, MusicId, MusicModel, PlayMode, PlaylistGroupId, PlaylistGroupModel,
-    PlaylistId, PlaylistModel, PreferenceModel, StorageEntryLoc, StorageId,
+    BlobId, DbKeyAlloc, LastPlayed, MusicId, MusicModel, PlayMode, PlaylistGroupId,
+    PlaylistGroupModel, PlaylistId, PlaylistModel, PreferenceModel, StorageEntryLoc, StorageId,
 };
 
 use ease_client_schema::entities::{
@@ -175,12 +175,28 @@ pub fn preference_loc_to_json(loc: Option<StorageEntryLoc>) -> Option<String> {
     loc.and_then(|v| serde_json::to_string(&v).ok())
 }
 
+/// `preference.last_played` column encodes the typed [`LastPlayed`] as
+/// camelCase JSON text (same approach as `last_import_loc`). Malformed
+/// text degrades to `None` — the preference is a UX nicety, never worth
+/// failing a query over.
+pub fn preference_last_played_from_json(s: Option<String>) -> Option<LastPlayed> {
+    s.and_then(|v| serde_json::from_str(&v).ok())
+}
+
+/// Inverse of [`preference_last_played_from_json`]; serialization of the
+/// plain struct cannot fail in practice, and degrades to `None` if it
+/// ever did.
+pub fn preference_last_played_to_json(v: Option<LastPlayed>) -> Option<String> {
+    v.and_then(|v| serde_json::to_string(&v).ok())
+}
+
 pub fn preference_from(m: PreferenceModel) -> preference::ActiveModel {
     preference::ActiveModel {
         id: sea_orm::ActiveValue::Set(0),
         playmode: sea_orm::ActiveValue::Set(play_mode_index(m.playmode)),
         language: sea_orm::ActiveValue::Set(m.language),
         last_import_loc: sea_orm::ActiveValue::Set(preference_loc_to_json(m.last_import_loc)),
+        last_played: sea_orm::ActiveValue::Set(preference_last_played_to_json(m.last_played)),
         show_track_artist: sea_orm::ActiveValue::Set(if m.show_track_artist { TRUE_I32 } else { FALSE_I32 }),
     }
 }
@@ -190,6 +206,7 @@ pub fn preference_to_model(row: preference::Model) -> PreferenceModel {
         playmode: play_mode_from_index(row.playmode),
         language: row.language,
         last_import_loc: preference_loc_from_json(row.last_import_loc),
+        last_played: preference_last_played_from_json(row.last_played),
         show_track_artist: row.show_track_artist != FALSE_I32,
     }
 }

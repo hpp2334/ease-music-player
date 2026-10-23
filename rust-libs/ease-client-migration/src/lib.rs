@@ -77,6 +77,10 @@ impl MigratorTrait for Migrator {
             // on music, filled by the play-time metadata writeback) —
             // applies to both fresh and existing databases.
             Box::new(migrations::MusicEmbeddedLyricMigration),
+            // Real post-collapse schema change (last-played track on the
+            // preference row, for the player's startup rehydration) —
+            // applies to both fresh and existing databases.
+            Box::new(migrations::PreferenceLastPlayedMigration),
         ]
     }
 }

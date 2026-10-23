@@ -110,6 +110,18 @@ pub struct StorageEntryLoc {
     pub path: String,
 }
 
+/// The track the player was last on (the music + the playlist it played
+/// from), persisted so a process kill while backgrounded can restore the
+/// player page / mini-player as paused instead of empty. The ids are
+/// re-validated against the live playlist on restore — the pair is a
+/// hint, never a guarantee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastPlayed {
+    pub music_id: MusicId,
+    pub playlist_id: PlaylistId,
+}
+
 /// Discriminant stored in the `storage` registry table's `type` column.
 /// `1` was the legacy native-WebDAV kind; it is unused since WebDAV moved to
 /// a JS plugin provider (schema v7 rewrites surviving rows to `Plugin`).

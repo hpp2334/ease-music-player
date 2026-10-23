@@ -1,4 +1,4 @@
-use ease_client_schema::{PlayMode, StorageEntryLoc};
+use ease_client_schema::{LastPlayed, PlayMode, StorageEntryLoc};
 
 use crate::{ctx::BackendContext, error::BResult};
 
@@ -44,6 +44,23 @@ pub(crate) async fn get_preference_last_import_loc(
 ) -> BResult<Option<StorageEntryLoc>> {
     let data = cx.database_server().load_preference().await?;
     Ok(data.last_import_loc)
+}
+
+pub(crate) async fn save_preference_last_played(
+    cx: &BackendContext,
+    arg: Option<LastPlayed>,
+) -> BResult<()> {
+    let mut data = cx.database_server().load_preference().await?;
+    data.last_played = arg;
+    cx.database_server().save_preference(data).await?;
+    Ok(())
+}
+
+pub(crate) async fn get_preference_last_played(
+    cx: &BackendContext,
+) -> BResult<Option<LastPlayed>> {
+    let data = cx.database_server().load_preference().await?;
+    Ok(data.last_played)
 }
 
 pub(crate) async fn save_preference_show_track_artist(

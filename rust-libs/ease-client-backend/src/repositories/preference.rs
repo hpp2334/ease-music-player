@@ -36,12 +36,14 @@ impl DatabaseServer {
         let sta = if model.show_track_artist { 1 } else { 0 };
         let last_import_loc =
             converter::preference_loc_to_json(model.last_import_loc);
+        let last_played = converter::preference_last_played_to_json(model.last_played);
         match existing {
             Some(row) => {
                 let mut am: preference::ActiveModel = row.into();
                 am.playmode = ActiveValue::Set(pm);
                 am.language = ActiveValue::Set(model.language);
                 am.last_import_loc = ActiveValue::Set(last_import_loc);
+                am.last_played = ActiveValue::Set(last_played);
                 am.show_track_artist = ActiveValue::Set(sta);
                 am.update(&db).await?;
             }
@@ -51,6 +53,7 @@ impl DatabaseServer {
                     playmode: ActiveValue::Set(pm),
                     language: ActiveValue::Set(model.language),
                     last_import_loc: ActiveValue::Set(last_import_loc),
+                    last_played: ActiveValue::Set(last_played),
                     show_track_artist: ActiveValue::Set(sta),
                 };
                 am.insert(&db).await?;
@@ -63,7 +66,7 @@ impl DatabaseServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ease_client_schema::{StorageEntryLoc, StorageId};
+    use ease_client_schema::{LastPlayed, MusicId, PlaylistId, StorageEntryLoc, StorageId};
 
     async fn server() -> (std::sync::Arc<DatabaseServer>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -110,6 +113,57 @@ mod tests {
         assert_eq!(m.playmode, PlayMode::SingleLoop);
         assert_eq!(m.language.as_deref(), Some("zh-CN"));
         assert_eq!(m.last_import_loc, Some(next));
+    }
+
+    #[tokio::test]
+    async fn last_played_round_trips_and_clears_to_none() {
+        let (server, _dir) = server().await;
+
+        // Fresh database: nothing played yet.
+        assert!(server.load_preference().await.unwrap().last_played.is_none());
+
+        // First save goes through the insert branch.
+        let played = LastPlayed {
+            music_id: MusicId::wrap(7),
+            playlist_id: PlaylistId::wrap(2),
+        };
+        let mut m = server.load_preference().await.unwrap();
+        m.last_played = Some(played);
+        server.save_preference(m).await.unwrap();
+        assert_eq!(
+            server.load_preference().await.unwrap().last_played,
+            Some(played)
+        );
+
+        // An explicit clear (player stopped / track removed) survives
+        // the update branch too.
+        let mut m = server.load_preference().await.unwrap();
+        m.last_played = None;
+        server.save_preference(m).await.unwrap();
+        assert!(server.load_preference().await.unwrap().last_played.is_none());
+    }
+
+    #[tokio::test]
+    async fn malformed_last_played_column_degrades_to_none() {
+        let (server, _dir) = server().await;
+
+        // Write garbage straight into the column of an existing row
+        // (simulating a corrupt or hand-edited database); the read must
+        // degrade to `None`.
+        server
+            .save_preference(PreferenceModel::default())
+            .await
+            .unwrap();
+        let mut am: preference::ActiveModel = preference::Entity::find_by_id(0)
+            .one(&server.db())
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        am.last_played = ActiveValue::Set(Some("{not json".to_string()));
+        am.update(&server.db()).await.unwrap();
+
+        assert!(server.load_preference().await.unwrap().last_played.is_none());
     }
 
     #[tokio::test]

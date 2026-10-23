@@ -9,6 +9,7 @@ pub mod m20260913_000008_preference_last_import_loc;
 pub mod m20260921_000009_music_artist;
 pub mod m20260921_000010_preference_show_track_artist;
 pub mod m20260922_000011_music_embedded_lyric;
+pub mod m20261023_000012_preference_last_played;
 
 pub use m20260715_000001_init::Migration as InitMigration;
 pub use m20260726_000002_plugin_kv::Migration as PluginKvMigration;
@@ -21,3 +22,4 @@ pub use m20260913_000008_preference_last_import_loc::Migration as PreferenceLast
 pub use m20260921_000009_music_artist::Migration as MusicArtistMigration;
 pub use m20260921_000010_preference_show_track_artist::Migration as PreferenceShowTrackArtistMigration;
 pub use m20260922_000011_music_embedded_lyric::Migration as MusicEmbeddedLyricMigration;
+pub use m20261023_000012_preference_last_played::Migration as PreferenceLastPlayedMigration;
