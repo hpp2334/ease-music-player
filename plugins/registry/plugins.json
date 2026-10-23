@@ -6,14 +6,14 @@
         "en-US": "Lyric Formats",
         "zh-CN": "歌词格式"
       },
-      "version": "0.2.1",
+      "version": "0.2.2",
       "description": {
         "en-US": "Lyric file parsers for LRC, SRT and WebVTT. The app's lyric pane is powered entirely by this plugin — there is no built-in parser.",
         "zh-CN": "LRC、SRT、WebVTT 歌词文件解析器。应用的歌词显示完全由本插件驱动，应用内没有内置解析器。"
       },
-      "zip": "zips/com.ease.lyricformats-0.2.1.zip",
-      "sha256": "142aa1d5b6bccbc32ea7734655f08e71f5e9b7687e9d8b001ba89f71351cc8c9",
-      "size": 35868,
+      "zip": "zips/com.ease.lyricformats-0.2.2.zip",
+      "sha256": "bde2aad760fd5b487d485e724bf8a715daacb48be61b81df1c0e8ccc58777810",
+      "size": 37346,
       "apiVersion": 1
     },
     {

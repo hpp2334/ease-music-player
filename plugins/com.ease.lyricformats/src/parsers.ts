@@ -11,12 +11,16 @@
 //   - LRC: info tags (`[ti:…]`, `[offset:…]`, …) pass through as metadata
 //     and are never applied (`[offset:+500]` stays a verbatim string).
 //     Multi-timestamp lines expand to one entry per timestamp; the first
-//     tag decides the line kind, one info tag per line. Enhanced-LRC word
-//     timings (`<mm:ss.xx> word`, plus the Foobar2000 `[mm:ss.xx] word`
-//     shape) are stripped from the text. `[:]` is a comment; unknown tags
-//     and untagged lines are skipped (lenient). Fractions scale by digit
-//     count (`.5` = `.50` = `.500` = 500 ms, longer runs truncate). No
-//     timed lines -> null ("not mine").
+//     tag decides the line kind, one info tag per line. A literal `\n`
+//     escape in the text becomes a real line break (one entry renders as
+//     several stacked lines), and entries sharing a start time merge into
+//     one multi-line entry — repeated tags (e.g. original + translation)
+//     scroll and highlight together, duplicated tags don't repeat a line.
+//     Enhanced-LRC word timings (`<mm:ss.xx> word`, plus the Foobar2000
+//     `[mm:ss.xx] word` shape) are stripped from the text. `[:]` is a
+//     comment; unknown tags and untagged lines are skipped (lenient).
+//     Fractions scale by digit count (`.5` = `.50` = `.500` = 500 ms,
+//     longer runs truncate). No timed lines -> null ("not mine").
 //   - SRT/WebVTT: cue start times; a parseable cue end becomes the
 //     per-line `durationMs`. VTT NOTE/STYLE/REGION blocks are skipped, as
 //     are optional cue id lines (SRT index / VTT identifier). Multi-line
@@ -178,8 +182,14 @@ export function parseLrc(text: string): LyricParseResult | null {
         const first = tags[0]!;
         if (parseTimestamp(first) !== null) {
             // Timed line: every leading tag is a timestamp candidate, each
-            // seeding one entry that carries the word-tag-stripped text.
-            const lineText = stripWordTags(rest).trim();
+            // seeding one entry that carries the word-tag-stripped text. A
+            // literal `\n` escape becomes a real line break — one entry
+            // then renders as several stacked lines — and an entry that is
+            // empty after unescaping (escape-only text) is dropped.
+            const lineText = stripWordTags(rest)
+                .split("\\n")
+                .join("\n")
+                .trim();
             if (lineText === "") continue;
             for (const tag of tags) {
                 const ms = parseTimestamp(tag);
@@ -200,9 +210,31 @@ export function parseLrc(text: string): LyricParseResult | null {
     }
     if (lines.length === 0) return null; // nothing timed parsed — "not mine"
     lines.sort((a, b) => a.timeMs - b.timeMs);
-    const result: LyricParseResult = { lines };
+    const result: LyricParseResult = { lines: mergeSameTime(lines) };
     if (Object.keys(meta).length > 0) result.metadata = meta as LyricMetadata;
     return result;
+}
+
+/**
+ * Merge sorted entries sharing a start time into one multi-line entry —
+ * LRC files commonly repeat a time tag for the original line plus its
+ * translation, and the lyric pane scrolls/highlights per entry. Text
+ * identical to the previous sub-line collapses, so a duplicated tag
+ * (`[00:12.00][00:12.00]chorus`, or the same line listed twice) never
+ * renders the same line twice.
+ */
+function mergeSameTime(lines: LyricLine[]): LyricLine[] {
+    const out: LyricLine[] = [];
+    for (const line of lines) {
+        const last = out[out.length - 1];
+        if (last !== undefined && last.timeMs === line.timeMs) {
+            const lastSub = last.text.slice(last.text.lastIndexOf("\n") + 1);
+            if (lastSub !== line.text) last.text += "\n" + line.text;
+        } else {
+            out.push({ timeMs: line.timeMs, text: line.text });
+        }
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -37,6 +37,28 @@ test("LRC: multi-timestamp line expands; fraction digit-count scales", () => {
     assert.equal(r.lines[1]!.timeMs, 60_500); // .50 = 500 ms
 });
 
+test("LRC: repeated timestamp merges into one multi-line entry", () => {
+    // original + translation sharing a tag scroll/highlight together
+    const r = parseLrc("[00:12.00]A\n[00:12.00]B\n[00:13.00]C\n")!;
+    assert.equal(r.lines.length, 2);
+    assert.equal(r.lines[0]!.timeMs, 12_000);
+    assert.equal(r.lines[0]!.text, "A\nB");
+    assert.equal(r.lines[1]!.text, "C");
+});
+
+test("LRC: duplicated identical tags don't repeat the line", () => {
+    const r = parseLrc("[00:12.00][00:12.00]chorus\n[00:20.00]chorus\n[00:20.00]chorus\n")!;
+    assert.equal(r.lines.length, 2);
+    assert.equal(r.lines[0]!.text, "chorus");
+    assert.equal(r.lines[1]!.text, "chorus");
+});
+
+test("LRC: literal \\n escape becomes a real line break; escape-only text dropped", () => {
+    const r = parseLrc("[00:12.00]Line A\\nLine B\n[00:14.00]\\n\n")!;
+    assert.equal(r.lines.length, 1);
+    assert.equal(r.lines[0]!.text, "Line A\nLine B");
+});
+
 test("LRC: enhanced word tags stripped from text", () => {
     const r = parseLrc("[00:01.00] <00:01.20> hel<00:01.40>lo world\n")!;
     assert.equal(r.lines.length, 1);
