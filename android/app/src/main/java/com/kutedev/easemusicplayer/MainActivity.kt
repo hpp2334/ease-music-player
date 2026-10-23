@@ -101,6 +101,10 @@ class MainActivity : ComponentActivity() {
             playlistRepository.setDefaultGroupTitle(getString(R.string.playlist_group_default))
             playlistRepository.reload()
             setupCantodeEngine()
+            // Rehydrate the last-played track after a process death in
+            // the background — the restored nav stack can land the user
+            // back on a player page whose repository state is empty.
+            playerControllerRepository.restoreLastPlayed()
             // Connect the plugin event bus after the player repo is wired
             // so plugins begin receiving music:play / resume / pause / stop /
             // complete.

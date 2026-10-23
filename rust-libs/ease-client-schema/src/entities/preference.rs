@@ -16,6 +16,11 @@ pub struct Model {
     /// Stored as text (not columns) the same way `playlist_group.order`
     /// keeps its order ladder — the pair is only ever read/written whole.
     pub last_import_loc: Option<String>,
+    /// JSON text of the last-played track ([`crate::LastPlayed`],
+    /// camelCase) — music + playlist id pair, `None` = nothing to
+    /// restore. Stored as text for the same reason as
+    /// `last_import_loc`.
+    pub last_played: Option<String>,
     /// 0/1 boolean — whether track artist lines are shown in the UI.
     /// Ships `DEFAULT 1` (shown).
     pub show_track_artist: i32,

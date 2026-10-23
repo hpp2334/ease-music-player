@@ -91,6 +91,16 @@ data class StorageEntryLoc(
     val path: String,
 )
 
+// Mirror of the Rust `LastPlayed` (camelCase): the track the player was
+// last on, persisted so a process kill while backgrounded can restore
+// the player page / mini-player as paused instead of empty. The ids are
+// re-validated against the live playlist before use.
+@Serializable
+data class LastPlayed(
+    val musicId: MusicId,
+    val playlistId: PlaylistId,
+)
+
 // Parametric storage descriptor — the `kind` tag matches the Rust enum's
 // `#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]`; the
 // per-variant fields are camelCase.

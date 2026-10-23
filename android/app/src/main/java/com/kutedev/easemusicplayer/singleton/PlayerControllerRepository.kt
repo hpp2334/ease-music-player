@@ -231,6 +231,50 @@ class PlayerControllerRepository @Inject constructor(
     }
 
     /**
+     * Rehydrate the player state after a process death in the background.
+     *
+     * The current track lives only in process memory, but the nav back
+     * stack survives (saved instance state): relaunching from Recents
+     * can land the user back on a PlayerPage whose repository is empty —
+     * placeholder cover, no title, `--:--:--` duration, prev/next dead.
+     * The `last_played` preference (kept current by
+     * [PlayerRepository.setCurrent]/[PlayerRepository.resetCurrent])
+     * restores the track as paused — no engine load, nothing sounds.
+     *
+     * The saved pair is a hint, validated exactly like [play]'s
+     * membership check: the music must still exist and still belong to
+     * the saved playlist. Skips when a track is already current (a
+     * user-initiated play raced the restore and wins).
+     */
+    fun restoreLastPlayed() {
+        if (_music.value != null) return
+        _scope.launch(Dispatchers.Main) {
+            val last = bridge.call(BridgeMethods.Preference.GET_LAST_PLAYED)
+                .unwrapOrNull()?.payload ?: return@launch
+            val music = bridge.call(BridgeMethods.Music.GET, last.musicId)
+                .unwrapOrNull()?.payload ?: return@launch
+            val playlist = bridge.call(BridgeMethods.Playlist.GET, last.playlistId)
+                .unwrapOrNull()?.payload ?: return@launch
+            if (playlist.musics.none { it.meta.id == last.musicId }) {
+                bridge.logRaw(
+                    "info",
+                    "restoreLastPlayed: music ${last.musicId.value} no longer in " +
+                        "playlist ${last.playlistId.value} — skipping",
+                )
+                return@launch
+            }
+            if (_music.value != null) return@launch
+            bridge.logRaw(
+                "info",
+                "restoreLastPlayed: music ${last.musicId.value} " +
+                    "(playlist ${last.playlistId.value})",
+            )
+            playerRepository.setCurrent(music, playlist)
+            launchLyricFetch(last.musicId)
+        }
+    }
+
+    /**
      * Current position in ms (for the PlayerVM poll).
      *
      * Stateful: while an optimistic seek override is active (see

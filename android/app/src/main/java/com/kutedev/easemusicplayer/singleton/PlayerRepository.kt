@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
 import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
+import com.kutedev.easemusicplayer.singleton.types.LastPlayed
 import com.kutedev.easemusicplayer.singleton.types.LyricLoadState
 import com.kutedev.easemusicplayer.singleton.types.Lyrics
 import com.kutedev.easemusicplayer.singleton.types.Music
@@ -142,6 +143,7 @@ class PlayerRepository @Inject constructor(
     fun setCurrent(music: Music, playlist: Playlist) {
         _music.value = music
         _playlist.value = playlist
+        persistLastPlayed(LastPlayed(music.meta.id, playlist.abstr.meta.id))
     }
 
     /**
@@ -176,6 +178,20 @@ class PlayerRepository @Inject constructor(
     fun resetCurrent() {
         _music.value = null
         _playlist.value = null
+        persistLastPlayed(null)
+    }
+
+    /**
+     * Mirror the current-track identity into the backend's
+     * `last_played` preference so a process kill while backgrounded can
+     * rehydrate the player (see [PlayerControllerRepository.restoreLastPlayed]).
+     * Fire-and-forget — the restore path re-validates the saved pair
+     * against the live playlist, so a lost write only costs the restore.
+     */
+    private fun persistLastPlayed(last: LastPlayed?) {
+        _scope.launch {
+            bridge.call(BridgeMethods.Preference.SAVE_LAST_PLAYED, last).unwrapOrNull()
+        }
     }
 
     fun remove() {

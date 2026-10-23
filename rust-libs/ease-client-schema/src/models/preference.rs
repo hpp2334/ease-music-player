@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::shared::{PlayMode, StorageEntryLoc};
+use crate::shared::{LastPlayed, PlayMode, StorageEntryLoc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreferenceModel {
@@ -10,6 +10,10 @@ pub struct PreferenceModel {
     /// Folder (storage + path) the user last imported from; `None` =
     /// never imported. Parsed/serialized at the repository boundary.
     pub last_import_loc: Option<StorageEntryLoc>,
+    /// Track (music + playlist) the player was last on; `None` =
+    /// nothing to restore. Parsed/serialized at the repository
+    /// boundary.
+    pub last_played: Option<LastPlayed>,
     /// Whether track artist lines are shown in the UI. Defaults to
     /// `true` — both the DB column and the in-memory default are on, so
     /// a not-yet-persisted preference still shows artists.
@@ -22,6 +26,7 @@ impl Default for PreferenceModel {
             playmode: PlayMode::default(),
             language: None,
             last_import_loc: None,
+            last_played: None,
             show_track_artist: true,
         }
     }

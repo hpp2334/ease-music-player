@@ -108,10 +108,12 @@ impl From<v3::PreferenceModel> for schema::PreferenceModel {
         schema::PreferenceModel {
             playmode: v.playmode.into(),
             // The legacy schemas predate the language override, the
-            // last-import-folder preference and the show-track-artist
-            // display preference (which defaults to on via Default).
+            // last-import-folder preference, the last-played track and
+            // the show-track-artist display preference (which defaults
+            // to on via Default).
             language: None,
             last_import_loc: None,
+            last_played: None,
             show_track_artist: true,
         }
     }

@@ -34,6 +34,7 @@ import com.kutedev.easemusicplayer.singleton.types.ArgUpdatePlaylistGroup
 import com.kutedev.easemusicplayer.singleton.types.ArgOauthExchange
 import com.kutedev.easemusicplayer.singleton.types.ArgOauthUrl
 import com.kutedev.easemusicplayer.singleton.types.ListLogFiles
+import com.kutedev.easemusicplayer.singleton.types.LastPlayed
 import com.kutedev.easemusicplayer.singleton.types.ListStorageEntryChildrenResp
 import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
 import com.kutedev.easemusicplayer.singleton.types.MusicId
@@ -177,6 +178,10 @@ object BridgeMethods {
         /** Folder (storage + path) the user last imported from; `null` = never. */
         val GET_LAST_IMPORT_LOC = bridgeSpecNoArg<StorageEntryLoc?>("preference.getLastImportLoc")
         val SAVE_LAST_IMPORT_LOC = bridgeSpecArg<StorageEntryLoc, Unit>("preference.saveLastImportLoc")
+
+        /** Track (music + playlist) the player was last on; `null` = nothing to restore. */
+        val GET_LAST_PLAYED = bridgeSpecNoArg<LastPlayed?>("preference.getLastPlayed")
+        val SAVE_LAST_PLAYED = bridgeSpecArg<LastPlayed?, Unit>("preference.saveLastPlayed")
 
         /** Whether track artist lines are shown in the UI; default on. */
         val GET_SHOW_TRACK_ARTIST = bridgeSpecNoArg<Boolean>("preference.getShowTrackArtist")

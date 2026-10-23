@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use ease_client_schema::{
-    MusicId, PlayMode, PlaylistGroupId, PlaylistId, PluginId, PluginStorageId, StorageEntryLoc,
-    StorageHandle, StorageId,
+    LastPlayed, MusicId, PlayMode, PlaylistGroupId, PlaylistId, PluginId, PluginStorageId,
+    StorageEntryLoc, StorageHandle, StorageId,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -57,8 +57,9 @@ use crate::{
         plugin_manager,
         preference::{
             get_preference_language, get_preference_last_import_loc,
-            get_preference_playmode, get_preference_show_track_artist,
-            save_preference_language, save_preference_last_import_loc,
+            get_preference_last_played, get_preference_playmode,
+            get_preference_show_track_artist, save_preference_language,
+            save_preference_last_import_loc, save_preference_last_played,
             save_preference_playmode, save_preference_show_track_artist,
         },
     },
@@ -565,6 +566,21 @@ async fn dispatch_inner(req: BridgeRequest, buffers: Vec<Vec<u8>>) -> DispatchRe
             let cx_cx = cx.get_context().clone();
             let loc = get_preference_last_import_loc(&cx_cx).await?;
             Ok((serde_json::to_value(loc)?, vec![]))
+        }
+        "preference.saveLastPlayed" => {
+            // The track (music + playlist) the player was last on; null
+            // clears it. Written by Kotlin on every current-track change.
+            let last: Option<LastPlayed> = serde_json::from_value(req.args)?;
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            save_preference_last_played(&cx_cx, last).await?;
+            Ok((Value::Null, vec![]))
+        }
+        "preference.getLastPlayed" => {
+            let cx = must_backend(handle)?;
+            let cx_cx = cx.get_context().clone();
+            let last = get_preference_last_played(&cx_cx).await?;
+            Ok((serde_json::to_value(last)?, vec![]))
         }
         "preference.saveShowTrackArtist" => {
             // Whether track artist lines are shown in the UI (playlist
