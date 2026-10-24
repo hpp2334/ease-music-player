@@ -52,6 +52,7 @@ class PlaylistRepository @Inject constructor(
     private val _debouncedReloadEvent = MutableSharedFlow<Unit>()
     private val _preRemovePlaylistEvent = MutableSharedFlow<PlaylistId>()
     private val _preRemoveMusicEvent = MutableSharedFlow<ArgRemoveMusicFromPlaylist>()
+    private val _musicsUpdated = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     /**
      * Bounds the post-import duration probes (`probeAndPersistDuration` →
@@ -77,6 +78,7 @@ class PlaylistRepository @Inject constructor(
     val syncedTotalDuration = _syncedTotalDuration.asSharedFlow()
     val preRemovePlaylistEvent = _preRemovePlaylistEvent.asSharedFlow()
     val preRemoveMusicEvent = _preRemoveMusicEvent.asSharedFlow()
+    val musicsUpdated = _musicsUpdated.asSharedFlow()
 
     /**
      * Localized title for the Default group created by the
@@ -398,6 +400,19 @@ class PlaylistRepository @Inject constructor(
         _scope.launch {
             _debouncedReloadEvent.emit(Unit)
         }
+    }
+
+    /**
+     * Notify that per-music data changed without a structural playlist
+     * change — e.g. the play-time metadata writeback (`player.loadMusic`
+     * backfills artist/cover/duration into the DB). Unlike
+     * [scheduleReload], whose effect on open pages rides the `_playlists`
+     * StateFlow (equality-suppressed when no abstract field changed, which
+     * is the common case for a mid-list first play), this fires
+     * unconditionally so an open playlist page re-queries its rows.
+     */
+    fun notifyMusicsUpdated() {
+        _musicsUpdated.tryEmit(Unit)
     }
 
     suspend fun reload() {

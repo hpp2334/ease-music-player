@@ -427,17 +427,21 @@ class PlayerControllerRepository @Inject constructor(
                     )
                 )
 
-                // The load's Rust-side writeback (embedded cover art +
-                // probed duration) is inline in `player.loadMusic`, so it
-                // has landed in the DB by now. Re-fetch and patch the
-                // current music so the player UI shows the extracted
-                // cover immediately; the debounced playlist reload
-                // refreshes the playlist cards' `showCover` (first music
-                // with a cover). Without this, first-play covers stayed
-                // invisible until an unrelated reload re-read them.
+                // The load's Rust-side writeback (embedded cover art,
+                // probed duration, backfilled artist) is inline in
+                // `player.loadMusic`, so it has landed in the DB by now.
+                // Re-fetch and patch the current music so the player UI
+                // shows the extracted cover + artist immediately; the
+                // debounced playlist reload refreshes the playlist cards'
+                // `showCover` (first music with a cover), and
+                // `notifyMusicsUpdated` re-queries any open playlist
+                // page's rows — the `_playlists` StateFlow can suppress
+                // an unchanged abstract list, which used to leave
+                // first-play artists invisible in the rows.
                 bridge.call(BridgeMethods.Music.GET, id).unwrapOrNull()?.payload?.let { extracted ->
                     playerRepository.updateMusicExtractedMeta(id, extracted)
                     playlistRepository.scheduleReload()
+                    playlistRepository.notifyMusicsUpdated()
                 }
 
                 // The same writeback also captures embedded tag lyrics —

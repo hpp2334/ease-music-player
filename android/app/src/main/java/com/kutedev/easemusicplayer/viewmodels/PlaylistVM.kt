@@ -82,6 +82,11 @@ class PlaylistVM @Inject constructor(
             }
         }
         viewModelScope.launch {
+            playlistRepository.musicsUpdated.debounce(Duration.ofMillis(500)).collect {
+                reload()
+            }
+        }
+        viewModelScope.launch {
             storageRepository.onRemoveStorageEvent.collect {
                 reload()
             }

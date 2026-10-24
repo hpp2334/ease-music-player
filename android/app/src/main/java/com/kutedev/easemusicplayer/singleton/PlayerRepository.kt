@@ -159,18 +159,23 @@ class PlayerRepository @Inject constructor(
     }
 
     /**
-     * Patch the freshly extracted cover/duration into the current music —
-     * the follow-up to `player.loadMusic`, whose Rust-side writeback
-     * (embedded cover art + probed duration) has landed in the DB by the
-     * time the load call resolves. Preserves the in-flight lyric state.
-     * No-op when the current music is not [id] (stale fetch racing a
-     * subsequent track switch).
+     * Patch the freshly extracted cover/duration/artist into the current
+     * music — the follow-up to `player.loadMusic`, whose Rust-side
+     * writeback (embedded cover art + probed duration + backfilled artist)
+     * has landed in the DB by the time the load call resolves. Preserves
+     * the in-flight lyric state. The artist keeps its current value when
+     * the re-fetch came back blank (mirrors the Rust only-if-empty
+     * backfill). No-op when the current music is not [id] (stale fetch
+     * racing a subsequent track switch).
      */
     fun updateMusicExtractedMeta(id: MusicId, extracted: Music) {
         val m = _music.value ?: return
         if (m.meta.id != id) return
         _music.value = m.copy(
-            meta = m.meta.copy(duration = extracted.meta.duration),
+            meta = m.meta.copy(
+                duration = extracted.meta.duration,
+                artist = extracted.meta.artist.ifBlank { m.meta.artist },
+            ),
             cover = extracted.cover,
         )
     }
