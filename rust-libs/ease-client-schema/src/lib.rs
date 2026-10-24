@@ -1,7 +1,9 @@
-mod v2;
-mod v3;
+pub mod entities;
+pub mod models;
+pub mod objects;
+pub mod shared;
 
-uniffi::setup_scaffolding!();
-
-pub use v2::upgrade_v1_to_v2;
-pub use v3::*;
+pub use entities::*;
+pub use models::*;
+pub use objects::*;
+pub use shared::*;

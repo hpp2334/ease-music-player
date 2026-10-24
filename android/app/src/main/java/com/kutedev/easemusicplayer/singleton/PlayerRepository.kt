@@ -1,5 +1,6 @@
 package com.kutedev.easemusicplayer.singleton
 
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,15 +10,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import uniffi.ease_client_backend.ArgRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ArgUpdateMusicLyric
-import uniffi.ease_client_backend.Music
-import uniffi.ease_client_backend.Playlist
-import uniffi.ease_client_backend.ctRemoveMusicFromPlaylist
-import uniffi.ease_client_backend.ctUpdateMusicLyric
-import uniffi.ease_client_backend.ctsGetPreferencePlaymode
-import uniffi.ease_client_backend.ctsSavePreferencePlaymode
-import uniffi.ease_client_schema.PlayMode
+import com.kutedev.easemusicplayer.singleton.types.ArgRemoveMusicFromPlaylist
+import com.kutedev.easemusicplayer.singleton.types.ArgUpdateMusicLyric
+import com.kutedev.easemusicplayer.singleton.types.LastPlayed
+import com.kutedev.easemusicplayer.singleton.types.LyricLoadState
+import com.kutedev.easemusicplayer.singleton.types.Lyrics
+import com.kutedev.easemusicplayer.singleton.types.Music
+import com.kutedev.easemusicplayer.singleton.types.MusicId
+import com.kutedev.easemusicplayer.singleton.types.MusicLyric
+import com.kutedev.easemusicplayer.singleton.types.Playlist
+import com.kutedev.easemusicplayer.singleton.types.PlayMode
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryLoc
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,6 +40,9 @@ class PlayerRepository @Inject constructor(
     private val _music = MutableStateFlow(null as Music?)
     private val _playlist = MutableStateFlow(null as Playlist?)
     private val _playing = MutableStateFlow(false)
+    /// ElapsedRealtime of the last `playing`/`loading` true — the anchor
+    /// for [isActive]'s auto-advance grace window.
+    private var lastActiveElapsed = 0L
     private val _musicIndex = combine(_music, _playlist) {
             music, playlist ->
         if (music == null || playlist == null) {
@@ -96,11 +102,36 @@ class PlayerRepository @Inject constructor(
     }.stateIn(_scope, SharingStarted.Eagerly, null)
 
     fun setIsPlaying(playing: Boolean) {
+        if (playing) {
+            lastActiveElapsed = SystemClock.elapsedRealtime()
+        }
         _playing.value = playing
     }
 
     fun setIsLoading(loading: Boolean) {
+        if (loading) {
+            lastActiveElapsed = SystemClock.elapsedRealtime()
+        }
         _loading.value = loading
+    }
+
+    /**
+     * Playback is active or within the auto-advance grace window: playing,
+     * loading, or a track ended so recently that the next track's load is
+     * still in flight. The load's storage probe runs before the engine
+     * publishes `LOADING`, so a pure `playing || loading` check leaves the
+     * handoff uncovered — exactly where a screen-off cleanup (MIUI's
+     * lock-screen memory cleanup removes the app's task) or a throttled
+     * connection kills playback. The services' task-removal guards and
+     * the wake/wifi locks key off this.
+     */
+    fun isActive(): Boolean {
+        if (_playing.value || _loading.value) {
+            lastActiveElapsed = SystemClock.elapsedRealtime()
+            return true
+        }
+        return _music.value != null &&
+            SystemClock.elapsedRealtime() - lastActiveElapsed < ADVANCE_GRACE_MS
     }
 
     fun notifyDurationChanged() {
@@ -112,11 +143,60 @@ class PlayerRepository @Inject constructor(
     fun setCurrent(music: Music, playlist: Playlist) {
         _music.value = music
         _playlist.value = playlist
+        persistLastPlayed(LastPlayed(music.meta.id, playlist.abstr.meta.id))
+    }
+
+    /**
+     * Patch the lyric into the current music (the async follow-up to
+     * `music.get`, whose lyric arrives as a LOADING placeholder). No-op
+     * when the current music is not [id] — e.g. a stale fetch racing a
+     * subsequent track switch.
+     */
+    fun updateMusicLyric(id: MusicId, lyric: MusicLyric?) {
+        val m = _music.value ?: return
+        if (m.meta.id != id) return
+        _music.value = m.copy(lyric = lyric)
+    }
+
+    /**
+     * Patch the freshly extracted cover/duration/artist into the current
+     * music — the follow-up to `player.loadMusic`, whose Rust-side
+     * writeback (embedded cover art + probed duration + backfilled artist)
+     * has landed in the DB by the time the load call resolves. Preserves
+     * the in-flight lyric state. The artist keeps its current value when
+     * the re-fetch came back blank (mirrors the Rust only-if-empty
+     * backfill). No-op when the current music is not [id] (stale fetch
+     * racing a subsequent track switch).
+     */
+    fun updateMusicExtractedMeta(id: MusicId, extracted: Music) {
+        val m = _music.value ?: return
+        if (m.meta.id != id) return
+        _music.value = m.copy(
+            meta = m.meta.copy(
+                duration = extracted.meta.duration,
+                artist = extracted.meta.artist.ifBlank { m.meta.artist },
+            ),
+            cover = extracted.cover,
+        )
     }
 
     fun resetCurrent() {
         _music.value = null
         _playlist.value = null
+        persistLastPlayed(null)
+    }
+
+    /**
+     * Mirror the current-track identity into the backend's
+     * `last_played` preference so a process kill while backgrounded can
+     * rehydrate the player (see [PlayerControllerRepository.restoreLastPlayed]).
+     * Fire-and-forget — the restore path re-validates the saved pair
+     * against the live playlist, so a lost write only costs the restore.
+     */
+    private fun persistLastPlayed(last: LastPlayed?) {
+        _scope.launch {
+            bridge.call(BridgeMethods.Preference.SAVE_LAST_PLAYED, last).unwrapOrNull()
+        }
     }
 
     fun remove() {
@@ -124,50 +204,67 @@ class PlayerRepository @Inject constructor(
         val p = _playlist.value
         _scope.launch {
             if (m != null && p != null) {
-                bridge.run { it ->
-                    ctRemoveMusicFromPlaylist(it, ArgRemoveMusicFromPlaylist(
+                bridge.call(
+                    BridgeMethods.Playlist.REMOVE_MUSIC,
+                    ArgRemoveMusicFromPlaylist(
                         playlistId = p.abstr.meta.id,
-                        musicId = m.meta.id
-                    ))
-                }
+                        musicId = m.meta.id,
+                    ),
+                ).unwrapOrNull()
             }
         }
     }
 
     fun changePlayModeToNext() {
         val nextPlayMode = when (playMode.value) {
-            PlayMode.SINGLE -> {
-                PlayMode.SINGLE_LOOP
-            }
-            PlayMode.SINGLE_LOOP -> {
-                PlayMode.LIST
-            }
-            PlayMode.LIST -> {
-                PlayMode.LIST_LOOP
-            }
-            PlayMode.LIST_LOOP -> {
-                PlayMode.SINGLE
-            }
+            PlayMode.SINGLE -> PlayMode.SINGLE_LOOP
+            PlayMode.SINGLE_LOOP -> PlayMode.LIST
+            PlayMode.LIST -> PlayMode.LIST_LOOP
+            PlayMode.LIST_LOOP -> PlayMode.SINGLE
         }
-
         savePlayMode(nextPlayMode)
     }
 
     fun removeLyric() {
-        val m = _music.value
-        if (m == null) {
-            return
-        }
-
+        val m = _music.value ?: return
         _scope.launch {
-            bridge.run { ctUpdateMusicLyric(it, ArgUpdateMusicLyric(id = m.meta.id, lyricLoc = null)) }
+            bridge.call(
+                BridgeMethods.Music.UPDATE_LYRIC,
+                ArgUpdateMusicLyric(id = m.meta.id, lyricLoc = null),
+            ).unwrapOrNull()
             reload()
         }
     }
 
-    private fun savePlayMode(playMode: PlayMode) {
-        bridge.runSync { ctsSavePreferencePlaymode(it, playMode) }
+    /**
+     * Attach an explicitly picked lyric file to the current music (the
+     * "Add lyric" flow): persist the location (`music.updateLyric` — Rust
+     * also flips `lyric_default` off, the explicit pick beats sibling
+     * pickup), show the pane as LOADING immediately, then fetch + parse
+     * via `music.loadLyric` and patch the result.
+     */
+    fun setLyric(loc: StorageEntryLoc) {
+        val m = _music.value ?: return
+        val id = m.meta.id
+        _scope.launch {
+            bridge.call(
+                BridgeMethods.Music.UPDATE_LYRIC,
+                ArgUpdateMusicLyric(id = id, lyricLoc = loc),
+            ).unwrapOrNull()
+            updateMusicLyric(
+                id,
+                MusicLyric(loc = loc, data = Lyrics(), loadedState = LyricLoadState.LOADING),
+            )
+            val lyric = bridge.call(BridgeMethods.Music.LOAD_LYRIC, id)
+                .unwrapOrNull()?.payload
+            updateMusicLyric(id, lyric)
+        }
+    }
 
+    private fun savePlayMode(playMode: PlayMode) {
+        kotlinx.coroutines.runBlocking {
+            bridge.call(BridgeMethods.Preference.SAVE_PLAY_MODE, playMode).unwrapOrNull()
+        }
         reload()
     }
 
@@ -184,9 +281,18 @@ class PlayerRepository @Inject constructor(
     }
 
     fun reload() {
-        bridge.runSync { ctsGetPreferencePlaymode(it) }?.let { _playMode.value = it }
+        val mode = kotlinx.coroutines.runBlocking {
+            bridge.call(BridgeMethods.Preference.GET_PLAY_MODE).unwrapOrNull()?.payload
+        }
+        mode?.let { _playMode.value = it }
         _scope.launch {
             _durationChanged.emit(Unit)
         }
+    }
+
+    private companion object {
+        /** How long after the last playing/loading tick the player is
+         *  still considered active — the auto-advance handoff window. */
+        const val ADVANCE_GRACE_MS = 30_000L
     }
 }

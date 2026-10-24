@@ -1,10 +1,13 @@
 package com.kutedev.easemusicplayer.singleton
 
 import android.Manifest.permission.READ_EXTERNAL_STORAGE
-import android.Manifest.permission.READ_MEDIA_AUDIO
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.result.ActivityResultLauncher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -49,11 +52,20 @@ class PermissionRepository @Inject constructor(
     }
 
     fun requestStoragePermission() {
-        val launcher = this._requestPermissionLauncher ?: return
+        val cx = _context ?: return
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            launcher.launch(READ_MEDIA_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // All-files access is an appop toggled in system settings, not a
+            // runtime dialog: open this app's page on the settings screen.
+            // The state is re-evaluated when the activity resumes
+            // (`MainActivity.onResume` → `triggerPermissionChanged`).
+            val intent = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:${cx.packageName}"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { cx.startActivity(intent) }
         } else {
+            val launcher = this._requestPermissionLauncher ?: return
             launcher.launch(READ_EXTERNAL_STORAGE)
         }
     }
@@ -65,8 +77,11 @@ class PermissionRepository @Inject constructor(
     private fun computeHaveStoragePermission(): Boolean {
         val cx = _context ?: return false
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            cx.checkSelfPermission(READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // True v3 way: the local storage backend reads by raw path, which
+            // needs all-files access — READ_MEDIA_AUDIO alone is denied for
+            // files contributed by other apps.
+            Environment.isExternalStorageManager()
         } else {
             cx.checkSelfPermission(READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }

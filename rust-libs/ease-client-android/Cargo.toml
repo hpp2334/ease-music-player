@@ -1,0 +1,51 @@
+[package]
+name = "ease-client-android"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ease-client-backend = { path = "../ease-client-backend" }
+ease-client-schema = { workspace = true }
+ease-client-tokio = { path = "../ease-client-tokio" }
+ease-tur-rpc = { path = "../ease-tur-rpc" }
+tracing = { workspace = true }
+serde_json = "1.0"
+anyhow = { workspace = true }
+
+# See `ease-client-backend/Cargo.toml` for the tur engine pin notes
+# (JS API contract, tokio-free core, dedup against tur-net-native).
+# d319829 = host-side image registration (PR #231: TurApp::register_image +
+# the `imageResourceHandle` JS bridge) — the seam `ease.library.covers`
+# registers cover thumbnails through.
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2" }
+tur-net-native = { git = "https://github.com/hpp2334/tur", rev = "0b17fc1b1ee6dfbd372e8bc9099a8463845bc3a2" }
+
+# Cover thumbnail decode for `ease.library.covers` (library_bridge.rs) —
+# same crates.io 0.25 line tur's decoder uses (feature-unified by cargo),
+# with webp added so realistic album art decodes; formats the `image` crate
+# cannot decode (e.g. HEIC) surface as `null` in JS and render the plugin's
+# fallback art.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# Matched to tur's pin (workspace.dependencies in tur's Cargo.toml) so
+# our `use boa_engine::*` resolves to the exact same instance the engine
+# compiles against.
+boa_engine = { git = "https://github.com/boa-dev/boa.git", rev = "93a9e31a83bbaa15bbd8b687e61639ffc53bbef1" }
+
+# CJK fallback fonts for the tur text pipeline (plugin_runtime/fonts.rs).
+# Resolves to the same 0.9.0 instance tur's parley stack compiles against.
+fontique = "0.9"
+
+jni = "0.21"
+ndk-context = "0.1"
+
+# OS entropy for the `crypto.getRandomValues` / `crypto.randomUUID` JS
+# polyfills (plugin_runtime/webapi.rs).
+getrandom = "0.3"

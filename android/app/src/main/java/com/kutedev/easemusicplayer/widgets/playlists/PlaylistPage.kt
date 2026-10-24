@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.ConfirmDialog
+import com.kutedev.easemusicplayer.singleton.ArtistDisplaySetting
 import com.kutedev.easemusicplayer.components.EaseContextMenu
 import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
@@ -78,9 +79,9 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.ScrollMoveMode
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import sh.calvin.reorderable.rememberReorderableLazyListState
-import uniffi.ease_client_schema.DataSourceKey
-import uniffi.ease_client_backend.MusicAbstract
-import uniffi.ease_client_schema.MusicId
+import com.kutedev.easemusicplayer.singleton.types.DataSourceKey
+import com.kutedev.easemusicplayer.singleton.types.MusicAbstract
+import com.kutedev.easemusicplayer.singleton.types.MusicId
 
 @Composable
 private fun RemovePlaylistDialog(
@@ -102,7 +103,7 @@ private fun RemovePlaylistDialog(
         }
     ) {
         Text(
-            text = "${stringResource(id = R.string.playlist_remove_dialog_text)} “${playlistAbstr.meta.title}”"
+            text = stringResource(id = R.string.playlist_remove_dialog_text, playlistAbstr.meta.title)
         )
     }
 }
@@ -148,7 +149,8 @@ private fun PlaylistHeader(
                     modifier = Modifier
                         .fillMaxSize(),
                     dataSourceKey = cover,
-                    contentScale = ContentScale.FillWidth
+                    contentScale = ContentScale.FillWidth,
+                    fallback = painterResource(id = R.drawable.cover_default_playlist_image),
                 )
                 Box(
                     modifier = Modifier
@@ -192,7 +194,7 @@ private fun PlaylistHeader(
                             EaseContextMenuItem(
                                 stringId = R.string.playlist_context_menu_import,
                                 onClick = {
-                                    playlistVM.prepareImportMusics(context)
+                                    playlistVM.prepareImportMusics()
                                     navController.navigate(RouteImport(RouteImportType.Music))
                                 }
                             ),
@@ -284,6 +286,8 @@ private fun ReorderableCollectionItemScope.PlaylistItem(
     val playlistAbstr by playlistVM.playlistAbstr.collectAsState()
     val id = item.meta.id
     val title = item.meta.title
+    val artist = item.meta.artist
+    val showArtist by ArtistDisplaySetting.show.collectAsState()
     val duration = item.durationStr()
 
     val anchoredDraggableState = with(density) {
@@ -308,6 +312,11 @@ private fun ReorderableCollectionItemScope.PlaylistItem(
         Color.Transparent
     }
     val durationColor = if (playing) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val artistColor = if (playing) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
@@ -367,13 +376,26 @@ private fun ReorderableCollectionItemScope.PlaylistItem(
                     maxLines = 1,
                     fontSize = 14.sp,
                 )
-                Text(
-                    text = title,
-                    color = color,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    fontSize = 14.sp,
-                )
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = title,
+                        color = color,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = 14.sp,
+                    )
+                    if (showArtist && artist.isNotBlank()) {
+                        Text(
+                            text = artist,
+                            color = artistColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
             }
             Box(modifier = Modifier.width(16.dp))
             Text(
