@@ -1,566 +1,238 @@
-//! Round-trip tests for `ease-tur-rpc`: the host (on a tokio thread) calls a
-//! JS handler (sync / async / throwing) and awaits its result, mediated by the
-//! tur event bus + id correlation. Exercises the production path end-to-end
-//! (EventBusHandle.emit_to_js → worker flush → JS dispatcher → reply →
-//! MainMsg::EventBusToHost → on_bus_event router → oneshot), just with the
-//! test harness (`TurTestApp`) driving frames instead of an Android FrameLoop.
+//! End-to-end host⇄rut RPC tests: a real rut fixture backend registers ops
+//! + events through the `ease.rpc` rows ([`TurRpcBusPlugin`]) and answers
+//! dispatches driven through [`RpcClient`].
 //!
-//! The streaming section covers the `hostRpc.registerStream` path: metadata
-//! reply, credit-gated pumping (including a slow-consumer burst that would
-//! lose chunks ungated), `release`-exactly-once on every exit, `mapError`,
-//! and host-side cancellation via `StreamRx` drop. The scope-isolation
-//! section pins the `hostRpc`/`viewRpc` namespace split.
+//! The harness app (`!Send`, Rc internals) lives on the driver thread and
+//! never escapes it — the test drives everything through the client, whose
+//! [`RutDriver`] hops commands onto that thread over a channel. This is the
+//! same shape as production (the Android driver hops onto the tur-host
+//! thread); there is no unsafe anywhere.
+//!
+//! Covers: the stash-and-take dispatch (one entry fn per op), the reply
+//! envelope (`ok`/`error`), unknown ops, the context-crossing token
+//! (downcast inside the fixture), event fan-out + unsubscribed no-ops, and
+//! the not-booted transport error.
 
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
+use std::sync::Arc;
 
-use ease_tur_rpc::{RpcClient, RpcError, RpcScope, StreamChunk, TurRpcPlugin};
-use tur_engine::core::plugin::Plugin;
+use ease_tur_rpc::{RpcBus, RpcClient, RpcError, RutDriver, TurRpcBusPlugin};
+use serde_json::json;
 use tur_integration_tests::TurTestApp;
 
-const RPC_JS: &str = r#"
-import { hostRpc, viewRpc } from "tur:rpc";
+/// The fixture backend: one entry fn per contract op + one event handler,
+/// registered at `start` through the bus rows. `op_echo` answers the whole
+/// request JSON as the result (proves the stash-and-take round-trip);
+/// `op_greet` downcasts the context and reads its field (proves the
+/// crossing); `op_fail` answers the error envelope.
+const ECHO_RUT: &str = r#"
+use tur_host::ease::rpc::{ register, subscribe_event, take_request };
 
-// sync handler — returns args unchanged
-hostRpc.registerHandler("echo", (args) => args);
+// The context the embedder holds between entry calls.
+struct Ctx {
+    greeting: str,
+}
 
-// async handler — awaits a microtask then returns args
-hostRpc.registerHandler("asyncEcho", async (args) => {
-  await Promise.resolve();
-  return args;
-});
+entry fn start() -> opaque {
+    register("echo", "op_echo");
+    register("greet", "op_greet");
+    register("fail", "op_fail");
+    subscribe_event("music:play", "on_play");
+    return opaque(Ctx { greeting: "hello" });
+}
 
-// throwing handler
-hostRpc.registerHandler("fail", () => { throw new Error("boom"); });
+// Echo the entire request JSON back as the result string — the host
+// asserts the exact stash-and-take round-trip.
+entry fn op_echo(cx: opaque) -> str {
+    let _ = opaque::downcast<Ctx>(cx);
+    let req = take_request();
+    return f"{{\"ok\":true,\"result\":{req}}}";
+}
 
-// view-scoped twin of echo, for the scope-isolation tests
-viewRpc.registerHandler("viewEcho", (args) => args);
+// Read the context record — proves the crossing + the downcast.
+entry fn op_greet(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("greet: cx is not a Ctx");
+    }
+    return f"{{\"ok\":true,\"result\":\"{c.greeting}\"}}";
+}
+
+// The plugin's own failure — the error envelope surfaces as
+// RpcError::Handler on the client.
+entry fn op_fail(cx: opaque) -> str {
+    let _ = opaque::downcast<Ctx>(cx);
+    return "{\"ok\":false,\"error\":\"boom\"}";
+}
+
+// The event handler: drain the stash, answer ok (the answer is ignored —
+// the host's event dispatch is fire-and-forget).
+entry fn on_play(cx: opaque) -> str {
+    let _ = opaque::downcast<Ctx>(cx);
+    let req = take_request();
+    return f"{{\"ok\":true,\"result\":{req}}}";
+}
 "#;
 
-fn build_app() -> TurTestApp {
-    let extra: Vec<Box<dyn Plugin>> = vec![Box::new(TurRpcPlugin)];
-    TurTestApp::new_with_extra_plugins(200.0, 100.0, extra).expect("test app")
+/// The driver's command rail (all payloads `Send` — the app never is).
+enum Cmd {
+    CallStr(String, u64, mpsc::SyncSender<Result<String, String>>),
+    Call(String, u64, mpsc::SyncSender<Result<(), String>>),
+    Token(mpsc::SyncSender<u64>),
 }
 
-/// Run `client.call_<scope>(op, args)` on a dedicated tokio runtime (worker
-/// thread) while the test thread pumps frames via `wait_for`. Mirrors
-/// production: caller on tokio, JS on the worker thread.
-fn call_with_pump(
-    app: &mut TurTestApp,
-    client: RpcClient,
-    scope: RpcScope,
-    op: &str,
-    args: serde_json::Value,
-) -> Result<serde_json::Value, RpcError> {
-    let slot: Arc<Mutex<Option<Result<serde_json::Value, RpcError>>>> = Arc::new(Mutex::new(None));
-    let slot_for_task = slot.clone();
-    let op = op.to_string();
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    rt.spawn(async move {
-        let r = match scope {
-            RpcScope::Host => client.call_host(&op, args).await,
-            RpcScope::View => client.call_view(&op, args).await,
-        };
-        *slot_for_task.lock().unwrap() = Some(r);
-    });
+impl RutDriver for TestDriver {
+    fn call_entry_str(&self, name: &str, cx: u64) -> Result<String, String> {
+        let (rtx, rrx) = mpsc::sync_channel(1);
+        self.tx
+            .send(Cmd::CallStr(name.to_string(), cx, rtx))
+            .map_err(|_| "driver thread gone".to_string())?;
+        rrx.recv().map_err(|_| "driver dropped".to_string())?
+    }
 
-    app.wait_for(|_| slot.lock().unwrap().is_some());
-    let result = slot.lock().unwrap().take().expect("result settled");
-    drop(rt);
-    result
-}
+    fn call_entry(&self, name: &str, cx: u64) -> Result<(), String> {
+        let (rtx, rrx) = mpsc::sync_channel(1);
+        self.tx
+            .send(Cmd::Call(name.to_string(), cx, rtx))
+            .map_err(|_| "driver thread gone".to_string())?;
+        rrx.recv()
+            .map_err(|_| "driver dropped".to_string())?
+    }
 
-#[test]
-fn sync_handler_round_trip() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(RPC_JS).expect("load js");
-
-    let result = call_with_pump(&mut app, client, RpcScope::Host, "echo", serde_json::json!({ "value": 42 }))
-        .expect("call ok");
-    assert_eq!(result, serde_json::json!({ "value": 42 }));
-}
-
-#[test]
-fn async_handler_round_trip() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(RPC_JS).expect("load js");
-
-    let result = call_with_pump(
-        &mut app,
-        client,
-        RpcScope::Host,
-        "asyncEcho",
-        serde_json::json!([1, "two", { "three": 3 }]),
-    )
-    .expect("call ok");
-    assert_eq!(result, serde_json::json!([1, "two", { "three": 3 }]));
-}
-
-#[test]
-fn handler_error_propagates() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(RPC_JS).expect("load js");
-
-    let err = call_with_pump(&mut app, client, RpcScope::Host, "fail", serde_json::json!(null))
-        .expect_err("handler should have thrown");
-    match err {
-        RpcError::Handler(msg) => assert!(msg.contains("boom"), "got: {msg}"),
-        other => panic!("expected Handler error, got {other:?}"),
+    fn start_token(&self) -> u64 {
+        let (rtx, rrx) = mpsc::sync_channel(1);
+        self.tx.send(Cmd::Token(rtx)).ok();
+        rrx.recv().unwrap_or(0)
     }
 }
 
-#[test]
-fn unknown_op_returns_error() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(RPC_JS).expect("load js");
-
-    let err = call_with_pump(&mut app, client, RpcScope::Host, "nope", serde_json::json!(null))
-        .expect_err("unknown op should error");
-    match err {
-        RpcError::Handler(msg) => assert!(msg.contains("no host handler"), "got: {msg}"),
-        other => panic!("expected Handler error, got {other:?}"),
-    }
+struct TestDriver {
+    tx: mpsc::Sender<Cmd>,
 }
 
-// === Streaming (registerStream, credit-gated) ==============================
-
-const STREAM_JS: &str = r#"
-import { hostRpc } from "tur:rpc";
-import { encodeUtf8 } from "tur:std";
-
-// probe state
-const state = { released: 0, pulled: 0 };
-hostRpc.registerHandler("state", () => ({ released: state.released, pulled: state.pulled }));
-
-// plain-object body yielding one string per next() — no generators, the
-// tur:net body shape (next + Symbol.asyncIterator).
-function bodyOf(parts, failAt) {
-  let i = 0;
-  return {
-    [Symbol.asyncIterator]() { return this; },
-    next() {
-      state.pulled += 1;
-      if (i < parts.length) {
-        const v = parts[i];
-        i += 1;
-        if (failAt !== undefined && i === failAt) {
-          return Promise.reject(new Error(v));
-        }
-        return Promise.resolve({ done: false, value: encodeUtf8(v) });
-      }
-      return Promise.resolve({ done: true });
-    },
-  };
-}
-
-// pushes three chunks then ends — concatenates to "Hello!"
-hostRpc.registerStream("blob", () => ({
-  meta: { size: 6 },
-  body: bodyOf(["Hel", "lo", "!"]),
-  release: () => { state.released += 1; },
-}));
-
-// opener rejects — the RPC itself must fail (single error path)
-hostRpc.registerStream("failing", () => Promise.reject(new Error("boom")));
-
-// body fails mid-way; mapError marks the error before it reaches the host
-hostRpc.registerStream("marked", () => ({
-  meta: {},
-  body: bodyOf(["a", "inner"], 2),
-  mapError: (e) => new Error("MARKED: " + (e && e.message)),
-  release: () => { state.released += 1; },
-}));
-
-// resolves without a body — protocol violation, rejected with a clear message
-hostRpc.registerStream("badshape", () => Promise.resolve({ meta: {} }));
-
-// burst: 48 one-char chunks — the slow-consumer credit test
-hostRpc.registerStream("burst", () => {
-  const parts = [];
-  // 48 chunks > the 32-credit window, so the pump must ride re-grants
-  for (let i = 0; i < 48; i++) parts.push(String(i % 10));
-  return { meta: { size: 48 }, body: bodyOf(parts) };
-});
-
-// long body for the cancel test (more chunks than the credit window)
-hostRpc.registerStream("long", () => {
-  const parts = [];
-  for (let i = 0; i < 100; i++) parts.push(String(i % 10));
-  return { meta: {}, body: bodyOf(parts), release: () => { state.released += 1; } };
-});
-
-// args must arrive VERBATIM — the stream id rides the envelope, never a
-// magic key inside args
-let lastArgs = null;
-hostRpc.registerStream("argcheck", (args) => {
-  lastArgs = args;
-  return { meta: {}, body: bodyOf([]) };
-});
-hostRpc.registerHandler("lastArgs", () => lastArgs);
-"#;
-
-/// Open a stream on a tokio worker, collect chunks until End/Error, pumping
-/// frames on the test thread meanwhile.
-fn stream_with_pump(
-    app: &mut TurTestApp,
-    client: RpcClient,
-    op: &str,
-    args: serde_json::Value,
-) -> (serde_json::Value, Result<Vec<u8>, String>) {
-    let slot: Arc<Mutex<Option<(serde_json::Value, Result<Vec<u8>, String>)>>> =
-        Arc::new(Mutex::new(None));
-    let slot_for_task = slot.clone();
-    let op = op.to_string();
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    rt.spawn(async move {
-        let (meta, mut rx) = match client.open_stream(&op, args).await {
-            Ok(v) => v,
-            Err(e) => {
-                *slot_for_task.lock().unwrap() = Some((serde_json::Value::Null, Err(format!("{e:?}"))));
-                return;
-            }
-        };
-        let mut buf = Vec::new();
-        let outcome = loop {
-            match rx.recv().await {
-                None => break Ok(buf),
-                Some(StreamChunk::Data(b)) => buf.extend_from_slice(&b),
-                Some(StreamChunk::End) => break Ok(buf),
-                Some(StreamChunk::Error(m)) => break Err(m),
-            }
-        };
-        *slot_for_task.lock().unwrap() = Some((meta, outcome));
-    });
-
-    app.wait_for(|_| slot.lock().unwrap().is_some());
-    let result = slot.lock().unwrap().take().expect("stream settled");
-    drop(rt);
-    result
-}
-
-#[test]
-fn open_stream_delivers_chunks_until_end() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(STREAM_JS).expect("load js");
-
-    let (meta, outcome) = stream_with_pump(&mut app, client.clone(), "blob", serde_json::json!({}));
-    let buf = outcome.expect("stream should complete cleanly");
-    assert_eq!(meta, serde_json::json!({ "size": 6 }));
-    assert_eq!(&buf, b"Hello!");
-
-    // release fired exactly once on the normal exit path
-    let mut released = 0;
-    for _ in 0..50 {
-        let v = call_with_pump(&mut app, client.clone(), RpcScope::Host, "state", serde_json::json!(null))
-            .expect("probe call ok");
-        if v.get("released").and_then(|x| x.as_i64()) == Some(1) {
-            released = 1;
-            break;
-        }
-    }
-    assert_eq!(released, 1, "release should fire exactly once after normal end");
-}
-
-#[test]
-fn open_stream_opener_failure_fails_the_call() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(STREAM_JS).expect("load js");
-
-    let (meta, outcome) = stream_with_pump(&mut app, client, "failing", serde_json::json!({}));
-    assert!(meta.is_null(), "no metadata on opener failure");
-    let err = outcome.expect_err("opener failure should fail open_stream");
-    assert!(err.contains("boom"), "got: {err}");
-}
-
-#[test]
-fn open_stream_bad_shape_rejected() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(STREAM_JS).expect("load js");
-
-    let (_meta, outcome) = stream_with_pump(&mut app, client, "badshape", serde_json::json!({}));
-    let err = outcome.expect_err("missing body should fail open_stream");
-    assert!(err.contains("must resolve"), "got: {err}");
-}
-
-#[test]
-fn midbody_error_applies_map_error() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(STREAM_JS).expect("load js");
-
-    let (_meta, outcome) = stream_with_pump(&mut app, client, "marked", serde_json::json!({}));
-    let err = outcome.expect_err("body failure should error the stream");
-    assert!(err.contains("MARKED: inner"), "got: {err}");
-}
-
-/// The stream id rides the request envelope — the opener's args must arrive
-/// verbatim, with no injected `streamId` key.
-#[test]
-fn stream_opener_receives_args_verbatim() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(STREAM_JS).expect("load js");
-
-    let (_meta, outcome) =
-        stream_with_pump(&mut app, client.clone(), "argcheck", serde_json::json!({ "x": 1 }));
-    outcome.expect("stream should complete cleanly");
-
-    let mut settled = None;
-    for _ in 0..50 {
-        let v = call_with_pump(&mut app, client.clone(), RpcScope::Host, "lastArgs", serde_json::json!(null))
-            .expect("probe call ok");
-        if !v.is_null() {
-            settled = Some(v);
-            break;
-        }
-    }
-    let args = settled.expect("opener should have observed its args");
-    assert_eq!(args, serde_json::json!({ "x": 1 }), "args must be verbatim");
-}
-
-/// Burst 300 chunks past the credit window while the consumer sleeps between
-/// recvs — ungated pushes would overflow the router channel and drop chunks;
-/// the credit gate must deliver every byte intact.
-#[test]
-fn credit_gate_keeps_slow_consumer_lossless() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(STREAM_JS).expect("load js");
-
-    let client_for_task = client.clone();
-    let slot: Arc<Mutex<Option<Result<Vec<u8>, String>>>> = Arc::new(Mutex::new(None));
-    let slot_for_task = slot.clone();
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    rt.spawn(async move {
-        let (meta, mut rx) = client_for_task
-            .open_stream("burst", serde_json::json!({}))
-            .await
-            .expect("open");
-        assert_eq!(meta.get("size").and_then(|s| s.as_i64()), Some(48));
-        let mut buf = Vec::new();
-        let outcome = loop {
-            // slow consumer: 1ms pause between chunks
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-            match rx.recv().await {
-                None => break Ok(buf),
-                Some(StreamChunk::Data(b)) => buf.extend_from_slice(&b),
-                Some(StreamChunk::End) => break Ok(buf),
-                Some(StreamChunk::Error(m)) => break Err(m),
-            }
-        };
-        *slot_for_task.lock().unwrap() = Some(outcome);
-    });
-
-    // Each wait_for call advances at most 2000 virtual ms; every chunk past
-    // the credit window costs a real-time grant round-trip, so loop the wait.
-    let mut settled = false;
-    for _ in 0..30 {
-        if app.wait_for(|_| slot.lock().unwrap().is_some()) {
-            settled = true;
-            break;
-        }
-    }
-    assert!(settled, "burst stream should settle within the extended budget");
-    let outcome = slot.lock().unwrap().take().expect("stream settled");
-    drop(rt);
-    let buf = outcome.expect("burst should complete cleanly");
-    let expected: Vec<u8> = (0..48).map(|i| b'0' + (i % 10) as u8).collect();
-    assert_eq!(buf.len(), 48, "no chunk may be dropped under backpressure");
-    assert_eq!(buf, expected);
-}
-
-/// Dropping the `StreamRx` mid-stream cancels the JS pump: it stops pushing
-/// and runs the opener's `release` hook exactly once.
-#[test]
-fn cancel_on_stream_rx_drop_releases_pump() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(STREAM_JS).expect("load js");
-
-    let client_for_task = client.clone();
-    let slot: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
-    let slot_for_task = slot.clone();
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
-    rt.spawn(async move {
-        let (_meta, mut rx) = client_for_task
-            .open_stream("long", serde_json::json!({}))
-            .await
-            .expect("open long stream");
-        // consume a few chunks, then abandon the stream
-        let mut got = 0u32;
-        while let Some(chunk) = rx.recv().await {
-            match chunk {
-                StreamChunk::Data(_) => {
-                    got += 1;
-                    if got >= 5 {
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-        drop(rx); // → cancel frame → JS pump aborts → release()
-        *slot_for_task.lock().unwrap() = Some(got);
-    });
-
-    app.wait_for(|_| slot.lock().unwrap().is_some());
-    let got = slot.lock().unwrap().take().expect("consumer settled");
-    drop(rt);
-    assert!(got >= 1, "should have received some chunks before cancelling");
-
-    // the pump's release hook fires (exactly once) after the cancel
-    let mut released = 0;
-    for _ in 0..100 {
-        let v = call_with_pump(&mut app, client.clone(), RpcScope::Host, "state", serde_json::json!(null))
-            .expect("probe call ok");
-        if v.get("released").and_then(|x| x.as_i64()) == Some(1) {
-            released = 1;
-            break;
-        }
-    }
-    assert_eq!(released, 1, "cancel should run release exactly once");
-}
-
-// === Scope isolation (hostRpc vs viewRpc) ==================================
-
-const SCOPE_JS: &str = r#"
-import { hostRpc, viewRpc } from "tur:rpc";
-
-hostRpc.registerHandler("hostOnly", (args) => ({ from: "host", args }));
-viewRpc.registerHandler("viewOnly", (args) => ({ from: "view", args }));
-"#;
-
-#[test]
-fn view_scoped_call_reaches_view_handler() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(SCOPE_JS).expect("load js");
-
-    let result = call_with_pump(
-        &mut app,
-        client,
-        RpcScope::View,
-        "viewOnly",
-        serde_json::json!({ "x": 1 }),
-    )
-    .expect("view-scoped call should reach the viewRpc registration");
-    assert_eq!(
-        result,
-        serde_json::json!({ "from": "view", "args": { "x": 1 } })
-    );
-}
-
-#[test]
-fn host_call_cannot_reach_view_op() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(SCOPE_JS).expect("load js");
-
-    let err = call_with_pump(&mut app, client, RpcScope::Host, "viewOnly", serde_json::json!({}))
-        .expect_err("host scope must not serve a viewRpc op");
-    match err {
-        RpcError::Handler(msg) => assert!(msg.contains("no host handler"), "got: {msg}"),
-        other => panic!("expected Handler error, got {other:?}"),
-    }
-}
-
-#[test]
-fn view_call_cannot_reach_host_op() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(SCOPE_JS).expect("load js");
-
-    let err = call_with_pump(&mut app, client, RpcScope::View, "hostOnly", serde_json::json!({}))
-        .expect_err("view scope must not serve a hostRpc op");
-    match err {
-        RpcError::Handler(msg) => assert!(msg.contains("no view handler"), "got: {msg}"),
-        other => panic!("expected Handler error, got {other:?}"),
-    }
-}
-
-// === Plugin events (fire-and-forget channel 1) ==============================
-
-const EVENT_JS: &str = r#"
-import { hostRpc } from "tur:rpc";
-
-let got = null;
-let gotLegacy = null;
-// Sig form ({ type } / { op }) — what plugins built against the sig API
-// (plugins/infra/events.ts + host-ops.ts) register with.
-hostRpc.onEvent({ type: "ping" }, (payload) => { got = payload.value; });
-hostRpc.registerHandler({ op: "got" }, () => ({ value: got }));
-// Legacy string form — already-installed bundles must keep working.
-hostRpc.onEvent("pong", (payload) => { gotLegacy = payload.value; });
-hostRpc.registerHandler("gotLegacy", () => ({ value: gotLegacy }));
-"#;
-
-#[test]
-fn emit_event_reaches_on_event_registration() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(EVENT_JS).expect("load js");
-
-    // Fire-and-forget on the event channel; observe via an RPC round-trip.
-    // Delivery is asynchronous (worker flush), so poll until it lands.
-    client.emit_event("ping", serde_json::json!({ "value": 7 }));
-    let mut delivered = false;
-    for _ in 0..50 {
-        let v = call_with_pump(&mut app, client.clone(), RpcScope::Host, "got", serde_json::json!(null))
-            .expect("probe call ok");
-        if v.get("value").and_then(|x| x.as_i64()) == Some(7) {
-            delivered = true;
-            break;
-        }
-    }
-    assert!(delivered, "event should have been delivered to onEvent");
-}
-
-#[test]
-fn emit_event_legacy_string_registration_still_works() {
-    let mut app = build_app();
-    let client = RpcClient::wire(app.app()).expect("rpc client");
-    app.eval_module_source(EVENT_JS).expect("load js");
-
-    client.emit_event("pong", serde_json::json!({ "value": 11 }));
-    let mut delivered = false;
-    for _ in 0..50 {
-        let v = call_with_pump(
-            &mut app,
-            client.clone(),
-            RpcScope::Host,
-            "gotLegacy",
-            serde_json::json!(null),
+/// Boot the fixture: the harness app is constructed on (and stays on) the
+/// driver thread; the test gets only the client over the shared bus.
+fn boot() -> RpcClient {
+    let bus = RpcBus::new();
+    let (tx, rx) = mpsc::channel::<Cmd>();
+    let (ready_tx, ready_rx) = mpsc::channel::<()>();
+    let bus_for_plugin = Some(bus.clone());
+    std::thread::spawn(move || {
+        let app = TurTestApp::new_with_extra_plugins(
+            400.0,
+            400.0,
+            vec![Box::new(TurRpcBusPlugin::new(bus_for_plugin))],
         )
-        .expect("probe call ok");
-        if v.get("value").and_then(|x| x.as_i64()) == Some(11) {
-            delivered = true;
-            break;
+        .expect("harness app");
+        app.load_rut_module(ECHO_RUT).expect("fixture loads");
+        ready_tx.send(()).expect("test still waiting");
+        for cmd in rx {
+            match cmd {
+                Cmd::CallStr(name, cx, rtx) => {
+                    let _ = rtx.send(
+                        app.call_rut_entry_cx_str(&name, cx).map_err(|e| e.to_string()),
+                    );
+                }
+                Cmd::Call(name, cx, rtx) => {
+                    let _ = rtx.send(
+                        app.call_rut_entry_cx(&name, cx)
+                            .map(|_| ())
+                            .map_err(|e| e.to_string()),
+                    );
+                }
+                Cmd::Token(rtx) => {
+                    let _ = rtx.send(app.rut_start_answer());
+                }
+            }
+        }
+    });
+    ready_rx.recv().expect("driver thread booted");
+    RpcClient::new(bus, Arc::new(TestDriver { tx }))
+}
+
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn dispatch_roundtrips_the_request_through_the_stash() {
+    let client = boot();
+    let reply = runtime()
+        .block_on(client.call_host("echo", json!({ "msg": "hi" })))
+        .expect("echo ok");
+    assert_eq!(
+        reply,
+        json!({ "op": "echo", "args": { "msg": "hi" } }),
+        "the fixture echoes the whole request envelope as the result"
+    );
+}
+
+#[test]
+fn the_context_crosses_and_downcasts() {
+    let client = boot();
+    let reply = runtime()
+        .block_on(client.call_host("greet", json!({})))
+        .expect("greet ok");
+    assert_eq!(reply, json!("hello"), "the fixture read the ctx record's field");
+}
+
+#[test]
+fn error_envelopes_surface_as_handler_errors() {
+    let client = boot();
+    let err = runtime()
+        .block_on(client.call_host("fail", json!({})))
+        .expect_err("fail answers an error envelope");
+    match err {
+        RpcError::Handler(msg) => assert_eq!(msg, "boom"),
+        other => panic!("expected Handler, got {other:?}"),
+    }
+}
+
+#[test]
+fn unknown_ops_are_rejected_client_side() {
+    let client = boot();
+    let err = runtime()
+        .block_on(client.call_host("nope", json!({})))
+        .expect_err("unregistered op");
+    assert!(matches!(err, RpcError::UnknownOp(op) if op == "nope"));
+}
+
+#[test]
+fn events_fan_out_and_unsubscribed_types_noop() {
+    let client = boot();
+    // Subscribed: dispatched (fire-and-forget — no result to assert; a
+    // failed dispatch would log, not panic).
+    runtime().block_on(client.emit_event("music:play", json!({ "musicId": "7" })));
+    // Unsubscribed: a silent no-op.
+    runtime().block_on(client.emit_event("music:stop", json!({})));
+}
+
+#[test]
+fn a_not_booted_module_is_a_transport_error() {
+    // A client over a bus whose driver reports no start token (the module
+    // failed to boot / was never loaded).
+    struct DeadDriver;
+    impl RutDriver for DeadDriver {
+        fn call_entry_str(&self, _name: &str, _cx: u64) -> Result<String, String> {
+            Err("dead".into())
+        }
+        fn call_entry(&self, _name: &str, _cx: u64) -> Result<(), String> {
+            Err("dead".into())
+        }
+        fn start_token(&self) -> u64 {
+            0
         }
     }
-    assert!(
-        delivered,
-        "event should have been delivered to a legacy string onEvent registration"
-    );
+    // The op IS registered (the module's start ran far enough to bind it),
+    // but the boot never answered a context token.
+    let bus = RpcBus::new();
+    bus.register_op("echo", "op_echo");
+    let client = RpcClient::new(bus, Arc::new(DeadDriver));
+    let err = runtime()
+        .block_on(client.call_host("echo", json!({})))
+        .expect_err("not booted");
+    assert!(matches!(err, RpcError::Transport(_)));
 }

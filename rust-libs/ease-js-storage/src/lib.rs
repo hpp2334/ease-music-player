@@ -246,9 +246,8 @@ impl StorageBackend for JsStorageBackend {
                             )));
                         }
                     };
-                    if chunk.eof {
-                        break Ok(());
-                    }
+                    // Consume the data BEFORE honoring eof — the final chunk
+                    // carries both.
                     let mut data = match base64::engine::general_purpose::STANDARD
                         .decode(chunk.data.as_bytes())
                     {
@@ -259,9 +258,7 @@ impl StorageBackend for JsStorageBackend {
                             )));
                         }
                     };
-                    if data.is_empty() {
-                        // Defensive: an empty chunk without `eof` ends the
-                        // stream too (the plugin's contract is one of the two).
+                    if data.is_empty() && chunk.eof {
                         break Ok(());
                     }
                     let n = data.len() as u64;
@@ -269,13 +266,19 @@ impl StorageBackend for JsStorageBackend {
                     if skip > 0 {
                         if n <= skip {
                             skip -= n;
+                            if chunk.eof {
+                                break Ok(());
+                            }
                             continue;
                         }
                         data.drain(..skip as usize);
                         skip = 0;
                     }
-                    if atx.send(Ok(Bytes::from(data))).await.is_err() {
+                    if !data.is_empty() && atx.send(Ok(Bytes::from(data))).await.is_err() {
                         break Ok(()); // consumer dropped the StreamFile
+                    }
+                    if chunk.eof {
+                        break Ok(());
                     }
                 };
                 // Release the plugin-side source (eof or cancel — best-effort).
