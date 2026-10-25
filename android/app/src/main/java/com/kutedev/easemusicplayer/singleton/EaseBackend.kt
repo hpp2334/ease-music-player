@@ -109,23 +109,12 @@ class EaseBackend @Inject constructor(
                 _runtime.value = null
             }
 
-            Log.i(TAG, "EaseBackend.start: creating worker pools")
-            val pools = com.kutedev.easemusicplayer.turintegration.EasePluginBridge.createPluginWorkerPools()
-            if (pools == 0L) {
-                val msg = "EaseBackend.start: createPluginWorkerPools returned 0"
-                Log.e(TAG, msg)
-                bridge.logRaw("error", msg)
-                throw IllegalStateException(msg)
-            }
-
-            Log.i(TAG, "EaseBackend.start: creating runtime (pools=$pools backend=$backendHandle)")
+            Log.i(TAG, "EaseBackend.start: creating runtime (backend=$backendHandle)")
             val handle = com.kutedev.easemusicplayer.turintegration.EasePluginBridge.createRuntime(
                 context.applicationContext,
-                pools,
                 backendHandle,
             )
             if (handle == 0L) {
-                com.kutedev.easemusicplayer.turintegration.EasePluginBridge.destroyPluginWorkerPools(pools)
                 val msg = "EaseBackend.start: createRuntime returned 0 " +
                     "(backend handle $backendHandle; see logcat)"
                 Log.e(TAG, msg)
@@ -137,16 +126,15 @@ class EaseBackend @Inject constructor(
             com.kutedev.easemusicplayer.turintegration.EasePluginBridge.bindPluginRuntime(
                 backendHandle,
                 handle,
-                pools,
                 context.applicationContext.assets,
             )
 
-            val runtime = TurRuntime(handle, pools)
+            val runtime = TurRuntime(handle)
             runtimeField = runtime
             _runtime.value = runtime
             bridge.logRaw(
                 "info",
-                "backend started (runtime=$handle pools=$pools backend=$backendHandle)",
+                "backend started (runtime=$handle backend=$backendHandle)",
             )
             Log.i(TAG, "EaseBackend.start: runtime $handle up")
             return runtime

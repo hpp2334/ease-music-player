@@ -28,50 +28,36 @@ package com.kutedev.easemusicplayer.turintegration
  */
 object TurNative {
     /**
-     * Spawn an isolated **renderer-less** engine instance — the INITIALIZE
-     * half of tur's two-phase lifecycle (#215). No surface yet: the native
-     * build (worker handshake + plugin registration) is queued onto the
-     * native tur-host thread while the caller stays free; ops for this
-     * handle are ordered behind it. Attach a rendering surface later via
-     * [attachInstance] (from `surfaceCreated`); a never-attached instance
-     * is simply headless. [pluginId] is stamped into the instance's
-     * per-instance data slot so `ease:*` bridge fns can resolve the
-     * calling plugin without a JS argument. [instance] is the storage's
-     * `plugin_storage_id` for edit-mode views (empty string for create
-     * mode) — exposed to JS as `ease.context.instance()`. [poolsHandle]
-     * (from [`EasePluginBridge.createPluginWorkerPools`]) assigns the
-     * instance to the shared view worker pool; `0` keeps the engine
-     * default. [baseColorArgb] (Android ARGB int) is the renderer's base
-     * (background) color, applied to every surface the instance attaches —
-     * what shows in any frame whose content doesn't cover the viewport
-     * (pass the theme surface color; the engine default is opaque white).
-     * A build failure logs to logcat (no exception) and turns
-     * later ops into no-ops. Returns `0` only for an invalid runtime
-     * handle or if the host thread is gone.
+     * Spawn an isolated **renderer-less** engine VIEW instance — the
+     * INITIALIZE half of tur's two-phase lifecycle (#215). No surface yet:
+     * the native build (worker handshake + plugin registration) is queued
+     * onto the native tur-host thread while the caller stays free; ops for
+     * this handle are ordered behind it. Attach a rendering surface later
+     * via [attachInstance] (from `surfaceCreated`). [pluginId] is stamped
+     * into the instance's per-instance data slot so `ease:*` rows can
+     * resolve the calling plugin without a rut argument. [instance] is the
+     * storage's `plugin_storage_id` for edit-mode views (empty string for
+     * create mode) — surfaced to rut as `ease.context.storage_id()`. The
+     * instance joins the shared view worker pool (allocated Rust-side at
+     * [EasePluginBridge.createRuntime]). [baseColorArgb] (Android ARGB
+     * int) is the renderer's base (background) color, applied to every
+     * surface the instance attaches — what shows in any frame whose
+     * content doesn't cover the viewport (pass the theme surface color;
+     * the engine default is opaque white). A build failure logs to logcat
+     * (no exception) and turns later ops into no-ops. Returns `0` only
+     * for an invalid runtime handle or if the host thread is gone.
+     *
+     * Headless backend instances are NOT spawned here — the backend crate
+     * spawns them Rust-side (`PluginEngineHost::spawn_headless`), which
+     * additionally stamps the per-instance RPC bus and assigns the backend
+     * pool.
      */
     external fun createInstance(
         runtimeHandle: Long,
-        poolsHandle: Long,
         frameLoop: FrameLoop,
         pluginId: String,
         instance: String,
         baseColorArgb: Int,
-    ): Long
-
-    /**
-     * Spawn an isolated headless instance (never attached to a surface).
-     * Runs JS + capabilities + events only. [pluginId] mirrors
-     * [`createInstance`]'s identity stamp. [poolsHandle] (from
-     * [`EasePluginBridge.createPluginWorkerPools`]) assigns the instance to
-     * the shared backend worker pool; `0` keeps the engine default. Same
-     * async-build semantics as [`createInstance`]. Returns an opaque instance
-     * handle, or `0` on failure.
-     */
-    external fun createHeadlessInstance(
-        runtimeHandle: Long,
-        poolsHandle: Long,
-        frameLoop: FrameLoop,
-        pluginId: String,
     ): Long
 
     /**

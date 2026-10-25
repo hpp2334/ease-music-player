@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Built on top of [TurNative] (the JNI bridge): holds the instance handle,
  * drives frames via a [FrameLoop], and translates Android input into the
  * engine's platform-event stream. Instances are created by
- * [TurRuntime.createInstance] / [TurRuntime.createHeadlessInstance] — not
+ * [TurRuntime.createInstance] — not
  * constructed directly.
  *
  * Use [TurView] in Compose rather than this class directly — [TurView] wires

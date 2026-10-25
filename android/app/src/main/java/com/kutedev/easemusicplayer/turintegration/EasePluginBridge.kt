@@ -24,56 +24,35 @@ import android.content.Context
  */
 object EasePluginBridge {
     /**
-     * Allocate the two shared plugin worker pools (`ease-plugin-backend` /
-     * `ease-plugin-view`, 2 lane threads each — all headless backends share
-     * the former, all TurViews the latter) and return an opaque native
-     * handle. Pass it to [createRuntime] (register on the runtime) and to
-     * `TurNative.createInstance` / `createHeadlessInstance` (assign per
-     * instance). Free with [destroyPluginWorkerPools] after
-     * `TurNative.destroyRuntime`. Returns `0L` on failure.
-     */
-    @JvmStatic
-    external fun createPluginWorkerPools(): Long
-
-    /**
-     * Free the worker pools behind [poolsHandle]. Call after the runtime
-     * built with it is destroyed. `0L` is a no-op.
-     */
-    @JvmStatic
-    external fun destroyPluginWorkerPools(poolsHandle: Long)
-
-    /**
      * Build the shared tur runtime with the Ease plugin set
-     * (TurStdPlugin + TurAnimationPlugin + TurClipboardPlugin + TurNetPlugin +
-     * EaseMusicPlugin) and return its opaque native handle. A non-zero
-     * [poolsHandle] also registers the shared plugin worker pools on the
-     * runtime; `0L` falls back to the engine default (one lane per instance).
+     * (TurStdPlugin + TurAnimationPlugin + TurRpcBusPlugin + EaseMusicPlugin)
+     * and return its opaque native handle. The two capped plugin worker
+     * pools (`ease-plugin-backend` / `ease-plugin-view`, 2 lane threads
+     * each) are allocated Rust-side here — there is no Kotlin pools
+     * handle anymore.
      *
      * [backendHandle] binds the engine (and every instance spawned from it)
-     * to one backend instance — the `ease:*` bridge fns resolve their
+     * to one backend instance — the `ease:*` rows resolve their
      * DB/KV/RPC services through it. An unknown handle fails the call
      * (returns `0L` + a Rust-side error log). Returns `0L` on failure (the
      * native side also throws).
      */
     @JvmStatic
-    external fun createRuntime(context: Context, poolsHandle: Long, backendHandle: Long): Long
+    external fun createRuntime(context: Context, backendHandle: Long): Long
 
     /**
      * Hand the (already-created) tur runtime handle + the app `AssetManager`
      * to the named backend instance, so the Rust-side plugin manager can
      * register module sources on the runtime (`plugin.list`) and read
-     * bundled plugin zips natively (`plugin.bootstrap`). `poolsHandle`
-     * lets the backend's own headless-instance spawns assign the shared
-     * `ease-plugin-backend` worker pool. Only the handles cross JNI — never
-     * the JS or zip bytes. Call once right after [createRuntime], as part
-     * of `EaseBackend.start`; attaching also triggers the first
-     * Rust-side backend reload (scan + spawn + wire).
+     * bundled plugin zips natively (`plugin.bootstrap`). Only the handles
+     * cross JNI — never the rut or zip bytes. Call once right after
+     * [createRuntime], as part of `EaseBackend.start`; attaching also
+     * triggers the first Rust-side backend reload (scan + spawn + wire).
      */
     @JvmStatic
     external fun bindPluginRuntime(
         backendHandle: Long,
         runtimeHandle: Long,
-        poolsHandle: Long,
         assetManager: android.content.res.AssetManager,
     )
 

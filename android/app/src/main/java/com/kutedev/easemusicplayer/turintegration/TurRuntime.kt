@@ -10,38 +10,30 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Built once via [EasePluginBridge.createRuntime] (which calls into
  * `libease_client_android.so` with the Ease plugin set). From a runtime,
- * spawn isolated instances via [createInstance] (renderer-less; attach an
- * `android.view.Surface` later via [TurInstance.attach]) or headless
- * instances via [createHeadlessInstance]. Multiple instances share the
- * runtime's fonts/clock/capabilities/plugins while keeping fully isolated
- * JS state.
+ * spawn isolated VIEW instances via [createInstance] (renderer-less; attach
+ * an `android.view.Surface` later via [TurInstance.attach]). Headless
+ * backend instances are spawned Rust-side (the backend crate's
+ * `spawn_headless`) — they never pass through Kotlin. Multiple instances
+ * share the runtime's fonts/clock/capabilities/plugins while keeping fully
+ * isolated module state.
  */
 class TurRuntime(
     handle: Long,
-    poolsHandle: Long = 0L,
 ) : Closeable {
 
     private val handleCell: AtomicLong = AtomicLong(handle)
     /** The opaque native handle (for advanced embedders / passing to [TurNative]). */
     val handle: Long get() = handleCell.get()
 
-    private val poolsCell: AtomicLong = AtomicLong(poolsHandle)
-    /**
-     * The opaque native worker-pools handle (from
-     * `EasePluginBridge.createPluginWorkerPools`), passed through to every
-     * spawned instance. `0` = engine default (one lane thread per instance).
-     */
-    val poolsHandle: Long get() = poolsCell.get()
-
     /**
      * Live VIEW instances keyed by `"<pluginId>/<instance>"`. See
      * [createInstance] — at most one live instance per logical view.
-     * Headless instances ([createHeadlessInstance]) are not tracked here.
+     * Rust-spawned headless instances are not tracked here.
      */
     private val liveViews = ConcurrentHashMap<String, TurInstance>()
 
     /**
-     * Register a JS module source on the runtime's shared registry and
+     * Register a module rut source on the runtime's shared registry and
      * return its opaque handle. Load it into any instance of this runtime
      * via [TurInstance.loadModule]. Pair with [releaseModuleSource].
      *
@@ -69,7 +61,7 @@ class TurRuntime(
      * instance's per-instance data slot so `ease:*` bridge fns resolve the
      * calling plugin from Rust, not from a JS argument. [instance] is the
      * storage's `plugin_storage_id` for edit-mode views (`null` for create
-     * mode) — exposed to JS as `ease.context.instance()`.
+     * mode) — surfaced to rut as `ease.context.storage_id()`.
      * [baseColorArgb] (Android ARGB int) is the renderer's base
      * (background) color, applied to every surface this instance attaches
      * — the color shown in any frame whose content doesn't cover the
@@ -102,7 +94,6 @@ class TurRuntime(
         val frameLoop = FrameLoop()
         val h = TurNative.createInstance(
             handle,
-            poolsHandle,
             frameLoop,
             pluginId,
             instance ?: "",
@@ -114,30 +105,12 @@ class TurRuntime(
         return inst
     }
 
-    /**
-     * Spawn an isolated headless instance (never attached to a surface).
-     * Runs JS + capabilities + events only. Useful for service plugins (e.g.
-     * a JS storage provider) that must stay alive independent of any view.
-     * [pluginId] mirrors [`createInstance`]'s identity stamp.
-     */
-    fun createHeadlessInstance(pluginId: String): TurInstance {
-        check(handle != 0L) { "runtime destroyed" }
-        val frameLoop = FrameLoop()
-        val h = TurNative.createHeadlessInstance(handle, poolsHandle, frameLoop, pluginId)
-        check(h != 0L) { "createHeadlessInstance returned 0 (see logcat)" }
-        return TurInstance(h, frameLoop)
-    }
-
     /** Drop the runtime and free native resources. Destroy all instances first. Idempotent. */
     override fun close() {
         liveViews.clear()
         val h = handleCell.getAndSet(0L)
         if (h != 0L) {
             TurNative.destroyRuntime(h)
-        }
-        val p = poolsCell.getAndSet(0L)
-        if (p != 0L) {
-            EasePluginBridge.destroyPluginWorkerPools(p)
         }
     }
 

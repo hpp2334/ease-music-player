@@ -13,7 +13,7 @@ import android.content.Context
  *
  * The runtime is created **once** (system-font discovery + plugin registration
  * happen a single time); isolated [TurInstance]s are then spawned from it via
- * [TurRuntime.createInstance] / [TurRuntime.createHeadlessInstance].
+ * [TurRuntime.createInstance] (headless backends spawn Rust-side).
  *
  * @return the opaque runtime handle (a `Long`), or `0` on failure.
  */
