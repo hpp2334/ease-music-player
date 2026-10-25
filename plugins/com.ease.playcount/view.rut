@@ -1,0 +1,1529 @@
+// Play Counts view — the rut port of the apiVersion 1 TS dashboard view
+// (`src/view.ts` + `src/play-counts.ts` + `src/ui/selector.ts`).
+//
+// A ranked play-count list over the rows the backend appends
+// (`plays:YYYY-MM-DD` → `{musicId, title, ts}`), with two dropdown
+// filters: a time range (Today .. Last Year — the day-key scan horizon)
+// and a playlist-membership filter (a row counts only when its musicId
+// belongs to the selected playlist, per the host roster).
+//
+// Data flow (the TS shape, on the rut rails): `ease.library.playlists()`
+// seeds the roster at MOUNT (never at boot — the compile/boot check
+// harness loads views headless with no database, so host rows must not
+// fire in `start`; on device the mount mutation runs before the first
+// frame paints). Every roster/selection change re-runs the refresh: a
+// synchronous `ease.db.multi_get_all_multi` scan of the range's day keys,
+// the JS-epoch aggregation ported line-for-line (dedupe is the KV's job —
+// first occurrence already won — so this side just counts), covers for
+// the top of the list via `ease.library.covers`, then the ranked rows.
+// Rows are plain per-build views over the item JSON: `Each` rebuilds every
+// mounted row when the entries atom changes, so static per-build styling
+// is always fresh (the TS's in-place derive reskin achieves the same
+// through a different mechanism).
+//
+// The two selectors are the TS `createSelector` ported onto the composited
+// target/follower pair (trigger anywhere in flow; scrim + menu in the root
+// Stack, anchored bottom-right → top-right, so both menus open leftward).
+//
+// No `ease.themes` — theme colors are an Android-only row and views must
+// boot headless. The palette is the app's LIGHT scheme resolved statically
+// (primary #2E89B0 / secondary #C9EBFA are the app's own overrides; the
+// rest are the Material 3 light defaults the scheme leaves stock). The
+// medal colors are semantic tier colors and stay fixed, exactly as in the
+// TS.
+//
+// Covers ride one instance-lifetime MapHandle (musicId → resource id, "0"
+// = known-none): the TS `coverHandles` memo — never cleared, so a range
+// switch never re-registers a cover (tur image resources have no free
+// API). The map is written BEFORE the entries source is set, so the row
+// rebuild that reads it always sees the fresh ids.
+
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+use tur_host::ease::db::{ multi_get_all_multi };
+use tur_host::ease::library::{ covers, playlists };
+use tur_host::ease::time::now_unix_ms;
+use tur_kit::control_flow::control::{ Condition, Each, Fragment, Switch };
+use tur_kit::control_flow::lifecycle::{ Lifecycle };
+use tur_kit::flags::{ Align, Axis, BorderPosition, BoxFit, CrossAlign, HitTestBehavior, MainAlign, MainAxisSize, StackFit };
+use tur_kit::gesture::pointer::{ MountEvent, PointerInteract };
+use tur_kit::handles::{ ListHandle, MapHandle, View, list_new, map_new, mount, str_parse_f64, value_item, value_len };
+use tur_kit::image::{ Image };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::layout::flex::{ Column, Expanded, Flexible, Row };
+use tur_kit::layout::stack::{ Positioned, Stack };
+use tur_kit::reactive::{ DeriveCtx, Mutation, MutationCtx, Readable, Source, derive, mutate, source, sv };
+use tur_kit::scroll::{ ScrollView };
+use tur_kit::text::core::{ Text };
+use tur_kit::virtual_app::{ CompositedFollower, CompositedTarget, layer_link };
+
+// ---------------------------------------------------------------------------
+// Palette — the app's light scheme, static (see the file header). Packed
+// 0xRRGGBBAA (the kit's color law).
+// ---------------------------------------------------------------------------
+
+let PRIMARY: u64 = 0xFF2E89B0u64;
+let PRIMARY_SOFT: u64 = 0xFFC9EBFAu64;
+let PRIMARY_TINT: u64 = 0xAA2E89B0u64;
+let PAGE_BG: u64 = 0xFFFFFBFEu64;
+let CARD: u64 = 0xFFECE6F0u64;
+let BAR_TRACK: u64 = 0xFFE6E0E9u64;
+let TEXT: u64 = 0xFF1C1B1Fu64;
+let TEXT_MUTED: u64 = 0xFF49454Fu64;
+let DIVIDER: u64 = 0xFFCAC4D0u64;
+let SHADOW: u64 = 0x0F172A1Cu64;
+let FILTER_BG: u64 = 0xCDC9EBFAu64;
+let TRIGGER_BG: u64 = 0xC8C9EBFAu64;
+let BAR_DIVIDER: u64 = 0x8CCAC4D0u64;
+
+// Medal fills — the SINGLE tier signal (gold / silver / bronze for the
+// podium; a muted disc for the long tail). Numerals stay dark on
+// gold/silver (legibility) and white on the darker bronze.
+let GOLD: u64 = 0xFFF5C400u64;
+let GOLD_RING: u64 = 0xFFE2B400u64;
+let GOLD_NUM: u64 = 0xFF3D2E00u64;
+let SILVER: u64 = 0xFFC6CDD6u64;
+let SILVER_RING: u64 = 0xFF98A3B3u64;
+let SILVER_NUM: u64 = 0xFF2F3640u64;
+let BRONZE: u64 = 0xFFCD7F32u64;
+let BRONZE_RING: u64 = 0xFFA05A1Eu64;
+let BRONZE_NUM: u64 = 0xFFFFFFFFu64;
+
+// ---------------------------------------------------------------------------
+// Layout + range constants
+// ---------------------------------------------------------------------------
+
+let PAGE_PADDING: f64 = 20.0;
+let CHIP_RADIUS: f64 = 999.0;
+let TRIGGER_HEIGHT: f64 = 36.0;
+let COVER_SIZE: f64 = 44.0;
+/// How many top entries get covers (the batch decodes synchronously on the
+/// view's lane — keep it modest; the host caps at 64).
+let COVER_BATCH: u64 = 24;
+
+/// The time ranges (id / label / day-key scan horizon — "Last N days" is
+/// inclusive of today). Module `let` initializers must be scalars in this
+/// build, so the tables live in fns.
+let RANGE_COUNT: i32 = 6;
+
+fn range_ids() -> [str] {
+    return ["today", "2days", "3days", "week", "month", "year"];
+}
+
+fn range_labels() -> [str] {
+    return ["Today", "Last 2 Days", "Last 3 Days", "Last Week", "Last Month", "Last Year"];
+}
+
+fn range_days() -> [i64] {
+    return [1, 2, 3, 7, 30, 365];
+}
+
+/// Sentinel playlist-filter value: no membership filtering.
+let PLAYLIST_ALL: str = "all";
+/// The title placeholder for rows whose every play predates the title
+/// field (the TS fallback, upgraded when any row provides a real title).
+let UNKNOWN_TITLE: str = "(unknown)";
+
+// ---------------------------------------------------------------------------
+// State + boot
+// ---------------------------------------------------------------------------
+
+/// The reactive state bundle. Handles bind by capture; the fields stay
+/// CONCRETE-annotated (`Source<T>`) — they cross ctx calls (the
+/// documented origin accommodation: a `Readable<T>` param's write origin
+/// is untracked, and `Writable` is Source's alone).
+struct State {
+    /// The host playlist roster: a ListHandle of
+    /// `{"id","title","musicIds":[…]}` rows (seeded at mount).
+    roster: Source<opaque>;
+    /// The selected range id (`RANGES_IDS` member).
+    sel_range: Source<str>;
+    /// `PLAYLIST_ALL` or a playlist id. A vanished playlist (deleted
+    /// between page opens) degrades to no filtering, per the TS.
+    sel_playlist: Source<str>;
+    /// The ranked rows: a ListHandle of
+    /// `{"musicId","title","count","top"}` (count-desc; `top` is the
+    /// range's max count — every bar rescales off it).
+    entries: Source<opaque>;
+    loading: Source<bool>;
+    /// musicId → cover resource id ("0" = none, "" = unknown yet).
+    covers: MapHandle;
+}
+
+fn seed_state() -> State {
+    return State {
+        roster: source<opaque>(list_new().raw()),
+        sel_range: source<str>("today"),
+        sel_playlist: source<str>(PLAYLIST_ALL),
+        entries: source<opaque>(list_new().raw()),
+        loading: source<bool>(false),
+        covers: map_new(),
+    };
+}
+
+entry fn start() -> u64 {
+    let s = seed_state();
+
+    // ---- selectors' inputs -------------------------------------------------
+
+    let range_opts: Source<opaque> = source<opaque>(range_options().raw());
+    let playlist_opts: Readable<opaque> = derive<opaque>(fn (ctx: DeriveCtx) -> opaque {
+        return playlist_options(ctx.get<opaque>(s.roster)).raw();
+    });
+    let range_label: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        return range_label_of(ctx.get<str>(s.sel_range));
+    });
+    let playlist_label: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        let v = ctx.get<str>(s.sel_playlist);
+        if (v == PLAYLIST_ALL) {
+            return "All Playlists";
+        }
+        return roster_title(ctx.get<opaque>(s.roster), v);
+    });
+
+    // ---- mutations (the writes flow through the ctx) -----------------------
+
+    let select_range = mutate(fn (ctx: MutationCtx, id: str) {
+        if (range_index_of(id) >= 0 && ctx.get<str>(s.sel_range) != id) {
+            ctx.set<str>(s.sel_range, id);
+            refresh_now(ctx, s);
+        }
+    });
+    let select_playlist = mutate(fn (ctx: MutationCtx, id: str) {
+        if (ctx.get<str>(s.sel_playlist) != id) {
+            ctx.set<str>(s.sel_playlist, id);
+            refresh_now(ctx, s);
+        }
+    });
+    // Mount: seed the roster from the host library, then the first scan.
+    let b_boot = mutate(fn (ctx: MutationCtx, _e: MountEvent) {
+        let raw = playlists();
+        ctx.set<opaque>(s.roster, parse_roster(raw).raw());
+        refresh_now(ctx, s);
+    });
+
+    // ---- derived page state --------------------------------------------------
+
+    let has_filters: Readable<bool> = derive<bool>(fn (ctx: DeriveCtx) -> bool {
+        return value_len(ctx.get<opaque>(s.roster)) > 0;
+    });
+    let status: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<bool>(s.loading)) {
+            return "loading";
+        }
+        if (value_len(ctx.get<opaque>(s.entries)) == 0) {
+            return "empty";
+        }
+        return "ready";
+    });
+    let total: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        return f"{entries_total(ctx.get<opaque>(s.entries))}";
+    });
+    let unit: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        if (entries_total(ctx.get<opaque>(s.entries)) == 1) {
+            return "play";
+        }
+        return "plays";
+    });
+
+    // ---- the tree ------------------------------------------------------------
+
+    let range_sel = make_selector(range_opts, s.sel_range, range_label, select_range, 196.0);
+    let playlist_sel = make_selector(playlist_opts, s.sel_playlist, playlist_label, select_playlist, 240.0);
+
+    let header = Row()
+        .main_alignment(MainAlign::SpaceBetween)
+        .cross_alignment(CrossAlign::Center)
+        .child(
+            Expanded()
+                .flex(sv(1.0f64))
+                .child(header_summary(total, unit))
+                .build(),
+        )
+        .child(SizedBox(8.0, 0.0).build())
+        .child(filter_bar(range_sel.trigger, playlist_sel.trigger, has_filters))
+        .build();
+
+    let body = Switch()
+        .value(status)
+        .cases("loading", loading_body())
+        .cases("empty", empty_body())
+        .cases("ready", ready_body(s.entries, s.covers))
+        .build();
+
+    let page = Container()
+        .color(sv(PAGE_BG))
+        .padding(PAGE_PADDING)
+        .child(
+            Column()
+                .cross_alignment(CrossAlign::Stretch)
+                .child(header)
+                .child(SizedBox(0.0, 14.0).build())
+                .child(Expanded().flex(sv(1.0f64)).child(body).build())
+                .build(),
+        )
+        .build();
+
+    // The root Stack carries the selector overlays (z0 page, z1 scrims,
+    // z2 menus) so the followers paint above content and aren't clipped.
+    let p_scrim = playlist_sel.scrim;
+    let p_menu = playlist_sel.menu;
+    let root = Lifecycle()
+        .on_mount(b_boot)
+        .child(
+            Stack()
+                .fit(StackFit::Expand)
+                .child(page)
+                .child(range_sel.scrim)
+                .child(range_sel.menu)
+                .child(
+                    Condition(has_filters)
+                        .then_build(fn () -> View {
+                            return Fragment().children([p_scrim, p_menu]).build();
+                        })
+                        .else_build(fn () -> View { return SizedBox(0.0, 0.0).build(); })
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+    mount(root);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// The refresh (the TS `refresh$` — a synchronous scan + aggregation, run
+// inside the calling mutation's ctx)
+// ---------------------------------------------------------------------------
+
+/// The aggregation accumulator (the TS Map keyed by musicId, as parallel
+/// index-aligned vectors — rut has no map in play here).
+struct Agg {
+    ids: Vec<str>;
+    titles: Vec<str>;
+    counts: Vec<i64>;
+}
+
+fn refresh_now(ctx: MutationCtx, s: State) {
+    ctx.set<bool>(s.loading, true);
+
+    // The range's day keys, newest first ("Last N days" includes today).
+    let days = range_days_of(ctx.get<str>(s.sel_range));
+    let mut w = JsonWriter::new();
+    w.begin_array();
+    let mut d: i64 = 0;
+    while (d < days) {
+        w.write_str(day_key_offset(d));
+        d += 1;
+    }
+    w.end_array();
+    let grouped = multi_get_all_multi(w.finish());
+
+    // Membership filter: `nil` = count every row; otherwise only rows whose
+    // musicId belongs to the selected playlist. Play rows store the
+    // stringified id and `library.playlists()` returns the same form, so
+    // plain string membership is exact. A playlist deleted between page
+    // opens degrades to no filtering.
+    let sel = ctx.get<str>(s.sel_playlist);
+    let mut allowed: ?Vec<str> = nil;
+    if (sel != PLAYLIST_ALL) {
+        allowed = roster_music_ids(ctx.get<opaque>(s.roster), sel);
+    }
+
+    let mut agg = Agg { ids: Vec<str>::new(), titles: Vec<str>::new(), counts: Vec<i64>::new() };
+    aggregate(grouped, allowed, agg);
+
+    // Rank count-desc. Rows carry the range's max count so every bar
+    // rescales off the same top (the TS `maxCount$` derive, folded into the
+    // row JSON — `Each` rebuilds all rows together, so it stays fresh).
+    // The padded-count prefix makes the rank a plain str ordering
+    // (ascending — the publisher below walks it backwards).
+    let n: i32 = agg.ids.len;
+    let mut top: i64 = 0;
+    let mut k: i32 = 0;
+    while (k < n) {
+        if (agg.counts[k] > top) {
+            top = agg.counts[k];
+        }
+        k += 1;
+    }
+    let mut rows = Vec<str>::new();
+    k = 0;
+    while (k < n) {
+        let mut b = StringBuilder::with_cap(128);
+        b.append(pad10(agg.counts[k]));
+        b.append(str::from_code(1));
+        b.append(entry_row_json(agg.ids[k], agg.titles[k], agg.counts[k], top));
+        rows.push(b.build());
+        k += 1;
+    }
+    sort_rows(rows);
+
+    // Covers for the top of the list (newest rank first). Only ids not
+    // cached yet are requested — a cover registers at most once per page
+    // open, and failures just leave the fallback disc.
+    let mut want = Vec<str>::new();
+    let mut picked: u64 = 0;
+    let mut i = n;
+    while (i > 0 && picked < COVER_BATCH) {
+        i -= 1;
+        let id = agg.ids[i];
+        if (is_digits(id) && s.covers.get(id) == "") {
+            want.push(id);
+            picked += 1;
+        }
+    }
+    if (want.len > 0) {
+        fill_covers(s.covers, covers(json_str_array(want)));
+    }
+
+    // Publish count-desc (strip the padded prefix).
+    let fresh = list_new();
+    let mut j = rows.len;
+    while (j > 0) {
+        j -= 1;
+        let row = rows[j];
+        let cut = find_from(row, 0, 1);
+        fresh.push(row.slice(cut + 1, row.len()));
+    }
+    ctx.set<opaque>(s.entries, fresh.raw());
+    ctx.set<bool>(s.loading, false);
+}
+
+/// The `{"musicId","title","count","top"}` row the ranked list renders
+/// from.
+fn entry_row_json(music_id: str, title: str, count: i64, top: i64) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("musicId");
+    w.write_str(music_id);
+    w.key("title");
+    w.write_str(title);
+    w.key("count");
+    w.write_i64(count);
+    w.key("top");
+    w.write_i64(top);
+    w.end_object();
+    return w.finish();
+}
+
+/// The `multi_get_all_multi` walk: `[{key, values:[row,…]}, …]` — every
+/// stored play row counted (subject to the membership filter). Corrupt
+/// rows are skipped, never fatal (the TS's defensive parse).
+fn aggregate(grouped: str, allowed: ?Vec<str>, mut agg: Agg) {
+    let mut r = JsonReader::of(grouped);
+    r.begin_array();
+    while (r.more()) {
+        r.begin_object();
+        while (r.more()) {
+            let k = r.next_key();
+            if (r.failed()) {
+                return;
+            }
+            if (k == "values") {
+                r.begin_array();
+                while (r.more()) {
+                    let raw = r.read_str();
+                    if (r.failed()) {
+                        return;
+                    }
+                    bump(agg, raw, allowed);
+                }
+                r.end_array();
+            } else {
+                r.skip_value();
+            }
+        }
+        r.end_object();
+    }
+    r.end_array();
+}
+
+/// One stored play row (`{musicId, title, ts}`) → +1 for its musicId.
+fn bump(mut agg: Agg, raw: str, allowed: ?Vec<str>) {
+    let mut r = JsonReader::of(raw);
+    let mut music_id = "";
+    let mut title = UNKNOWN_TITLE;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (k == "musicId") {
+            let v = opt_str(r);
+            if (r.failed()) {
+                return;
+            }
+            if (v != nil) {
+                music_id = v;
+            }
+        } else if (k == "title") {
+            let v = opt_str(r);
+            if (r.failed()) {
+                return;
+            }
+            if (v != nil) {
+                title = v;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed() || music_id == "") {
+        return;
+    }
+    if (allowed != nil) {
+        let list: Vec<str> = allowed;
+        if (!vec_contains(list, music_id)) {
+            return;
+        }
+    }
+    let n: i32 = agg.ids.len;
+    let mut i: i32 = 0;
+    while (i < n) {
+        if (agg.ids[i] == music_id) {
+            agg.counts[i] = agg.counts[i] + 1;
+            // Older rows (written before the title field existed) fall back
+            // to the placeholder; prefer a real title if any row for this
+            // music provides one.
+            if (agg.titles[i] == UNKNOWN_TITLE && title != UNKNOWN_TITLE) {
+                agg.titles[i] = title;
+            }
+            return;
+        }
+        i += 1;
+    }
+    agg.ids.push(music_id);
+    agg.titles.push(title);
+    agg.counts.push(1);
+}
+
+/// Register the fetched covers into the instance memo. The answer is
+/// `[{"musicId":"…","id":n|null}]` (id = the engine image resource; null =
+/// no cover / undecodable — the rows keep the fallback art).
+fn fill_covers(covers_map: MapHandle, answer: str) {
+    let mut r = JsonReader::of(answer);
+    r.begin_array();
+    while (r.more()) {
+        let mut music_id = "";
+        let mut id: i64 = 0;
+        r.begin_object();
+        while (r.more()) {
+            let k = r.next_key();
+            if (r.failed()) {
+                return;
+            }
+            if (k == "musicId") {
+                music_id = r.read_str();
+            } else if (k == "id") {
+                if (!r.try_null()) {
+                    id = r.read_i64();
+                }
+            } else {
+                r.skip_value();
+            }
+        }
+        r.end_object();
+        if (r.failed()) {
+            return;
+        }
+        if (music_id != "") {
+            covers_map.set(music_id, f"{id}");
+        }
+    }
+    r.end_array();
+}
+
+// ---------------------------------------------------------------------------
+// The ranked list
+// ---------------------------------------------------------------------------
+
+/// One decoded entry row.
+struct EntryV {
+    music_id: str;
+    title: str;
+    count: i64;
+    top: i64;
+}
+
+fn decode_entry(item: str) -> ?EntryV {
+    let mut r = JsonReader::of(item);
+    let mut music_id = "";
+    let mut title = "";
+    let mut count: i64 = 0;
+    let mut top: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "musicId") {
+            music_id = r.read_str();
+        } else if (k == "title") {
+            title = r.read_str();
+        } else if (k == "count") {
+            count = r.read_i64();
+        } else if (k == "top") {
+            top = r.read_i64();
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return EntryV { music_id: music_id, title: title, count: count, top: top };
+}
+
+fn ready_body(entries: Source<opaque>, covers_map: MapHandle) -> View {
+    // The "TOP n" caption only when there IS a tail below the podium — with
+    // ≤3 cards the medals already tell the whole story.
+    let has_tail: Readable<bool> = derive<bool>(fn (ctx: DeriveCtx) -> bool {
+        return value_len(ctx.get<opaque>(entries)) > 3;
+    });
+    let top_label: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        let n = value_len(ctx.get<opaque>(entries));
+        let mut m: u64 = 3;
+        if (n < m) {
+            m = n;
+        }
+        return f"TOP {m}";
+    });
+    return ScrollView()
+        .axis(Axis::Vertical)
+        .child(
+            Column()
+                .cross_alignment(CrossAlign::Stretch)
+                .main_axis_size(MainAxisSize::Min)
+                .child(
+                    Condition(has_tail)
+                        .then(Text().text(top_label).font_size(11.0).color(TEXT_MUTED).build())
+                        .else_branch(SizedBox(0.0, 0.0).build())
+                        .build(),
+                )
+                .child(SizedBox(0.0, 8.0).build())
+                .child(
+                    Each(entries)
+                        .item_builder(fn (i: u64, item: str) -> View {
+                            return entry_column(i, item, covers_map);
+                        })
+                        .build(),
+                )
+                .child(SizedBox(0.0, 24.0).build())
+                .build(),
+        )
+        .build();
+}
+
+/// One `Each` item: the density change between the podium (1–3) and the
+/// tail (4+) IS the separator — a taller gap after rank 3, no hairline.
+fn entry_column(i: u64, item: str, covers_map: MapHandle) -> View {
+    if (i == 0) {
+        return Column()
+            .cross_alignment(CrossAlign::Stretch)
+            .main_axis_size(MainAxisSize::Min)
+            .child(ranked_row(i, item, covers_map))
+            .build();
+    }
+    let gap: f64 = if (i == 3) { 24.0 } else { 12.0 };
+    return Column()
+        .cross_alignment(CrossAlign::Stretch)
+        .main_axis_size(MainAxisSize::Min)
+        .child(SizedBox(0.0, gap).build())
+        .child(ranked_row(i, item, covers_map))
+        .build();
+}
+
+/// One ranked row — rank `i + 1`. Everything data- or rank-dependent is
+/// read off the item JSON at build time: `Each` rebuilds the mounted rows
+/// whenever the entries atom changes, so the podium reskin, the bar scale
+/// and the covers swap all land on the next refresh.
+fn ranked_row(i: u64, item: str, covers_map: MapHandle) -> View {
+    let e = decode_entry(item);
+    if (e == nil) {
+        return SizedBox(0.0, 0.0).build();
+    }
+    let ent: EntryV = e;
+    let rank = i + 1;
+    let tier = rank <= 3;
+
+    // The medal spec (the TS `medalSpec`): top 3 get podium discs, the
+    // tail a small muted disc. The medal is the ONLY tier-colored element
+    // on a card.
+    let mut d: f64 = 28.0;
+    let mut fill: u64 = BAR_TRACK;
+    let mut ring: u64 = BAR_TRACK;
+    let mut num: u64 = TEXT_MUTED;
+    let mut fs: f64 = 12.0;
+    let mut bw: f64 = 1.0;
+    if (rank == 1) {
+        d = 48.0;
+        fill = GOLD;
+        ring = GOLD_RING;
+        num = GOLD_NUM;
+        fs = 18.0;
+        bw = 2.0;
+    } else if (rank == 2) {
+        d = 44.0;
+        fill = SILVER;
+        ring = SILVER_RING;
+        num = SILVER_NUM;
+        fs = 16.0;
+        bw = 2.0;
+    } else if (rank == 3) {
+        d = 44.0;
+        fill = BRONZE;
+        ring = BRONZE_RING;
+        num = BRONZE_NUM;
+        fs = 16.0;
+        bw = 1.0;
+    }
+    let badge = Container()
+        .width_height(d, d)
+        .alignment(Align::Center)
+        .color(sv(fill))
+        .border(ring, bw, BorderPosition::Inside)
+        .radius(sv(d / 2.0))
+        .child(Text().text(sv(f"{rank}")).font_size(fs).color(num).build())
+        .build();
+
+    let title_color: u64 = if (tier) { TEXT } else { TEXT_MUTED };
+    let title_size: f64 = if (tier) { 16.0 } else { 14.0 };
+    let inner_pad: f64 = if (tier) { 16.0 } else { 12.0 };
+    // Hierarchy is expressed via size + color contrast (podium dark, tail
+    // muted) plus the medal — no bold weight, per the TS note.
+    let title = Expanded()
+        .child(
+            Text()
+                .text(sv(ent.title))
+                .font_size(title_size)
+                .color(title_color)
+                .max_lines(1)
+                .ellipsis()
+                .build(),
+        )
+        .build();
+
+    // Bar + count read as ONE glance: fill/track flexes keep their ratio
+    // and the exact count sits right at the bar's end.
+    let fill_flex: f64 = ent.count as f64;
+    let track: i64 = ent.top - ent.count;
+    let track_flex: f64 = if (track > 0) { track as f64 } else { 0.0 };
+    let bar = Row()
+        .cross_alignment(CrossAlign::Center)
+        .child(
+            Expanded()
+                .flex(sv(fill_flex))
+                .child(Container().height(sv(6.0f64)).color(sv(PRIMARY)).radius(sv(3.0f64)).build())
+                .build(),
+        )
+        .child(
+            Expanded()
+                .flex(sv(track_flex))
+                .child(Container().height(sv(6.0f64)).color(sv(BAR_TRACK)).radius(sv(3.0f64)).build())
+                .build(),
+        )
+        .child(SizedBox(8.0, 0.0).build())
+        .child(Text().text(sv(f"{ent.count}")).font_size(12.0).color(TEXT_MUTED).build())
+        .build();
+
+    let card = Container()
+        .color(sv(CARD))
+        .radius(sv(12.0f64))
+        .shadow(SHADOW, 6.0, 0.0, 2.0)
+        .child(
+            Container()
+                .padding(inner_pad)
+                .child(
+                    Column()
+                        .cross_alignment(CrossAlign::Stretch)
+                        .main_axis_size(MainAxisSize::Min)
+                        .child(
+                            Row()
+                                .main_alignment(MainAlign::Start)
+                                .cross_alignment(CrossAlign::Center)
+                                .child(badge)
+                                .child(SizedBox(12.0, 0.0).build())
+                                .child(cover_thumb(ent.music_id, covers_map))
+                                .child(SizedBox(12.0, 0.0).build())
+                                .child(title)
+                                .build(),
+                        )
+                        .child(SizedBox(0.0, 8.0).build())
+                        .child(bar)
+                        // Breathing room under the bar so it doesn't hug
+                        // the card's bottom edge.
+                        .child(SizedBox(0.0, 3.0).build())
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+    return card;
+}
+
+/// The cover thumbnail: the host-registered image resource at a fixed
+/// square slot, or the fallback disc (tonal track + note glyph) while the
+/// id hasn't landed / for tracks with no cover.
+fn cover_thumb(music_id: str, covers_map: MapHandle) -> View {
+    let res = str_parse_f64(covers_map.get(music_id)) as u64;
+    if (res != 0) {
+        return Container()
+            .width_height(COVER_SIZE, COVER_SIZE)
+            .color(sv(BAR_TRACK))
+            .radius(sv(10.0f64))
+            .child(
+                Image(res)
+                    .width(COVER_SIZE)
+                    .height(COVER_SIZE)
+                    .fit(BoxFit::Cover)
+                    .build(),
+            )
+            .build();
+    }
+    return Container()
+        .width_height(COVER_SIZE, COVER_SIZE)
+        .alignment(Align::Center)
+        .color(sv(BAR_TRACK))
+        .radius(sv(10.0f64))
+        .child(Text().text(sv("♪")).font_size(18.0).color(PRIMARY_TINT).build())
+        .build();
+}
+
+// ---------------------------------------------------------------------------
+// Header (stat + filter bar)
+// ---------------------------------------------------------------------------
+
+fn header_summary(total: Readable<str>, unit: Readable<str>) -> View {
+    // The Compose top bar already carries the page title, so the in-view
+    // header is just the headline number + a muted unit.
+    return Row()
+        .cross_alignment(CrossAlign::Center)
+        .main_axis_size(MainAxisSize::Min)
+        .child(Text().text(total).font_size(22.0).color(TEXT).build())
+        .child(SizedBox(6.0, 0.0).build())
+        .child(Text().text(unit).font_size(13.0).color(TEXT_MUTED).build())
+        .build();
+}
+
+/// ONE tonal segmented container holding both filter triggers, so the two
+/// controls read as a single group. The playlist segment mounts only while
+/// the roster is non-empty.
+fn filter_bar(range_trigger: View, playlist_trigger: View, has_filters: Readable<bool>) -> View {
+    return Container()
+        .color(sv(FILTER_BG))
+        .radius(sv(CHIP_RADIUS))
+        .padding(4.0)
+        .child(
+            Row()
+                .cross_alignment(CrossAlign::Center)
+                .main_axis_size(MainAxisSize::Min)
+                .child(range_trigger)
+                .child(
+                    Condition(has_filters)
+                        .then(
+                            Fragment()
+                                .children([
+                                    Container().width(sv(1.0f64)).height(sv(20.0f64)).color(sv(BAR_DIVIDER)).build(),
+                                    playlist_trigger,
+                                ])
+                                .build(),
+                        )
+                        .else_branch(SizedBox(0.0, 0.0).build())
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}
+
+// ---------------------------------------------------------------------------
+// Status bodies
+// ---------------------------------------------------------------------------
+
+fn loading_body() -> View {
+    return Container()
+        .padding(48.0)
+        .child(Text().text(sv("Loading…")).font_size(14.0).color(TEXT_MUTED).build())
+        .build();
+}
+
+/// An intentional resting state: a tonal disc carrying the note glyph, the
+/// message, and a short hint.
+fn empty_body() -> View {
+    return Column()
+        .cross_alignment(CrossAlign::Center)
+        .main_alignment(MainAlign::Center)
+        .child(
+            Container()
+                .width_height(88.0, 88.0)
+                .alignment(Align::Center)
+                .color(sv(CARD))
+                .radius(sv(44.0f64))
+                .child(Text().text(sv("♪")).font_size(34.0).color(PRIMARY_TINT).build())
+                .build(),
+        )
+        .child(SizedBox(0.0, 16.0).build())
+        .child(Text().text(sv("No plays in this range.")).font_size(14.0).color(TEXT).build())
+        .child(SizedBox(0.0, 4.0).build())
+        .child(Text().text(sv("Try a wider range.")).font_size(12.0).color(TEXT_MUTED).build())
+        .build();
+}
+
+// ---------------------------------------------------------------------------
+// The dropdown selector (the TS `createSelector` port)
+// ---------------------------------------------------------------------------
+
+/// The three placed pieces of one selector: the trigger goes anywhere in
+/// normal flow; the scrim + menu are Stack children of the root page.
+struct Selector {
+    trigger: View;
+    scrim: View;
+    menu: View;
+}
+
+fn make_selector(
+    options: Readable<opaque>,
+    selected: Source<str>,
+    label: Readable<str>,
+    on_select: Mutation<str>,
+    menu_width: f64,
+) -> Selector {
+    let open: Source<bool> = source<bool>(false);
+    let link = layer_link();
+    let b_toggle = mutate(fn (ctx: MutationCtx, _e: nil) {
+        ctx.set<bool>(open, !ctx.get<bool>(open));
+    });
+    let b_close = mutate(fn (ctx: MutationCtx, _e: nil) {
+        ctx.set<bool>(open, false);
+    });
+    // Dismiss backdrop: Condition-gated so it only exists while open — an
+    // always-mounted fill would steal taps from the trigger below it. It
+    // is fully transparent; it only captures an outside tap to close.
+    let scrim = Condition(open)
+        .then_build(fn () -> View {
+            return Positioned()
+                .left(sv(0.0f64))
+                .top(sv(0.0f64))
+                .right(0.0)
+                .bottom(0.0)
+                .child(
+                    PointerInteract()
+                        .behavior(HitTestBehavior::Opaque)
+                        .on_click(b_close)
+                        .child(Container().color(sv(0x00000000u64)).build())
+                        .build(),
+                )
+                .build();
+        })
+        .else_build(fn () -> View { return SizedBox(0.0, 0.0).build(); })
+        .build();
+    // Menu: a DIRECT Stack child (always mounted) so the composited
+    // transform tracks and repositions it; the open/close gating lives
+    // INSIDE. The default anchor pair extends the card leftward from the
+    // right-aligned trigger (both triggers live in the right-hand filter
+    // bar).
+    let menu = CompositedFollower()
+        .link(link)
+        .target_anchor(Align::BottomRight)
+        .follower_anchor(Align::TopRight)
+        .offset(0.0, 6.0)
+        .child(
+            Condition(open)
+                .then_build(fn () -> View {
+                    return menu_card(options, selected, on_select, open, menu_width);
+                })
+                .else_build(fn () -> View { return SizedBox(0.0, 0.0).build(); })
+                .build(),
+        )
+        .build();
+    return Selector {
+        trigger: CompositedTarget().link(link).child(trigger_pill(label, open, b_toggle)).build(),
+        scrim: scrim,
+        menu: menu,
+    };
+}
+
+/// The bare trigger: NO fill keyline — the shared FilterBar carries the
+/// tonal chrome for both triggers (a pill-in-a-pill would double the
+/// outline).
+fn trigger_pill(label: Readable<str>, open: Source<bool>, b_toggle: Mutation<nil>) -> View {
+    let caret: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<bool>(open)) {
+            return "▲";
+        }
+        return "▼";
+    });
+    return PointerInteract()
+        .behavior(HitTestBehavior::Opaque)
+        .on_click(b_toggle)
+        .child(
+            Container()
+                .height(sv(TRIGGER_HEIGHT))
+                .color(sv(TRIGGER_BG))
+                .radius(sv(CHIP_RADIUS))
+                .child(
+                    Row()
+                        .main_alignment(MainAlign::Start)
+                        .cross_alignment(CrossAlign::Center)
+                        .main_axis_size(MainAxisSize::Min)
+                        .child(SizedBox(14.0, 0.0).build())
+                        // Loose fit: the label shrink-wraps when it fits the
+                        // pill and ellipsizes at the pill's true budget when
+                        // it doesn't.
+                        .child(
+                            Flexible()
+                                .child(
+                                    Text()
+                                        .text(label)
+                                        .font_size(13.0)
+                                        .color(PRIMARY)
+                                        .max_lines(1)
+                                        .ellipsis()
+                                        .build(),
+                                )
+                                .build(),
+                        )
+                        .child(SizedBox(8.0, 0.0).build())
+                        .child(Text().text(caret).font_size(10.0).color(PRIMARY).build())
+                        .child(SizedBox(14.0, 0.0).build())
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}
+
+fn menu_card(
+    options: Readable<opaque>,
+    selected: Source<str>,
+    on_select: Mutation<str>,
+    open: Source<bool>,
+    menu_width: f64,
+) -> View {
+    return Container()
+        .width(sv(menu_width))
+        .color(sv(CARD))
+        .border(DIVIDER, 1.0, BorderPosition::Inside)
+        .radius(sv(14.0f64))
+        .shadow(SHADOW, 16.0, 0.0, 6.0)
+        .child(
+            Container()
+                .padding(6.0)
+                .child(
+                    Column()
+                        .cross_alignment(CrossAlign::Stretch)
+                        .main_axis_size(MainAxisSize::Min)
+                        .child(
+                            Each(options)
+                                .item_builder(fn (i: u64, item: str) -> View {
+                                    return menu_row(i, item, selected, on_select, open);
+                                })
+                                .build(),
+                        )
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}
+
+/// A height-0 spacer fronts every menu row after the first.
+fn menu_row(i: u64, item: str, selected: Source<str>, on_select: Mutation<str>, open: Source<bool>) -> View {
+    let gap: f64 = if (i == 0) { 0.0 } else { 4.0 };
+    return Column()
+        .cross_alignment(CrossAlign::Stretch)
+        .main_axis_size(MainAxisSize::Min)
+        .child(SizedBox(0.0, gap).build())
+        .child(option_row(item, selected, on_select, open))
+        .build();
+}
+
+struct OptionV {
+    value: str;
+    label: str;
+}
+
+fn decode_option(item: str) -> ?OptionV {
+    let mut r = JsonReader::of(item);
+    let mut value = "";
+    let mut label = "";
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "value") {
+            value = r.read_str();
+        } else if (k == "label") {
+            label = r.read_str();
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return OptionV { value: value, label: label };
+}
+
+fn option_row(item: str, selected: Source<str>, on_select: Mutation<str>, open: Source<bool>) -> View {
+    let o = decode_option(item);
+    if (o == nil) {
+        return SizedBox(0.0, 0.0).build();
+    }
+    let opt: OptionV = o;
+    let value = opt.value;
+    let is_sel: Readable<bool> = derive<bool>(fn (ctx: DeriveCtx) -> bool {
+        return ctx.get<str>(selected) == value;
+    });
+    let label_plain = Text()
+        .text(sv(opt.label))
+        .font_size(13.0)
+        .color(TEXT)
+        .max_lines(1)
+        .ellipsis()
+        .build();
+    let label_active = Text()
+        .text(sv(opt.label))
+        .font_size(13.0)
+        .color(PRIMARY)
+        .max_lines(1)
+        .ellipsis()
+        .build();
+    let b_pick = mutate(fn (ctx: MutationCtx, _e: nil) {
+        ctx.set<bool>(open, false);
+        if (ctx.get<str>(selected) != value) {
+            ctx.run<str>(on_select, value);
+        }
+    });
+    return PointerInteract()
+        .behavior(HitTestBehavior::Opaque)
+        .on_click(b_pick)
+        .child(
+            Container()
+                .radius(sv(10.0f64))
+                .padding(12.0)
+                .color(sv(CARD))
+                .child(
+                    Row()
+                        .main_alignment(MainAlign::SpaceBetween)
+                        .cross_alignment(CrossAlign::Center)
+                        .child(
+                            Flexible()
+                                .child(
+                                    Condition(is_sel)
+                                        .then(label_active)
+                                        .else_branch(label_plain)
+                                        .build(),
+                                )
+                                .build(),
+                        )
+                        .child(
+                            Condition(is_sel)
+                                .then(Text().text(sv("✓")).font_size(13.0).color(PRIMARY).build())
+                                .else_branch(SizedBox(0.0, 0.0).build())
+                                .build(),
+                        )
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}
+
+// ---------------------------------------------------------------------------
+// The roster + selector option lists
+// ---------------------------------------------------------------------------
+
+/// One decoded playlist row (the reader sits at the object's start — both
+/// the roster array walk and the single-row decodes land here).
+struct PlaylistV {
+    id: str;
+    title: str;
+    music_ids: Vec<str>;
+}
+
+fn decode_playlist(mut r: JsonReader) -> ?PlaylistV {
+    let mut id = "";
+    let mut title = "";
+    let mut ids = Vec<str>::new();
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "id") {
+            id = r.read_str();
+        } else if (k == "title") {
+            title = r.read_str();
+        } else if (k == "musicIds") {
+            r.begin_array();
+            while (r.more()) {
+                let v = r.read_str();
+                if (r.failed()) {
+                    return nil;
+                }
+                ids.push(v);
+            }
+            r.end_array();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return PlaylistV { id: id, title: title, music_ids: ids };
+}
+
+/// `library.playlists()` → the roster rows (re-encoded one JSON row per
+/// playlist so `value_item` reads them back singly).
+fn parse_roster(raw: str) -> ListHandle {
+    let out = list_new();
+    let mut r = JsonReader::of(raw);
+    r.begin_array();
+    while (r.more()) {
+        let p = decode_playlist(r);
+        if (p == nil) {
+            break;
+        }
+        let pl: PlaylistV = p;
+        let mut w = JsonWriter::new();
+        w.begin_object();
+        w.key("id");
+        w.write_str(pl.id);
+        w.key("title");
+        w.write_str(pl.title);
+        w.key("musicIds");
+        w.begin_array();
+        for (let mid of pl.music_ids) {
+            w.write_str(mid);
+        }
+        w.end_array();
+        w.end_object();
+        out.push(w.finish());
+    }
+    r.end_array();
+    return out;
+}
+
+fn roster_music_ids(roster: opaque, id: str) -> ?Vec<str> {
+    let n = value_len(roster);
+    let mut i: u64 = 0;
+    while (i < n) {
+        let mut r = JsonReader::of(value_item(roster, i));
+        let p = decode_playlist(r);
+        if (p != nil) {
+            let pl: PlaylistV = p;
+            if (pl.id == id) {
+                return pl.music_ids;
+            }
+        }
+        i += 1;
+    }
+    return nil;
+}
+
+fn roster_title(roster: opaque, id: str) -> str {
+    let n = value_len(roster);
+    let mut i: u64 = 0;
+    while (i < n) {
+        let mut r = JsonReader::of(value_item(roster, i));
+        let p = decode_playlist(r);
+        if (p != nil) {
+            let pl: PlaylistV = p;
+            if (pl.id == id) {
+                return pl.title;
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+/// The range menu's options.
+fn range_options() -> ListHandle {
+    let ids = range_ids();
+    let labels = range_labels();
+    let out = list_new();
+    let mut i: i32 = 0;
+    while (i < RANGE_COUNT) {
+        out.push(option_row_json(ids[i], labels[i]));
+        i += 1;
+    }
+    return out;
+}
+
+/// The playlist menu's options: the "no filtering" head, then the roster.
+fn playlist_options(roster: opaque) -> ListHandle {
+    let out = list_new();
+    out.push(option_row_json(PLAYLIST_ALL, "All Playlists"));
+    let n = value_len(roster);
+    let mut i: u64 = 0;
+    while (i < n) {
+        let mut r = JsonReader::of(value_item(roster, i));
+        let p = decode_playlist(r);
+        if (p != nil) {
+            let pl: PlaylistV = p;
+            if (pl.id != "") {
+                out.push(option_row_json(pl.id, pl.title));
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn option_row_json(value: str, label: str) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("value");
+    w.write_str(value);
+    w.key("label");
+    w.write_str(label);
+    w.end_object();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Range lookups + shared helpers
+// ---------------------------------------------------------------------------
+
+fn range_index_of(id: str) -> i32 {
+    let ids = range_ids();
+    let mut i: i32 = 0;
+    while (i < RANGE_COUNT) {
+        if (ids[i] == id) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn range_days_of(id: str) -> i64 {
+    let i = range_index_of(id);
+    if (i >= 0) {
+        let days = range_days();
+        return days[i];
+    }
+    return 1;
+}
+
+fn range_label_of(id: str) -> str {
+    let i = range_index_of(id);
+    if (i >= 0) {
+        let labels = range_labels();
+        return labels[i];
+    }
+    return "Today";
+}
+
+/// The header's headline number (the TS `total$` derive).
+fn entries_total(entries: opaque) -> i64 {
+    let n = value_len(entries);
+    let mut sum: i64 = 0;
+    let mut i: u64 = 0;
+    while (i < n) {
+        let e = decode_entry(value_item(entries, i));
+        if (e != nil) {
+            let ent: EntryV = e;
+            sum += ent.count;
+        }
+        i += 1;
+    }
+    return sum;
+}
+
+/// `needle in items` over a string vector.
+fn vec_contains(items: Vec<str>, needle: str) -> bool {
+    for (let s of items) {
+        if (s == needle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn is_digits(s: str) -> bool {
+    let n = s.len();
+    if (n == 0) {
+        return false;
+    }
+    let mut i = 0;
+    while (i < n) {
+        let c = s.code_at(i);
+        if (c < 48 || c > 57) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+/// The optional-string read: `null` → nil, a string → some, anything else
+/// → the reader's sticky error.
+fn opt_str(mut r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+fn find_from(s: str, from: i32, c: u32) -> i32 {
+    let n = s.len();
+    let mut i = from;
+    while (i < n) {
+        if (s.code_at(i) == c) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+/// Count, zero-padded to 10 digits — makes the count-desc rank a plain str
+/// ordering (ascending; the publisher walks it backwards). Division from
+/// the right, then the fixed-width reversal (the webdav nc_hex pattern).
+fn pad10(v: i64) -> str {
+    let digits = "0123456789";
+    let mut b = StringBuilder::with_cap(10);
+    let mut rest = v;
+    let mut n: i64 = 0;
+    while (n < 10) {
+        let d = rest % 10;
+        rest = rest / 10;
+        let di: i32 = d as i32;
+        b.append(digits.slice(di, di + 1));
+        n += 1;
+    }
+    return reverse_str(b.build());
+}
+
+fn reverse_str(s: str) -> str {
+    let n = s.len();
+    let mut b = StringBuilder::with_cap(n);
+    let mut i: i32 = n;
+    while (i > 0) {
+        b.append(s.slice(i - 1, i));
+        i -= 1;
+    }
+    return b.build();
+}
+
+// ---------------------------------------------------------------------------
+// Day keys — kept in sync with backend.rut (module boundaries don't share
+// fns). UTC days, exactly what the backend's appender buckets by.
+// ---------------------------------------------------------------------------
+
+/// The day key `offset` days before now (0 = today).
+fn day_key_offset(offset: i64) -> str {
+    let now = now_unix_ms() as i64;
+    let days = floordiv(now, 86400000) - offset;
+    let ymd = civil_from_days(days);
+    let y = ymd.0;
+    let mo = ymd.1;
+    let d = ymd.2;
+    return f"plays:{y}-{pad2(mo)}-{pad2(d)}";
+}
+
+fn pad2(n: i64) -> str {
+    if (n < 10) {
+        return f"0{n}";
+    }
+    return f"{n}";
+}
+
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) {
+        return q - 1;
+    }
+    return q;
+}
+
+/// Howard Hinnant's `civil_from_days` — days since the epoch to (y, m, d).
+/// (The literal suffixes are the kit's i64-arithmetic spelling.)
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z2 = z + 719468i64;
+    let era = floordiv(z2, 146097i64);
+    let doe = z2 - era * 146097i64;
+    let yoe = (doe - doe / 1460i64 + doe / 36524i64 - doe / 146096i64) / 365i64;
+    let y = yoe + era * 400i64;
+    let doy = doe - (365i64 * yoe + yoe / 4i64 - yoe / 100i64);
+    let mp = (5i64 * doy + 2i64) / 153i64;
+    let d = doy - (153i64 * mp + 2i64) / 5i64 + 1i64;
+    let mut m = mp + 3i64;
+    if (mp >= 10) {
+        m = mp - 9i64;
+    }
+    let mut yy = y;
+    if (m <= 2) {
+        yy = y + 1i64;
+    }
+    return (yy, m, d);
+}
+
+/// `["a","b"]` — the `multi_get_all_multi` keys JSON (also kept in sync
+/// with backend.rut's twin).
+fn json_str_array(items: Vec<str>) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_array();
+    for (let s of items) {
+        w.write_str(s);
+    }
+    w.end_array();
+    return w.finish();
+}
+
+/// Codepoint-wise ordering (the padded prefix does the counting).
+fn str_less(a: str, b: str) -> bool {
+    let n = a.len();
+    let m = b.len();
+    let mut i = 0;
+    while (i < n && i < m) {
+        let ca = a.code_at(i);
+        let cb = b.code_at(i);
+        if (ca != cb) {
+            return ca < cb;
+        }
+        i += 1;
+    }
+    return n < m;
+}
+
+/// Insertion sort ascending (the day's distinct tracks are a modest list).
+fn sort_rows(mut rows: Vec<str>) {
+    let n: i32 = rows.len;
+    let mut i: i32 = 1;
+    while (i < n) {
+        let key = rows[i];
+        let mut j = i - 1;
+        while (j >= 0 && str_less(key, rows[j])) {
+            rows[j + 1] = rows[j];
+            j -= 1;
+        }
+        rows[j + 1] = key;
+        i += 1;
+    }
+}

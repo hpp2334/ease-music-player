@@ -1122,6 +1122,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ease-plugins-check"
+version = "0.1.0"
+dependencies = [
+ "ease-client-android",
+ "ease-client-backend",
+ "ease-tur-rpc",
+ "serde_json",
+ "tur-engine",
+ "tur-integration-tests",
+]
+
+[[package]]
 name = "ease-remote-storage"
 version = "0.1.0"
 dependencies = [

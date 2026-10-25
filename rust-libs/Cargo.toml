@@ -11,6 +11,7 @@ members = [
     "ease-order-key",
     "ease-tur-rpc",
     "ease-js-storage",
+    "ease-plugins-check",
 ]
 
 [profile.bench]

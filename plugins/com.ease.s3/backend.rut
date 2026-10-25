@@ -1,0 +1,2495 @@
+// S3 / S3-compatible storage provider — the rut port of the apiVersion 1 TS
+// backend (`src/backend.ts` + `sigv4.ts` + `s3path.ts` + `listing.ts`). A
+// headless backend serving the storage contract ops over the RPC bus, plus
+// the plugin-private view ops (`s3:test` / `s3:connect`).
+//
+// Multi-instance: each configured endpoint+bucket is one *instance* named
+// `s3:<uuid>` (the storage row's `plugin_storage_id`). Per-instance config
+// lives in `ease.db` (this plugin's KV) under `storage:<instance>` = JSON
+// `{ alias, endpoint, region, bucket, accessKeyId, secretId }` (the exact
+// key names the TS wrote — legacy configs stay readable); the secret access
+// key lives in `ease.secret` under that `secretId` (scope `plugin:com.ease.s3`).
+// Identity rides the op payload (`storageId`); multiple instances multiplex
+// by it exactly as the TS did.
+//
+// Signing: AWS Signature Version 4 over `ease.crypto` — `sha256_hex` hashes
+// the canonical request, `hmac_sha256_hex` rides the signing-key chain
+// (each hex output is decoded back to bytes for the next HMAC round), and
+// `ease.time.format_amz_date` stamps `x-amz-date`. Every request is a
+// bodyless GET, so the payload hash is the empty-string SHA-256 constant;
+// the signed header set is `host[;range];x-amz-content-sha256;x-amz-date`.
+// The canonical URI/query strings are built once and reused byte-for-byte
+// in both the URL and the canonical request (the TS invariant). The `host`
+// header is signed but never sent — the net layer derives it from the URL,
+// so its value is the URL authority after default-port normalization.
+//
+// Addressing is always path-style (`<endpoint>/<bucket>/<key>`), which every
+// S3 flavor accepts (AWS, R2, MinIO, B2, ...).
+//
+// Streaming: the contract is a chunked PULL — `storage:get` opens a session
+// (one single-byte range GET validates everything and reads the metadata
+// off the response headers), then the host pulls `storage:get-chunk`
+// (`{sid, offset, len}`), each an independently signed range GET
+// `offset..offset+len-1`, until a chunk answers `eof`. Sessions live in the
+// module state record: a fixed pool of 4 concurrent sessions keyed by a
+// sequentially allocated `sid`, parking the signing inputs (the chunk op
+// carries only `sid`). `storage:release` frees the slot.
+//
+// Error contract: messages prefixed `UNAUTHORIZED` / `TIMEOUT` are mapped
+// by the host (`ease-js-storage`) to typed errors — S3 signals bad keys or
+// bad signatures as 401/403; S3 `<Error>` documents surface their Code
+// (`NoSuchKey`, `RequestTimeTooSkewed`, ...).
+//
+// Net core: `ease.net.request_sync` — the BLOCKING one-shot, entry-fn-safe
+// (the drive runs on the shared tokio runtime, never the worker lane). Its
+// reply envelope is `{"status","statusText","headers","body"<base64>,
+// "error"}`; the base64 body decodes through `ease.crypto.base64_decode`.
+// ListObjectsV2 / error-document XML decode through `ease.xml.to_json`.
+
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec, freeze_bytes };
+use strbuild::{ StringBuilder };
+use tur_host::clipboard::{ decode_utf8, encode_utf8 };
+use tur_host::ease::context::{ notify_change, remove_storage };
+use tur_host::ease::crypto::{ base64_decode, base64_encode, hmac_sha256_hex, random_uuid, sha256_hex };
+use tur_host::ease::db::{ single_delete, single_get, single_set };
+use tur_host::ease::net::request_sync;
+use tur_host::ease::rpc::{ register, take_request };
+use tur_host::ease::secret::{ get, put, remove };
+use tur_host::ease::time::{ format_amz_date, now_unix_ms };
+use tur_host::ease::xml::to_json;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+let DEFAULT_REGION: str = "us-east-1";
+
+/// SHA-256 of the empty payload — every request this plugin signs is a
+/// bodyless GET.
+let EMPTY_PAYLOAD_SHA256: str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+let ALGORITHM: str = "AWS4-HMAC-SHA256";
+let AMZ_TERMINATOR: str = "aws4_request";
+let S3_SERVICE: str = "s3";
+
+/// The session pool size (4 concurrent streams are ample — the host pulls
+/// sequentially per stream).
+let POOL: i32 = 4;
+
+/// Safety cap: 100 pages x 1000 keys = 100k entries per directory.
+let MAX_LIST_PAGES: i32 = 100;
+
+// ---------------------------------------------------------------------------
+// Module state + data records
+// ---------------------------------------------------------------------------
+
+/// Per-instance config (the `storage:<id>` KV document; `secret_id` 0 =
+/// none).
+struct Config {
+    alias: str,
+    endpoint: str,
+    region: str,
+    bucket: str,
+    access_key_id: str,
+    secret_id: i64,
+}
+
+/// A normalized endpoint (the TS `S3Endpoint`).
+struct Endpoint {
+    /// Scheme + authority (+ base path), no trailing slash.
+    origin: str,
+    /// The URL authority after default-port normalization — the value the
+    /// net layer will send as `Host`, so the signed `host` must match it.
+    host: str,
+    /// Base path prefix (gateways serving S3 under a subpath), "" or
+    /// "/prefix" (starts with, never ends with, a slash).
+    base_path: str,
+}
+
+/// The settled `request_sync` reply (transport failures ride `failed`/`err`).
+struct SyncResp {
+    failed: bool,
+    err: str,
+    status: u64,
+    status_text: str,
+    body_b64: str,
+    content_range: ?str,
+    content_type: ?str,
+    content_length: ?str,
+}
+
+/// An S3 `<Error>` document's Code/Message.
+struct S3Error {
+    code: str,
+    message: str,
+}
+
+/// The listing walk's accumulator: the requested prefix (for the dir's own
+/// marker skip), collected rows as parallel (sort key, entry JSON) strings,
+/// and the page cursor for the pagination loop.
+struct ListCx {
+    prefix: str,
+    keys: Vec<str>,
+    jsons: Vec<str>,
+    found_root: bool,
+    truncated: bool,
+    token_raw: str,
+}
+
+/// A parked stream session (the signing inputs the chunk pulls re-use; the
+/// chunk op carries only `sid`).
+struct Session {
+    ep: str,
+    region: str,
+    bucket: str,
+    key: str,
+    ak: str,
+    sk: str,
+}
+
+/// The module state record: the session pool (slot's columns as parallel
+/// arrays; `sess_sid` 0 = free) + the sid allocator.
+struct Ctx {
+    sess_sid: [u64],
+    sess_ep: [?str],
+    sess_region: [?str],
+    sess_bucket: [?str],
+    sess_key: [?str],
+    sess_ak: [?str],
+    sess_sk: [?str],
+    next_sid: u64,
+}
+
+/// `s3:test` form credentials.
+struct TestArgs {
+    storage_id: ?str,
+    endpoint: str,
+    region: str,
+    bucket: str,
+    access_key_id: str,
+    secret_key: str,
+}
+
+/// `s3:connect` form fields.
+struct ConnectArgs {
+    storage_id: ?str,
+    endpoint: str,
+    region: str,
+    bucket: str,
+    alias: str,
+    access_key_id: str,
+    secret_key: str,
+}
+
+entry fn start() -> opaque {
+    register("storage:list", "op_storage_list");
+    register("storage:get", "op_storage_get");
+    register("storage:get-chunk", "op_storage_get_chunk");
+    register("storage:release", "op_storage_release");
+    register("storage:removeInstance", "op_storage_remove_instance");
+    register("s3:test", "op_s3_test");
+    register("s3:connect", "op_s3_connect");
+    return opaque(Ctx {
+        sess_sid: [0; 4],
+        sess_ep: [nil; 4],
+        sess_region: [nil; 4],
+        sess_bucket: [nil; 4],
+        sess_key: [nil; 4],
+        sess_ak: [nil; 4],
+        sess_sk: [nil; 4],
+        next_sid: 1,
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Envelope helpers
+// ---------------------------------------------------------------------------
+
+fn ok_env(result_json: str) -> str {
+    return f"{{\"ok\":true,\"result\":{result_json}}}";
+}
+
+fn err_env(msg: str) -> str {
+    let mut w = JsonWriter::new();
+    w.write_str(msg);
+    return f"{{\"ok\":false,\"error\":{w.finish()}}}";
+}
+
+// ---------------------------------------------------------------------------
+// str helpers (no URL/regex runtime — pure scans)
+// ---------------------------------------------------------------------------
+
+fn is_ws(c: u32) -> bool {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}
+
+fn lower_code(c: u32) -> u32 {
+    if (c >= 65 && c <= 90) {
+        return c + 32;
+    }
+    return c;
+}
+
+fn lower(s: str) -> str {
+    let n = s.len();
+    let mut b = StringBuilder::with_cap(n);
+    let mut i = 0;
+    while (i < n) {
+        b.append(str::from_code(lower_code(s.code_at(i))));
+        i += 1;
+    }
+    return b.build();
+}
+
+/// Case-insensitive equality (S3 tags arrive verbatim from servers that
+/// vary their casing — the TS pick()/pickAll() shape).
+fn ci_eq(a: str, b: str) -> bool {
+    let n = a.len();
+    if (n != b.len()) {
+        return false;
+    }
+    let mut i = 0;
+    while (i < n) {
+        if (lower_code(a.code_at(i)) != lower_code(b.code_at(i))) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn starts_with_ci(s: str, at: i32, prefix: str) -> bool {
+    let n = prefix.len();
+    if (at < 0 || s.len() < at + n) {
+        return false;
+    }
+    let mut i = 0;
+    while (i < n) {
+        if (lower_code(s.code_at(at + i)) != lower_code(prefix.code_at(i))) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn contains_ci(hay: str, needle: str) -> bool {
+    let n = hay.len();
+    let m = needle.len();
+    if (m == 0) {
+        return true;
+    }
+    let mut i = 0;
+    while (i + m <= n) {
+        if (starts_with_ci(hay, i, needle)) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+/// Codepoint-wise ordering (the listing's path sort).
+fn str_less(a: str, b: str) -> bool {
+    let n = a.len();
+    let m = b.len();
+    let mut i = 0;
+    while (i < n && i < m) {
+        let ca = a.code_at(i);
+        let cb = b.code_at(i);
+        if (ca != cb) {
+            return ca < cb;
+        }
+        i += 1;
+    }
+    return n < m;
+}
+
+fn trim(s: str) -> str {
+    let n = s.len();
+    let mut a = 0;
+    while (a < n && is_ws(s.code_at(a))) {
+        a += 1;
+    }
+    let mut b = n;
+    while (b > a && is_ws(s.code_at(b - 1))) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+fn ends_with(s: str, suffix: str) -> bool {
+    let n = s.len();
+    let m = suffix.len();
+    if (m == 0) {
+        return true;
+    }
+    if (n < m) {
+        return false;
+    }
+    return s.slice(n - m, n) == suffix;
+}
+
+fn find_from(s: str, from: i32, c: u32) -> i32 {
+    let n = s.len();
+    let mut i = from;
+    while (i < n) {
+        if (s.code_at(i) == c) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn find_last(s: str, c: u32) -> i32 {
+    let n = s.len();
+    let mut last = -1;
+    let mut i = 0;
+    while (i < n) {
+        if (s.code_at(i) == c) {
+            last = i;
+        }
+        i += 1;
+    }
+    return last;
+}
+
+fn is_digits(s: str) -> bool {
+    let n = s.len();
+    if (n == 0) {
+        return false;
+    }
+    let mut i = 0;
+    while (i < n) {
+        let c = s.code_at(i);
+        if (c < 48 || c > 57) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn str_to_i64(s: str) -> i64 {
+    let mut acc: i64 = 0;
+    let n = s.len();
+    let mut i = 0;
+    while (i < n) {
+        acc = acc * 10i64 + (s.code_at(i) as i64 - 48i64);
+        i += 1;
+    }
+    return acc;
+}
+
+fn hex_digit_val(c: u32) -> i32 {
+    if (c >= 48 && c <= 57) {
+        return c as i32 - 48;
+    }
+    if (c >= 97 && c <= 102) {
+        return c as i32 - 87;
+    }
+    if (c >= 65 && c <= 70) {
+        return c as i32 - 55;
+    }
+    return -1;
+}
+
+/// Hex → bytes (the signing-key chain: `hmac_sha256_hex` answers hex, the
+/// next HMAC round needs the raw key bytes).
+fn hex_decode(s: str) -> bytes {
+    let n = s.len();
+    let mut v = Vec<u8>::new();
+    let mut i = 0;
+    while (i + 1 < n) {
+        let hi = hex_digit_val(s.code_at(i));
+        let lo = hex_digit_val(s.code_at(i + 1));
+        if (hi < 0 || lo < 0) {
+            i += 1;
+            continue;
+        }
+        v.push((hi * 16 + lo) as u8);
+        i += 2;
+    }
+    return freeze_bytes(v);
+}
+
+fn byte_hex(b: u64) -> str {
+    let hex = "0123456789ABCDEF";
+    let hi = (b / 16) as i32;
+    let lo = (b % 16) as i32;
+    return f"{hex.slice(hi, hi + 1)}{hex.slice(lo, lo + 1)}";
+}
+
+/// The last `/`-separated segment, tolerating a trailing slash.
+fn last_segment(p: str) -> str {
+    let mut t = p;
+    if (ends_with(t, "/")) {
+        t = t.slice(0, t.len() - 1);
+    }
+    let slash = find_last(t, 47);
+    if (slash == -1) {
+        return t;
+    }
+    return t.slice(slash + 1, t.len());
+}
+
+// ---------------------------------------------------------------------------
+// URI encode / decode (the SigV4 rules)
+// ---------------------------------------------------------------------------
+
+/// Strict RFC 3986 percent-encoding (the SigV4 rules): everything but
+/// `A-Za-z0-9-._~` is encoded as uppercase-hex UTF-8; slashes preserved in
+/// paths when `keep_slash`. The SAME encoded string feeds the request URL
+/// and the canonical request — they must match byte-for-byte.
+fn s3_encode(s: str, keep_slash: bool) -> str {
+    let n = s.len();
+    let mut b = StringBuilder::with_cap(n * 3 + 1);
+    let mut i = 0;
+    while (i < n) {
+        let c = s.code_at(i);
+        let keep = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+            || c == 45 || c == 46 || c == 95 || c == 126 || (keep_slash && c == 47);
+        if (keep) {
+            b.append(s.slice(i, i + 1));
+        } else if (c < 0x80) {
+            b.append(f"%{byte_hex(c as u64)}");
+        } else if (c < 0x800) {
+            b.append(f"%{byte_hex((c >> 6) as u64 | 192)}");
+            b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+        } else if (c < 0x10000) {
+            b.append(f"%{byte_hex((c >> 12) as u64 | 224)}");
+            b.append(f"%{byte_hex(((c >> 6) & 63) as u64 | 128)}");
+            b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+        } else {
+            b.append(f"%{byte_hex((c >> 18) as u64 | 240)}");
+            b.append(f"%{byte_hex(((c >> 12) & 63) as u64 | 128)}");
+            b.append(f"%{byte_hex(((c >> 6) & 63) as u64 | 128)}");
+            b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+fn hex_byte_push(mut bytes: Vec<u8>, hi: i32, lo: i32) {
+    bytes.push((hi * 16 + lo) as u8);
+}
+
+/// Push one codepoint's UTF-8 bytes (the decode's re-encoding half).
+fn utf8_push(mut bytes: Vec<u8>, c: u32) {
+    if (c < 0x80) {
+        bytes.push(c as u8);
+    } else if (c < 0x800) {
+        bytes.push((c >> 6) as u8 | 192);
+        bytes.push((c & 63) as u8 | 128);
+    } else if (c < 0x10000) {
+        bytes.push((c >> 12) as u8 | 224);
+        bytes.push(((c >> 6) & 63) as u8 | 128);
+        bytes.push((c & 63) as u8 | 128);
+    } else {
+        bytes.push((c >> 18) as u8 | 240);
+        bytes.push(((c >> 12) & 63) as u8 | 128);
+        bytes.push(((c >> 6) & 63) as u8 | 128);
+        bytes.push((c & 63) as u8 | 128);
+    }
+}
+
+/// Tolerant percent-decoding (S3 list responses return keys URL-encoded;
+/// MinIO returns them raw — invalid escapes keep the input verbatim; `+`
+/// is never a space).
+fn s3_decode(s: str) -> str {
+    let n = s.len();
+    let mut bytes = Vec<u8>::new();
+    let mut i = 0;
+    while (i < n) {
+        let c = s.code_at(i);
+        if (c == 37 && i + 2 < n) {
+            let hi = hex_digit_val(s.code_at(i + 1));
+            let lo = hex_digit_val(s.code_at(i + 2));
+            if (hi >= 0 && lo >= 0) {
+                hex_byte_push(bytes, hi, lo);
+                i += 3;
+                continue;
+            }
+        }
+        utf8_push(bytes, c);
+        i += 1;
+    }
+    return decode_utf8(freeze_bytes(bytes));
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint normalization (the s3path.ts port)
+// ---------------------------------------------------------------------------
+
+/// Index of the ':' ending a valid `scheme://` prefix, else -1.
+fn scheme_end(s: str) -> i32 {
+    let n = s.len();
+    if (n == 0) {
+        return -1;
+    }
+    let c0 = s.code_at(0);
+    if (!((c0 >= 97 && c0 <= 122) || (c0 >= 65 && c0 <= 90))) {
+        return -1;
+    }
+    let mut i = 1;
+    while (i < n) {
+        let c = s.code_at(i);
+        if (c == 58) {
+            if (i + 2 < n && s.code_at(i + 1) == 47 && s.code_at(i + 2) == 47) {
+                return i;
+            }
+            return -1;
+        }
+        let ok = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+            || c == 43 || c == 45 || c == 46;
+        if (!ok) {
+            return -1;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn rstrip_slashes(s: str) -> str {
+    let n = s.len();
+    let mut b = n;
+    while (b > 1 && s.code_at(b - 1) == 47) {
+        b -= 1;
+    }
+    return s.slice(0, b);
+}
+
+fn lstrip_slashes(s: str) -> str {
+    let n = s.len();
+    let mut a = 0;
+    while (a < n && s.code_at(a) == 47) {
+        a += 1;
+    }
+    return s.slice(a, n);
+}
+
+fn contains_ws(s: str) -> bool {
+    let n = s.len();
+    let mut i = 0;
+    while (i < n) {
+        if (is_ws(s.code_at(i))) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+/// Normalize an endpoint string: accepts `host`, `host:port`, `http(s)://…`,
+/// an optional base path, trailing slashes. Nil on anything without a
+/// parseable authority (no URL runtime — pure string handling).
+fn normalize_endpoint(input: str) -> ?Endpoint {
+    let trimmed = trim(input);
+    if (trimmed == "") {
+        return nil;
+    }
+    let mut s = trimmed;
+    let mut scheme = "https";
+    let se = scheme_end(s);
+    if (se != -1) {
+        let sch = s.slice(0, se);
+        scheme = lower(sch);
+        if (scheme != "http" && scheme != "https") {
+            return nil;
+        }
+        s = s.slice(se + 3, s.len());
+    } else {
+        s = f"https://{s}";
+    }
+    let slash = find_from(s, 0, 47);
+    let mut authority = s;
+    let mut base_path = "";
+    if (slash != -1) {
+        authority = s.slice(0, slash);
+        base_path = rstrip_slashes(s.slice(slash, s.len()));
+    }
+    // Authority must be `host` or `host:port` (IPv6 brackets tolerated).
+    if (authority == "" || contains_ws(authority) || authority.code_at(0) == 58) {
+        return nil;
+    }
+    let mut host = authority;
+    let colon = find_last(authority, 58);
+    if (colon != -1) {
+        let port = authority.slice(colon + 1, authority.len());
+        if (!is_digits(port)) {
+            return nil;
+        }
+        // Strip explicit default ports — the net layer's URL parser drops
+        // them, so the Host header (and the signed `host` value) must match.
+        if ((scheme == "http" && port == "80") || (scheme == "https" && port == "443")) {
+            host = authority.slice(0, colon);
+        }
+    }
+    return Endpoint { origin: f"{scheme}://{host}{base_path}", host: host, base_path: base_path };
+}
+
+/// Host `dir` ("", "/", "/music/album") → S3 list prefix ("", "music/album/").
+fn dir_to_prefix(dir: str) -> str {
+    let mut d = lstrip_slashes(dir);
+    let n = d.len();
+    let mut b = n;
+    while (b > 0 && d.code_at(b - 1) == 47) {
+        b -= 1;
+    }
+    d = d.slice(0, b);
+    if (d == "") {
+        return "";
+    }
+    return f"{d}/";
+}
+
+/// Plugin path ("/music/a.mp3") → object key ("music/a.mp3").
+fn path_to_key(path: str) -> str {
+    return lstrip_slashes(path);
+}
+
+/// Canonical URI for a request (also used verbatim as the URL's path):
+/// `/[basePath/]bucket[/key]`, strictly encoded with slashes preserved.
+fn canonical_uri(ep: Endpoint, bucket: str, key: str) -> str {
+    let mut base = "";
+    if (ep.base_path != "") {
+        base = s3_encode(ep.base_path, true);
+    }
+    let mut uri = f"{base}/{s3_encode(bucket, false)}";
+    if (key != "") {
+        uri = f"{uri}/{s3_encode(key, true)}";
+    }
+    return uri;
+}
+
+// ---------------------------------------------------------------------------
+// Config (ease.db KV + ease.secret)
+// ---------------------------------------------------------------------------
+
+fn kv_key(instance: str) -> str {
+    return f"storage:{instance}";
+}
+
+/// The optional-string read: `null` → nil, a string → some, anything else
+/// (or a truncated body) → the reader's sticky error.
+fn read_opt_str(mut r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+fn opt_str_or(v: ?str, fallback: str) -> str {
+    if (v == nil) {
+        return fallback;
+    }
+    let s: str = v;
+    return s;
+}
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?Config {
+    let mut r = JsonReader::of(doc);
+    r.begin_object();
+    let mut alias: ?str = nil;
+    let mut endpoint: ?str = nil;
+    let mut region: ?str = nil;
+    let mut bucket: ?str = nil;
+    let mut access_key_id: ?str = nil;
+    let mut secret_id: i64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> { alias = read_opt_str(r); },
+            "endpoint" -> { endpoint = read_opt_str(r); },
+            "region" -> { region = read_opt_str(r); },
+            "bucket" -> { bucket = read_opt_str(r); },
+            "accessKeyId" -> { access_key_id = read_opt_str(r); },
+            "secretId" -> {
+                if (!r.try_null()) {
+                    secret_id = r.read_i64();
+                }
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return Config {
+        alias: opt_str_or(alias, ""),
+        endpoint: opt_str_or(endpoint, ""),
+        region: opt_str_or(region, DEFAULT_REGION),
+        bucket: opt_str_or(bucket, ""),
+        access_key_id: opt_str_or(access_key_id, ""),
+        secret_id: secret_id,
+    };
+}
+
+/// Load an instance's config (defaults applied); nil when absent/corrupt.
+fn config_of(instance: str) -> ?Config {
+    let raw = single_get(kv_key(instance));
+    if (raw == nil) {
+        return nil;
+    }
+    let doc: str = raw;
+    let cfg = decode_config(doc);
+    if (cfg == nil) {
+        return nil;
+    }
+    let mut c: Config = cfg;
+    if (c.alias == "") {
+        c.alias = instance;
+    }
+    if (c.region == "") {
+        c.region = DEFAULT_REGION;
+    }
+    return c;
+}
+
+/// The cached secret access key (the KV document carries only the secret id).
+fn load_secret(conf: Config) -> str {
+    if (conf.secret_id == 0) {
+        return "";
+    }
+    let v = get(conf.secret_id);
+    if (v == nil) {
+        return "";
+    }
+    let s: str = v;
+    return s;
+}
+
+/// The persisted config document (the TS `configToJson` — the exact key
+/// names keep legacy configs readable).
+fn config_json(conf: Config) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("alias");
+    w.write_str(conf.alias);
+    w.key("endpoint");
+    w.write_str(conf.endpoint);
+    w.key("region");
+    w.write_str(conf.region);
+    w.key("bucket");
+    w.write_str(conf.bucket);
+    w.key("accessKeyId");
+    w.write_str(conf.access_key_id);
+    w.key("secretId");
+    if (conf.secret_id != 0) {
+        w.write_i64(conf.secret_id);
+    } else {
+        w.write_raw("null");
+    }
+    w.end_object();
+    return w.finish();
+}
+
+/// Bucket naming: 2–63 chars, alphanumeric edges, `.`/`_`/`-` inside (the
+/// TS BUCKET_RE — lowercase-strict AWS rules relaxed to allow uppercase for
+/// permissive MinIO setups; the server rejects what it doesn't like).
+fn bucket_ok(bucket: str) -> bool {
+    let n = bucket.len();
+    if (n < 2 || n > 63) {
+        return false;
+    }
+    if (!is_alnum(bucket.code_at(0)) || !is_alnum(bucket.code_at(n - 1))) {
+        return false;
+    }
+    let mut i = 1;
+    while (i < n - 1) {
+        let c = bucket.code_at(i);
+        if (!is_alnum(c) && c != 46 && c != 95 && c != 45) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn is_alnum(c: u32) -> bool {
+    return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57);
+}
+
+// ---------------------------------------------------------------------------
+// SigV4 core (the sigv4.ts port)
+// ---------------------------------------------------------------------------
+
+/// Sort the query params by key (then value) in place — insertion sort, the
+/// param sets here are tiny.
+fn sort_query(mut keys: Vec<str>, mut vals: Vec<str>) {
+    let n = keys.len;
+    let mut i = 1;
+    while (i < n) {
+        let kk = keys[i];
+        let kv = vals[i];
+        let mut j = i - 1;
+        while (j >= 0 && query_less(kk, kv, keys[j], vals[j])) {
+            keys[j + 1] = keys[j];
+            vals[j + 1] = vals[j];
+            j -= 1;
+        }
+        keys[j + 1] = kk;
+        vals[j + 1] = kv;
+        i += 1;
+    }
+}
+
+fn query_less(k1: str, v1: str, k2: str, v2: str) -> bool {
+    if (k1 == k2) {
+        return str_less(v1, v2);
+    }
+    return str_less(k1, k2);
+}
+
+/// Canonical query string: params sorted by key (then value), strictly
+/// encoded, joined `k=v` with `&`. The SAME string doubles as the request
+/// URL's query — servers don't care about order, the signature does.
+fn canonical_query(mut keys: Vec<str>, mut vals: Vec<str>) -> str {
+    sort_query(keys, vals);
+    let mut b = StringBuilder::with_cap(64);
+    let n = keys.len;
+    let mut i = 0;
+    while (i < n) {
+        if (i > 0) {
+            b.append("&");
+        }
+        b.append(f"{s3_encode(keys[i], false)}={s3_encode(vals[i], false)}");
+        i += 1;
+    }
+    return b.build();
+}
+
+/// SigV4 signing key: the HMAC chain over date / region / service /
+/// terminator (each hex answer decoded back to the raw key bytes).
+fn derive_signing_key(secret_key: str, date_stamp: str, region: str) -> bytes {
+    let k1 = hex_decode(hmac_sha256_hex(encode_utf8(f"AWS4{secret_key}"), encode_utf8(date_stamp)));
+    let k2 = hex_decode(hmac_sha256_hex(k1, encode_utf8(region)));
+    let k3 = hex_decode(hmac_sha256_hex(k2, encode_utf8(S3_SERVICE)));
+    return hex_decode(hmac_sha256_hex(k3, encode_utf8(AMZ_TERMINATOR)));
+}
+
+/// Build the URL + the `request_sync` opts for one signed bodyless GET.
+/// `range` ("" = not ranged) joins the signed header set AND the wire set;
+/// `host` is signed but never sent (the net layer derives it from the URL).
+/// Nil on a garbage endpoint.
+fn build_signed_request(conf: Config, secret_key: str, key: str, qk: Vec<str>, qv: Vec<str>, range: str) -> ?str {
+    let nep = normalize_endpoint(conf.endpoint);
+    if (nep == nil) {
+        return nil;
+    }
+    let ep: Endpoint = nep;
+    let uri = canonical_uri(ep, conf.bucket, key);
+    let query = canonical_query(qk, qv);
+    let ms = now_unix_ms();
+    let amz_date = format_amz_date(ms);
+    let date_stamp = amz_date.slice(0, 8);
+    let mut region = conf.region;
+    if (region == "") {
+        region = DEFAULT_REGION;
+    }
+
+    // Canonical headers in sorted (lowercase) name order — the signed set is
+    // exactly host [+ range] + x-amz-content-sha256 + x-amz-date. The
+    // spec's trimall is a no-op here: every value is synthesized clean.
+    let mut cr = StringBuilder::with_cap(512);
+    cr.append("GET\n");
+    cr.append(uri);
+    cr.append("\n");
+    cr.append(query);
+    cr.append("\n");
+    cr.append(f"host:{ep.host}\n");
+    if (range != "") {
+        cr.append(f"range:{range}\n");
+    }
+    cr.append(f"x-amz-content-sha256:{EMPTY_PAYLOAD_SHA256}\n");
+    cr.append(f"x-amz-date:{amz_date}\n");
+    let mut signed_headers = "host;x-amz-content-sha256;x-amz-date";
+    if (range != "") {
+        signed_headers = "host;range;x-amz-content-sha256;x-amz-date";
+    }
+    cr.append("\n");
+    cr.append(signed_headers);
+    cr.append("\n");
+    cr.append(EMPTY_PAYLOAD_SHA256);
+    let canonical_request = cr.build();
+
+    // String to sign (step 2).
+    let hashed = sha256_hex(encode_utf8(canonical_request));
+    let mut sts = StringBuilder::with_cap(256);
+    sts.append(ALGORITHM);
+    sts.append("\n");
+    sts.append(amz_date);
+    sts.append("\n");
+    sts.append(f"{date_stamp}/{region}/{S3_SERVICE}/{AMZ_TERMINATOR}");
+    sts.append("\n");
+    sts.append(hashed);
+
+    // Steps 3–5: sign and assemble the Authorization header.
+    let signing_key = derive_signing_key(secret_key, date_stamp, region);
+    let signature = hmac_sha256_hex(signing_key, encode_utf8(sts.build()));
+    let authorization = f"{ALGORITHM} Credential={conf.access_key_id}/{date_stamp}/{region}/{S3_SERVICE}/{AMZ_TERMINATOR}, SignedHeaders={signed_headers}, Signature={signature}";
+
+    let mut url = f"{ep.origin}{uri}";
+    if (query != "") {
+        url = f"{url}?{query}";
+    }
+
+    // Wire headers: signed names are lowercase per the SigV4 spec, but
+    // `Range` goes out in conventional casing.
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("url");
+    w.write_str(url);
+    w.key("method");
+    w.write_str("GET");
+    w.key("headers");
+    w.begin_object();
+    w.key("x-amz-content-sha256");
+    w.write_str(EMPTY_PAYLOAD_SHA256);
+    w.key("x-amz-date");
+    w.write_str(amz_date);
+    w.key("Authorization");
+    w.write_str(authorization);
+    if (range != "") {
+        w.key("Range");
+        w.write_str(range);
+    }
+    w.end_object();
+    w.end_object();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// HTTP core (request_sync + error mapping)
+// ---------------------------------------------------------------------------
+
+/// Transport failures: `timeout`-ish messages get the host's TIMEOUT prefix,
+/// everything else passes through (the TS markedError).
+fn marked_transport_error(msg: str) -> str {
+    if (contains_ci(msg, "timeout") || contains_ci(msg, "timed out")) {
+        return f"TIMEOUT: {msg}";
+    }
+    return msg;
+}
+
+/// One blocking GET. The reply envelope is `{"status","statusText",
+/// "headers","body"<base64>,"error"}`; headers arrive as `{name: value}`
+/// with lowercased names (the three this plugin reads are captured).
+fn sync_get(opts: str) -> SyncResp {
+    let reply = request_sync(opts);
+    let mut r = JsonReader::of(reply);
+    r.begin_object();
+    let mut status: u64 = 0;
+    let mut status_text = "";
+    let mut body_b64 = "";
+    let mut err = "";
+    let mut content_range: ?str = nil;
+    let mut content_type: ?str = nil;
+    let mut content_length: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "status") {
+            status = r.read_i64() as u64;
+        } else if (k == "statusText") {
+            status_text = opt_str_or(read_opt_str(r), "");
+        } else if (k == "body") {
+            body_b64 = opt_str_or(read_opt_str(r), "");
+        } else if (k == "error") {
+            err = opt_str_or(read_opt_str(r), "");
+        } else if (k == "headers") {
+            r.begin_object();
+            while (r.more()) {
+                let name = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (ci_eq(name, "content-range")) {
+                    content_range = read_opt_str(r);
+                } else if (ci_eq(name, "content-type")) {
+                    content_type = read_opt_str(r);
+                } else if (ci_eq(name, "content-length")) {
+                    content_length = read_opt_str(r);
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (r.failed()) {
+        return SyncResp {
+            failed: true,
+            err: "s3: malformed net reply",
+            status: 0,
+            status_text: "",
+            body_b64: "",
+            content_range: nil,
+            content_type: nil,
+            content_length: nil,
+        };
+    }
+    if (err != "") {
+        return SyncResp {
+            failed: true,
+            err: marked_transport_error(err),
+            status: 0,
+            status_text: "",
+            body_b64: "",
+            content_range: nil,
+            content_type: nil,
+            content_length: nil,
+        };
+    }
+    return SyncResp {
+        failed: false,
+        err: "",
+        status: status,
+        status_text: status_text,
+        body_b64: body_b64,
+        content_range: content_range,
+        content_type: content_type,
+        content_length: content_length,
+    };
+}
+
+/// Parse an S3 `<Error>` XML body (operation failures) for its Code/Message
+/// — gives diagnostics like `NoSuchKey` / `RequestTimeTooSkewed` instead of
+/// a bare status. Nil when the body isn't an S3 error document.
+fn parse_s3_error(body_b64: str) -> ?S3Error {
+    let bytes = base64_decode(body_b64);
+    let tree = to_json(bytes);
+    if (tree == nil) {
+        return nil;
+    }
+    let t: str = tree;
+    let mut r = JsonReader::of(t);
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return nil;
+                }
+                if (ci_eq(tag, "error")) {
+                    return error_el(r);
+                }
+                r.skip_value();
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    return nil;
+}
+
+/// One `<Error>` el: `{code, message}` — nil when the Code el is missing.
+fn error_el(mut r: JsonReader) -> ?S3Error {
+    let mut code: ?str = nil;
+    let mut message: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return nil;
+                }
+                if (ci_eq(tag, "code")) {
+                    code = el_text(r);
+                } else if (ci_eq(tag, "message")) {
+                    message = el_text(r);
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed() || code == nil) {
+        return nil;
+    }
+    let c: str = code;
+    return S3Error { code: c, message: opt_str_or(message, "") };
+}
+
+/// The TS markedError over an HTTP failure: 401/403 carry the host's
+/// UNAUTHORIZED prefix; the S3 error document's Code/Message (else the
+/// status text) ride the message.
+fn http_error_text(status: u64, status_text: str, body_b64: str) -> str {
+    let mut code = "";
+    let mut message = trim(status_text);
+    let parsed = parse_s3_error(body_b64);
+    if (parsed != nil) {
+        let p: S3Error = parsed;
+        code = p.code;
+        message = p.message;
+    }
+    if (status == 401 || status == 403) {
+        return f"UNAUTHORIZED: HTTP {status} {code}: {message}";
+    }
+    return f"HTTP {status} {code}: {message}";
+}
+
+/// Signed bodyless GET returning the full body as text (list / test).
+/// `(nil, marked error)` on any failure.
+fn s3_get_text(conf: Config, secret_key: str, key: str, qk: Vec<str>, qv: Vec<str>) -> (?str, str) {
+    let signed = build_signed_request(conf, secret_key, key, qk, qv, "");
+    if (signed == nil) {
+        return (nil, "s3: invalid endpoint");
+    }
+    let opts: str = signed;
+    let resp = sync_get(opts);
+    if (resp.failed) {
+        return (nil, resp.err);
+    }
+    if (resp.status >= 400) {
+        return (nil, http_error_text(resp.status, resp.status_text, resp.body_b64));
+    }
+    let body = base64_decode(resp.body_b64);
+    return (decode_utf8(body), "");
+}
+
+// ---------------------------------------------------------------------------
+// Dates (the S3 LastModified shape)
+// ---------------------------------------------------------------------------
+
+/// RFC 3339 UTC (`2024-01-02T10:00:00Z`, fractional seconds tolerated) →
+/// unix ms; 0 on anything else (the TS parseIsoDate).
+fn parse_iso_date(s: str) -> u64 {
+    let n = s.len();
+    if (n < 20) {
+        return 0;
+    }
+    if (s.code_at(4) != 45 || s.code_at(7) != 45) {
+        return 0;
+    }
+    let y = iso_num(s, 0, 4);
+    let mo = iso_num(s, 5, 2);
+    let d = iso_num(s, 8, 2);
+    if (s.code_at(10) != 84 && s.code_at(10) != 32) {
+        return 0;
+    }
+    let h = iso_num(s, 11, 2);
+    let mi = iso_num(s, 14, 2);
+    let sec = iso_num(s, 17, 2);
+    if (y < 0 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || mi < 0 || sec < 0) {
+        return 0;
+    }
+    let days = days_from_civil(y, mo, d);
+    return (days * 86400i64 + h * 3600i64 + mi * 60i64 + sec) as u64 * 1000u64;
+}
+
+fn iso_num(s: str, at: i32, n: i32) -> i64 {
+    let mut acc: i64 = 0;
+    let mut i = at;
+    while (i < at + n) {
+        let c = s.code_at(i);
+        if (c < 48 || c > 57) {
+            return -1;
+        }
+        acc = acc * 10i64 + (c as i64 - 48i64);
+        i += 1;
+    }
+    return acc;
+}
+
+/// Howard Hinnant's `days_from_civil`.
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let mut yy = y;
+    if (m <= 2) {
+        yy = y - 1;
+    }
+    let era = floordiv(yy, 400);
+    let yoe = yy - era * 400;
+    let mp = if (m > 2) { m - 3 } else { m + 9 };
+    let doy = (153i64 * mp + 2i64) / 5i64 + d - 1i64;
+    let doe = yoe * 365i64 + yoe / 4i64 - yoe / 100i64 + doy;
+    return era * 146097i64 + doe - 719468i64;
+}
+
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) {
+        return q - 1;
+    }
+    return q;
+}
+
+// ---------------------------------------------------------------------------
+// ListObjectsV2 response walk (the listing.ts port over ease.xml.to_json)
+// ---------------------------------------------------------------------------
+
+/// The `text` member of one el (nil when absent).
+fn el_text(mut r: JsonReader) -> ?str {
+    let mut found: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "text") {
+            let v = r.read_str();
+            if (r.failed()) {
+                return nil;
+            }
+            found = v;
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return found;
+}
+
+/// Walk the decoded tree: 0 = ok, 1 = unparsable, 2 = no ListBucketResult
+/// root (a silent `[]` once hid a runtime gap as an "empty directory" —
+/// a missing root stays an error, like the TS threw).
+fn walk_list_tree(tree: str, mut cx: ListCx) -> i32 {
+    let mut r = JsonReader::of(tree);
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (k == "children") {
+            let rc = walk_root_children(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    if (!cx.found_root) {
+        return 2;
+    }
+    return 0;
+}
+
+fn walk_root_children(mut r: JsonReader, mut cx: ListCx) -> i32 {
+    r.begin_object();
+    while (r.more()) {
+        let tag = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (ci_eq(tag, "listbucketresult")) {
+            let rc = each_lbr(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One el or an array of els (single-element pages take the same path).
+fn each_lbr(mut r: JsonReader, mut cx: ListCx) -> i32 {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            let rc = walk_lbr_el(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        }
+        r.end_array();
+    } else {
+        return walk_lbr_el(r, cx);
+    }
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One ListBucketResult el: Contents / CommonPrefixes / IsTruncated /
+/// NextContinuationToken (the truncated flag and the token are collected
+/// independently — document order doesn't matter).
+fn walk_lbr_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
+    cx.found_root = true;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return 1;
+                }
+                if (ci_eq(tag, "contents")) {
+                    let rc = each_contents(r, cx);
+                    if (rc != 0) {
+                        return rc;
+                    }
+                } else if (ci_eq(tag, "commonprefixes")) {
+                    let rc = each_prefixes(r, cx);
+                    if (rc != 0) {
+                        return rc;
+                    }
+                } else if (ci_eq(tag, "istruncated")) {
+                    let t = el_text(r);
+                    if (t != nil) {
+                        let s: str = t;
+                        cx.truncated = lower(trim(s)) == "true";
+                    }
+                } else if (ci_eq(tag, "nextcontinuationtoken")) {
+                    let t = el_text(r);
+                    if (t != nil) {
+                        let s: str = t;
+                        cx.token_raw = s;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+            if (r.failed()) {
+                return 1;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+fn each_contents(mut r: JsonReader, mut cx: ListCx) -> i32 {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            let rc = walk_contents_el(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        }
+        r.end_array();
+    } else {
+        return walk_contents_el(r, cx);
+    }
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One Contents el: Key (decoded — AWS URL-encodes, MinIO doesn't; a
+/// tolerant decode keeps the input verbatim on failure), Size, LastModified.
+fn walk_contents_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
+    let mut key: ?str = nil;
+    let mut size: ?str = nil;
+    let mut lastmod: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return 1;
+                }
+                if (ci_eq(tag, "key")) {
+                    key = el_text(r);
+                } else if (ci_eq(tag, "size")) {
+                    size = el_text(r);
+                } else if (ci_eq(tag, "lastmodified")) {
+                    lastmod = el_text(r);
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+            if (r.failed()) {
+                return 1;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    if (key != nil) {
+        let kk: str = key;
+        push_file_row(cx, kk, size, lastmod);
+    }
+    return 0;
+}
+
+fn each_prefixes(mut r: JsonReader, mut cx: ListCx) -> i32 {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            let rc = walk_cp_el(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        }
+        r.end_array();
+    } else {
+        return walk_cp_el(r, cx);
+    }
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One CommonPrefixes el: the inner Prefix el is what repeats in practice;
+/// the single-el form is accepted too.
+fn walk_cp_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return 1;
+                }
+                if (ci_eq(tag, "prefix")) {
+                    let rc = each_prefix_text(r, cx);
+                    if (rc != 0) {
+                        return rc;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+            if (r.failed()) {
+                return 1;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+fn each_prefix_text(mut r: JsonReader, mut cx: ListCx) -> i32 {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            let t = el_text(r);
+            if (t != nil) {
+                let s: str = t;
+                push_dir_row(cx, s);
+            }
+        }
+        r.end_array();
+    } else {
+        let t = el_text(r);
+        if (t != nil) {
+            let s: str = t;
+            push_dir_row(cx, s);
+        }
+    }
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One file row (the TS pageToEntries file half): the key is decoded (AWS
+/// URL-encodes keys, MinIO returns them raw — the decoded form is the
+/// canonical key the plugin re-encodes for `storage:get`); folder-marker
+/// keys are elided; the path is "/" + key.
+fn push_file_row(mut cx: ListCx, key_text: str, size: ?str, lastmod: ?str) {
+    let key = s3_decode(key_text);
+    if (key == "") {
+        return;
+    }
+    if (key == cx.prefix) {
+        return; // the listed dir's own marker
+    }
+    if (ends_with(key, "/")) {
+        return; // nested folder markers, not files
+    }
+    let path = f"/{key}";
+    let name = last_segment(key);
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("name");
+    w.write_str(name);
+    w.key("path");
+    w.write_str(path);
+    if (size != nil) {
+        let s: str = size;
+        let t = trim(s);
+        if (is_digits(t)) {
+            w.key("size");
+            w.write_i64(str_to_i64(t));
+        }
+    }
+    w.key("isDir");
+    w.write_bool(false);
+    // S3 has no creation time; LastModified is the only timestamp.
+    if (lastmod != nil) {
+        let lm: str = lastmod;
+        let ms = parse_iso_date(lm);
+        if (ms > 0) {
+            w.key("modifiedAt");
+            w.write_i64(ms as i64);
+        }
+    }
+    w.end_object();
+    cx.keys.push(f"f{path}");
+    cx.jsons.push(w.finish());
+}
+
+/// One directory row (the CommonPrefixes half): the trailing slash trims;
+/// the queried prefix itself never re-lists.
+fn push_dir_row(mut cx: ListCx, prefix_text: str) {
+    let mut trimmed = s3_decode(prefix_text);
+    if (ends_with(trimmed, "/")) {
+        trimmed = trimmed.slice(0, trimmed.len() - 1);
+    }
+    if (trimmed == "") {
+        return;
+    }
+    let mut own = "";
+    if (cx.prefix.len() > 0) {
+        own = cx.prefix.slice(0, cx.prefix.len() - 1);
+    }
+    if (trimmed == own) {
+        return;
+    }
+    let path = f"/{trimmed}";
+    let name = last_segment(trimmed);
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("name");
+    w.write_str(name);
+    w.key("path");
+    w.write_str(path);
+    w.key("isDir");
+    w.write_bool(true);
+    w.end_object();
+    cx.keys.push(f"d{path}");
+    cx.jsons.push(w.finish());
+}
+
+/// Sort (dirs first via the key's d/f flag, then by path — matching the TS
+/// comparator), drop adjacent duplicates (S3 pages are disjoint and keys
+/// unique; the dedupe only guards degenerate servers), join the JSON rows.
+fn render_entries(mut cx: ListCx) -> str {
+    sort_rows(cx.keys, cx.jsons);
+    let mut out = StringBuilder::with_cap(256);
+    out.append("[");
+    let mut first = true;
+    let mut prev = "";
+    let mut have_prev = false;
+    let mut i = 0;
+    while (i < cx.keys.len) {
+        let k = cx.keys[i];
+        if (!have_prev || k != prev) {
+            if (!first) {
+                out.append(",");
+            }
+            first = false;
+            out.append(cx.jsons[i]);
+            prev = k;
+            have_prev = true;
+        }
+        i += 1;
+    }
+    out.append("]");
+    return out.build();
+}
+
+fn sort_rows(mut keys: Vec<str>, mut jsons: Vec<str>) {
+    let n = keys.len;
+    let mut i = 1;
+    while (i < n) {
+        let kk = keys[i];
+        let kj = jsons[i];
+        let mut j = i - 1;
+        while (j >= 0 && str_less(kk, keys[j])) {
+            keys[j + 1] = keys[j];
+            jsons[j + 1] = jsons[j];
+            j -= 1;
+        }
+        keys[j + 1] = kk;
+        jsons[j + 1] = kj;
+        i += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// storage:list
+// ---------------------------------------------------------------------------
+
+/// ListObjectsV2 with a `/` delimiter, following continuation tokens (100
+/// pages x 1000 keys cap). `("", err)` on failure (err carries the marked
+/// prefix), the entry array JSON otherwise.
+fn list_impl(conf: Config, secret_key: str, dir: str) -> (?str, str) {
+    let prefix = dir_to_prefix(dir);
+    let mut cx = ListCx {
+        prefix: prefix,
+        keys: Vec<str>::new(),
+        jsons: Vec<str>::new(),
+        found_root: false,
+        truncated: false,
+        token_raw: "",
+    };
+    let mut token = "";
+    let mut pages: i32 = 0;
+    while (true) {
+        let mut qk = Vec<str>::new();
+        let mut qv = Vec<str>::new();
+        qk.push("list-type");
+        qv.push("2");
+        qk.push("delimiter");
+        qv.push("/");
+        qk.push("max-keys");
+        qv.push("1000");
+        qk.push("prefix");
+        qv.push(prefix);
+        if (token != "") {
+            qk.push("continuation-token");
+            qv.push(token);
+        }
+        let out = s3_get_text(conf, secret_key, "", qk, qv);
+        let o = out.0;
+        if (o == nil) {
+            return (nil, out.1);
+        }
+        let body: str = o;
+        let rc = walk_list_tree(body, cx);
+        if (rc == 1) {
+            return (nil, "s3: unparsable ListObjectsV2 response");
+        }
+        if (rc == 2) {
+            return (nil, "s3: ListObjectsV2 response has no ListBucketResult root");
+        }
+        pages += 1;
+        let mut next = "";
+        if (cx.truncated) {
+            next = cx.token_raw;
+        }
+        if (next == "" || pages >= MAX_LIST_PAGES) {
+            break;
+        }
+        token = next;
+    }
+    return (render_entries(cx), "");
+}
+
+// ---------------------------------------------------------------------------
+// storage:get / get-chunk / release (the chunked-pull sessions)
+// ---------------------------------------------------------------------------
+
+/// Open a stream: ONE single-byte range GET (`bytes=offset-offset`)
+/// validates endpoint + bucket + keys + signature + range support and reads
+/// the metadata off the response headers — Content-Range still carries the
+/// full total. (The apiVersion 1 opener streamed `bytes=offset-`; under the
+/// chunked-pull contract the opener's body is discarded, so pulling the
+/// whole remainder here would double every download.) The session parks the
+/// signing inputs under a fresh `sid`.
+fn open_impl(conf: Config, secret_key: str, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
+    let key = path_to_key(path);
+    let signed = build_signed_request(conf, secret_key, key, Vec<str>::new(), Vec<str>::new(), f"bytes={offset}-{offset}");
+    if (signed == nil) {
+        return (nil, "s3: invalid endpoint");
+    }
+    let opts: str = signed;
+    let resp = sync_get(opts);
+    if (resp.failed) {
+        return (nil, resp.err);
+    }
+    if (resp.status >= 400) {
+        return (nil, http_error_text(resp.status, resp.status_text, resp.body_b64));
+    }
+    // S3 always honors Range (206 + Content-Range), but a gateway that
+    // doesn't gets the same `dataOffset: 0` fallback as the WebDAV plugin:
+    // the host drops the prefix bytes itself.
+    let mut range_honored = resp.status == 206;
+    if (resp.content_range != nil) {
+        range_honored = true;
+    }
+    let mut data_offset = offset;
+    if (!range_honored) {
+        data_offset = 0;
+    }
+    // totalLength: prefer Content-Range's total (`bytes start-end/total`) —
+    // Content-Length on a Range response is the partial length. (With the
+    // single-byte opener it only falls back to Content-Length when the
+    // server ignored the Range — where that length is the full size.)
+    let mut total: i64 = -1;
+    if (resp.content_range != nil) {
+        let s: str = resp.content_range;
+        let slash = find_last(s, 47);
+        if (slash != -1) {
+            let tail = trim(s.slice(slash + 1, s.len()));
+            if (is_digits(tail)) {
+                total = str_to_i64(tail);
+            }
+        }
+    }
+    if (total < 0 && resp.content_length != nil) {
+        let s: str = resp.content_length;
+        let t = trim(s);
+        if (is_digits(t)) {
+            total = str_to_i64(t);
+        }
+    }
+    // claim a session slot
+    let mut slot: i32 = -1;
+    let mut i: i32 = 0;
+    while (i < POOL) {
+        if (c.sess_sid[i] == 0) {
+            slot = i;
+            break;
+        }
+        i += 1;
+    }
+    if (slot == -1) {
+        return (nil, "s3: too many concurrent streams");
+    }
+    let sid = c.next_sid;
+    c.next_sid = c.next_sid + 1u64;
+    c.sess_sid[slot] = sid;
+    c.sess_ep[slot] = conf.endpoint;
+    c.sess_region[slot] = conf.region;
+    c.sess_bucket[slot] = conf.bucket;
+    c.sess_key[slot] = key;
+    c.sess_ak[slot] = conf.access_key_id;
+    c.sess_sk[slot] = secret_key;
+    let name = last_segment(path);
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("sid");
+    w.write_i64(sid as i64);
+    w.key("meta");
+    w.begin_object();
+    if (total >= 0) {
+        w.key("totalLength");
+        w.write_i64(total);
+    }
+    w.key("name");
+    w.write_str(name);
+    if (resp.content_type != nil) {
+        let ct: str = resp.content_type;
+        if (ct != "") {
+            w.key("contentType");
+            w.write_str(ct);
+        }
+    }
+    w.key("dataOffset");
+    w.write_i64(data_offset as i64);
+    w.end_object();
+    w.end_object();
+    return (w.finish(), "");
+}
+
+fn session_of(c: Ctx, sid: u64) -> ?Session {
+    let mut i: i32 = 0;
+    while (i < POOL) {
+        if (sid != 0 && c.sess_sid[i] == sid) {
+            let ep = c.sess_ep[i];
+            let region = c.sess_region[i];
+            let bucket = c.sess_bucket[i];
+            let key = c.sess_key[i];
+            let ak = c.sess_ak[i];
+            let sk = c.sess_sk[i];
+            if (ep == nil || region == nil || bucket == nil || key == nil || ak == nil || sk == nil) {
+                return nil;
+            }
+            let e: str = ep;
+            let rg: str = region;
+            let b: str = bucket;
+            let k: str = key;
+            let a: str = ak;
+            let s: str = sk;
+            return Session {
+                ep: e,
+                region: rg,
+                bucket: b,
+                key: k,
+                ak: a,
+                sk: s,
+            };
+        }
+        i += 1;
+    }
+    return nil;
+}
+
+fn release_impl(mut c: Ctx, sid: u64) -> bool {
+    let mut i: i32 = 0;
+    while (i < POOL) {
+        if (sid != 0 && c.sess_sid[i] == sid) {
+            c.sess_sid[i] = 0;
+            c.sess_ep[i] = nil;
+            c.sess_region[i] = nil;
+            c.sess_bucket[i] = nil;
+            c.sess_key[i] = nil;
+            c.sess_ak[i] = nil;
+            c.sess_sk[i] = nil;
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+/// One chunk: an independently signed range GET `offset..offset+len-1`;
+/// `eof` when fewer bytes than `len` came back (the final chunk carries
+/// data AND eof). A 416 (range start beyond EOF — the exact-multiple tail)
+/// is the clean end of the stream.
+fn chunk_impl(s: Session, offset: u64, len: u64) -> (?str, str) {
+    let end = offset + len - 1u64;
+    let conf = Config {
+        alias: "",
+        endpoint: s.ep,
+        region: s.region,
+        bucket: s.bucket,
+        access_key_id: s.ak,
+        secret_id: 0,
+    };
+    let signed = build_signed_request(conf, s.sk, s.key, Vec<str>::new(), Vec<str>::new(), f"bytes={offset}-{end}");
+    if (signed == nil) {
+        return (nil, "s3: invalid endpoint");
+    }
+    let opts: str = signed;
+    let resp = sync_get(opts);
+    if (resp.failed) {
+        return (nil, resp.err);
+    }
+    if (resp.status == 416) {
+        return (chunk_json("", true), "");
+    }
+    if (resp.status >= 400) {
+        if (resp.status == 401 || resp.status == 403) {
+            return (nil, f"UNAUTHORIZED: HTTP {resp.status}: {trim(resp.status_text)}");
+        }
+        return (nil, f"HTTP {resp.status}: {resp.status_text}");
+    }
+    let data = base64_decode(resp.body_b64);
+    let eof = (data.len() as u64) < len;
+    return (chunk_json(resp.body_b64, eof), "");
+}
+
+fn chunk_json(data_b64: str, eof: bool) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("data");
+    w.write_str(data_b64);
+    w.key("eof");
+    w.write_bool(eof);
+    w.end_object();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// test / connect / instance lifecycle
+// ---------------------------------------------------------------------------
+
+/// Explicit values win; on edit a blank secret falls back to the stored one
+/// (the TS testCredentials). Nil config = no stored instance to fall back to.
+fn resolve_test(a: TestArgs) -> (?Config, str) {
+    let endpoint = trim(a.endpoint);
+    let bucket = trim(a.bucket);
+    let access_key_id = trim(a.access_key_id);
+    let secret_key = a.secret_key;
+    if (secret_key != "" || a.storage_id == nil) {
+        let mut region = trim(a.region);
+        if (region == "") {
+            region = DEFAULT_REGION;
+        }
+        return (Config {
+            alias: "",
+            endpoint: endpoint,
+            region: region,
+            bucket: bucket,
+            access_key_id: access_key_id,
+            secret_id: 0,
+        }, secret_key);
+    }
+    let sid: str = a.storage_id;
+    let stored = config_of(sid);
+    if (stored == nil) {
+        return (nil, "");
+    }
+    let mut conf: Config = stored;
+    if (endpoint != "") {
+        conf.endpoint = endpoint;
+    }
+    if (bucket != "") {
+        conf.bucket = bucket;
+    }
+    if (access_key_id != "") {
+        conf.access_key_id = access_key_id;
+    }
+    return (conf, load_secret(conf));
+}
+
+/// One-key list validates endpoint + bucket + keys + signature + clock skew
+/// in a single round trip. SUCCESS / UNAUTHORIZED / TIMEOUT / OTHER_ERROR.
+fn test_impl(a: TestArgs) -> str {
+    let resolved = resolve_test(a);
+    let conf_o = resolved.0;
+    if (conf_o == nil) {
+        return "OTHER_ERROR";
+    }
+    let conf: Config = conf_o;
+    let secret_key: str = resolved.1;
+    let mut qk = Vec<str>::new();
+    let mut qv = Vec<str>::new();
+    qk.push("list-type");
+    qv.push("2");
+    qk.push("max-keys");
+    qv.push("1");
+    let out = s3_get_text(conf, secret_key, "", qk, qv);
+    if (out.0 != nil) {
+        return "SUCCESS";
+    }
+    let err: str = out.1;
+    if (starts_with_ci(err, 0, "UNAUTHORIZED")) {
+        return "UNAUTHORIZED";
+    }
+    if (starts_with_ci(err, 0, "TIMEOUT")) {
+        return "TIMEOUT";
+    }
+    return "OTHER_ERROR";
+}
+
+/// Create or update an S3 instance (the TS connectImpl). On create persist
+/// the config + secret key and mint `s3:<uuid>` — the VIEW registers the
+/// host storage row with the minted id (the rut split leaves host
+/// registration + notify to the view, which owns the form outcome). On
+/// update rewrite the kv; a blank secret keeps the stored secret. Answers
+/// the reply document `{storageId, created}`.
+fn connect_impl(args: ConnectArgs) -> (?str, str) {
+    let endpoint = trim(args.endpoint);
+    let mut region = trim(args.region);
+    if (region == "") {
+        region = DEFAULT_REGION;
+    }
+    let bucket = trim(args.bucket);
+    let mut alias = trim(args.alias);
+    if (alias == "") {
+        alias = "S3";
+    }
+    let access_key_id = trim(args.access_key_id);
+    let secret_key = args.secret_key;
+
+    // validate before persisting anything
+    if (normalize_endpoint(endpoint) == nil) {
+        return (nil, "s3: invalid endpoint");
+    }
+    if (!bucket_ok(bucket)) {
+        return (nil, "s3: invalid bucket name (2-63 chars, letters/digits/./-/_)");
+    }
+    if (access_key_id == "") {
+        return (nil, "s3: access key id cannot be empty");
+    }
+
+    if (args.storage_id != nil) {
+        // Update: keep the existing secret unless a new one is given.
+        let sid: str = args.storage_id;
+        let mut secret_id: i64 = 0;
+        let existing = config_of(sid);
+        if (existing != nil) {
+            let e: Config = existing;
+            secret_id = e.secret_id;
+        }
+        if (secret_key != "") {
+            let new_id = put(secret_key);
+            if (secret_id != 0) {
+                remove(secret_id);
+            }
+            secret_id = new_id;
+        }
+        let conf = Config {
+            alias: alias,
+            endpoint: endpoint,
+            region: region,
+            bucket: bucket,
+            access_key_id: access_key_id,
+            secret_id: secret_id,
+        };
+        single_set(kv_key(sid), config_json(conf));
+        let mut w = JsonWriter::new();
+        w.begin_object();
+        w.key("storageId");
+        w.write_str(sid);
+        w.key("created");
+        w.write_bool(false);
+        w.end_object();
+        return (w.finish(), "");
+    }
+
+    // Create: the secret key is required.
+    if (secret_key == "") {
+        return (nil, "s3: secret access key cannot be empty");
+    }
+    let instance = f"s3:{random_uuid()}";
+    let secret_id = put(secret_key);
+    let conf = Config {
+        alias: alias,
+        endpoint: endpoint,
+        region: region,
+        bucket: bucket,
+        access_key_id: access_key_id,
+        secret_id: secret_id,
+    };
+    single_set(kv_key(instance), config_json(conf));
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("storageId");
+    w.write_str(instance);
+    w.key("created");
+    w.write_bool(true);
+    w.end_object();
+    return (w.finish(), "");
+}
+
+/// Remove an instance: drop its config (kv) + secret key, free any session
+/// parked on it, ask the host to delete the storage row, and reload the
+/// dashboard. Called from the host trash button (`storage:removeInstance`
+/// via `storage_plugin.remove_instance`).
+fn remove_instance_impl(mut c: Ctx, storage_id: str) {
+    let mut endpoint = "";
+    let existing = config_of(storage_id);
+    if (existing != nil) {
+        let e: Config = existing;
+        if (e.secret_id != 0) {
+            remove(e.secret_id);
+        }
+        endpoint = e.endpoint;
+    }
+    // free the sessions parked on this instance's config (the chunk op
+    // carries only `sid`, so a surviving slot would serve a dead instance)
+    let mut i: i32 = 0;
+    while (i < POOL) {
+        if (c.sess_sid[i] != 0) {
+            let ep = c.sess_ep[i];
+            if (ep != nil) {
+                let s: str = ep;
+                if (s == endpoint) {
+                    c.sess_sid[i] = 0;
+                    c.sess_ep[i] = nil;
+                    c.sess_region[i] = nil;
+                    c.sess_bucket[i] = nil;
+                    c.sess_key[i] = nil;
+                    c.sess_ak[i] = nil;
+                    c.sess_sk[i] = nil;
+                }
+            }
+        }
+        i += 1;
+    }
+    single_delete(kv_key(storage_id));
+    // Complete the disconnect on the host side: drop the storage row, then
+    // reload so the dashboard + edit page reflect the removal.
+    remove_storage(storage_id);
+    notify_change();
+}
+
+// ---------------------------------------------------------------------------
+// Op entries
+// ---------------------------------------------------------------------------
+
+/// Position the cursor inside the envelope's `args` object (`{"op":…,
+/// "args":{…}}` — the caller decodes fields then closes the object).
+fn enter_args(mut r: JsonReader) -> bool {
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return false;
+        }
+        if (k == "args") {
+            return true;
+        }
+        r.skip_value();
+    }
+    return false;
+}
+
+entry fn op_storage_list(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("storage:list: cx is not a Ctx");
+    }
+    let req = take_request();
+    let mut r = JsonReader::of(req);
+    if (!enter_args(r)) {
+        return err_env("s3: bad storage:list request");
+    }
+    let mut storage_id: ?str = nil;
+    let mut dir: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return err_env("s3: bad storage:list request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "dir" -> { dir = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return err_env("s3: bad storage:list request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil || dir == nil) {
+        return err_env("s3: storage:list needs storageId + dir");
+    }
+    let sid: str = storage_id;
+    let d: str = dir;
+    let cfg = config_of(sid);
+    if (cfg == nil) {
+        return err_env(f"s3: no config for instance {sid}");
+    }
+    let conf: Config = cfg;
+    let out = list_impl(conf, load_secret(conf), d);
+    let o = out.0;
+    if (o == nil) {
+        return err_env(out.1);
+    }
+    let res: str = o;
+    return ok_env(res);
+}
+
+entry fn op_storage_get(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("storage:get: cx is not a Ctx");
+    }
+    let mut cc: Ctx = c;
+    let req = take_request();
+    let mut r = JsonReader::of(req);
+    if (!enter_args(r)) {
+        return err_env("s3: bad storage:get request");
+    }
+    let mut storage_id: ?str = nil;
+    let mut path: ?str = nil;
+    let mut offset: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return err_env("s3: bad storage:get request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "path" -> { path = read_opt_str(r); },
+            "offset" -> { offset = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return err_env("s3: bad storage:get request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil || path == nil) {
+        return err_env("s3: storage:get needs storageId + path + offset");
+    }
+    let sid: str = storage_id;
+    let pth: str = path;
+    let cfg = config_of(sid);
+    if (cfg == nil) {
+        return err_env(f"s3: no config for instance {sid}");
+    }
+    let conf: Config = cfg;
+    let out = open_impl(conf, load_secret(conf), pth, offset, cc);
+    let o = out.0;
+    if (o == nil) {
+        return err_env(out.1);
+    }
+    let res: str = o;
+    return ok_env(res);
+}
+
+entry fn op_storage_get_chunk(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("storage:get-chunk: cx is not a Ctx");
+    }
+    let cc: Ctx = c;
+    let req = take_request();
+    let mut r = JsonReader::of(req);
+    if (!enter_args(r)) {
+        return err_env("s3: bad storage:get-chunk request");
+    }
+    let mut sid: u64 = 0;
+    let mut offset: u64 = 0;
+    let mut len: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return err_env("s3: bad storage:get-chunk request");
+        }
+        when (k) {
+            "sid" -> { sid = r.read_i64() as u64; },
+            "offset" -> { offset = r.read_i64() as u64; },
+            "len" -> { len = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return err_env("s3: bad storage:get-chunk request");
+        }
+    }
+    r.end_object();
+    if (sid == 0 || len == 0) {
+        return err_env("s3: storage:get-chunk needs sid + offset + len");
+    }
+    let sess = session_of(cc, sid);
+    if (sess == nil) {
+        return err_env("s3: unknown stream session");
+    }
+    let s: Session = sess;
+    let out = chunk_impl(s, offset, len);
+    let o = out.0;
+    if (o == nil) {
+        return err_env(out.1);
+    }
+    let res: str = o;
+    return ok_env(res);
+}
+
+entry fn op_storage_release(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("storage:release: cx is not a Ctx");
+    }
+    let mut cc: Ctx = c;
+    let req = take_request();
+    let mut r = JsonReader::of(req);
+    if (!enter_args(r)) {
+        return err_env("s3: bad storage:release request");
+    }
+    let mut sid: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return err_env("s3: bad storage:release request");
+        }
+        when (k) {
+            "sid" -> { sid = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return err_env("s3: bad storage:release request");
+        }
+    }
+    r.end_object();
+    release_impl(cc, sid);
+    return ok_env("true");
+}
+
+entry fn op_storage_remove_instance(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("storage:removeInstance: cx is not a Ctx");
+    }
+    let mut cc: Ctx = c;
+    let req = take_request();
+    let mut r = JsonReader::of(req);
+    if (!enter_args(r)) {
+        return err_env("s3: bad storage:removeInstance request");
+    }
+    let mut storage_id: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return err_env("s3: bad storage:removeInstance request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return err_env("s3: bad storage:removeInstance request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil) {
+        return err_env("s3: storage:removeInstance needs storageId");
+    }
+    let sid: str = storage_id;
+    remove_instance_impl(cc, sid);
+    return ok_env("{}");
+}
+
+entry fn op_s3_test(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("s3:test: cx is not a Ctx");
+    }
+    let req = take_request();
+    let mut r = JsonReader::of(req);
+    if (!enter_args(r)) {
+        return err_env("s3: bad s3:test request");
+    }
+    let mut storage_id: ?str = nil;
+    let mut endpoint = "";
+    let mut region = "";
+    let mut bucket = "";
+    let mut access_key_id = "";
+    let mut secret_key = "";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return err_env("s3: bad s3:test request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "endpoint" -> { endpoint = opt_str_or(read_opt_str(r), ""); },
+            "region" -> { region = opt_str_or(read_opt_str(r), ""); },
+            "bucket" -> { bucket = opt_str_or(read_opt_str(r), ""); },
+            "accessKeyId" -> { access_key_id = opt_str_or(read_opt_str(r), ""); },
+            "secretAccessKey" -> { secret_key = opt_str_or(read_opt_str(r), ""); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return err_env("s3: bad s3:test request");
+        }
+    }
+    r.end_object();
+    let outcome = test_impl(TestArgs {
+        storage_id: storage_id,
+        endpoint: endpoint,
+        region: region,
+        bucket: bucket,
+        access_key_id: access_key_id,
+        secret_key: secret_key,
+    });
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("result");
+    w.write_str(outcome);
+    w.end_object();
+    return ok_env(w.finish());
+}
+
+entry fn op_s3_connect(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("s3:connect: cx is not a Ctx");
+    }
+    let req = take_request();
+    let mut r = JsonReader::of(req);
+    if (!enter_args(r)) {
+        return err_env("s3: bad s3:connect request");
+    }
+    let mut storage_id: ?str = nil;
+    let mut endpoint = "";
+    let mut region = "";
+    let mut bucket = "";
+    let mut alias = "";
+    let mut access_key_id = "";
+    let mut secret_key = "";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return err_env("s3: bad s3:connect request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "endpoint" -> { endpoint = opt_str_or(read_opt_str(r), ""); },
+            "region" -> { region = opt_str_or(read_opt_str(r), ""); },
+            "bucket" -> { bucket = opt_str_or(read_opt_str(r), ""); },
+            "alias" -> { alias = opt_str_or(read_opt_str(r), ""); },
+            "accessKeyId" -> { access_key_id = opt_str_or(read_opt_str(r), ""); },
+            "secretAccessKey" -> { secret_key = opt_str_or(read_opt_str(r), ""); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return err_env("s3: bad s3:connect request");
+        }
+    }
+    r.end_object();
+    let out = connect_impl(ConnectArgs {
+        storage_id: storage_id,
+        endpoint: endpoint,
+        region: region,
+        bucket: bucket,
+        alias: alias,
+        access_key_id: access_key_id,
+        secret_key: secret_key,
+    });
+    let o = out.0;
+    if (o == nil) {
+        let mut msg = out.1;
+        if (msg == "") {
+            msg = "s3: connect failed";
+        }
+        return err_env(msg);
+    }
+    let res: str = o;
+    return ok_env(res);
+}

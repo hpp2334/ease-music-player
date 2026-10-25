@@ -113,6 +113,7 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
         vec![
             nrow("request", vec![TY_STR], TY_OPAQUE, false),
             nrow("finish", vec![TY_OPAQUE], TY_BYTES, true),
+            nrow("request_sync", vec![TY_STR], TY_STR, false),
             nrow("status", vec![TY_OPAQUE], TY_U64, false),
             nrow("status_text", vec![TY_OPAQUE], TY_STR, false),
             nrow("headers", vec![TY_OPAQUE], TY_STR, false),
@@ -205,13 +206,31 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
     // ---- net bodies ------------------------------------------------------------------
 
     /// `request(opts: str) -> opaque` — allocate the task, start the drive.
-    /// Sync (the drive rides `spawn_local`); await via `finish`.
-    rut_vm::pkg_fn!(pkg, "ease::net::request", (String,) -> rut_vm::Opaque<NetTask>, move |vm: &mut rut_vm::interp::Vm, opts_json: String| {
+    /// Sync (the drive rides `spawn_local`); await via `finish`. The answer
+    /// crosses as the bare `OpaqueRef` (its `Ret::TY` is `TY_OPAQUE`, so the
+    /// decl-row signature check passes — a typed `Opaque<NetTask>` return
+    /// carries `u32::MAX` and drifts every boot).
+    let h = handles.clone();
+    rut_vm::pkg_fn!(pkg, "ease::net::request", (String,) -> rut_vm::OpaqueRef, move |vm: &mut rut_vm::interp::Vm, opts_json: String| {
         let task = NetTask::new();
-        if let Err(msg) = net_start_drive(&handles, &task, &opts_json) {
+        if let Err(msg) = net_start_drive(&h, &task, &opts_json) {
             task.settle(tur_net_capability::HttpOutcome::Err(msg));
         }
-        Ok(rut_vm::Opaque::alloc(vm, task)?)
+        Ok(rut_vm::Opaque::alloc(vm, task)?.handle().clone())
+    });
+
+    /// `request_sync(opts: str) -> str` — the blocking one-shot. Fires the
+    /// request and answers a JSON envelope
+    /// `{"status": u64, "statusText": str, "headers": {name: value},
+    ///   "body": <base64>, "error": str}` (`body` "" + `error` set on a
+    /// transport failure). Runs the capability future to completion on the
+    /// calling thread via the shared tokio runtime — **entry-fn-safe**:
+    /// the drive lives on the tokio runtime, never the worker lane, so op
+    /// entries can send+await in one row call (no settled-task spin).
+    /// `opts` shape: see [`net_start_drive`].
+    let h = handles.clone();
+    rut_vm::pkg_fn!(pkg, "ease::net::request_sync", (String,) -> String, move |_vm: &mut rut_vm::interp::Vm, opts_json: String| {
+        net_request_sync(&h, &opts_json)
     });
 
     /// `finish(task: opaque) -> bytes` — await the drive; the body (empty on
@@ -558,17 +577,12 @@ fn xml_to_json(bytes: &[u8]) -> Option<String> {
     Some(finish(root).to_string())
 }
 
-/// Parse the `ease.net::request` opts and start the drive on the instance's
-/// worker spawner. `Err(msg)` = the request never fired (bad opts / no
-/// capability) — the caller settles the task as failed.
+/// Parse the `ease.net::request` opts (the shared shape for the async
+/// drive and [`net_request_sync`]).
 ///
 /// `opts` JSON: `{ url: str, method?: str (default GET), headers?: {name:
 /// value}, body?: {text} | {base64} }`.
-fn net_start_drive(
-    handles: &Rc<RutHandles>,
-    task: &NetTask,
-    opts_json: &str,
-) -> Result<(), String> {
+fn parse_request_opts(opts_json: &str) -> Result<tur_net_capability::RequestOpts, String> {
     #[derive(serde::Deserialize)]
     struct Opts {
         url: String,
@@ -580,15 +594,8 @@ fn net_start_drive(
         body: Option<serde_json::Value>,
     }
 
-    let opts: Opts = serde_json::from_str(opts_json)
-        .map_err(|e| format!("ease:net: opts is not valid JSON: {e}"))?;
-    let http = handles
-        .inst
-        .capability()
-        .of::<tur_net_capability::Http>()
-        .ok_or_else(|| "ease:net: no http capability on this instance".to_string())?
-        .backend()
-        .clone();
+    let opts: Opts =
+        serde_json::from_str(opts_json).map_err(|e| format!("ease:net: opts is not valid JSON: {e}"))?;
 
     let headers: Vec<(String, String)> = opts
         .headers
@@ -617,13 +624,85 @@ fn net_start_drive(
         }
     });
 
-    let request = tur_net_capability::RequestOpts {
+    Ok(tur_net_capability::RequestOpts {
         url: opts.url,
         method: opts.method.unwrap_or_else(|| "GET".to_string()),
         headers,
         body,
         stream_buffer_bytes: None,
+    })
+}
+
+/// The blocking one-shot ([`install`]'s `ease.net.request_sync`): drive the
+/// capability request to completion on the shared tokio runtime and answer
+/// the settled outcome as JSON
+/// (`{"status","statusText","headers","body"<base64>,"error"}`).
+fn net_request_sync(handles: &Rc<RutHandles>, opts_json: &str) -> String {
+    let reply = |status: u64, status_text: &str, headers: &[(String, String)], body_b64: &str, error: &str| {
+        let map: serde_json::Map<String, serde_json::Value> = headers
+            .iter()
+            .map(|(k, v)| (k.to_lowercase(), serde_json::Value::String(v.clone())))
+            .collect();
+        serde_json::json!({
+            "status": status,
+            "statusText": status_text,
+            "headers": serde_json::Value::Object(map),
+            "body": body_b64,
+            "error": error,
+        })
+        .to_string()
     };
+
+    let opts = match parse_request_opts(opts_json) {
+        Ok(o) => o,
+        Err(msg) => return reply(0, "", &[], "", &msg),
+    };
+    let Some(http) = handles
+        .inst
+        .capability()
+        .of::<tur_net_capability::Http>()
+        .map(|c| c.backend().clone())
+    else {
+        return reply(0, "", &[], "", "ease:net: no http capability on this instance");
+    };
+
+    // The capability future is executor-agnostic (waker-driven reqwest on
+    // the registered backend) — driving it on the shared ease tokio runtime
+    // never touches the worker lane, so a blocking row here cannot wedge
+    // the VM's own drive.
+    match ease_client_tokio::tokio_runtime().block_on(http.request(opts)) {
+        tur_net_capability::HttpOutcome::Ok {
+            status,
+            status_text,
+            headers,
+            body,
+        } => reply(
+            status as u64,
+            &status_text,
+            &headers,
+            &b64_encode(&body),
+            "",
+        ),
+        tur_net_capability::HttpOutcome::Err(msg) => reply(0, "", &[], "", &msg),
+    }
+}
+
+/// Parse the `ease.net::request` opts and start the drive on the instance's
+/// worker spawner. `Err(msg)` = the request never fired (bad opts / no
+/// capability) — the caller settles the task as failed.
+fn net_start_drive(
+    handles: &Rc<RutHandles>,
+    task: &NetTask,
+    opts_json: &str,
+) -> Result<(), String> {
+    let request = parse_request_opts(opts_json)?;
+    let http = handles
+        .inst
+        .capability()
+        .of::<tur_net_capability::Http>()
+        .ok_or_else(|| "ease:net: no http capability on this instance".to_string())?
+        .backend()
+        .clone();
 
     let task2 = task.clone();
     handles.inst.spawn_local(move |_aw| async move {

@@ -4,11 +4,15 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileS
 import path from "node:path";
 import { ROOT } from "./base";
 
-// Package built plugin bundles (rspack output in <pluginDir>/dist) into
-// the committed registry:
+// Package rut plugin sources into the committed registry:
 //
-//   plugins/registry/zips/<id>-<version>.zip   (manifest.json + *.js at zip root)
-//   plugins/registry/plugins.json              (index: id/name/version/zip/sha256/size)
+//   plugins/registry/zips/<id>-<version>.zip   (manifest.json + *.rut + icons at zip root)
+//   plugins/registry/plugins.json              (index: id/name/version/zip/sha256/size/apiVersion)
+//
+// Plugins are raw rut sources since the apiVersion 2 epoch — there is no
+// build step (no rspack/pnpm/bundlers; the engine compiles the sources).
+// Everything at the plugin dir's top level ships: `manifest.json`, every
+// `.rut` source, and every manifest-referenced icon.
 //
 // `--bundle <id[,id…]>` (repeatable) additionally copies those zips into
 // the APK assets (`android/app/src/main/assets/plugin-bundles/<id>.zip`)
@@ -24,6 +28,12 @@ const ZIPS_DIR = path.join(REGISTRY_DIR, "zips");
 const ICONS_DIR = path.join(REGISTRY_DIR, "icons");
 const INDEX_PATH = path.join(REGISTRY_DIR, "plugins.json");
 const ASSET_BUNDLES_DIR = path.join(ROOT, "android/app/src/main/assets/plugin-bundles");
+
+/** The current plugin API epoch — must match `PLUGIN_API_MIN/MAX` in
+ *  `rust-libs/ease-client-backend/src/services/plugin_manager.rs` (the app
+ *  refuses installs outside its range, so packaging an out-of-epoch zip is
+ *  a loud error). */
+const PLUGIN_API_VERSION = 2;
 
 interface RegistryEntry {
   id: string;
@@ -84,44 +94,65 @@ function packagePlugin(pluginDir: string): RegistryEntry {
   const id: string = manifest.id;
   const version: string = manifest.version ?? "0.0.0";
   // The app rejects installs whose manifest lacks an integer `apiVersion`
-  // (see PLUGIN_API_MIN/MAX in `plugin_manager.rs`) — fail the packaging
-  // loudly instead of shipping an uninstallable zip.
+  // or whose level is outside its supported range (see PLUGIN_API_MIN/MAX
+  // in `plugin_manager.rs`) — fail the packaging loudly instead of shipping
+  // an uninstallable zip.
   if (!Number.isInteger(manifest.apiVersion)) {
     throw new Error(
-      `manifest.json must declare an integer "apiVersion" (e.g. 1): ${manifestPath}`,
+      `manifest.json must declare an integer "apiVersion" (e.g. ${PLUGIN_API_VERSION}): ${manifestPath}`,
     );
   }
   const apiVersion: number = manifest.apiVersion;
-  const distDir = path.join(pluginDir, "dist");
-  if (!existsSync(distDir)) {
-    throw new Error(`dist/ not found — run the plugin's rspack build first: ${distDir}`);
+  if (apiVersion !== PLUGIN_API_VERSION) {
+    throw new Error(
+      `manifest apiVersion ${apiVersion} != the packaging epoch ${PLUGIN_API_VERSION} — port the plugin to rut first: ${manifestPath}`,
+    );
   }
-  // The manifest ships inside the zip root (the old per-plugin `cp` step
-  // only targeted the removed assets dir).
-  copyFileSync(manifestPath, path.join(distDir, "manifest.json"));
 
-  // Contribution icons are plain files (never bundled by rspack) — copy
-  // each manifest-referenced one into dist/ so it lands in the zip root.
-  // A missing icon is a packaging error: the runtime would silently drop
-  // the icon, so fail loudly here instead.
+  // Stage the zip contents: manifest + every .rut source + every
+  // manifest-referenced icon. Entry files named by the manifest
+  // (`backend` / contribution `view`) must exist — a missing entry is a
+  // packaging error (the runtime would load a blank view / no backend).
+  const staging = path.join(pluginDir, "dist");
+  execSync(`rm -rf "${staging}" && mkdir -p "${staging}"`);
+  copyFileSync(manifestPath, path.join(staging, "manifest.json"));
+
+  const sources = readdirSync(pluginDir, { withFileTypes: true })
+    .filter((d) => d.isFile() && d.name.endsWith(".rut"))
+    .map((d) => d.name);
+  if (sources.length === 0) {
+    throw new Error(`no .rut sources found — port the plugin to rut: ${pluginDir}`);
+  }
+  for (const src of sources) {
+    copyFileSync(path.join(pluginDir, src), path.join(staging, src));
+  }
+
+  const entryFiles = [
+    ...(typeof manifest.backend === "string" && manifest.backend ? [manifest.backend] : []),
+    ...(manifest.contributions?.storages ?? []).map((c: { view?: string }) => c.view),
+    ...(manifest.contributions?.dashboard ?? []).map((c: { view?: string }) => c.view),
+  ];
+  for (const f of entryFiles) {
+    if (typeof f === "string" && f && !existsSync(path.join(staging, f))) {
+      throw new Error(`manifest entry file not found among the .rut sources: ${f} (${pluginDir})`);
+    }
+  }
+
   for (const icon of collectIconFiles(manifest)) {
     const src = path.join(pluginDir, icon);
     if (!existsSync(src)) {
       throw new Error(`manifest icon not found: ${src}`);
     }
-    copyFileSync(src, path.join(distDir, icon));
-    console.log(`icon: ${icon} -> ${path.join(distDir, icon)}`);
+    copyFileSync(src, path.join(staging, icon));
+    console.log(`icon: ${icon} -> ${path.join(staging, icon)}`);
   }
 
   mkdirSync(ZIPS_DIR, { recursive: true });
   const zipPath = path.join(ZIPS_DIR, `${id}-${version}.zip`);
-  // Zip the dist *contents* (manifest + icon(s) + bundles at zip root),
-  // stored-only entries (-X drops extra attrs; -0 avoids double compression
-  // of already-minified JS and keeps installs fast on-device). Source maps
-  // stay out — they double the payload for no runtime value. The zip is
-  // recreated from scratch (`zip` would otherwise merge into a stale
-  // archive).
-  execSync(`rm -f "${zipPath}" && zip -rX -0 "${zipPath}" . -x "*.map"`, { cwd: distDir, stdio: "inherit" });
+  // Zip the staged contents (manifest + sources + icons at zip root),
+  // stored-only (-X drops extra attrs; -0 keeps installs fast on-device —
+  // rut sources are small). Recreated from scratch each run.
+  execSync(`rm -f "${zipPath}" && zip -rX -0 "${zipPath}" .`, { cwd: staging, stdio: "inherit" });
 
   // `name` / `description` may be localized (`{ "en-US": …, "zh-CN": … }`) —
   // pass them through as declared; the app normalizes on parse.

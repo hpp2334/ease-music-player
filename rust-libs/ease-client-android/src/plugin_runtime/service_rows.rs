@@ -69,7 +69,7 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
             row("ease/secret", "remove", vec![TY_I64], TY_NIL, false),
             // ---- oauth (flow mint + Kotlin upcall) ----
             row("ease/oauth", "new", vec![], TY_STR, false),
-            row("ease/oauth", "start", vec![TY_STR], TY_NIL, false),
+            row("ease/oauth", "begin", vec![TY_STR], TY_NIL, false),
             // ---- themes (host palette) ----
             row("ease/themes", "color", vec![TY_STR], TY_STR, false),
             row("ease/themes", "is_dark", vec![], TY_BOOL, false),
@@ -259,19 +259,19 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
         Ok(format!("oauth-{n}"))
     });
 
-    row_fn!(handles, "ease::oauth::start", (oauth_id: &str) -> (), {
+    row_fn!(handles, "ease::oauth::begin", (oauth_id: &str) -> (), {
         let pid = plugin_id("oauth", &handles)?;
         let oauth_id = oauth_id.to_string();
         #[cfg(target_os = "android")]
         {
             if let Err(e) = upcall_start_oauth(pid.as_ref(), &oauth_id) {
-                tracing::warn!("ease:oauth.start({oauth_id}) upcall failed: {e}");
+                tracing::warn!("ease:oauth.begin({oauth_id}) upcall failed: {e}");
             }
         }
         #[cfg(not(target_os = "android"))]
         {
             let _ = (pid.as_ref(), oauth_id);
-            tracing::debug!("ease:oauth.start ignored (non-Android target)");
+            tracing::debug!("ease:oauth.begin ignored (non-Android target)");
         }
         Ok(())
     });
