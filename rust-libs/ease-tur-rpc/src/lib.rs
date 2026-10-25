@@ -1,561 +1,464 @@
-//! `ease-tur-rpc` — typed **request/response RPC** plus **credit-gated
-//! streaming** between the Rust host and the JS plugin realm, layered on
-//! tur's bidirectional event bus. Lets a JS plugin act as a service (e.g. a
-//! storage provider: the host calls `list(dir)`, opens a byte stream for
-//! `get(path, offset)`, and awaits OAuth callbacks).
+//! `ease-tur-rpc` — the host⇄rut plugin RPC bridge.
 //!
-//! tur's event bus (`EventBusHandle`) is a fire-and-forget byte pub/sub,
-//! multiplexed by `channel_id` since tur #190: a message targets exactly one
-//! channel, and a message to a channel with no handlers is silently dropped
-//! (no broadcast). Since tur #181 the threaded backend wires both directions
-//! and **self-wakes**: `emit_to_js` enqueues onto the worker (which flushes +
-//! fires the JS `on` callbacks registered on that channel), and JS→host bytes
-//! are shipped back to main (where the `on_bus_event` handlers registered on
-//! that channel fire). No manual pump / `request_paint` / per-call wake is
-//! required — the host holds a [`RpcClient`] (`Send + Clone`) and calls it
-//! from any thread (e.g. a tokio playback task).
+//! The tur engine's JS-era event bus is gone; this crate re-implements the
+//! request/response + event transport over the **rut entry rail**, keeping the
+//! `RpcClient` surface (`call_host` / `emit_event`) the backend services
+//! already use. There is no injected script module and no JS anywhere: the
+//! contract with a plugin backend is a **rut entry-fn convention**.
 //!
-//! Channel layout (each plugin instance owns its own bus, so channels never
-//! cross plugins):
+//! # Architecture (the bus pattern)
 //!
-//! - [`RPC_CHANNEL_ID`] (0) — the global RPC channel. Two protocols ride it,
-//!   distinguished by a leading magic byte (JSON never starts with `0x00`):
-//!   - **Control RPC (JSON):** [`RpcClient::call_host`] /
-//!     [`RpcClient::call_view`] enqueue `{id, op, scope, args}` via
-//!     `emit_to_js`. The JS dispatcher (`tur:rpc`) routes by scope —
-//!     `hostRpc.registerHandler` / `viewRpc.registerHandler` (or a
-//!     `hostRpc.registerStream` opener — see below) — and replies
-//!     `{id, ok, result|error}`; the host-side router (an `on_bus_event`
-//!     handler) matches `id` → resolves the caller's `oneshot`.
-//!   - **Streaming (binary-framed):** [`RpcClient::open_stream`] opens a
-//!     stream. The JS opener (registered via `hostRpc.registerStream`)
-//!     resolves
-//!     `{ meta, body, release?, mapError? }` — `meta` becomes the RPC reply,
-//!     then the dispatcher pumps `body` through a sid-bound **`StreamProducer`**
-//!     (`push`/`end`/`error`) that awaits host-granted credits before each
-//!     chunk. Frames over the bus:
-//!     `0x00 chunk : [0x00][streamId u32 LE][raw bytes...]`,
-//!     `0x01 end    : [0x01][streamId u32 LE]`,
-//!     `0x02 error  : [0x02][streamId u32 LE][utf-8 message...]`.
-//! - [`EVENT_CHANNEL_ID`] (1) — plugin-only events, host → JS,
-//!   fire-and-forget: [`RpcClient::emit_event`] pushes `{type, payload}`;
-//!   the JS side dispatches it to the `hostRpc.onEvent(sig, …)`
-//!   registration (the sig object carries the wire `type`; the legacy
-//!   bare-string form is still accepted for already-installed bundles). No
-//!   reply is sent, and a plugin with no registration
-//!   simply never hears it.
-//! - [`CREDIT_CHANNEL_ID`] (2) — stream flow control + cancellation, host →
-//!   JS only, JSON frames: grants `{"sid":n,"n":k}` re-credit stream `n`'s
-//!   pump, cancels `{"sid":n,"cancel":true}` abort it. Cancels are fired by
-//!   [`StreamRx`] drop/`cancel()` and by failed [`RpcClient::open_stream`]s.
+//! Each plugin backend instance carries a per-instance [`RpcBus`] (stamped as
+//! instance data by the embedder at `createInstance`; read by the host rows
+//! through the instance context):
 //!
-//! **Flow control**: the host grants [`CREDIT_WINDOW`] credits up front and
-//! one more per chunk a consumer receives ([`StreamRx::recv`] acks
-//! ack-on-consumption, TCP-like). At most `CREDIT_WINDOW` data frames are
-//! ever in flight — never more than the router's channel capacity, so gated
-//! pushes can't be dropped; a slow consumer *stalls* the JS pump (which
-//! stops pulling `body.next()`, propagating through `tur:net`'s byte budget
-//! down to TCP) instead of losing bytes. Cancellation rides the same
-//! channel: dropping the [`StreamRx`] tells the pump to stop, which runs the
-//! opener's `release()` hook (conventionally `task.cancel()` — the
-//! deterministic wire abort).
+//! - `ops: op → rut export name` — the backend registers each contract op as
+//!   its own `entry fn` (`ease.rpc.register("storage:list", "op_storage_list")`),
+//!   so dispatch is a compile-checked export call, never an in-module JSON
+//!   string switch.
+//! - `events: type → [export names]` — `ease.rpc.subscribe_event`.
+//! - `inbox: single pending request` — the host stashes the call payload
+//!   before firing the entry (the engine's crossing lanes carry no str
+//!   argument; the rut side pulls the payload with `ease.rpc.take_request()`).
 //!
-//! Wire-up is two steps:
-//! 1. Register [`TurRpcPlugin`] on the runtime (after `TurStdPlugin`, which
-//!    owns the event bus + `encodeUtf8`/`decodeUtf8`). This installs the
-//!    `tur:rpc` JS dispatcher module.
-//! 2. After spawning an instance, call [`RpcClient::wire`] on it — once, on
-//!    the instance's own thread (via `with_app`) — to grab the `Send`
-//!    `EventBusHandle`, install the reply router, and obtain a [`RpcClient`].
+//! `RpcClient::call_host(op, args)`:
+//! 1. resolve `op` → export name (`UnknownOp` when the backend never
+//!    registered it),
+//! 2. stash `{"op":…,"args":…}` in the inbox,
+//! 3. `call_rut_entry_cx_str(export, ctx_token)` — the entry returns the
+//!    reply envelope string,
+//! 4. parse `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`.
+//!
+//! Events ride the same inbox: `emit_event` stashes
+//! `{"type":…,"payload":…}` and fires each subscribed export (fire-and-
+//! forget).
+//!
+//! # Streaming (chunked pull)
+//!
+//! There are no credit-gated push streams anymore. The storage contract
+//! (`ease-js-storage`) splits the old `storage:get` opener into three plain
+//! ops driven by the host: `storage:get` (opener → `{sid, meta}`),
+//! `storage:get-chunk` (`{sid, offset, len}` → `{data: <base64>, eof}`) and
+//! `storage:release` (`{sid}`). Pull = natural backpressure; the reply is a
+//! str envelope, binary rides base64.
+//!
+//! # Threading
+//!
+//! [`RpcClient`] is `Clone` + `Send`; every call serializes through a shared
+//! gate (the inbox is single-slot) and crosses onto the instance's tur-host
+//! thread via the [`RutDriver`] impl (a blocking round-trip, the same pattern
+//! tur's own `loadModule` uses). Never call back into the *same* instance
+//! from inside a dispatch (single-slot inbox + face re-entrancy).
+//!
+//! # Testability
+//!
+//! [`RutDriver`] abstracts the engine hop, so host tests drive a real rut
+//! module through [`TurRpcBusPlugin`] + `TurTestApp` without Android.
 
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::{mpsc, oneshot};
-use tur_engine::core::event_bus::EventBusHandle;
-use tur_engine::core::plugin::{Plugin, PluginRegisterContext};
-use tur_engine::TurApp;
-use tur_engine::error::TurError;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use thiserror::Error;
 
-// ---------------------------------------------------------------------------
-// Bus channel ids (tur #190 multiplexing) — must match the JS constants in
-// RPC_JS below.
-// ---------------------------------------------------------------------------
-
-/// Global RPC channel: control RPC (JSON) + stream frames (binary). Shared
-/// by all RPC callers of one plugin instance's bus.
-pub const RPC_CHANNEL_ID: u64 = 0;
-
-/// Plugin-event channel: host → JS fire-and-forget `{type, payload}` JSON
-/// (see [`RpcClient::emit_event`]). One bus per plugin instance, so this
-/// channel is naturally plugin-private.
-pub const EVENT_CHANNEL_ID: u64 = 1;
-
-/// Stream credit channel: host → JS grants (`{"sid",n}`) and cancels
-/// (`{"sid","cancel"}`) that pace and abort streaming pumps (see
-/// [`RpcClient::open_stream`] / [`StreamRx`]).
-pub const CREDIT_CHANNEL_ID: u64 = 2;
-
-/// Per-stream credit window: the maximum number of data frames allowed in
-/// flight (bus queue + router channel) per open stream. The router's mpsc
-/// capacity carries headroom above it (see [`STREAM_CHANNEL_CAPACITY`]):
-/// the credit protocol alone gates the pump, and a transient credit
-/// accounting slip must never drop a data frame — for control traffic a
-/// drop is a glitch, for streamed audio bytes it is permanent corruption.
-pub const CREDIT_WINDOW: u32 = 32;
-
-/// Router channel capacity per stream: the credit window plus headroom.
-/// Credits still bound legitimate in-flight frames (≤ `CREDIT_WINDOW`);
-/// the slack absorbs bursts racing the credit round-trip so `try_send`
-/// can only hit `Full` on a real protocol violation (dropped + warned).
-const STREAM_CHANNEL_CAPACITY: usize = CREDIT_WINDOW as usize * 2;
-
-// ---------------------------------------------------------------------------
-// Error
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, thiserror::Error)]
-pub enum RpcError {
-    #[error("JS handler error: {0}")]
-    Handler(String),
-    #[error("channel closed (instance dropped?)")]
-    ChannelClosed,
-    #[error("undecodable reply: {0}")]
-    BadReply(String),
-    #[error("event bus not available (is TurStdPlugin registered?)")]
-    NoEventBus,
-}
-
-// ---------------------------------------------------------------------------
-// Control-RPC wire format (JSON over the byte event bus)
-// ---------------------------------------------------------------------------
-
-/// Which side a control-RPC request is issued on. Every envelope carries it
-/// explicitly, and the JS dispatcher routes strictly by it — an op registered
-/// in the wrong namespace is a "no host/view handler" error at the first
-/// call, never a silent half-serve.
+/// Per-instance bus state: the op/event tables + the request inbox.
 ///
-/// - [`RpcScope::Host`] — the Rust host invoking the backend: the storage
-///   contract (`storage:list` / `storage:get` via `ease-js-storage`), the
-///   instance lifecycle (`storage:removeInstance`), and the OAuth flow
-///   (`oauth:url` / `oauth:exchange`) — all contract literals with identity
-///   riding the payload. Resolves `hostRpc.registerHandler` /
-///   `hostRpc.registerStream` registrations.
-/// - [`RpcScope::View`] — the plugin's own view invoking its backend via
-///   `ease.rpc.call`. Resolves `viewRpc.registerHandler` registrations (views
-///   cannot open streams).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum RpcScope {
-    Host,
-    View,
+/// Shared three ways: the rut rows (`ease.rpc.*`) reach it through the
+/// instance's plugin state / instance data ([`RpcBusCell`]), the embedder
+/// stamps it at `createInstance`, and the [`RpcClient`] holds the same `Arc`.
+pub struct RpcBus {
+    ops: Mutex<HashMap<String, String>>,
+    events: Mutex<HashMap<String, Vec<String>>>,
+    inbox: Mutex<Option<String>>,
+    /// Set once the first `register_op` lands — diagnostics for "the backend
+    /// loaded but registered nothing".
+    registered: AtomicBool,
 }
 
-#[derive(Serialize)]
-struct OutgoingRequest<'a> {
-    id: u64,
-    op: &'a str,
-    scope: RpcScope,
-    /// Envelope-level stream id for `hostRpc.registerStream` opens (host
-    /// only). The `args` object is passed through verbatim — no magic-key
-    /// injection; plugin code never sees a stream id.
-    #[serde(rename = "streamId", skip_serializing_if = "Option::is_none")]
-    stream_id: Option<u32>,
-    args: &'a Value,
+impl RpcBus {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            ops: Mutex::new(HashMap::new()),
+            events: Mutex::new(HashMap::new()),
+            inbox: Mutex::new(None),
+            registered: AtomicBool::new(false),
+        })
+    }
+
+    /// `ease.rpc.register(op, export)` — bind a contract op to the entry fn
+    /// that serves it. Re-registering an op replaces the binding.
+    pub fn register_op(&self, op: &str, export: &str) {
+        self.registered.store(true, Ordering::Relaxed);
+        self.ops
+            .lock()
+            .expect("rpc bus ops poisoned")
+            .insert(op.to_string(), export.to_string());
+    }
+
+    /// `ease.rpc.subscribe_event(type, export)` — append the export to the
+    /// event's fan-out list (idempotent per export).
+    pub fn subscribe_event(&self, event_type: &str, export: &str) {
+        let mut events = self.events.lock().expect("rpc bus events poisoned");
+        let list = events.entry(event_type.to_string()).or_default();
+        if !list.iter().any(|e| e == export) {
+            list.push(export.to_string());
+        }
+    }
+
+    /// `ease.rpc.take_request()` — drain the inbox ("" when empty).
+    pub fn take_request(&self) -> String {
+        self.inbox
+            .lock()
+            .expect("rpc bus inbox poisoned")
+            .take()
+            .unwrap_or_default()
+    }
+
+    /// Look up the export serving `op`.
+    pub fn export_for_op(&self, op: &str) -> Option<String> {
+        self.ops
+            .lock()
+            .expect("rpc bus ops poisoned")
+            .get(op)
+            .cloned()
+    }
+
+    /// The exports subscribed to `event_type`.
+    pub fn exports_for_event(&self, event_type: &str) -> Vec<String> {
+        self.events
+            .lock()
+            .expect("rpc bus events poisoned")
+            .get(event_type)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn stash(&self, json: String) {
+        *self.inbox.lock().expect("rpc bus inbox poisoned") = Some(json);
+    }
+
+    /// Whether any op was ever registered (diagnostics).
+    pub fn has_registrations(&self) -> bool {
+        self.registered.load(Ordering::Relaxed)
+    }
 }
 
-#[derive(Deserialize)]
-struct Reply {
-    id: u64,
-    ok: bool,
-    #[serde(default)]
-    result: Value,
-    #[serde(default)]
-    error: Option<String>,
-}
-
-impl Reply {
-    fn into_result(self) -> Result<Value, RpcError> {
-        if self.ok {
-            Ok(self.result)
-        } else {
-            Err(RpcError::Handler(self.error.unwrap_or_default()))
+impl Default for RpcBus {
+    fn default() -> Self {
+        Self {
+            ops: Mutex::new(HashMap::new()),
+            events: Mutex::new(HashMap::new()),
+            inbox: Mutex::new(None),
+            registered: AtomicBool::new(false),
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Streaming wire format (binary frames over the byte event bus)
-// ---------------------------------------------------------------------------
-//
-// A stream frame starts with a magic byte that JSON can never produce (JSON
-// begins with `{` 0x7B, `[`, `"`, digit, `-`, `t`/`f`/`n`), so the host router
-// can tell a stream frame from a JSON reply by inspecting byte[0]:
-//   0x00 chunk  : [0x00][streamId u32 LE][raw bytes...]
-//   0x01 end    : [0x01][streamId u32 LE]
-//   0x02 error  : [0x02][streamId u32 LE][utf-8 message...]
+/// The plugin-state / instance-data wrapper the rows resolve the bus through.
+///
+/// A distinct newtype (instead of bare `Arc<RpcBus>`) so the instance-data
+/// slot never collides with an embedder's own `Arc<_>` types.
+#[derive(Clone)]
+pub struct RpcBusCell(pub Arc<RpcBus>);
 
-const MAGIC_CHUNK: u8 = 0x00;
-const MAGIC_END: u8 = 0x01;
-const MAGIC_ERR: u8 = 0x02;
-
-/// One item pushed by the JS opener of a stream.
-#[derive(Debug)]
-pub enum StreamChunk {
-    Data(Bytes),
-    End,
-    Error(String),
+#[derive(Error, Debug)]
+pub enum RpcError {
+    /// The backend never registered this op (or the module is a view-only
+    /// load). Carries the op name.
+    #[error("unknown rpc op `{0}` (not registered by the plugin backend)")]
+    UnknownOp(String),
+    /// The entry answered an error envelope — the plugin's own failure.
+    #[error("{0}")]
+    Handler(String),
+    /// The engine hop failed (stale instance, module gone, trap).
+    #[error("rpc transport: {0}")]
+    Transport(String),
+    /// The reply was not a valid envelope.
+    #[error("rpc reply decode: {0}")]
+    Decode(String),
 }
 
-fn read_stream_id(bytes: &[u8]) -> Option<u32> {
-    if bytes.len() < 5 {
-        return None;
+/// The engine hop, abstracted so host tests can drive a rut module without
+/// the Android runtime. All methods are blocking; impls cross onto the
+/// instance's tur-host thread (see the crate docs).
+pub trait RutDriver: Send + Sync {
+    /// Call `entry fn(opaque) -> str` and return the answered string.
+    fn call_entry_str(&self, name: &str, cx: u64) -> Result<String, String>;
+    /// Call `entry fn(opaque)` (answer ignored — event dispatch).
+    fn call_entry(&self, name: &str, cx: u64) -> Result<(), String>;
+    /// The `entry fn start() -> opaque` answer token; 0 until the module
+    /// boots (callers treat 0 as "not loaded").
+    fn start_token(&self) -> u64;
+}
+
+/// The client half. `Clone` shares the bus, driver and the call gate.
+pub struct RpcClient {
+    bus: Arc<RpcBus>,
+    driver: Arc<dyn RutDriver>,
+    /// Serializes call_host/emit_event per instance — the inbox is
+    /// single-slot and the entry rail is one VM call at a time.
+    gate: Arc<tokio::sync::Mutex<()>>,
+    token: std::sync::OnceLock<u64>,
+}
+
+impl Clone for RpcClient {
+    fn clone(&self) -> Self {
+        Self {
+            bus: self.bus.clone(),
+            driver: self.driver.clone(),
+            gate: self.gate.clone(),
+            token: self.token.clone(),
+        }
     }
-    Some(u32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]))
+}
+
+impl RpcClient {
+    pub fn new(bus: Arc<RpcBus>, driver: Arc<dyn RutDriver>) -> Self {
+        Self {
+            bus,
+            driver,
+            gate: Arc::new(tokio::sync::Mutex::new(())),
+            token: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// The context token, resolved once (0 = the module never answered an
+    /// opaque start — dispatch then fails with [`RpcError::Transport`]).
+    fn token(&self) -> Result<u64, RpcError> {
+        match self.token.get() {
+            Some(t) => Ok(*t),
+            None => {
+                let t = self.driver.start_token();
+                let _ = self.token.set(t);
+                Ok(*self.token.get().unwrap_or(&0))
+            }
+        }
+    }
+
+    /// Resolve `op → export`, stash the payload, fire the entry, decode the
+    /// envelope. `args` rides verbatim as the payload's `args` field.
+    pub async fn call_host(&self, op: &str, args: Value) -> Result<Value, RpcError> {
+        let export = self
+            .bus
+            .export_for_op(op)
+            .ok_or_else(|| RpcError::UnknownOp(op.to_string()))?;
+        let token = self.token()?;
+        if token == 0 {
+            return Err(RpcError::Transport(
+                "the plugin module has not booted (no context token)".into(),
+            ));
+        }
+        let _guard = self.gate.lock().await;
+        self.bus.stash(
+            serde_json::json!({ "op": op, "args": args }).to_string(),
+        );
+        let reply = self
+            .driver
+            .call_entry_str(&export, token)
+            .map_err(RpcError::Transport)?;
+        decode_envelope(&reply)
+    }
+
+    /// Fire-and-forget event fan-out. Payload errors are logged, never
+    /// surfaced (the old event semantics).
+    pub async fn emit_event(&self, event_type: &str, payload: Value) {
+        let exports = self.bus.exports_for_event(event_type);
+        if exports.is_empty() {
+            return;
+        }
+        let Ok(token) = self.token() else {
+            return;
+        };
+        if token == 0 {
+            return;
+        }
+        let _guard = self.gate.lock().await;
+        for export in exports {
+            self.bus.stash(
+                serde_json::json!({ "type": event_type, "payload": payload })
+                    .to_string(),
+            );
+            if let Err(e) = self.driver.call_entry(&export, token) {
+                tracing::warn!(event = event_type, export, "plugin event dispatch failed: {e}");
+            }
+        }
+    }
+
+    /// The bus this client drives (diagnostics / tests).
+    pub fn bus(&self) -> &Arc<RpcBus> {
+        &self.bus
+    }
+
+    /// Eagerly resolve the context token (0 = the module has not booted).
+    /// The engine's `extract_rpc` gates on this — a backend whose module
+    /// failed to boot never produces a client.
+    pub fn bus_token(&self) -> u64 {
+        self.token().unwrap_or(0)
+    }
+}
+
+/// Decode `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`.
+fn decode_envelope(reply: &str) -> Result<Value, RpcError> {
+    let v: Value = serde_json::from_str(reply)
+        .map_err(|e| RpcError::Decode(format!("reply is not JSON: {e} — `{reply}`")))?;
+    match v.get("ok") {
+        Some(Value::Bool(true)) => Ok(v
+            .get("result")
+            .cloned()
+            .ok_or_else(|| RpcError::Decode("ok envelope missing `result`".into()))?),
+        Some(Value::Bool(false)) => {
+            let msg = v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("unspecified plugin error");
+            Err(RpcError::Handler(msg.to_string()))
+        }
+        _ => Err(RpcError::Decode(format!(
+            "reply envelope missing `ok` — `{}`",
+            truncate(reply)
+        ))),
+    }
+}
+
+fn truncate(s: &str) -> &str {
+    match s.char_indices().nth(200) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
+}
+
+/// Build the ok envelope (mirrors what the rut side hand-builds).
+pub fn ok_envelope(result: Value) -> Value {
+    serde_json::json!({ "ok": true, "result": result })
+}
+
+/// Build the error envelope.
+pub fn err_envelope(message: &str) -> Value {
+    serde_json::json!({ "ok": false, "error": message })
 }
 
 // ---------------------------------------------------------------------------
-// Cross-thread shared state (Arc<Mutex> — shared between the Send RpcClient
-// and the on_bus_event router, which fires on the main thread)
+// The `ease.rpc` host rows (the bus plugin).
 // ---------------------------------------------------------------------------
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>;
-type StreamTable = Arc<Mutex<HashMap<u32, mpsc::Sender<StreamChunk>>>>;
+/// Registers the `ease.rpc` rows the rut side needs to serve the bus:
+///
+/// - `register(op: str, export: str)` — bind a contract op.
+/// - `subscribe_event(type: str, export: str)` — join an event fan-out.
+/// - `take_request() -> str` — drain the pending call/event payload ("" = none).
+///
+/// The bus comes from the per-instance data slot (`RpcBusCell`, stamped by
+/// the embedder); when absent (host tests), `register` mints a private one
+/// into plugin state so the harness flows work unchanged.
+pub struct TurRpcBusPlugin {
+    /// The shared bus for engine-stamped instances (`None` = mint fresh per
+    /// instance — the host-test path).
+    bus: Option<Arc<RpcBus>>,
+}
 
-// ---------------------------------------------------------------------------
-// Plugin — installs the `tur:rpc` JS dispatcher module. No subsystem: the
-// engine's event bus is itself the transport (self-waking both ways since #181).
-// ---------------------------------------------------------------------------
+impl TurRpcBusPlugin {
+    pub fn new(bus: Option<Arc<RpcBus>>) -> Self {
+        Self { bus }
+    }
+}
 
-/// Install as a runtime plugin (after `TurStdPlugin`). Registers the `tur:rpc`
-/// JS module (dispatcher + `registerStream` pump + credit gates). Then call
-/// [`RpcClient::wire`] on each instance to obtain a caller handle.
-pub struct TurRpcPlugin;
-
-impl Plugin for TurRpcPlugin {
-    fn register(&self, ctx: &mut PluginRegisterContext<'_>) -> Result<(), TurError> {
-        ctx.register_js_module("tur:rpc", RPC_JS, Path::new("tur-rpc.mjs"))?;
-        tracing::info!("TurRpcPlugin registered tur:rpc");
+impl tur_engine::core::plugin::Plugin for TurRpcBusPlugin {
+    fn register(&self, ctx: &mut tur_engine::core::plugin::PluginRegisterContext) -> Result<(), tur_engine::error::TurError> {
+        let cell = match &self.bus {
+            Some(b) => RpcBusCell(b.clone()),
+            None => RpcBusCell(RpcBus::new()),
+        };
+        // Per-instance plugin state: `register` re-runs per instance, so the
+        // minted cell is instance-fresh on the test path.
+        ctx.define_plugin_state(std::rc::Rc::new(cell));
+        ctx.push_rut_ext(std::rc::Rc::new(install_rpc_rows));
         Ok(())
     }
 }
 
-// ---------------------------------------------------------------------------
-// Caller handle (Send + Clone) — usable from any thread
-// ---------------------------------------------------------------------------
+fn install_rpc_rows(cx: &mut tur_engine::core::rut_runtime::RutPkgCx<'_>) {
+    use rut_core::types::{TY_NIL, TY_STR};
 
-/// Send-able handle for invoking JS handlers and opening byte streams. Obtain
-/// via [`RpcClient::wire`]. Cheaply cloneable so multiple backend tasks can
-/// share one (id counters are shared via `Arc`).
-#[derive(Clone)]
-pub struct RpcClient {
-    eb: EventBusHandle,
-    pending: Pending,
-    streams: StreamTable,
-    next_req_id: Arc<AtomicU64>,
-    next_stream_id: Arc<AtomicU64>,
-}
 
-impl RpcClient {
-    /// Wire the RPC layer into an already-built instance and return a caller
-    /// handle. Must be called on the instance's own thread (via `with_app`) —
-    /// `event_bus_handle()` borrows the `Rc`-based `TurApp`. The returned
-    /// [`RpcClient`] is `Send + Clone` and may be moved to any thread.
-    pub fn wire(app: &TurApp) -> Result<Self, RpcError> {
-        let eb = app.event_bus_handle();
-        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let streams: StreamTable = Arc::new(Mutex::new(HashMap::new()));
+    cx.decl.extend(
+        vec![
+            ("register", vec![TY_STR, TY_STR], TY_NIL, false),
+            ("subscribe_event", vec![TY_STR, TY_STR], TY_NIL, false),
+            ("take_request", vec![], TY_STR, false),
+        ]
+        .into_iter()
+        .map(|(n, p, r, a)| {
+            tur_engine::core::rut_runtime::host_row_at("ease/rpc", n, p, r, a)
+        }),
+    );
 
-        // Route JS→host messages on the RPC channel: stream frames → stream
-        // channels; otherwise → JSON control-RPC replies matched by id. Fires
-        // on the main thread (MainBackend dispatch of MainMsg::EventBusToHost).
-        let (p, s) = (pending.clone(), streams.clone());
-        eb.on_bus_event(RPC_CHANNEL_ID, move |bytes| route_incoming(bytes, &p, &s));
-
-        Ok(RpcClient {
-            eb,
-            pending,
-            streams,
-            next_req_id: Arc::new(AtomicU64::new(1)),
-            next_stream_id: Arc::new(AtomicU64::new(1)),
-        })
-    }
-
-    /// Invoke a **host-scoped** JS handler — one registered via
-    /// `hostRpc.registerHandler` — and await its result. For the Rust host's
-    /// backend calls: the storage contract and the bridged lifecycle ops.
-    /// Errors thrown by the handler come back as [`RpcError::Handler`].
-    pub async fn call_host(&self, op: &str, args: Value) -> Result<Value, RpcError> {
-        self.call_inner(RpcScope::Host, op, args, None).await
-    }
-
-    /// Invoke a **view-scoped** JS handler — one registered via
-    /// `viewRpc.registerHandler`. This is the scope `ease.rpc.call` from a
-    /// plugin view lands in (see `rpc_bridge.rs`); Rust code rarely calls it
-    /// directly.
-    pub async fn call_view(&self, op: &str, args: Value) -> Result<Value, RpcError> {
-        self.call_inner(RpcScope::View, op, args, None).await
-    }
-
-    async fn call_inner(
-        &self,
-        scope: RpcScope,
-        op: &str,
-        args: Value,
-        stream_id: Option<u32>,
-    ) -> Result<Value, RpcError> {
-        let id = self.next_req_id.fetch_add(1, Ordering::Relaxed);
-        let (otx, orx) = oneshot::channel();
-        // Register the awaiter BEFORE emitting so a fast (impossible in
-        // practice, but defensive) reply is never missed.
-        self.pending.lock().unwrap().insert(id, otx);
-        let payload = serde_json::to_vec(&OutgoingRequest {
-            id,
-            op,
-            scope,
-            stream_id,
-            args: &args,
-        })
-        .unwrap_or_default();
-        // Self-waking: emit_to_js enqueues a WorkerMsg → worker flushes → JS
-        // dispatcher runs → reply ships back via MainMsg::EventBusToHost →
-        // router resolves the oneshot.
-        self.eb.emit_to_js(RPC_CHANNEL_ID, payload);
-        orx.await.map_err(|_| RpcError::ChannelClosed)?
-    }
-
-    /// Fire a plugin event at the JS realm on the dedicated event channel:
-    /// pushes `{type, payload}` JSON, delivered to the
-    /// `hostRpc.onEvent(sig, …)` registration on the next flush.
-    /// Fire-and-forget — no reply is sent, and a plugin with no registration
-    /// silently never hears it (standard channel semantics since tur #190).
-    pub fn emit_event(&self, event_type: &str, payload: Value) {
-        let frame = serde_json::json!({ "type": event_type, "payload": payload });
-        let bytes = serde_json::to_vec(&frame).unwrap_or_default();
-        self.eb.emit_to_js(EVENT_CHANNEL_ID, bytes);
-    }
-
-    /// Open a byte stream: calls JS stream opener `op` (registered via
-    /// `hostRpc.registerStream` — streams are host-only; views cannot open
-    /// them) and awaits its metadata reply, returning the
-    /// metadata plus a [`StreamRx`] for the chunks the JS pump pushes. The
-    /// stream id is host-assigned and carried in the request *envelope*
-    /// (`streamId` alongside `op`/`args`) — the opener receives `args`
-    /// verbatim, and plugin code never sees a stream id.
-    ///
-    /// Flow control: [`CREDIT_WINDOW`] credits are granted up front; each
-    /// [`StreamRx::recv`] of a data chunk re-credits the pump by one, so the
-    /// consumer's pace gates the producer's. Dropping the [`StreamRx`] (or
-    /// [`StreamRx::cancel`]) aborts the pump.
-    pub async fn open_stream(
-        &self,
-        op: &str,
-        args: Value,
-    ) -> Result<(Value, StreamRx), RpcError> {
-        let stream_id = self.next_stream_id.fetch_add(1, Ordering::Relaxed) as u32;
-        let (stx, srx) = mpsc::channel::<StreamChunk>(STREAM_CHANNEL_CAPACITY);
-        self.streams.lock().unwrap().insert(stream_id, stx);
-        // Initial credit window — emitted before the request so the credits
-        // are already queued when the JS pump starts taking them.
-        emit_credit(&self.eb, stream_id, CREDIT_WINDOW);
-        // Drop guard: ANY failure exit — the call erroring, or the caller
-        // dropping this future mid-await — removes the table entry (no leak)
-        // and cancels the JS pump (the opener may still resolve and start
-        // pumping on the initial credits; the cancel is what unparks it).
-        let guard = StreamGuard {
-            streams: self.streams.clone(),
-            eb: self.eb.clone(),
-            sid: stream_id,
-            armed: true,
-        };
-        match self.call_inner(RpcScope::Host, op, args, Some(stream_id)).await {
-            Ok(metadata) => {
-                guard.disarm();
-                Ok((
-                    metadata,
-                    StreamRx {
-                        rx: srx,
-                        eb: self.eb.clone(),
-                        sid: stream_id,
-                        done: false,
-                    },
-                ))
-            }
-            // guard fires on drop: entry removed + cancel emitted
-            Err(e) => Err(e),
-        }
-    }
-}
-
-/// Cleans up a failed/abandoned `open_stream`: removes the stream-table
-/// entry and emits a cancel frame, unless defused by a successful open.
-struct StreamGuard {
-    streams: StreamTable,
-    eb: EventBusHandle,
-    sid: u32,
-    armed: bool,
-}
-
-impl StreamGuard {
-    fn disarm(mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for StreamGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            self.streams.lock().unwrap().remove(&self.sid);
-            emit_cancel(&self.eb, self.sid);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// StreamRx — the consumer-side handle (credits + cancellation)
-// ---------------------------------------------------------------------------
-
-/// Receiving half of an open stream. Every `recv()` of a [`StreamChunk::Data`]
-/// re-credits the JS pump by one chunk (the backpressure ack); dropping the
-/// handle — or [`StreamRx::cancel`] — emits a cancel frame that aborts the
-/// pump (its `release` hook then runs, conventionally `task.cancel()` on the
-/// underlying request).
-pub struct StreamRx {
-    rx: mpsc::Receiver<StreamChunk>,
-    eb: EventBusHandle,
-    sid: u32,
-    done: bool,
-}
-
-impl StreamRx {
-    /// Await the next stream item. `None` means the stream finished (an
-    /// `End`/`Error` was already delivered, or the sender vanished).
-    pub async fn recv(&mut self) -> Option<StreamChunk> {
-        let chunk = self.rx.recv().await?;
-        match chunk {
-            StreamChunk::Data(_) => {
-                // Ack-on-consumption: one grant back per chunk handed out.
-                emit_credit(&self.eb, self.sid, 1);
-            }
-            StreamChunk::End | StreamChunk::Error(_) => {
-                self.done = true;
-            }
-        }
-        Some(chunk)
-    }
-
-    /// Abort the stream: the JS pump stops pushing and its `release` hook
-    /// fires. Idempotent; also runs automatically on drop.
-    pub fn cancel(&mut self) {
-        if !self.done {
-            self.done = true;
-            emit_cancel(&self.eb, self.sid);
-        }
-    }
-}
-
-impl Drop for StreamRx {
-    fn drop(&mut self) {
-        self.cancel();
-    }
-}
-
-fn emit_credit(eb: &EventBusHandle, sid: u32, n: u32) {
-    let frame = serde_json::json!({ "sid": sid, "n": n });
-    if let Ok(bytes) = serde_json::to_vec(&frame) {
-        eb.emit_to_js(CREDIT_CHANNEL_ID, bytes);
-    }
-}
-
-fn emit_cancel(eb: &EventBusHandle, sid: u32) {
-    let frame = serde_json::json!({ "sid": sid, "cancel": true });
-    if let Ok(bytes) = serde_json::to_vec(&frame) {
-        eb.emit_to_js(CREDIT_CHANNEL_ID, bytes);
-    }
-}
-
-/// Shared incoming-message router (host `on_bus_event` handler body).
-fn route_incoming(bytes: Vec<u8>, pending: &Pending, streams: &StreamTable) {
-    let first = match bytes.first() {
-        Some(b) => *b,
-        None => return,
+    let Some(handles) = cx.handles else {
+        return; // compile-time decl probe
     };
-    match first {
-        // stream frame
-        MAGIC_CHUNK => {
-            if let Some(sid) = read_stream_id(&bytes) {
-                let chunk = Bytes::copy_from_slice(&bytes[5..]);
-                forward_stream(streams, sid, StreamChunk::Data(chunk));
-            }
-        }
-        MAGIC_END => {
-            if let Some(sid) = read_stream_id(&bytes) {
-                forward_stream(streams, sid, StreamChunk::End);
-            }
-        }
-        MAGIC_ERR => {
-            if let Some(sid) = read_stream_id(&bytes) {
-                let msg = String::from_utf8_lossy(&bytes[5..]).into_owned();
-                forward_stream(streams, sid, StreamChunk::Error(msg));
-            }
-        }
-        // otherwise: JSON control-RPC reply
-        _ => match serde_json::from_slice::<Reply>(&bytes) {
-            Ok(r) => {
-                if let Some(s) = pending.lock().unwrap().remove(&r.id) {
-                    let _ = s.send(r.into_result());
-                }
-            }
-            Err(e) => tracing::warn!("tur:rpc: undecodable reply ({e}), dropping"),
-        },
-    }
+    let pkg = &mut *cx.pkg;
+
+    // register(op, export) — bind op → entry fn name.
+    let h = handles.clone();
+    rut_vm::pkg_fn!(pkg, "ease::rpc::register", (&str, &str) -> (), move |_vm: &mut rut_vm::interp::Vm, op: &str, export: &str| {
+        bus_of(&h).register_op(op, export);
+        Ok(())
+    });
+
+    // subscribe_event(type, export).
+    let h = handles.clone();
+    rut_vm::pkg_fn!(pkg, "ease::rpc::subscribe_event", (&str, &str) -> (), move |_vm: &mut rut_vm::interp::Vm, ty: &str, export: &str| {
+        bus_of(&h).subscribe_event(ty, export);
+        Ok(())
+    });
+
+    // take_request() -> str — the pending call/event payload ("" = none).
+    let h = handles.clone();
+    rut_vm::pkg_fn!(pkg, "ease::rpc::take_request", () -> String, move |_vm: &mut rut_vm::interp::Vm| {
+        Ok(bus_of(&h).take_request())
+    });
 }
 
-/// Deliver a stream chunk to its channel and, on End/Error, drop the sender.
-fn forward_stream(streams: &StreamTable, sid: u32, chunk: StreamChunk) {
-    let is_terminal = matches!(chunk, StreamChunk::End | StreamChunk::Error(_));
-    let mut table = streams.lock().unwrap();
-    let sender = if is_terminal {
-        table.remove(&sid)
-    } else {
-        table.get(&sid).cloned()
-    };
-    drop(table);
-    if let Some(sender) = sender {
-        match sender.try_send(chunk) {
-            Ok(()) => {}
-            // Unreachable for well-formed pumps — the credit window is
-            // below the channel capacity (see STREAM_CHANNEL_CAPACITY);
-            // a Full hit means a protocol violation, and a dropped DATA
-            // frame is permanent audio corruption — escalate it.
-            Err(mpsc::error::TrySendError::Full(c)) => {
-                let bytes = match &c {
-                    StreamChunk::Data(b) => b.len(),
-                    _ => 0,
-                };
-                tracing::error!(
-                    sid,
-                    bytes,
-                    "tur:rpc: stream chunk dropped (channel full) — DATA LOSS"
-                );
-            }
-            // Consumer gone; its StreamRx drop already emitted a cancel.
-            Err(mpsc::error::TrySendError::Closed(_)) => {}
-        }
-    }
+/// Resolve the bus: instance data first (the embedder-stamped slot), then
+/// the plugin state (the host-test path minted at register).
+fn bus_of(handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>) -> Arc<RpcBus> {
+    handles
+        .inst
+        .data::<RpcBusCell>()
+        .map(|c| c.0)
+        .or_else(|| {
+            handles
+                .inst
+                .plugin_state::<RpcBusCell>()
+                .map(|c| c.0.clone())
+        })
+        .expect("rpc bus: no RpcBusCell in instance data or plugin state")
 }
 
-// ---------------------------------------------------------------------------
-// tur:rpc JS glue — scoped dispatch (hostRpc/viewRpc), credit-gated
-// StreamProducer pump, plugin events. The module source lives in
-// `tur-rpc.mjs` next to this file (registered under the specifier
-// "tur:rpc"); the bus channel ids there must match the Rust constants
-// RPC_CHANNEL_ID / EVENT_CHANNEL_ID / CREDIT_CHANNEL_ID above.
-// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
 
-const RPC_JS: &str = include_str!("tur-rpc.mjs");
+    #[test]
+    fn envelope_roundtrip() {
+        let ok = ok_envelope(serde_json::json!({ "a": 1 }));
+        assert_eq!(decode_envelope(&ok.to_string()).unwrap(), serde_json::json!({ "a": 1 }));
+
+        let err = err_envelope("boom");
+        match decode_envelope(&err.to_string()) {
+            Err(RpcError::Handler(m)) => assert_eq!(m, "boom"),
+            other => panic!("expected Handler, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn envelope_garbage() {
+        assert!(matches!(
+            decode_envelope("not json"),
+            Err(RpcError::Decode(_))
+        ));
+        assert!(matches!(
+            decode_envelope("{\"result\":1}"),
+            Err(RpcError::Decode(_))
+        ));
+    }
+}

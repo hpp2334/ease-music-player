@@ -1,43 +1,52 @@
-//! `ease-js-storage` — a [`StorageBackend`] whose `list` / `get` are served by a
-//! JS storage-provider plugin over `ease-tur-rpc`.
+//! `ease-js-storage` — a [`StorageBackend`] whose `list` / `get` are served
+//! by a rut storage-provider plugin over `ease-tur-rpc`.
 //!
 //! Each storage row that references a plugin provider instantiates one of
 //! these. `list(dir)` is a control RPC returning a JSON array of entries;
-//! `get(path, offset)` opens a streaming RPC and bridges the credit-gated
-//! chunks into a [`StreamFile`] (channel-backed).
+//! `get(path, offset)` is a **chunked pull**: an opener RPC returns the
+//! metadata + a session id, then the host pulls fixed-size chunks until
+//! `eof`, then releases the session. Pull = natural backpressure (the
+//! consumer drains the bounded channel; the loop only pulls the next chunk
+//! after the previous one was handed off) — the old credit-gated push
+//! protocol is gone.
 //!
-//! The ops are **contract literals, identical for every provider** — the host
-//! never composes an op name. Identity rides the payload:
+//! The ops are **contract literals, identical for every provider** — the
+//! host never composes an op name. Identity rides the payload:
 //! - `storage:list` `{ pluginId, storageId, dir }` →
-//!   `[{ name, path, size?, isDir }, ...]` — a `hostRpc.registerHandler`.
-//! - `storage:get` `{ pluginId, storageId, path, offset }` — a
-//!   `hostRpc.registerStream` opener resolving
-//!   `{ meta: { totalLength?, name?, contentType?, dataOffset? }, body,
-//!   release?, mapError? }`. `meta` is replied up front, then `body` (an
-//!   async iterable of `Uint8Array`) is pumped with host-granted credits.
-//!   `dataOffset` (default: the requested `offset`) declares the byte offset
-//!   the pushed chunks actually start at — a server that ignored the Range
-//!   request reports `0` and the forwarding loop below drops the prefix
-//!   bytes. `release` (conventionally `task.cancel()`) fires on every pump
-//!   exit; `mapError` optionally marks mid-body errors.
+//!   `[{ name, path, size?, isDir, createdAt?, modifiedAt? }, ...]`
+//!   (a backend op entry fn answering the result array).
+//! - `storage:get` `{ pluginId, storageId, path, offset }` →
+//!   `{ sid, meta: { totalLength?, name?, contentType?, dataOffset? } }`.
+//!   `dataOffset` (default: the requested `offset`) declares the byte
+//!   offset the chunks actually start at — a server that ignored the Range
+//!   request reports `0` and the forwarding loop below drops the prefix.
+//! - `storage:get-chunk` `{ sid, offset, len }` →
+//!   `{ data: <base64>, eof: bool }` — `data` empty with `eof` set ends the
+//!   stream.
+//! - `storage:release` `{ sid }` — drop the plugin-side source (called on
+//!   eof and on consumer cancellation; best-effort).
+//!
+//! The plugin backend keeps its per-session source state in its own module
+//! cells, keyed by `sid`.
 //!
 //! `pluginId` is the manifest id (`com.ease.webdav`); `storageId` is the
 //! plugin-scoped instance (`webdav:<uuid>`, the storage row's
-//! `plugin_storage_id` — the same value `ease.context.storageId$` publishes).
-//! Both come straight from the registry row; the host derives nothing.
+//! `plugin_storage_id`). Both come straight from the registry row; the host
+//! derives nothing.
 //!
-//! Error semantics: opener errors / stream errors whose message starts
-//! with `UNAUTHORIZED` or `TIMEOUT` are mapped to the corresponding
-//! [`StorageBackendError`] variants so the UI can distinguish auth failures
-//! and timeouts from other errors.
+//! Error semantics: handler errors whose message starts with `UNAUTHORIZED`
+//! or `TIMEOUT` are mapped to the corresponding [`StorageBackendError`]
+//! variants so the UI can distinguish auth failures and timeouts from
+//! other errors.
 
+use base64::Engine as _;
 use bytes::Bytes;
 use ease_remote_storage::{Entry, StorageBackend, StorageBackendError, StorageBackendResult, StreamFile};
-use ease_tur_rpc::{RpcClient, StreamChunk};
+use ease_tur_rpc::RpcClient;
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 
-/// Classify a JS-side error message into the typed variants the host UI
+/// Classify a plugin-side error message into the typed variants the host UI
 /// reacts to (`is_unauthorized` / `is_timeout`).
 fn classify_error(message: String) -> StorageBackendError {
     let trimmed = message.trim_start();
@@ -50,7 +59,7 @@ fn classify_error(message: String) -> StorageBackendError {
     }
 }
 
-/// Map an RPC failure: a JS handler error keeps its (classified) message;
+/// Map an RPC failure: a handler error keeps its (classified) message;
 /// transport errors stay opaque.
 fn map_rpc_error(context: &str, e: ease_tur_rpc::RpcError) -> StorageBackendError {
     match e {
@@ -59,12 +68,12 @@ fn map_rpc_error(context: &str, e: ease_tur_rpc::RpcError) -> StorageBackendErro
     }
 }
 
-/// A `StorageBackend` backed by a JS plugin via `ease-tur-rpc`.
+/// A `StorageBackend` backed by a rut plugin via `ease-tur-rpc`.
 ///
 /// `plugin_id` + `storage_id` come straight from the storage registry row
 /// (`plugin_id` = manifest id; `storage_id` = the `plugin_storage_id`
 /// instance, e.g. `onedrive:<uuid>`) and ride every RPC payload verbatim so
-/// the JS plugin multiplexes between configured instances (e.g. multiple
+/// the plugin multiplexes between configured instances (e.g. multiple
 /// OneDrive accounts).
 #[derive(Clone)]
 pub struct JsStorageBackend {
@@ -88,9 +97,16 @@ impl JsStorageBackend {
             handle,
         }
     }
+
+    fn args(&self) -> serde_json::Value {
+        serde_json::json!({
+            "pluginId": self.plugin_id,
+            "storageId": self.storage_id,
+        })
+    }
 }
 
-// JS-side entry shape (camelCase `isDir`).
+// Plugin-side entry shape (camelCase `isDir`).
 #[derive(Deserialize)]
 struct JsEntry {
     name: String,
@@ -126,24 +142,42 @@ struct GetMeta {
     name: Option<String>,
     #[serde(rename = "contentType", default)]
     content_type: Option<String>,
-    /// Byte offset the pushed chunks actually start at. Defaults to the
+    /// Byte offset the pulled chunks actually start at. Defaults to the
     /// requested offset; a server that ignored the Range request reports 0
     /// and the prefix bytes are dropped below.
     #[serde(rename = "dataOffset", default)]
     data_offset: Option<u64>,
 }
 
+#[derive(Deserialize)]
+struct OpenReply {
+    sid: u64,
+    #[serde(default)]
+    meta: Option<GetMeta>,
+}
+
+#[derive(Deserialize)]
+struct ChunkReply {
+    #[serde(default)]
+    data: String,
+    #[serde(default)]
+    eof: bool,
+}
+
+/// Chunk size requested per `storage:get-chunk` pull. Sized for the
+/// `BufferedSource` read-ahead: big enough that the cross-thread RPC
+/// round-trips amortize, small enough that a chunk lands well inside the
+/// source's window.
+const CHUNK_LEN: u64 = 256 * 1024;
+
 impl StorageBackend for JsStorageBackend {
     fn list(&self, dir: String) -> BoxFuture<StorageBackendResult<Vec<Entry>>> {
-        let plugin_id = self.plugin_id.clone();
-        let storage_id = self.storage_id.clone();
+        let rpc = self.rpc.clone();
+        let mut args = self.args();
+        args["dir"] = serde_json::Value::String(dir);
         Box::pin(async move {
-            let val = self
-                .rpc
-                .call_host(
-                    "storage:list",
-                    serde_json::json!({ "pluginId": plugin_id, "storageId": storage_id, "dir": dir }),
-                )
+            let val = rpc
+                .call_host("storage:list", args)
                 .await
                 .map_err(|e| map_rpc_error("list", e))?;
             let entries: Vec<JsEntry> = serde_json::from_value(val)
@@ -154,24 +188,21 @@ impl StorageBackend for JsStorageBackend {
 
     fn get(&self, path: String, byte_offset: u64) -> BoxFuture<StorageBackendResult<StreamFile>> {
         let handle = self.handle.clone();
-        let plugin_id = self.plugin_id.clone();
-        let storage_id = self.storage_id.clone();
+        let rpc = self.rpc.clone();
+        let mut args = self.args();
+        args["path"] = serde_json::Value::String(path);
+        args["offset"] = serde_json::json!(byte_offset);
         Box::pin(async move {
-            let (meta, mut rx) = self
-                .rpc
-                .open_stream(
-                    "storage:get",
-                    serde_json::json!({
-                        "pluginId": plugin_id,
-                        "storageId": storage_id,
-                        "path": path,
-                        "offset": byte_offset,
-                    }),
-                )
+            // ---- opener: metadata + session id ----------------------------
+            let open = rpc
+                .call_host("storage:get", args)
                 .await
                 .map_err(|e| map_rpc_error("get", e))?;
-            let meta: GetMeta = serde_json::from_value(meta)
-                .map_err(|e| StorageBackendError::Other(format!("get meta decode: {e}")))?;
+            let open: OpenReply = serde_json::from_value(open)
+                .map_err(|e| StorageBackendError::Other(format!("get open decode: {e}")))?;
+            let meta: GetMeta = open
+                .meta
+                .ok_or_else(|| StorageBackendError::Other("get open decode: missing meta".into()))?;
             let data_offset = meta.data_offset.unwrap_or(byte_offset);
             if data_offset > byte_offset {
                 return Err(StorageBackendError::Other(format!(
@@ -180,38 +211,82 @@ impl StorageBackend for JsStorageBackend {
             }
             // Prefix bytes to drop before real data starts (ignored Range).
             let mut skip = byte_offset - data_offset;
+            let sid = open.sid;
 
-            // Bridge the JS chunk stream into the async_channel the StreamFile
-            // consumes. Spawned on the shared tokio runtime so it runs regardless
-            // of which thread is reading the StreamFile (e.g. the cantode worker).
+            // ---- the chunked pull ------------------------------------------
+            // Bridges the pull loop into the async_channel the StreamFile
+            // consumes. Spawned on the shared tokio runtime so it runs
+            // regardless of which thread is reading the StreamFile (e.g. the
+            // cantode worker). Pull-driven: the next chunk is only fetched
+            // after the previous one was handed off (or dropped).
             let (atx, arx) = async_channel::bounded::<StorageBackendResult<Bytes>>(10);
             handle.spawn(async move {
-                while let Some(chunk) = rx.recv().await {
-                    match chunk {
-                        StreamChunk::Data(b) => {
-                            let b = if skip > 0 {
-                                if b.len() as u64 <= skip {
-                                    skip -= b.len() as u64;
-                                    continue;
-                                }
-                                let b = b.slice(skip as usize..);
-                                skip = 0;
-                                b
-                            } else {
-                                b
-                            };
-                            if atx.send(Ok(b)).await.is_err() {
-                                break; // consumer dropped the StreamFile
-                            }
+                let mut offset = data_offset;
+                let result = loop {
+                    let mut chunk_args = serde_json::json!({
+                        "sid": sid,
+                        "offset": offset,
+                        "len": CHUNK_LEN,
+                    });
+                    let _ = &mut chunk_args;
+                    let reply = match rpc.call_host("storage:get-chunk", chunk_args).await {
+                        Ok(v) => v,
+                        Err(ease_tur_rpc::RpcError::Handler(msg)) => {
+                            break Err(classify_error(msg));
                         }
-                        StreamChunk::End => break,
-                        StreamChunk::Error(msg) => {
-                            let _ = atx
-                                .send(Err(classify_error(msg)))
-                                .await;
-                            break;
+                        Err(e) => {
+                            break Err(StorageBackendError::Other(format!("get rpc: {e}")));
                         }
+                    };
+                    let chunk: ChunkReply = match serde_json::from_value(reply) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            break Err(StorageBackendError::Other(format!(
+                                "get chunk decode: {e}"
+                            )));
+                        }
+                    };
+                    if chunk.eof {
+                        break Ok(());
                     }
+                    let mut data = match base64::engine::general_purpose::STANDARD
+                        .decode(chunk.data.as_bytes())
+                    {
+                        Ok(d) => d,
+                        Err(e) => {
+                            break Err(StorageBackendError::Other(format!(
+                                "get chunk base64: {e}"
+                            )));
+                        }
+                    };
+                    if data.is_empty() {
+                        // Defensive: an empty chunk without `eof` ends the
+                        // stream too (the plugin's contract is one of the two).
+                        break Ok(());
+                    }
+                    let n = data.len() as u64;
+                    offset += n;
+                    if skip > 0 {
+                        if n <= skip {
+                            skip -= n;
+                            continue;
+                        }
+                        data.drain(..skip as usize);
+                        skip = 0;
+                    }
+                    if atx.send(Ok(Bytes::from(data))).await.is_err() {
+                        break Ok(()); // consumer dropped the StreamFile
+                    }
+                };
+                // Release the plugin-side source (eof or cancel — best-effort).
+                let _ = rpc
+                    .call_host(
+                        "storage:release",
+                        serde_json::json!({ "sid": sid }),
+                    )
+                    .await;
+                if let Err(e) = result {
+                    let _ = atx.send(Err(e)).await;
                 }
                 let _ = atx.close();
             });

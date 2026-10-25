@@ -1,0 +1,5 @@
+[toolchain]
+# Matches the tur engine's workspace pin (tur@795538f builds on
+# nightly-2026-07-15; the rut VM + engine core rely on it).
+channel = "nightly-2026-07-15"
+profile = "minimal"

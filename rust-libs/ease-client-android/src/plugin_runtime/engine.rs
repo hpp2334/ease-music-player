@@ -5,14 +5,16 @@
 //! `detach_engine_host` compare-and-sets against) with the raw
 //! `*mut AAssetManager` stashed from the Kotlin `AssetManager` object. The
 //! backend's plugin scan calls [`PluginEngineHost::register_source`] to put
-//! module JS on the runtime's shared registry, and `plugin.bootstrap` calls
-//! [`PluginEngineHost::read_bundled_asset`] to read the bundled plugin zips
-//! natively — their bytes never cross the JNI boundary.
+//! module rut sources on the runtime's shared registry, and
+//! `plugin.bootstrap` calls [`PluginEngineHost::read_bundled_asset`] to read
+//! the bundled plugin zips natively — their bytes never cross the JNI
+//! boundary.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use ease_client_backend::services::plugin_manager::PluginEngineHost;
+use ease_tur_rpc::{RpcBus, RpcBusCell, RpcClient};
 
 /// The host implementation. Constructed by the `bindPluginRuntime` JNI
 /// trampoline ([`crate::plugin_runtime::plugin_jni`]) and attached to the
@@ -24,21 +26,24 @@ use ease_client_backend::services::plugin_manager::PluginEngineHost;
 /// thread to the JVM via ndk-context for the duration of the call.
 pub(crate) struct TurEngineHost {
     runtime_handle: i64,
-    pools_handle: i64,
     asset_manager: usize,
     /// Per spawned headless instance: the Kotlin `FrameLoop` global ref +
     /// its `AtomicLong` handle cell (the zeroable pump guard — see
     /// `FrameLoop.closeInstance`). Dropped when the instance closes.
     loops: std::sync::Mutex<HashMap<i64, (jni::objects::GlobalRef, jni::objects::GlobalRef)>>,
+    /// Per spawned headless instance: the RPC bus stamped into the instance
+    /// at build time — `extract_rpc` pairs it with the driver into the
+    /// [`RpcClient`]. Popped on extract / dropped on close.
+    buses: std::sync::Mutex<HashMap<i64, Arc<RpcBus>>>,
 }
 
 impl TurEngineHost {
-    pub(crate) fn new(runtime_handle: i64, pools_handle: i64, asset_manager: usize) -> Self {
+    pub(crate) fn new(runtime_handle: i64, asset_manager: usize) -> Self {
         Self {
             runtime_handle,
-            pools_handle,
             asset_manager,
             loops: Default::default(),
+            buses: Default::default(),
         }
     }
 }
@@ -58,15 +63,51 @@ fn with_attached_env<R>(
     f(&mut env)
 }
 
+/// The [`ease_tur_rpc::RutDriver`] over a live instance handle: every call
+/// is a blocking round-trip onto the instance's tur-host thread (`with_app`
+/// + `block_on` on the async `TurApp` entry rail — the exact pattern tur's
+/// own `loadModule` uses on the host thread). The instance keeps executing
+/// on its worker lane, so the round-trip only queues + waits.
+#[cfg(target_os = "android")]
+struct AndroidDriver {
+    handle: i64,
+}
+
+#[cfg(target_os = "android")]
+impl ease_tur_rpc::RutDriver for AndroidDriver {
+    fn call_entry_str(&self, name: &str, cx: u64) -> Result<String, String> {
+        tur_android::ops::with_app(self.handle, |app| {
+            futures::executor::block_on(app.call_rut_entry_cx_str(name, cx))
+        })
+        .ok_or_else(|| format!("instance {self:?} gone"))?
+        .map_err(|e| e.to_string())
+    }
+
+    fn call_entry(&self, name: &str, cx: u64) -> Result<(), String> {
+        tur_android::ops::with_app(self.handle, |app| {
+            futures::executor::block_on(app.call_rut_entry_cx(name, cx)).map(|_| ())
+        })
+        .ok_or_else(|| format!("instance {self:?} gone"))?
+        .map_err(|e| e.to_string())
+    }
+
+    fn start_token(&self) -> u64 {
+        tur_android::ops::with_app(self.handle, |app| {
+            futures::executor::block_on(app.rut_start_answer())
+        })
+        .unwrap_or(0)
+    }
+}
+
 impl PluginEngineHost for TurEngineHost {
     fn id(&self) -> i64 {
         self.runtime_handle
     }
 
-    /// Register module JS on the bound runtime's shared
-    /// `ModuleSourceRegistry` (tur #198) and return its opaque handle.
-    /// `0` on failure — loudly, never silently: a zero handle would leave a
-    /// plugin view/backend permanently blank.
+    /// Register a module rut source on the bound runtime's shared
+    /// `ModuleSourceRegistry` and return its opaque handle. `0` on failure —
+    /// loudly, never silently: a zero handle would leave a plugin
+    /// view/backend permanently blank.
     fn register_source(&self, src: String) -> i64 {
         if self.runtime_handle == 0 {
             tracing::error!(
@@ -114,24 +155,28 @@ impl PluginEngineHost for TurEngineHost {
 
     /// Spawn a headless instance from Rust: attach to the JVM, construct
     /// the Kotlin `FrameLoop` (main-looper-safe by construction), hand it
-    /// to the engine's `create_instance` (which globalizes the ref itself),
-    /// then wire the loop's wake callbacks through a zeroable
-    /// `AtomicLong` cell — the exact `TurInstance` guard semantics, so a
-    /// wake that lands after `close_headless` reads 0 and no-ops instead of
-    /// pumping a freed route.
+    /// to the engine's `create_instance` (which globalizes the ref itself)
+    /// along with the per-instance stamps — [`PluginId`], the backend
+    /// worker pool, and a fresh RPC [`RpcBus`] (stamped as
+    /// [`RpcBusCell`] instance data so the `ease.rpc` rows and the
+    /// [`RpcClient`] share it) — then wire the loop's wake callbacks
+    /// through a zeroable `AtomicLong` cell — the exact `TurInstance`
+    /// guard semantics, so a wake that lands after `close_headless` reads
+    /// 0 and no-ops instead of pumping a freed route.
     fn spawn_headless(&self, plugin_id: &str) -> anyhow::Result<i64> {
         #[cfg(target_os = "android")]
         {
             use tur_engine::core::render::brush::Color;
 
             let pid = plugin_id.to_string();
-            let pools_handle = self.pools_handle;
             let runtime_handle = self.runtime_handle;
+            let bus = RpcBus::new();
+            let bus_for_stamp = bus.clone();
             let loops = &self.loops;
+            let buses = &self.buses;
+            let backend_pool =
+                crate::plugin_runtime::plugin_jni::backend_pool_for(runtime_handle);
             with_attached_env(move |env| {
-                let backend_pool =
-                    crate::plugin_runtime::plugin_jni::borrow_pools(pools_handle)
-                        .map(|pools| pools.backend.clone());
                 let class = crate::plugin_runtime::host_cache::frame_loop_class()
                     .ok_or_else(|| anyhow::anyhow!("FrameLoop class not cached (createRuntime not run)"))?;
                 // SAFETY: the cached raw jclass is a process-lifetime global ref.
@@ -160,6 +205,7 @@ impl PluginEngineHost for TurEngineHost {
                             cx.define::<crate::plugin_runtime::PluginInstance>(
                                 crate::plugin_runtime::PluginInstance(None),
                             );
+                            cx.define::<RpcBusCell>(RpcBusCell(bus_for_stamp.clone()));
                         })
                     },
                     // Never attached to a surface — the base color is moot.
@@ -168,6 +214,7 @@ impl PluginEngineHost for TurEngineHost {
                 if instance == 0 {
                     anyhow::bail!("create_instance returned 0 (see logcat)");
                 }
+                buses.lock().unwrap().insert(instance, bus);
                 // Guard cell + wake wiring (mirrors TurInstance.init).
                 let cell = env
                     .new_object(
@@ -217,22 +264,33 @@ impl PluginEngineHost for TurEngineHost {
         }
     }
 
+    /// Pair the instance's bus with an [`AndroidDriver`] into an
+    /// [`RpcClient`]. Blocking round-trips resolve the start token — FIFO
+    /// behind the spawn + load posts, so the module has booted and its
+    /// `start()` registrations are in by the time this runs.
     fn extract_rpc(&self, instance_handle: i64) -> Option<ease_tur_rpc::RpcClient> {
         #[cfg(target_os = "android")]
         {
-            // Blocking round-trip onto the engine host thread — FIFO behind
-            // the spawn + load posts, so the JS handlers are registered by
-            // the time this runs.
-            tur_android::ops::with_app(instance_handle, |app| {
-                ease_tur_rpc::RpcClient::wire(app)
-            })
-            .and_then(|r| match r {
-                Ok(client) => Some(client),
-                Err(e) => {
-                    tracing::error!("RpcClient::wire failed: {e}");
-                    None
-                }
-            })
+            let bus = self.buses.lock().unwrap().get(&instance_handle).cloned();
+            let Some(bus) = bus else {
+                tracing::error!(
+                    "extract_rpc: instance {instance_handle} has no RPC bus — not spawned here?"
+                );
+                return None;
+            };
+            let driver: Arc<dyn ease_tur_rpc::RutDriver> = Arc::new(AndroidDriver {
+                handle: instance_handle,
+            });
+            let client = RpcClient::new(bus, driver);
+            let token = client.bus_token();
+            if token == 0 {
+                tracing::error!(
+                    "extract_rpc: instance {instance_handle} has no start token — \
+                     the backend module failed to boot"
+                );
+                return None;
+            }
+            Some(client)
         }
         #[cfg(not(target_os = "android"))]
         {
@@ -245,6 +303,7 @@ impl PluginEngineHost for TurEngineHost {
         #[cfg(target_os = "android")]
         {
             let globals = self.loops.lock().unwrap().remove(&instance_handle);
+            self.buses.lock().unwrap().remove(&instance_handle);
             let _ = with_attached_env(|env| {
                 if let Some((loop_ref, cell_ref)) = globals {
                     let class = crate::plugin_runtime::host_cache::frame_loop_class()

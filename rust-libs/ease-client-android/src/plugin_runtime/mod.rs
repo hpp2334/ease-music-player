@@ -1,60 +1,59 @@
-//! tur plugin runtime — in-memory bridge between the ease backend and the
-//! tur engine.
+//! tur plugin runtime — the rut-side bridge between the ease backend and
+//! the tur engine.
 //!
 //! This module wires the engine (linked as an rlib into
-//! `libease_client_backend.so`) to the ease backend's services. The
-//! backend binding is **instance-attached**: `createRuntime` resolves the
-//! [`ease_client_backend::ctx::BackendContext`] from the backend handle the Kotlin host
-//! passes in, [`plugin::EaseMusicPlugin`] carries it and stamps it into
-//! every instance's plugin state at register time ([`PluginBackendCx`]),
-//! and the bridge fns read it back from their per-instance context — no
-//! process-wide singleton whose entry could outlive a destroyed backend.
-//! The bridge exposes one synthetic JS module to plugins:
+//! `libease_client_android.so`) to the ease backend's services. The backend
+//! binding is **instance-attached**: `createRuntime` resolves the
+//! [`ease_client_backend::ctx::BackendContext`] from the backend handle the
+//! Kotlin host passes in, [`plugin::EaseMusicPlugin`] carries it and stamps
+//! it into every instance's plugin state at register time
+//! ([`PluginBackendCx`]), and the host rows read it back from the instance —
+//! no process-wide singleton whose entry could outlive a destroyed backend.
 //!
-//! - `ease` — unified host module exporting grouped namespace objects:
-//!   `db`, `secret`, `oauth`, `themes`, `rpc`, `context`, `library`. Each
-//!   method is ctx-bound (`extract_js_ctx`) so bridge fns can resolve the
-//!   calling plugin's identity from the per-instance data slot — never from
-//!   a JS argument.
+//! The bridge exposes one host pkg to rut modules — the `ease` rows:
 //!
-//! Per-instance identity: the Kotlin host stamps a [`PluginId`] into each
-//! tur instance at build time via `TurAppBuilder::instance_data(|cx|
-//! cx.define::<PluginId>(...))` (see `plugin_jni.rs`). Bridge fns read it
-//! back via `js_ctx.data::<PluginId>()` to enforce per-plugin scoping in
-//! SQLite + the secret store. The value is JS-unforgeable — it never crosses
-//! the JS↔Rust boundary as an argument.
+//! - `ease.db` / `ease.secret` / `ease.oauth` / `ease.themes` /
+//!   `ease.context` / `ease.library` — the host services (KV, secrets,
+//!   OAuth flows, theme colors, storage lifecycle, read-only library).
+//! - `ease.rpc` — the plugin RPC bus ([`ease_tur_rpc::TurRpcBusPlugin`]:
+//!   `register` / `subscribe_event` / `take_request`) plus `call` (a view
+//!   reaching its own backend).
+//! - `ease.crypto` / `ease.xml` / `ease.net` / `ease.time` — the utility
+//!   surface that replaced the old npm plugin deps (md5 / base64 / SHA-2 /
+//!   HMAC / UUID, XML, full-featured HTTP, HTTP dates).
 //!
-//! Other tur modules (`tur:std`, `tur:animation`, `tur:net`) are
-//! registered by the standard plugin set installed alongside
-//! [`EaseMusicPlugin`] in `plugin_jni::create_ease_plugin_engine`.
+//! Rows are **typed** (`rut_core::types`): scalars cross as str/u64/i64/
+//! f64/bool, binary as bytes, composites as JSON strings, host objects as
+//! opaques. Per-instance identity: the host stamps a [`PluginId`] (and for
+//! edit-mode views a [`PluginInstance`]) into the engine's `instance_data`
+//! at build time (`TurAppBuilder::instance_data`) — rows resolve the calling
+//! plugin through it, never from a rut argument. The value is script-
+//! unforgeable.
+//!
+//! There is no JS in the plugin system: modules are rut sources loaded by
+//! opaque `ModuleSourceRegistry` handles, and every host entry point is a
+//! typed row.
 
-pub mod context_bridge;
-pub mod db_bridge;
 pub mod engine;
 pub mod fonts;
 pub mod host_cache;
-pub mod library_bridge;
-pub mod oauth_bridge;
 pub mod plugin;
 pub mod plugin_jni;
-pub mod rpc_bridge;
-pub mod secret_bridge;
-pub mod themes_bridge;
-pub mod webapi;
-
-use boa_engine::{JsError, JsNativeError, JsResult, JsValue};
-use tur_engine::core::js_runtime::helpers::extract_js_ctx;
+pub mod service_rows;
+pub mod util_rows;
 
 pub use plugin::EaseMusicPlugin;
 
+use ease_tur_rpc::RpcBusCell;
+
 /// Per-instance plugin identity, stamped into the tur engine's
 /// `instance_data` slot at build time (via `TurAppBuilder::instance_data`)
-/// and read back by `ease:*` bridge fns to resolve the calling plugin.
+/// and read back by `ease:*` rows to resolve the calling plugin.
 ///
 /// The wrapped `String` is the plugin's stable identifier (e.g.
 /// `"com.ease.onedrive"`). The field is private so external code must go
-/// through [`Self::as_str`] / [`Self::as_ref`] — JS itself never sees this
-/// value (no accessor is exposed to JS), so identity stays JS-unforgeable.
+/// through [`Self::as_str`] / [`Self::as_ref`] — rut itself never sees this
+/// value (no row returns it), so identity stays script-unforgeable.
 #[derive(Debug, Clone)]
 pub struct PluginId(String);
 
@@ -81,39 +80,67 @@ impl AsRef<str> for PluginId {
 ///
 /// `None` for create-mode setup views (no storage row yet) and for the
 /// headless service instance (which serves *all* instances, not one).
-/// The `ease.context` namespace surfaces this to JS as the reactive
-/// `storageId$` const (`null` = create, a real id = edit), minted in
-/// [`plugin::EaseMusicPlugin::register`].
+/// The `ease.context.storage_id()` row surfaces this to rut (`?str`:
+/// `nil` = create, a real id = edit).
 #[derive(Debug, Clone)]
 pub struct PluginInstance(pub Option<String>);
 
 /// The backend context an engine instance is bound to, captured at
 /// `createRuntime` (from the backend handle the Kotlin host passes) and
 /// defined as per-instance plugin state by
-/// [`plugin::EaseMusicPlugin::register`]. Bridge fns resolve it via
-/// [`backend_cx`] — there is no process-wide backend singleton anymore.
+/// [`plugin::EaseMusicPlugin::register`]. Rows resolve it via
+/// [`backend_cx`] — there is no process-wide backend singleton.
 ///
-/// [`ease_client_backend::ctx::BackendContext`] is itself an `Arc`-backed cheap clone, so
-/// bridge fns clone it out of the `Rc`-boxed (single-threaded boa side)
-/// plugin state without any lifetime gymnastics.
+/// [`ease_client_backend::ctx::BackendContext`] is an `Arc`-backed cheap
+/// clone, so rows clone it out of the `Rc`-boxed plugin state without
+/// lifetime gymnastics.
 pub struct PluginBackendCx(pub ease_client_backend::ctx::BackendContext);
 
-/// Resolve the [`ease_client_backend::ctx::BackendContext`] bound to the calling plugin
-/// instance ([`PluginBackendCx`]). `ns` names the `ease:<ns>` bridge for
-/// the error message. Fails loudly when the engine was built without a
-/// backend binding — previously this was a silent global miss.
+/// Resolve the [`ease_client_backend::ctx::BackendContext`] bound to the
+/// calling plugin instance ([`PluginBackendCx`]). `ns` names the `ease`
+/// row family for the error message. Fails loudly when the engine was
+/// built without a backend binding.
 pub(crate) fn backend_cx(
     ns: &str,
-    args: &[JsValue],
-) -> JsResult<ease_client_backend::ctx::BackendContext> {
-    let js_ctx = extract_js_ctx(args)?;
-    js_ctx
+    handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
+) -> Result<ease_client_backend::ctx::BackendContext, rut_vm::Trap> {
+    handles
+        .inst
         .plugin_state::<PluginBackendCx>()
         .map(|cx| cx.0.clone())
         .ok_or_else(|| {
-            JsError::from(JsNativeError::typ().with_message(format!(
-                "ease:{ns}: backend context not bound to this instance \
-                 (engine built without a backend handle)"
-            )))
+            rut_vm::Trap::new(
+                rut_vm::TrapKind::Invalid,
+                format!(
+                    "ease:{ns}: backend context not bound to this instance \
+                     (engine built without a backend handle)"
+                ),
+            )
         })
+}
+
+/// Resolve the calling plugin's [`PluginId`] (the instance-data slot).
+pub(crate) fn plugin_id(
+    ns: &str,
+    handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
+) -> Result<PluginId, rut_vm::Trap> {
+    handles.inst.data::<PluginId>().ok_or_else(|| {
+        rut_vm::Trap::new(
+            rut_vm::TrapKind::Invalid,
+            format!("ease:{ns}: no plugin context bound to this instance"),
+        )
+    })
+}
+
+/// Resolve the per-instance RPC bus cell (see [`RpcBusCell`]) — stamped by
+/// the embedder for headless backend instances; views fall back to the
+/// per-instance cell [`ease_tur_rpc::TurRpcBusPlugin`] mints at register.
+pub(crate) fn rpc_bus_cell(
+    handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
+) -> RpcBusCell {
+    handles
+        .inst
+        .data::<RpcBusCell>()
+        .or_else(|| handles.inst.plugin_state::<RpcBusCell>().map(|c| (*c).clone()))
+        .expect("ease:rpc: no RpcBusCell in instance data or plugin state")
 }
