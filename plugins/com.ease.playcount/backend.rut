@@ -27,7 +27,9 @@
 // instead — the compile/boot check harness loads backends with no
 // database, so `ease.db` rows must never fire at boot (same guard, same
 // once-per-install effect: the KV flag makes it a no-op after the first
-// run, and it survives backend reloads).
+// run, and it survives backend reloads). The same lazy pass also re-keys
+// TS-era rows from device-local day buckets to this port's UTC buckets
+// (see REKEY_FLAG_KEY below).
 
 use json::{ JsonReader, JsonWriter };
 use pouch::{ Vec };
@@ -221,17 +223,30 @@ fn play_row_json(music_id: str, title: str, ts: i64) -> str {
 // ---------------------------------------------------------------------------
 
 let REPAIR_FLAG_KEY: str = "repair:duplicate-rows";
-/// Scan horizon: one key per day that has plays, newest first. Generous
-/// for this schema's lifetime; a key older than the window would simply
-/// stay un-compacted, never lost.
+/// The TS keyed day buckets by device-LOCAL midnight; this port keys by
+/// UTC (see the file header). Upgraded installs carry rows under
+/// local-day keys, which sit +/-1 day from their UTC day (UTC-12..+14) —
+/// a play made 16:00-24:00 local (UTC+8) is keyed one day AHEAD of its
+/// UTC day and surfaces under "Today" a day late, forever. This second
+/// flag gates the one-time re-key: every scanned row moves to the UTC
+/// day its own `ts` names. (Separate from the dedupe flag: TS-era
+/// installs already consumed `repair:duplicate-rows` at module start —
+/// their re-key still has to run.)
+let REKEY_FLAG_KEY: str = "repair:utc-rekey";
+/// Scan horizon: one key per day that has plays, newest first — extended
+/// one day BEFORE today so legacy local-day keys one day behind (western
+/// timezones) are inside the scan. Generous for this schema's lifetime;
+/// a key older than the window simply stays un-migrated, never lost.
 let REPAIR_SCAN_DAYS: i64 = 400;
 
 fn compact_duplicate_rows() {
-    if (single_get(REPAIR_FLAG_KEY) != nil) {
+    let dup_done = single_get(REPAIR_FLAG_KEY) != nil;
+    let rekey_done = single_get(REKEY_FLAG_KEY) != nil;
+    if (dup_done && rekey_done) {
         return;
     }
     let mut keys = Vec<str>::new();
-    let mut i: i64 = 0;
+    let mut i: i64 = -1;
     while (i < REPAIR_SCAN_DAYS) {
         keys.push(day_key_offset(i));
         i += 1;
@@ -282,13 +297,24 @@ fn compact_duplicate_rows() {
                 kept.push(raw);
             }
         }
-        // Only days that actually shrank are rewritten — untouched days
-        // must NOT be re-appended (they'd duplicate; exactly the bug the
-        // TS's first attempt shipped).
-        if (kept.len != values.len) {
+        // One rewrite pass does both repairs: the dedupe above collapses
+        // byte-identical rows, and every survivor moves to the UTC day
+        // its `ts` names (legacy local-day keys). Only days whose row set
+        // actually changed are rewritten — untouched days must NOT be
+        // re-appended (they'd duplicate; exactly the bug the TS's first
+        // attempt shipped), and the delete wipes a key's whole row set,
+        // so a no-op rewrite would lose data.
+        let mut key_changed = kept.len != values.len;
+        for (let v of kept) {
+            let target = row_target_key(key, v);
+            if (target != key) {
+                key_changed = true;
+            }
+        }
+        if (key_changed) {
             changed.push(key);
             for (let v of kept) {
-                re_append.push(kv_entry_json(key, v));
+                re_append.push(kv_entry_json(row_target_key(key, v), v));
             }
         }
     }
@@ -299,6 +325,40 @@ fn compact_duplicate_rows() {
         multi_append_multi(f"[{str_join(re_append, comma)}]");
     }
     single_set(REPAIR_FLAG_KEY, "done");
+    single_set(REKEY_FLAG_KEY, "done");
+}
+
+/// The UTC day key the row's own `ts` names — where the row belongs under
+/// UTC bucketing. Rows without a usable ts stay where they are.
+fn row_target_key(current: str, raw: str) -> str {
+    let ts = row_ts(raw);
+    if (ts <= 0) {
+        return current;
+    }
+    return day_key_from_ms(ts);
+}
+
+/// The `ts` field of a stored play row; 0 when absent/malformed.
+fn row_ts(raw: str) -> i64 {
+    let mut r = JsonReader::of(raw);
+    let mut ts: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 0;
+        }
+        if (k == "ts") {
+            ts = r.read_i64();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 0;
+    }
+    return ts;
 }
 
 /// `["a","b"]` — the `*Multi` row helpers' JSON array of strings.

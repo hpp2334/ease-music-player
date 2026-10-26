@@ -30,15 +30,9 @@ mod storage_dispatch {
     /// Boot `plugin_dir`'s backend (stamped with `plugin_id`) and return
     /// the bus + the driver channel.
     fn boot(plugin_id: &str, plugin_dir: &str) -> (Arc<RpcBus>, mpsc::Sender<Cmd>) {
-        let source = std::fs::read_to_string(format!(
-            "{}/backend.rut",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/",).replace(
-                "/plugins//backend.rut",
-                "/backend.rut"
-            ) // (unused shape guard — real path built below)
-        ))
-        .or_else(|_| std::fs::read_to_string(plugin_dir.to_string() + "/backend.rut"))
-        .expect("backend.rut readable");
+        let source =
+            std::fs::read_to_string(plugin_dir.to_string() + "/backend.rut")
+                .expect("backend.rut readable");
 
         let cx = BackendContext::new();
         // The config lookups past arg-decode hit `ease.db` — initialize the
@@ -174,13 +168,20 @@ mod storage_dispatch {
     }
 
     /// The chunk-pull op too (its arg loop is the one the streaming path
-    /// rides): decode must not die.
+    /// rides): decode must not die. All three providers — onedrive's
+    /// streaming path in particular was never runtime-verified until this
+    /// gate existed.
     #[test]
     fn storage_get_chunk_requests_decode() {
         let cases = [
             (
                 "com.ease.webdav",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/com.ease.webdav"),
+                "op_storage_get_chunk",
+            ),
+            (
+                "com.ease.onedrive",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/com.ease.onedrive"),
                 "op_storage_get_chunk",
             ),
             (
