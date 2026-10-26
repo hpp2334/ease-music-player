@@ -86,6 +86,11 @@ entry fn op_on_music_play(cx: opaque) -> str {
         return err_envelope("music:play: malformed payload");
     }
     let e: PlayEv = ev;
+    if (e.music_id == "") {
+        // Null/missing musicId: nothing to count — skip instead of writing
+        // a junk row the view would have to filter.
+        return "{\"ok\":true,\"result\":null}";
+    }
     multi_append(day_key_from_ms(e.ts), play_row_json(e.music_id, e.title, e.ts));
     // Fire-and-forget dispatch — the answer is ignored.
     return "{\"ok\":true,\"result\":null}";

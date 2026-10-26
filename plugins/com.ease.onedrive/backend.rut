@@ -1423,6 +1423,11 @@ fn enter_args(mut r: JsonReader) -> bool {
             return false;
         }
         if (k == "args") {
+            // ENTER the args object — the cursor sits on its `{` after
+            // next_key, and the callers' field loops (`more()`/`next_key()`)
+            // expect to walk the args members directly. Without this, the
+            // first next_key reads `{` and fails sticky (WrongType).
+            r.begin_object();
             return true;
         }
         r.skip_value();

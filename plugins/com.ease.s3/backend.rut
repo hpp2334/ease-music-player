@@ -555,7 +555,9 @@ fn scheme_end(s: str) -> i32 {
 fn rstrip_slashes(s: str) -> str {
     let n = s.len();
     let mut b = n;
-    while (b > 1 && s.code_at(b - 1) == 47) {
+    // Strip ALL trailing slashes — a root-only base (`/`) must become ""
+    // or every URL join doubles the slash (strict routers 301).
+    while (b > 0 && s.code_at(b - 1) == 47) {
         b -= 1;
     }
     return s.slice(0, b);
@@ -601,7 +603,13 @@ fn normalize_endpoint(input: str) -> ?Endpoint {
         }
         s = s.slice(se + 3, s.len());
     } else {
+        // No (valid) scheme — default to https (the TS `normalizeEndpoint`
+        // law: legacy configs saved without one must keep working), then
+        // strip the prefix so the authority slice below sees the bare
+        // authority — same shape the explicit-scheme path produces.
+        scheme = "https";
         s = f"https://{s}";
+        s = s.slice(8, s.len());
     }
     let slash = find_from(s, 0, 47);
     let mut authority = s;
@@ -2172,6 +2180,11 @@ fn enter_args(mut r: JsonReader) -> bool {
             return false;
         }
         if (k == "args") {
+            // ENTER the args object — the cursor sits on its `{` after
+            // next_key, and the callers' field loops (`more()`/`next_key()`)
+            // expect to walk the args members directly. Without this, the
+            // first next_key reads `{` and fails sticky (WrongType).
+            r.begin_object();
             return true;
         }
         r.skip_value();

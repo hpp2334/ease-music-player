@@ -452,7 +452,9 @@ fn bump(mut agg: Agg, raw: str, allowed: ?Vec<str>) {
             return;
         }
         if (k == "musicId") {
-            let v = opt_str(r);
+            // TS-era rows carry the raw NUMBER (`JSON.stringify`ed host
+            // payload); normalize both spellings to the stringified id.
+            let v = id_str(r);
             if (r.failed()) {
                 return;
             }

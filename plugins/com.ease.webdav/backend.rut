@@ -1757,7 +1757,11 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
         data_offset = 0;
     }
     // totalLength: prefer Content-Range's total (`bytes start-end/total`) —
-    // Content-Length on a Range response is the partial length.
+    // Content-Length on a Range response is the partial length (for the
+    // 1-byte probe: literally 1). A Content-Range with a `*` total
+    // (`bytes o-o/*`, server doesn't know the size) must stay unknown —
+    // only fall back to Content-Length when NO Content-Range rode the
+    // response at all (the range-ignoring 200's full-body length).
     let mut total: i64 = -1;
     let cr = header_of(resp.headers, "content-range");
     if (cr != nil) {
@@ -1765,17 +1769,11 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
         let slash = find_from(s, 0, 47);
         if (slash != -1) {
             let tail = trim(s.slice(slash + 1, s.len()));
-            // `bytes o-o/*` (unknown total) must stay unknown — falling
-            // through to Content-Length here would read the PROBE's 1-byte
-            // length as the file size.
-            if (tail == "*") {
-                total = -1;
-            } else if (is_digits(tail)) {
+            if (tail != "*" && is_digits(tail)) {
                 total = str_to_i64(tail);
             }
         }
-    }
-    if (total < 0) {
+    } else {
         let cl = header_of(resp.headers, "content-length");
         if (cl != nil) {
             let s: str = cl;
@@ -2071,6 +2069,11 @@ fn enter_args(mut r: JsonReader) -> bool {
             return false;
         }
         if (k == "args") {
+            // ENTER the args object — the cursor sits on its `{` after
+            // next_key, and the callers' field loops (`more()`/`next_key()`)
+            // expect to walk the args members directly. Without this, the
+            // first next_key reads `{` and fails sticky (WrongType).
+            r.begin_object();
             return true;
         }
         r.skip_value();
