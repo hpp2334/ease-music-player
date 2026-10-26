@@ -137,6 +137,13 @@ impl RpcBus {
         *self.inbox.lock().expect("rpc bus inbox poisoned") = Some(json);
     }
 
+    /// Test/driver seam: enqueue a request payload directly (the same slot
+    /// `call_host` fills). The next `take_request()` in the plugin drains
+    /// it.
+    pub fn stash_request(&self, json: String) {
+        self.stash(json);
+    }
+
     /// Whether any op was ever registered (diagnostics).
     pub fn has_registrations(&self) -> bool {
         self.registered.load(Ordering::Relaxed)

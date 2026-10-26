@@ -517,7 +517,10 @@ fn fill_covers(covers_map: MapHandle, answer: str) {
                 return;
             }
             if (k == "musicId") {
-                music_id = r.read_str();
+                music_id = id_str(r);
+                if (r.failed()) {
+                    return;
+                }
             } else if (k == "id") {
                 if (!r.try_null()) {
                     id = r.read_i64();
@@ -562,7 +565,10 @@ fn decode_entry(item: str) -> ?EntryV {
             return nil;
         }
         if (k == "musicId") {
-            music_id = r.read_str();
+            music_id = id_str(r);
+            if (r.failed()) {
+                return nil;
+            }
         } else if (k == "title") {
             title = r.read_str();
         } else if (k == "count") {
@@ -1379,6 +1385,37 @@ fn is_digits(s: str) -> bool {
 
 /// The optional-string read: `null` → nil, a string → some, anything else
 /// → the reader's sticky error.
+/// Stored play rows carry `musicId` as a NUMBER (the TS `JSON.stringify`ed
+/// the raw host payload) while roster ids are strings — accept both and
+/// normalize to the string. (Keep in sync with backend.rut's `id_str`.)
+fn id_str(mut r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let rest = r.rest();
+    let mut i = 0;
+    let mut c: u32 = 0;
+    while (i < rest.len()) {
+        c = rest.code_at(i);
+        if (c != 32 && c != 10 && c != 13 && c != 9) {
+            break;
+        }
+        i += 1;
+    }
+    if (c == 34) {
+        let v = r.read_str();
+        if (r.failed()) {
+            return nil;
+        }
+        return v;
+    }
+    let n = r.read_i64();
+    if (r.failed()) {
+        return nil;
+    }
+    return f"{n}";
+}
+
 fn opt_str(mut r: JsonReader) -> ?str {
     if (r.try_null()) {
         return nil;

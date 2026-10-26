@@ -8,9 +8,13 @@ description = "Compile + boot validation for the shipped rut plugin sources (hos
 [dependencies]
 ease-client-android = { path = "../ease-client-android" }
 ease-client-backend = { path = "../ease-client-backend" }
+ease-client-tokio = { path = "../ease-client-tokio" }
 ease-tur-rpc = { path = "../ease-tur-rpc" }
 tur-engine = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
 
 [dev-dependencies]
 tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
 serde_json = "1"
+futures = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"] }

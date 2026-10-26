@@ -1127,10 +1127,14 @@ version = "0.1.0"
 dependencies = [
  "ease-client-android",
  "ease-client-backend",
+ "ease-client-tokio",
  "ease-tur-rpc",
+ "futures",
  "serde_json",
+ "tokio",
  "tur-engine",
  "tur-integration-tests",
+ "tur-native",
 ]
 
 [[package]]

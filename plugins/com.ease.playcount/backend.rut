@@ -113,7 +113,7 @@ fn decode_play(text: str) -> ?PlayEv {
                     return nil;
                 }
                 if (pk == "musicId") {
-                    let v = opt_str(r);
+                    let v = id_str(r);
                     if (r.failed()) {
                         return nil;
                     }
@@ -159,6 +159,41 @@ fn opt_str(mut r: JsonReader) -> ?str {
         return nil;
     }
     return v;
+}
+
+/// The host sends `musicId` as a JSON NUMBER (`MusicId.value: Long` in
+/// `PluginEvent.toJsonElement`), and TS-era stored rows carry the raw
+/// number too — while the roster (`ease.library.playlists`) uses
+/// stringified ids. Accept both spellings and normalize to the string.
+/// (The reader's failures are sticky, so discriminate on the next token's
+/// first non-ws codepoint — 34 = `"`. — before reading; keep in sync with
+/// view.rut's `id_str`.)
+fn id_str(mut r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let rest = r.rest();
+    let mut i = 0;
+    let mut c: u32 = 0;
+    while (i < rest.len()) {
+        c = rest.code_at(i);
+        if (c != 32 && c != 10 && c != 13 && c != 9) {
+            break;
+        }
+        i += 1;
+    }
+    if (c == 34) {
+        let v = r.read_str();
+        if (r.failed()) {
+            return nil;
+        }
+        return v;
+    }
+    let n = r.read_i64();
+    if (r.failed()) {
+        return nil;
+    }
+    return f"{n}";
 }
 
 /// The stored play row — byte-shape-compatible with the TS append

@@ -1765,7 +1765,12 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
         let slash = find_from(s, 0, 47);
         if (slash != -1) {
             let tail = trim(s.slice(slash + 1, s.len()));
-            if (is_digits(tail)) {
+            // `bytes o-o/*` (unknown total) must stay unknown — falling
+            // through to Content-Length here would read the PROBE's 1-byte
+            // length as the file size.
+            if (tail == "*") {
+                total = -1;
+            } else if (is_digits(tail)) {
                 total = str_to_i64(tail);
             }
         }
@@ -1883,6 +1888,12 @@ fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, mut c: Ctx) ->
     let mut resp = dav_attempt(spec, creds, sess.auth, c);
     if (resp.failed || resp.status == 401) {
         resp = dav_request(spec, creds, c);
+        // The fallback re-authed against a fresh challenge — re-park its
+        // working auth so the remaining chunks of this stream don't pay
+        // 401 + retry every pull.
+        if (!resp.failed) {
+            c.sess_auth[sess.slot] = resp.auth_used;
+        }
     }
     if (resp.failed) {
         return (nil, resp.err);
