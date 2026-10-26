@@ -485,9 +485,12 @@ fn url_decode(s: str) -> str {
 }
 
 fn rstrip_slashes(s: str) -> str {
+    // Strip ALL trailing slashes — a root-only address (`http://host/`)
+    // must yield an empty base path, or `build_url`'s join would double
+    // the slash (`//music/`), which strict routers 301-redirect.
     let n = s.len();
     let mut b = n;
-    while (b > 1 && s.code_at(b - 1) == 47) {
+    while (b > 0 && s.code_at(b - 1) == 47) {
         b -= 1;
     }
     return s.slice(0, b);
@@ -847,10 +850,13 @@ fn authorization_for(scheme: str, username: str, password: str, uri: str, method
     }
     let ha2 = md5_hex(encode_utf8(f"{method}:{uri}"));
     let ncx = nc_hex(nc);
-    let response = md5_hex(encode_utf8(f"{ha1}:{p.nonce}:{ncx}:{cnonce}:auth:{ha2}"));
+    // RFC 7616 (qop=auth) vs RFC 2069 (no qop) — different response hashes;
+    // older NAS/embedded DAV servers challenge without qop.
+    let mut response = md5_hex(encode_utf8(f"{ha1}:{p.nonce}:{ha2}"));
     let mut hdr = f"Digest username=\"{username}\", realm=\"{p.realm}\", nonce=\"{p.nonce}\", uri=\"{uri}\", algorithm={p.algorithm}, response=\"{response}\"";
     if (p.qop_auth) {
-        hdr = f"{hdr}, qop=auth, nc={ncx}, cnonce=\"{cnonce}\"";
+        response = md5_hex(encode_utf8(f"{ha1}:{p.nonce}:{ncx}:{cnonce}:auth:{ha2}"));
+        hdr = f"Digest username=\"{username}\", realm=\"{p.realm}\", nonce=\"{p.nonce}\", uri=\"{uri}\", algorithm={p.algorithm}, qop=auth, nc={ncx}, cnonce=\"{cnonce}\", response=\"{response}\"";
     }
     if (p.opaque != nil) {
         let op: str = p.opaque;
@@ -1709,9 +1715,12 @@ fn push_entry(mut cx: ListCx, href: str, display: ?str, is_dir: bool, size: i64,
 // storage:get / get-chunk / release (the chunked-pull sessions)
 // ---------------------------------------------------------------------------
 
-/// Open a stream: one ranged GET establishes the working auth + metadata;
-/// the session (url + auth + dataOffset) parks in the pool under a fresh
-/// `sid`.
+/// Open a stream: a **1-byte ranged probe** (`bytes=offset-offset`)
+/// establishes the working auth + metadata (status 206, Content-Range's
+/// total, content type) without pulling the whole remaining file — the
+/// body the server sends for the probe is discarded, and the actual bytes
+/// arrive through the host's chunk pulls. The session (url + auth +
+/// dataOffset) parks in the pool under a fresh `sid`.
 /// The opener: `("", err)` on failure (err carries the marked prefix),
 /// the `{sid, meta}` JSON otherwise.
 fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
@@ -1731,7 +1740,7 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
         url: u,
         uri: uri,
         propfind: false,
-        range: f"bytes={offset}-",
+        range: f"bytes={offset}-{offset}",
     }, creds, c);
     if (resp.failed) {
         return (nil, resp.err);
@@ -1877,6 +1886,18 @@ fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, mut c: Ctx) ->
     }
     if (resp.failed) {
         return (nil, resp.err);
+    }
+    // 416 = the pull landed past EOF (exact-multiple-of-len files): the
+    // stream is done, not failed — match S3's mapping.
+    if (resp.status == 416) {
+        let mut w0 = JsonWriter::new();
+        w0.begin_object();
+        w0.key("data");
+        w0.write_str("");
+        w0.key("eof");
+        w0.write_bool(true);
+        w0.end_object();
+        return (w0.finish(), "");
     }
     if (resp.status >= 400) {
         return (nil, f"HTTP {resp.status}: {resp.status_text}");

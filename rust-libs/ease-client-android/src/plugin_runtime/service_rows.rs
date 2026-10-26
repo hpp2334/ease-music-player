@@ -304,12 +304,9 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
         let _ = plugin_id("themes", &handles)?;
         #[cfg(target_os = "android")]
         {
-            theme_upcall_is_dark().map_err(|e| {
-                rut_vm::Trap::new(
-                    TrapKind::Invalid,
-                    format!("ease:themes.is_dark: host upcall failed: {e}"),
-                )
-            })
+            // Upcall failure degrades to the light default (the old
+            // bridge's `unwrap_or(false)`), never a trap.
+            Ok(theme_upcall_is_dark().unwrap_or(false))
         }
         #[cfg(not(target_os = "android"))]
         {
@@ -757,6 +754,13 @@ fn theme_upcall_color(name: &str) -> Result<String, String> {
         )
         .map_err(|e| format!("call_static_method: {e}"))?;
     let obj = ret.l().map_err(|e| format!("ret.l: {e}"))?;
+    // Kotlin answers null for an unknown role. `get_string(null)` would
+    // throw a JVM NPE that jni-rs reports WITHOUT clearing, poisoning the
+    // worker lane's pending-exception state for later upcalls — null-check
+    // and fail with a clean message instead (the old bridge's contract).
+    if obj.is_null() {
+        return Err(format!("unknown color name: {name}"));
+    }
     let s: String = env
         .get_string((&obj).into())
         .map_err(|e| format!("get_string: {e}"))?

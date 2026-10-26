@@ -223,12 +223,11 @@ impl StorageBackend for JsStorageBackend {
             handle.spawn(async move {
                 let mut offset = data_offset;
                 let result = loop {
-                    let mut chunk_args = serde_json::json!({
+                    let chunk_args = serde_json::json!({
                         "sid": sid,
                         "offset": offset,
                         "len": CHUNK_LEN,
                     });
-                    let _ = &mut chunk_args;
                     let reply = match rpc.call_host("storage:get-chunk", chunk_args).await {
                         Ok(v) => v,
                         Err(ease_tur_rpc::RpcError::Handler(msg)) => {
@@ -260,6 +259,15 @@ impl StorageBackend for JsStorageBackend {
                     };
                     if data.is_empty() && chunk.eof {
                         break Ok(());
+                    }
+                    if data.is_empty() {
+                        // A plugin answering `data:"", eof:false` forever
+                        // would spin this loop — treat it as a protocol
+                        // error (the shipped plugins always set eof on
+                        // empty).
+                        break Err(StorageBackendError::Other(
+                            "get chunk: empty chunk without eof".into(),
+                        ));
                     }
                     let n = data.len() as u64;
                     offset += n;

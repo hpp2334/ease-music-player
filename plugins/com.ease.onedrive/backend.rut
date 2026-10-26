@@ -1216,6 +1216,18 @@ fn chunk_impl(mut c: Ctx, sess: Session, offset: u64, len: u64) -> (?str, str) {
     if (resp.failed) {
         return (nil, resp.err);
     }
+    // 416 = the pull landed past EOF (exact-multiple-of-len files): the
+    // stream is done, not failed — match S3's mapping.
+    if (resp.status == 416) {
+        let mut w0 = JsonWriter::new();
+        w0.begin_object();
+        w0.key("data");
+        w0.write_str("");
+        w0.key("eof");
+        w0.write_bool(true);
+        w0.end_object();
+        return (w0.finish(), "");
+    }
     let data = resp.body;
     let n = data.len();
     let eof = (n as u64) < len;
