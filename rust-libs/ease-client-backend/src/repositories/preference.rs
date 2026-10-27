@@ -126,6 +126,7 @@ mod tests {
         let played = LastPlayed {
             music_id: MusicId::wrap(7),
             playlist_id: PlaylistId::wrap(2),
+            position_ms: Some(192_416),
         };
         let mut m = server.load_preference().await.unwrap();
         m.last_played = Some(played);
@@ -133,6 +134,21 @@ mod tests {
         assert_eq!(
             server.load_preference().await.unwrap().last_played,
             Some(played)
+        );
+
+        // Marking the session completed (playlist ran to its end) drops
+        // the position — the update branch persists the new shape too.
+        let completed = LastPlayed {
+            music_id: MusicId::wrap(7),
+            playlist_id: PlaylistId::wrap(2),
+            position_ms: None,
+        };
+        let mut m = server.load_preference().await.unwrap();
+        m.last_played = Some(completed);
+        server.save_preference(m).await.unwrap();
+        assert_eq!(
+            server.load_preference().await.unwrap().last_played,
+            Some(completed)
         );
 
         // An explicit clear (player stopped / track removed) survives
@@ -164,6 +180,38 @@ mod tests {
         am.update(&server.db()).await.unwrap();
 
         assert!(server.load_preference().await.unwrap().last_played.is_none());
+    }
+
+    #[tokio::test]
+    async fn pre_position_last_played_record_parses_with_none_position() {
+        let (server, _dir) = server().await;
+
+        // A record written before `positionMs` existed (older app
+        // version, same database): the read must keep the pair and
+        // default the position to `None` (replay from 0), never fail.
+        server
+            .save_preference(PreferenceModel::default())
+            .await
+            .unwrap();
+        let mut am: preference::ActiveModel = preference::Entity::find_by_id(0)
+            .one(&server.db())
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+        am.last_played = ActiveValue::Set(Some(
+            r#"{"musicId":7,"playlistId":2}"#.to_string(),
+        ));
+        am.update(&server.db()).await.unwrap();
+
+        assert_eq!(
+            server.load_preference().await.unwrap().last_played,
+            Some(LastPlayed {
+                music_id: MusicId::wrap(7),
+                playlist_id: PlaylistId::wrap(2),
+                position_ms: None,
+            })
+        );
     }
 
     #[tokio::test]

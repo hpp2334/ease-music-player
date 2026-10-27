@@ -191,7 +191,7 @@ fun MiniPlayer(
         onClick = { navController.navigate(RouteMusicPlayer()) },
         onPlay = { playerVM.resume() },
         onPause = { playerVM.pause() },
-        onStop = { playerVM.stop() },
+        onStop = { playerVM.userStop() },
         onNext = { playerVM.playNext() },
     )
 }

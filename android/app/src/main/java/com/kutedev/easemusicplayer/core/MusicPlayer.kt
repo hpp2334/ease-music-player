@@ -236,7 +236,9 @@ class PlaybackService : android.app.Service() {
 
                 override fun onStop() {
                     pausedByFocusLoss = false
-                    playerControllerRepository.stop()
+                    // Notification dismissal / transport stop: park the
+                    // session (resumable) instead of wiping it.
+                    playerControllerRepository.userStop()
                 }
             })
             setSessionActivity(sessionActivity)

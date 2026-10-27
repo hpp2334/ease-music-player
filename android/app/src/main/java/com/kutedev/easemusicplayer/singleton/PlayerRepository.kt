@@ -140,10 +140,10 @@ class PlayerRepository @Inject constructor(
         }
     }
 
-    fun setCurrent(music: Music, playlist: Playlist) {
+    fun setCurrent(music: Music, playlist: Playlist, positionMs: Long? = null) {
         _music.value = music
         _playlist.value = playlist
-        persistLastPlayed(LastPlayed(music.meta.id, playlist.abstr.meta.id))
+        persistLastPlayed(LastPlayed(music.meta.id, playlist.abstr.meta.id, positionMs))
     }
 
     /**
@@ -184,6 +184,51 @@ class PlayerRepository @Inject constructor(
         _music.value = null
         _playlist.value = null
         persistLastPlayed(null)
+    }
+
+    /**
+     * User explicit stop (mini-bar X / notification dismissal): stop the
+     * audio and clear the visible deck, but KEEP the session resumable —
+     * the record persists with [positionMs] parked, so the next
+     * foreground's [restoreLastPlayed] brings the track back and the
+     * first play of it seeks to the parked position instead of 0:00.
+     * No-op when nothing is current.
+     *
+     * Distinct from [resetCurrent] (session teardown — playlist/music/
+     * storage removal wipes the record) and from the auto/complete path
+     * ([markSessionCompleted] keeps the deck and drops the position).
+     */
+    fun parkSession(positionMs: Long?) {
+        val m = _music.value ?: return
+        val p = _playlist.value ?: return
+        _music.value = null
+        _playlist.value = null
+        persistLastPlayed(LastPlayed(m.meta.id, p.abstr.meta.id, positionMs))
+    }
+
+    /**
+     * The playlist/track ran to its natural end: keep the deck (paused at
+     * the end) but record the session as completed — [positionMs] null on
+     * the wire means replay from 0, never "resume at the end". The next
+     * `setCurrent` (auto-advance, replay) overwrites this anyway.
+     */
+    fun markSessionCompleted() {
+        val m = _music.value ?: return
+        val p = _playlist.value ?: return
+        persistLastPlayed(LastPlayed(m.meta.id, p.abstr.meta.id, null))
+    }
+
+    /**
+     * Refresh the parked playback position in the persisted record
+     * (periodic snapshot while playing + on pause). No-op when nothing
+     * is current — the ids ride the live deck, so a track switch between
+     * the snapshot and the write only costs a stale position for a track
+     * that is no longer current.
+     */
+    fun savePositionSnapshot(positionMs: Long) {
+        val m = _music.value ?: return
+        val p = _playlist.value ?: return
+        persistLastPlayed(LastPlayed(m.meta.id, p.abstr.meta.id, positionMs))
     }
 
     /**

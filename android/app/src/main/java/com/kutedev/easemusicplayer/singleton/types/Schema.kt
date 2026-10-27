@@ -94,11 +94,14 @@ data class StorageEntryLoc(
 // Mirror of the Rust `LastPlayed` (camelCase): the track the player was
 // last on, persisted so a process kill while backgrounded can restore
 // the player page / mini-player as paused instead of empty. The ids are
-// re-validated against the live playlist before use.
+// re-validated against the live playlist before use. `positionMs` parks
+// the playback position (user stop mid-track / process death while
+// playing); null marks a completed session — replay from 0.
 @Serializable
 data class LastPlayed(
     val musicId: MusicId,
     val playlistId: PlaylistId,
+    val positionMs: Long? = null,
 )
 
 // Parametric storage descriptor — the `kind` tag matches the Rust enum's

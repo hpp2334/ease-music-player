@@ -115,11 +115,19 @@ pub struct StorageEntryLoc {
 /// player page / mini-player as paused instead of empty. The ids are
 /// re-validated against the live playlist on restore — the pair is a
 /// hint, never a guarantee.
+///
+/// [`Self::position_ms`] parks the playback position: `Some` after a
+/// user stop mid-track or a process death while playing (resume at the
+/// parked position on the next play of the same track); `None` marks a
+/// completed session (playlist/track ran to its end — replay from 0) or
+/// a pre-upgrade record without the field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LastPlayed {
     pub music_id: MusicId,
     pub playlist_id: PlaylistId,
+    #[serde(default)]
+    pub position_ms: Option<u64>,
 }
 
 /// Discriminant stored in the `storage` registry table's `type` column.

@@ -78,6 +78,9 @@ class PlayerVM @Inject constructor(
     fun resume() = playerControllerRepository.resume()
     fun pause() = playerControllerRepository.pause()
     fun stop() = playerControllerRepository.stop()
+
+    /** Mini-bar X: park the session (resumable) instead of wiping it. */
+    fun userStop() = playerControllerRepository.userStop()
     fun playNext() = playerControllerRepository.playNext()
     fun playPrevious() = playerControllerRepository.playPrevious()
     fun remove() = playerRepository.remove()

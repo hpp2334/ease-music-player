@@ -112,6 +112,15 @@ class PlayerControllerRepository @Inject constructor(
      */
     @Volatile private var overridedSeek: OverridedSeek? = null
 
+    /**
+     * Parked resume position: the track [restoreLastPlayed] rehydrated
+     * and where it was parked (user stop mid-track / process death while
+     * playing). Applied once by the first successful [play] of that same
+     * music id; any other track's play abandons it. Null = nothing parked.
+     */
+    private var parkedResumeMusicId: MusicId? = null
+    private var parkedResumePositionMs: Long? = null
+
     private var setupStarted = false
 
     init {
@@ -139,7 +148,25 @@ class PlayerControllerRepository @Inject constructor(
         }
         _scope.launch(Dispatchers.Main) {
             _endedEvent.collect {
+                // Natural end: mark the persisted session completed
+                // (replay from 0 — never "resume at the end"). When an
+                // auto-advance follows, its `setCurrent` overwrites the
+                // record anyway; this covers the exhausted-playlist and
+                // single-track ends.
+                playerRepository.markSessionCompleted()
                 playOnComplete()
+            }
+        }
+        // Parked-position snapshots: keep the persisted `last_played`
+        // position fresh while audio is active, so a user stop or a
+        // process death mid-track resumes where it left off (±5 s).
+        // Cheap local write; skipped entirely when idle.
+        _scope.launch {
+            while (true) {
+                delay(POSITION_SNAPSHOT_INTERVAL_MS)
+                if (playerRepository.playing.value || playerRepository.loading.value) {
+                    playerRepository.savePositionSnapshot(getCurrentPosition())
+                }
             }
         }
     }
@@ -267,9 +294,17 @@ class PlayerControllerRepository @Inject constructor(
             bridge.logRaw(
                 "info",
                 "restoreLastPlayed: music ${last.musicId.value} " +
-                    "(playlist ${last.playlistId.value})",
+                    "(playlist ${last.playlistId.value})" +
+                    (last.positionMs?.let { " parked at ${it}ms" } ?: ""),
             )
-            playerRepository.setCurrent(music, playlist)
+            // The parked position rides the persist (surviving a second
+            // process death) and arms the resume: the first play of this
+            // same track seeks to it instead of restarting at 0:00.
+            playerRepository.setCurrent(music, playlist, last.positionMs)
+            last.positionMs?.let {
+                parkedResumeMusicId = last.musicId
+                parkedResumePositionMs = it
+            }
             launchLyricFetch(last.musicId)
         }
     }
@@ -284,8 +319,18 @@ class PlayerControllerRepository @Inject constructor(
      * which point it clears the override and returns engine truth again.
      */
     fun getCurrentPosition(): Long {
-        val engineMs = _cantodeEngine.value?.positionMs?.value ?: 0L
-        val overrided = overridedSeek ?: return engineMs
+        val engine = _cantodeEngine.value
+        val engineMs = engine?.positionMs?.value ?: 0L
+        val overrided = overridedSeek ?: run {
+            // Parked deck (restored but not yet re-loaded): the engine
+            // holds no source and reports 0 — surface the parked position
+            // so the slider and the lock-screen seekbar show where the
+            // session stopped.
+            if (engine == null || engine.state.value == PlayerState.IDLE) {
+                parkedResumePositionMs?.let { return it }
+            }
+            return engineMs
+        }
         val settled = abs(engineMs - overrided.targetMs) <= SEEK_SETTLE_TOLERANCE_MS
         val expired = SystemClock.elapsedRealtime() >= overrided.expiresAtMs
         return if (settled || expired) {
@@ -324,7 +369,13 @@ class PlayerControllerRepository @Inject constructor(
         // way forward is a fresh load.
         val ended = engine.state.value == PlayerState.ENDED
         val errorState = engine.state.value == PlayerState.ERROR
-        if (!ended && !errorState && _music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
+        // An IDLE engine holds no source at all — same-track "resume"
+        // would be a dead `engine.play()` no-op (that is the state after
+        // a user stop parked the session, or a restored-but-not-yet-
+        // loaded deck). Route it through the fresh-load path below, which
+        // also applies the parked resume position.
+        val freshSource = ended || errorState || engine.state.value == PlayerState.IDLE
+        if (!freshSource && _music.value?.meta?.id == id && _playlist.value?.abstr?.meta?.id == playlistId) {
             bridge.logRaw("info", "play(${id.value}): same track → resume")
             resume(); return
         }
@@ -444,6 +495,28 @@ class PlayerControllerRepository @Inject constructor(
                     playlistRepository.notifyMusicsUpdated()
                 }
 
+                // Parked-position resume: restoreLastPlayed rehydrated
+                // this track from a mid-track stop / process death — the
+                // fresh load above started at 0, so jump to the parked
+                // position once. Guards skip a trivial position and the
+                // end-of-track window (a completed session replays from
+                // 0). Cleared unconditionally: playing any other track
+                // abandons the parked position.
+                val parkedId = parkedResumeMusicId
+                val parkedMs = parkedResumePositionMs
+                parkedResumeMusicId = null
+                parkedResumePositionMs = null
+                if (parkedId == id && parkedMs != null && parkedMs > RESUME_POSITION_MIN_MS) {
+                    val durMs = playerRepository.music.value?.meta?.duration
+                    if (durMs == null || parkedMs < durMs - RESUME_POSITION_TAIL_MS) {
+                        bridge.logRaw(
+                            "info",
+                            "play(${id.value}): resume at parked ${parkedMs}ms",
+                        )
+                        seek(parkedMs.toULong())
+                    }
+                }
+
                 // The same writeback also captures embedded tag lyrics —
                 // which the earlier lyric fetch could not have seen on a
                 // track's FIRST play (it races the load; the column was
@@ -503,12 +576,18 @@ class PlayerControllerRepository @Inject constructor(
         // design — see the state machine's rows for both; a failed load
         // ends in `Error`): without this, the play button at
         // end-of-track / end-of-playlist — or after a failed load — was
-        // a dead no-op. Replay the current track via a fresh load
-        // instead (a brand-new source epoch; the engine's poll error
-        // slot clears with the new session).
+        // a dead no-op. An IDLE engine holds no source either (a user
+        // stop parked the deck, or a restored-but-not-yet-loaded
+        // session) — `engine.play()` would be equally dead. Replay the
+        // current track via a fresh load instead (a brand-new source
+        // epoch; the engine's poll error slot clears with the new
+        // session; a parked position applies in [play]).
         val m = _music.value
         val p = _playlist.value
-        if ((engine.state.value == PlayerState.ENDED || engine.state.value == PlayerState.ERROR) && m != null && p != null) {
+        if ((engine.state.value == PlayerState.ENDED ||
+                engine.state.value == PlayerState.ERROR ||
+                engine.state.value == PlayerState.IDLE) && m != null && p != null
+        ) {
             play(m.meta.id, p.abstr.meta.id)
             return
         }
@@ -537,6 +616,10 @@ class PlayerControllerRepository @Inject constructor(
     fun pause() {
         val engine = _cantodeEngine.value ?: return
         engine.pause()
+        // Park the position immediately — a notification dismissal or a
+        // process death right after this pause must resume from here,
+        // not from the last 5 s snapshot.
+        playerRepository.savePositionSnapshot(getCurrentPosition())
         _pluginEvents.tryEmit(
             PluginEvent.MusicPause(
                 musicId = _music.value?.meta?.id,
@@ -551,6 +634,30 @@ class PlayerControllerRepository @Inject constructor(
         engine.stop()
         overridedSeek = null
         playerRepository.resetCurrent()
+        _pluginEvents.tryEmit(
+            PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
+        )
+    }
+
+    /**
+     * User explicit stop (mini-bar X / notification dismissal /
+     * transport stop): stop the audio and hide the deck, but PARK the
+     * session — `last_played` survives with the parked position, so the
+     * next foreground's [restoreLastPlayed] brings the track back and
+     * the first play of it resumes in place instead of from 0:00.
+     *
+     * Contrast [stop] — the session-teardown variant used when the
+     * deck's playlist/music/storage is being removed: it wipes the
+     * record, since the parked pair could not be restored anyway.
+     * A finished session (ENDED) parks with no position — replay from 0.
+     */
+    fun userStop() {
+        val engine = _cantodeEngine.value ?: return
+        val position = getCurrentPosition()
+        val ended = engine.state.value == PlayerState.ENDED
+        engine.stop()
+        overridedSeek = null
+        playerRepository.parkSession(if (ended) null else position)
         _pluginEvents.tryEmit(
             PluginEvent.MusicStop(timestamp = System.currentTimeMillis())
         )
@@ -656,5 +763,17 @@ class PlayerControllerRepository @Inject constructor(
          *  instead of ending the listening session. */
         private const val ADVANCE_LOAD_RETRY_MAX = 2
         private const val ADVANCE_LOAD_RETRY_DELAY_MS = 5_000L
+
+        /** Parked-resume guards (applied in [play]'s post-load): a
+         *  position this close to 0 isn't worth a seek, and one this
+         *  close to the end means the session had completed — replay
+         *  from 0 instead. */
+        private const val RESUME_POSITION_MIN_MS = 5_000L
+        private const val RESUME_POSITION_TAIL_MS = 10_000L
+
+        /** How often the persisted `last_played` position is refreshed
+         *  while audio is active — the resume-position granularity for
+         *  process deaths. */
+        private const val POSITION_SNAPSHOT_INTERVAL_MS = 5_000L
     }
 }
