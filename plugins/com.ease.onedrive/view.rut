@@ -1,0 +1,380 @@
+// OneDrive storage view — the tur_kit port of the apiVersion 1 TS view
+// (`src/view.ts` + `src/oauth-pending.ts`). The setup form shown in the
+// add-storage page (create mode) and when editing an existing OneDrive
+// storage (edit mode).
+//
+// Mode comes from `ease.context.storage_id()` (read once at `start`: nil =
+// create, a `plugin_storage_id` = edit). Edit-mode hydration (the alias +
+// secretId from the plugin's `storage:<id>` kv document) runs at MOUNT,
+// not at boot — identity-bound rows must never fire during `start`.
+//
+// - Create: an alias input + a "连接你的账户" button. Tapping it calls the
+//   backend's `onedrive:connect` view op (`ease.rpc.call`): the backend
+//   mints a flow id (`oauth.new()`), stashes the alias in its own KV keyed
+//   by it (`oauth:<id>` — the pending slot its `oauth:exchange` handler
+//   consumes), and fires `oauth.start(oauthId)`; the host fetches the
+//   authorize URL from the backend (`oauth:url`), stashes
+//   `(pluginId, oauthId)`, and opens the system browser. The
+//   `easem://oauth2redirect` callback completes the exchange host-side and
+//   mints the storage row; there is no "save" step, and the alias never
+//   crosses the host.
+//
+// - Edit: the alias input is prefilled from the kv config; a Save button
+//   writes it back via `db.singleSet` + `context.notifyChange()` (the host
+//   reloads the dashboard so the new alias shows). Removal is handled by
+//   the host's top-bar trash icon (`storage:removeInstance` on the
+//   backend), so no in-view disconnect button.
+//
+// No `ease.themes` — theme colors are an Android-only row and views must
+// boot headless (the check harness); the palette is static slate + indigo.
+
+use json::{ JsonReader, JsonWriter };
+use tur_host::ease::context::{ notify_change, storage_id };
+use tur_host::ease::db::{ single_get, single_set };
+use tur_host::ease::rpc::call;
+use tur_kit::control_flow::control::{ Condition };
+use tur_kit::control_flow::lifecycle::{ Lifecycle };
+use tur_kit::flags::{ BorderPosition, CrossAlign, MainAxisSize };
+use tur_kit::gesture::pointer::{ MountEvent, PointerInteract };
+use tur_kit::handles::{ TextCtrl, UndoCtrl, View, mount, text_ctrl, undo_ctrl };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::layout::flex::{ Column };
+use tur_kit::reactive::{ DeriveCtx, Mutation, MutationCtx, Readable, Source, derive, mutate, source, sv };
+use tur_kit::text::core::{ Text };
+use tur_kit::text::input::{ Input };
+
+// The static palette (0xRRGGBBAA — the kit's packing law).
+let PRIMARY: u64 = 0x4F46E5FFu64;
+let CARD: u64 = 0xFFFFFFFFu64;
+let TEXT: u64 = 0xFF1E293Bu64;
+let TEXT_MUTED: u64 = 0xFF64748Bu64;
+let DIVIDER: u64 = 0xFFE2E8F0u64;
+let ERROR: u64 = 0xFFDC2626u64;
+
+entry fn start() -> u64 {
+    // Mode: nil = create (no storage row yet), a real id = edit. Read once —
+    // the value never changes for the instance lifetime.
+    let sid = storage_id();
+    let mut sid_seed = "";
+    if (sid != nil) {
+        sid_seed = sid;
+    }
+    let storage_src: Source<str> = source<str>(sid_seed);
+    // The existing config's secretId (hydrated in edit mode; Save preserves
+    // it — only the alias is editable here).
+    let existing_secret: Source<i64> = source<i64>(0);
+
+    let ctrl_alias = text_ctrl();
+    let undo_alias = undo_ctrl();
+
+    let status_text = source<str>("");
+    let status_is_error = source<bool>(false);
+
+    let is_edit: Readable<bool> = derive(fn (ctx: DeriveCtx) -> bool {
+        return ctx.get<str>(storage_src) != "";
+    });
+    let status_visible: Readable<bool> = derive(fn (ctx: DeriveCtx) -> bool {
+        return ctx.get<str>(status_text) != "";
+    });
+
+    // Edit-mode hydration: at MOUNT (never at boot), read the kv config and
+    // prefill the controller + the preserved secretId. A corrupt/missing
+    // document starts blank.
+    let b_hydrate = mutate(fn (ctx: MutationCtx, _e: MountEvent) {
+        let sid = storage_id();
+        if (sid == nil) {
+            return;
+        }
+        let s: str = sid;
+        let raw = single_get(f"storage:{s}");
+        if (raw == nil) {
+            return;
+        }
+        let doc: str = raw;
+        let cfg = decode_config(doc);
+        if (cfg == nil) {
+            return;
+        }
+        let c: StoredConfig = cfg;
+        ctrl_alias.set_text(c.alias);
+        ctx.set<i64>(existing_secret, c.secret_id);
+    });
+
+    let b_connect = mutate(fn (ctx: MutationCtx, _e: nil) {
+        // The backend mints the flow id, stashes the alias in its pending
+        // slot (the `oauth:exchange` handler consumes it) and fires the
+        // browser flow — business data never crosses the host.
+        let alias = trim(ctrl_alias.text());
+        let mut w = JsonWriter::new();
+        w.begin_object();
+        w.key("alias");
+        w.write_str(alias);
+        w.end_object();
+        ctx.set<str>(status_text, "正在发起授权...");
+        ctx.set<bool>(status_is_error, false);
+        let reply = call("onedrive:connect", w.finish());
+        let r = parse_connect_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, f"授权失败：{r.message}");
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        if (r.fired) {
+            ctx.set<str>(status_text, "已发起授权，请在浏览器中完成登录");
+            ctx.set<bool>(status_is_error, false);
+        } else {
+            ctx.set<str>(status_text, "无法发起授权，请升级 App 后重试");
+            ctx.set<bool>(status_is_error, true);
+        }
+    });
+
+    let b_save = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let sid = ctx.get<str>(storage_src);
+        if (sid == "") {
+            return;
+        }
+        let alias = trim(ctrl_alias.text());
+        let mut w = JsonWriter::new();
+        w.begin_object();
+        w.key("alias");
+        w.write_str(alias);
+        w.key("secretId");
+        let secret = ctx.get<i64>(existing_secret);
+        if (secret != 0) {
+            w.write_i64(secret);
+        } else {
+            w.write_raw("null");
+        }
+        w.end_object();
+        // Preserve the existing secretId; only the alias is editable here.
+        single_set(f"storage:{sid}", w.finish());
+        // Reload the host list so the dashboard picks up the new alias.
+        notify_change();
+        ctx.set<str>(status_text, "已保存");
+        ctx.set<bool>(status_is_error, false);
+    });
+
+    let form = Column()
+        .cross_alignment(CrossAlign::Stretch)
+        .main_axis_size(MainAxisSize::Min)
+        .query_key("onedrive-form")
+        .child(field_label("服务器名称 (别名)"))
+        .child(SizedBox(0.0, 6.0).build())
+        .child(alias_field(ctrl_alias, undo_alias))
+        .child(SizedBox(0.0, 16.0).build())
+        .child(
+            Condition(is_edit)
+                .then(primary_button("onedrive-save", "保存", b_save))
+                .else_branch(primary_button("onedrive-connect", "连接你的账户", b_connect))
+                .build(),
+        )
+        .child(SizedBox(0.0, 10.0).build())
+        .child(status_area(status_text, status_visible, status_is_error))
+        .build();
+
+    // mount runs the hydration mutation before the first frame paints
+    let root = Lifecycle()
+        .on_mount(b_hydrate)
+        .child(
+            Container()
+                .color(sv(CARD))
+                .padding(4.0)
+                .child(form)
+                .build(),
+        )
+        .build();
+    mount(root);
+    return 0;
+}
+
+// ---- the form pieces ----------------------------------------------------
+
+/// Per-instance config (the `storage:<id>` KV document).
+struct StoredConfig {
+    alias: str,
+    secret_id: i64,
+}
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?StoredConfig {
+    let mut r = JsonReader::of(doc);
+    r.begin_object();
+    let mut alias = "";
+    let mut secret_id: i64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                alias = v;
+            },
+            "secretId" -> {
+                if (!r.try_null()) {
+                    secret_id = r.read_i64();
+                }
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return StoredConfig { alias: alias, secret_id: secret_id };
+}
+
+fn field_label(text: str) -> View {
+    return Text()
+        .text(sv(text))
+        .font_size(13.0)
+        .color(TEXT_MUTED)
+        .build();
+}
+
+fn alias_field(ctrl: TextCtrl, undo: UndoCtrl) -> View {
+    let input = Input()
+        .controller(ctrl)
+        .undo(undo)
+        .placeholder(sv("OneDrive"))
+        .font_size(15.0)
+        .color(TEXT)
+        .cursor_color(PRIMARY)
+        .width_height(0.0, 22.0)
+        .build();
+    return Container()
+        .color(sv(CARD))
+        .border(DIVIDER, 1.0, BorderPosition::Inside)
+        .radius(sv(12.0f64))
+        .padding(10.0)
+        .child(input)
+        .build();
+}
+
+fn primary_button(key: str, label: str, cb: Mutation<nil>) -> View {
+    let face = Container()
+        .radius(sv(24.0f64))
+        .padding(14.0)
+        .color(sv(PRIMARY))
+        .child(
+            Text()
+                .text(sv(label))
+                .font_size(15.0)
+                .color(0xFFFFFFFFu64)
+                .build(),
+        )
+        .build();
+    return PointerInteract()
+        .on_click(cb)
+        .query_key(key)
+        .child(face)
+        .build();
+}
+
+/// The status line: the message rides its source, the tint swaps on
+/// `status_is_error` (Text.color is a static lane).
+fn status_area(status_text: Readable<str>, status_visible: Readable<bool>, status_is_error: Readable<bool>) -> View {
+    let err = Text()
+        .text(status_text)
+        .font_size(13.0)
+        .color(ERROR)
+        .query_key("onedrive-status")
+        .build();
+    let muted = Text()
+        .text(status_text)
+        .font_size(13.0)
+        .color(TEXT_MUTED)
+        .query_key("onedrive-status")
+        .build();
+    return Condition(status_visible)
+        .then(
+            Condition(status_is_error)
+                .then(err)
+                .else_branch(muted)
+                .build(),
+        )
+        .else_branch(SizedBox(0.0, 0.0).build())
+        .build();
+}
+
+// ---- the actions' helpers -------------------------------------------------
+
+/// The `onedrive:connect` reply: `{"ok":true,"result":{"fired":…}}` / the
+/// error shape.
+struct ConnectReply {
+    ok: bool,
+    message: str,
+    fired: bool,
+}
+
+fn parse_connect_reply(reply: str) -> ConnectReply {
+    let mut r = JsonReader::of(reply);
+    r.begin_object();
+    let mut ok = false;
+    let mut have_ok = false;
+    let mut message = "";
+    let mut fired = false;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "ok") {
+            ok = r.read_bool();
+            have_ok = true;
+        } else if (k == "error") {
+            let v = r.read_str();
+            if (!r.failed()) {
+                message = v;
+            }
+        } else if (k == "result") {
+            r.begin_object();
+            while (r.more()) {
+                let rk = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (rk == "fired") {
+                    fired = r.read_bool();
+                } else if (rk == "error") {
+                    let v = r.read_str();
+                    if (!r.failed()) {
+                        message = v;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (!have_ok) {
+        return ConnectReply { ok: false, message: "后台未响应", fired: false };
+    }
+    return ConnectReply { ok: ok, message: message, fired: fired };
+}
+
+fn trim(s: str) -> str {
+    let n = s.len();
+    let mut a = 0;
+    while (a < n && is_ws(s.code_at(a))) {
+        a += 1;
+    }
+    let mut b = n;
+    while (b > a && is_ws(s.code_at(b - 1))) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+fn is_ws(c: u32) -> bool {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}

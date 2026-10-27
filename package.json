@@ -6,6 +6,7 @@
   "scripts": {
     "build:jni": "npx tsx ./scripts/build-jni-libs.ts",
     "build:apk": "EBUILD=1 pnpm run build:jni && npx tsx ./scripts/build-apk.ts",
+    "build:plugins": "npx tsx ./scripts/package-plugin.ts --all --bundle com.ease.webdav,com.ease.lyricformats",
     "test": "cd ./rust-libs && cargo nextest run"
   },
   "keywords": [],

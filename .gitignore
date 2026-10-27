@@ -9,6 +9,7 @@
 .history
 .svn/
 migrate_working_dir/
+.zcode/
 
 # IntelliJ related
 *.iml
@@ -50,4 +51,20 @@ rust-libs/ease-remote-storage/src/generated.rs
 **/target
 **/node_modules
 
+# Plugin rspack build output (`plugins/<id>/dist`) — packaged into the
+# committed registry (`plugins/registry/`) by `scripts/package-plugin.ts`.
+/plugins/*/dist/
+# Bundled plugin zip copied into the APK assets by `--bundle` (only
+# WebDAV ships there; regenerated from the registry zip on build).
+/android/app/src/main/assets/plugin-bundles/
+
+# Playwright MCP session logs
+/.playwright-mcp/
+
 .fuse*
+
+# Build cache & local state
+.gradle/
+/build/
+.metadata
+.vscode/

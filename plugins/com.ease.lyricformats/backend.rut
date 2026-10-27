@@ -1,0 +1,923 @@
+// Lyric Formats — the app's entire lyric parsing as a headless rut
+// backend (apiVersion 2; a faithful port of the JS epoch's
+// src/backend.ts + src/parsers.ts — there is no built-in parser
+// host-side). One `lyric:parse` host-RPC entry serves every
+// `contributions.lyricParsers` entry of this manifest; the host
+// (rust-libs/ease-client-backend services/lyrics) resolves candidate
+// parsers per file extension, ships the raw bytes as base64, and falls
+// through to the next parser on a `result: null`, an error envelope or
+// a timeout:
+//
+//   lyric:parse { pluginId, parserId, fileName, size, contentBase64 }
+//     -> { lines: [{ timeMs, durationMs?, text }...], metadata? } | null
+//
+// `result: null` = "not mine / unrecognized content"; the error
+// envelope = the plugin's own failure. Both fall through host-side.
+//
+// Formats (hand-written, regex-free lexers — rut has no regex):
+//   - lrc      LRC (info tags pass through unapplied — `[offset:+500]`
+//              stays a verbatim string; enhanced-LRC word timings
+//              stripped from the text)
+//   - srt/vtt  SRT + WebVTT (cue start times, per-line durationMs from
+//              the cue end)
+//
+// All results are pre-sorted by time; the host clamps, rounds, caps
+// and sorts again (defensive on both sides).
+
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+use tur_host::clipboard::{ decode_utf8 };
+use tur_host::ease::crypto::{ base64_decode };
+use tur_host::ease::rpc::{ register, take_request };
+
+// ---------------------------------------------------------------------------
+// Module lifecycle
+// ---------------------------------------------------------------------------
+
+// The module record the engine slots at boot. The parsers are pure —
+// the JS backend kept no per-session state either; the record only
+// proves the start answer (the bus token the dispatch rides).
+struct Ctx {}
+
+entry fn start() -> opaque {
+    register("lyric:parse", "op_lyric_parse");
+    return opaque(Ctx {});
+}
+
+// Nothing to dispose — the bus rows die with the instance.
+entry fn stop() {
+}
+
+// ---------------------------------------------------------------------------
+// The contract op
+// ---------------------------------------------------------------------------
+
+// The stashed call payload's args half.
+struct Req {
+    parser_id: str,
+    file_name: str,
+    content_base64: str,
+}
+
+entry fn op_lyric_parse(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("lyric:parse: cx is not a Ctx");
+    }
+    let raw = take_request();
+    if (raw.len() == 0) {
+        return err_envelope("lyric:parse: no pending request");
+    }
+    let req = decode_request(raw);
+    if (req == nil) {
+        // A malformed request is the plugin's own failure — the error
+        // envelope rejects the RPC host-side (logged, next parser
+        // tried), exactly like a thrown decode error did in the JS
+        // backend.
+        return err_envelope("lyric:parse: malformed request");
+    }
+    let r: Req = req;
+    let bytes = base64_decode(r.content_base64);
+    let text = decode_utf8(bytes);
+    // Dispatch on the file-name extension (case-insensitive) — the same
+    // key the host resolves candidates by. The old JS backend keyed on
+    // `parserId`; the extension is the stricter, host-mirrored form.
+    let ext = file_ext_lower(r.file_name);
+    let mut parsed: ?LyricResult = nil;
+    if (ext == "lrc") {
+        parsed = parse_lrc(text);
+    } else if (ext == "srt" || ext == "vtt") {
+        parsed = parse_subtitle(text);
+    }
+    if (parsed == nil) {
+        // Unknown extension or no usable content — "not mine", the
+        // envelope-ok null the host falls through on.
+        return "{\"ok\":true,\"result\":null}";
+    }
+    let res: LyricResult = parsed;
+    return ok_envelope(res);
+}
+
+// Decode `{"op":…,"args":{…}}` — only the args fields this plugin
+// reads; unknown keys are skipped, never a failure. Nil on any
+// malformed shape.
+fn decode_request(text: str) -> ?Req {
+    let mut r = JsonReader::of(text);
+    let mut parser_id = "";
+    let mut file_name = "";
+    let mut content = "";
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) { return nil; }
+        if (k == "args") {
+            r.begin_object();
+            while (r.more()) {
+                let ak = r.next_key();
+                if (r.failed()) { return nil; }
+                if (ak == "parserId") {
+                    parser_id = r.read_str();
+                } else if (ak == "fileName") {
+                    file_name = r.read_str();
+                } else if (ak == "contentBase64") {
+                    content = r.read_str();
+                } else {
+                    r.skip_value();
+                }
+                if (r.failed()) { return nil; }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) { return nil; }
+    }
+    r.end_object();
+    if (r.failed()) { return nil; }
+    return Req { parser_id: parser_id, file_name: file_name, content_base64: content };
+}
+
+// `{"ok":true,"result":…}` — the reply envelope, built over the std
+// writer (its string escaping is exactly RFC 8259; lyric text is
+// arbitrary).
+fn ok_envelope(res: LyricResult) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("ok");
+    w.write_bool(true);
+    w.key("result");
+    w.begin_object();
+    w.key("lines");
+    w.begin_array();
+    for (let ln of res.lines) {
+        w.begin_object();
+        w.key("timeMs");
+        w.write_i64(ln.time_ms);
+        if (ln.duration_ms != nil) {
+            let d: i64 = ln.duration_ms;
+            w.key("durationMs");
+            w.write_i64(d);
+        }
+        w.key("text");
+        w.write_str(ln.text);
+        w.end_object();
+    }
+    w.end_array();
+    if (res.artist != nil || res.album != nil || res.title != nil || res.lyricist != nil || res.author != nil || res.length != nil || res.offset != nil) {
+        w.key("metadata");
+        w.begin_object();
+        if (res.artist != nil) { let v: str = res.artist; w.key("artist"); w.write_str(v); }
+        if (res.album != nil) { let v: str = res.album; w.key("album"); w.write_str(v); }
+        if (res.title != nil) { let v: str = res.title; w.key("title"); w.write_str(v); }
+        if (res.lyricist != nil) { let v: str = res.lyricist; w.key("lyricist"); w.write_str(v); }
+        if (res.author != nil) { let v: str = res.author; w.key("author"); w.write_str(v); }
+        if (res.length != nil) { let v: str = res.length; w.key("length"); w.write_str(v); }
+        if (res.offset != nil) { let v: str = res.offset; w.key("offset"); w.write_str(v); }
+        w.end_object();
+    }
+    w.end_object();
+    w.end_object();
+    return w.finish();
+}
+
+// `{"ok":false,"error":…}` — the plugin's own failure.
+fn err_envelope(msg: str) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("ok");
+    w.write_bool(false);
+    w.key("error");
+    w.write_str(msg);
+    w.end_object();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// The lexer toolkit (regex-free by design — character scanning only)
+// ---------------------------------------------------------------------------
+
+// One result line. `duration_ms` is the optional per-line duration the
+// subtitle format carries (absent for LRC).
+struct LyricLine {
+    time_ms: i64,
+    duration_ms: ?i64,
+    text: str,
+}
+
+// One parser answer: the timed lines plus whatever info-tag values
+// mapped (all strings, pass-through — the host keeps `length` /
+// `offset` verbatim, exactly like the old Rust lrc-nom parser did).
+struct LyricResult {
+    lines: Vec<LyricLine>,
+    artist: ?str,
+    album: ?str,
+    title: ?str,
+    lyricist: ?str,
+    author: ?str,
+    length: ?str,
+    offset: ?str,
+}
+
+// ASCII whitespace only (space \t \n \r \v \f) — the JS `.trim()`'s
+// set minus the exotic Unicode codepoints; lyric files in the wild
+// don't lead with U+3000.
+fn is_ws(c: i32) -> bool {
+    return c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D || c == 0x0B || c == 0x0C;
+}
+
+fn trim(s: str) -> str {
+    let n = s.len();
+    let mut a: i32 = 0;
+    while (a < n && is_ws(s.code_at(a) as i32)) {
+        a += 1;
+    }
+    let mut b: i32 = n;
+    while (b > a && is_ws(s.code_at(b - 1) as i32)) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+fn trim_start(s: str) -> str {
+    let n = s.len();
+    let mut a: i32 = 0;
+    while (a < n && is_ws(s.code_at(a) as i32)) {
+        a += 1;
+    }
+    return s.slice(a, n);
+}
+
+// First index of one codepoint at/after `from`, -1 when absent.
+fn index_of(s: str, c: i32, from: i32) -> i32 {
+    let n = s.len();
+    let mut k = from;
+    while (k < n) {
+        if (s.code_at(k) as i32 == c) {
+            return k;
+        }
+        k += 1;
+    }
+    return -1;
+}
+
+// Last index of one codepoint, -1 when absent.
+fn last_index_of(s: str, c: i32) -> i32 {
+    let mut k = s.len() - 1;
+    while (k >= 0) {
+        if (s.code_at(k) as i32 == c) {
+            return k;
+        }
+        k -= 1;
+    }
+    return -1;
+}
+
+// First index of substring `needle` at/after `from`, -1 when absent.
+fn index_of_str(s: str, needle: str, from: i32) -> i32 {
+    let n = s.len();
+    let m = needle.len();
+    if (m == 0) { return from; }
+    let mut k = from;
+    while (k + m <= n) {
+        if (s.starts_with(k, needle)) {
+            return k;
+        }
+        k += 1;
+    }
+    return -1;
+}
+
+// All `needle` occurrences -> `repl` (the JS `split(needle).join(repl)`).
+fn replace_all(s: str, needle: str, repl: str) -> str {
+    let n = s.len();
+    let m = needle.len();
+    if (m == 0) { return s; }
+    let b = StringBuilder::with_cap(n);
+    let mut i: i32 = 0;
+    while (i < n) {
+        if (i + m <= n && s.starts_with(i, needle)) {
+            b.append(repl);
+            i += m;
+        } else {
+            b.append(s.slice(i, i + 1));
+            i += 1;
+        }
+    }
+    return b.build();
+}
+
+fn is_digits(s: str) -> bool {
+    let n = s.len();
+    if (n == 0) { return false; }
+    let mut i: i32 = 0;
+    while (i < n) {
+        let c = s.code_at(i) as i32;
+        if (c < 0x30 || c > 0x39) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// A run of ASCII digits as its numeric value (the JS `Number(s)` of a
+// digit-only string).
+fn digits_value(s: str) -> i64 {
+    let mut v: i64 = 0;
+    let n = s.len();
+    let mut i: i32 = 0;
+    while (i < n) {
+        v = v * 10 + (s.code_at(i) as i32 - 0x30) as i64;
+        i += 1;
+    }
+    return v;
+}
+
+// ASCII-only case mapping — extensions and the VTT block keywords are
+// ASCII by definition (and the JS code compared them ASCII-sensitively
+// through `toUpperCase` on already-ASCII text).
+fn ascii_lower(s: str) -> str {
+    let b = StringBuilder::with_cap(s.len());
+    let n = s.len();
+    let mut i: i32 = 0;
+    while (i < n) {
+        let c = s.code_at(i) as i32;
+        if (c >= 0x41 && c <= 0x5A) {
+            b.append_code((c + 0x20) as u32);
+        } else {
+            b.append(s.slice(i, i + 1));
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+fn ascii_upper(s: str) -> str {
+    let b = StringBuilder::with_cap(s.len());
+    let n = s.len();
+    let mut i: i32 = 0;
+    while (i < n) {
+        let c = s.code_at(i) as i32;
+        if (c >= 0x61 && c <= 0x7A) {
+            b.append_code((c - 0x20) as u32);
+        } else {
+            b.append(s.slice(i, i + 1));
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+// Split on `\n`, `\r\n` or a lone `\r` (every line terminator in the
+// wild) — the JS `split("\n")`-then-`split("\r")` shape, empties kept.
+// QUIRK carried from the JS backend: a `\r\n` pair yields a phantom
+// empty line between the two real ones ("a\r\nb" -> a, "", b). The LRC
+// parser skips empty lines, so CRLF LRC files parse unchanged — but an
+// SRT/VTT file with CRLF endings gets its blank-line block separators
+// doubled and fails to produce cues (null, "not mine"), exactly as the
+// old backend did.
+fn split_lines(text: str) -> Vec<str> {
+    let mut out = Vec<str>::new();
+    let n = text.len();
+    let mut chunk_start: i32 = 0;
+    let mut i: i32 = 0;
+    while (i <= n) {
+        if (i == n || text.code_at(i) as i32 == 0x0A) {
+            // one JS split("\n") chunk — carve it on \r, empties kept
+            let chunk = text.slice(chunk_start, i);
+            let m = chunk.len();
+            let mut piece_start: i32 = 0;
+            let mut j: i32 = 0;
+            while (j <= m) {
+                if (j == m || chunk.code_at(j) as i32 == 0x0D) {
+                    out.push(chunk.slice(piece_start, j));
+                    piece_start = j + 1;
+                }
+                j += 1;
+            }
+            chunk_start = i + 1;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Drop a leading UTF-8 BOM — it would poison LRC's first-line tags and
+// defeat the `WEBVTT` header sniffing.
+fn strip_bom(text: str) -> str {
+    if (text.len() > 0 && text.code_at(0) as i32 == 0xFEFF) {
+        return text.slice(1, text.len());
+    }
+    return text;
+}
+
+// Collapse whitespace runs to single spaces and trim both ends.
+fn collapse_spaces(text: str) -> str {
+    let b = StringBuilder::with_cap(text.len());
+    let mut pending = false;
+    let n = text.len();
+    let mut i: i32 = 0;
+    while (i < n) {
+        let c = text.code_at(i) as i32;
+        if (c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D) {
+            pending = b.len() > 0;
+        } else {
+            if (pending) {
+                b.append(" ");
+                pending = false;
+            }
+            b.append(text.slice(i, i + 1));
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+// `[a, b, c].join(sep)` — one builder, sep between pieces.
+fn join_str(parts: Vec<str>, sep: str) -> str {
+    let b = StringBuilder::with_cap(64);
+    let n = parts.len;
+    let mut k: i32 = 0;
+    while (k < n) {
+        if (k > 0) {
+            b.append(sep);
+        }
+        let p: str = parts[k];
+        b.append(p);
+        k += 1;
+    }
+    return b.build();
+}
+
+// The lowercased extension of a file name (after the last `.`, basename
+// after the last `/`), or "" for extensionless names / a trailing dot —
+// mirrors the host's `file_extension`.
+fn file_ext_lower(name: str) -> str {
+    let mut base = name;
+    let slash = last_index_of(name, 0x2F);
+    if (slash >= 0) {
+        base = name.slice(slash + 1, name.len());
+    }
+    let dot = last_index_of(base, 0x2E);
+    if (dot < 0) {
+        return "";
+    }
+    return ascii_lower(base.slice(dot + 1, base.len()));
+}
+
+// Parse one `[hh:]mm:ss[,.]frac` timestamp into whole milliseconds.
+// Accepts the SRT comma and the VTT/LRC dot, 2 or 3 fields, and scales
+// the fraction by its digit count (".5" = ".50" = ".500" = 500 ms,
+// longer runs truncate). Returns nil when not well-formed — callers
+// use that both to reject and to classify (`parse_lrc` distinguishes
+// time tags from info tags this way).
+fn parse_timestamp(s: str) -> ?i64 {
+    let t = trim(s);
+    let n = t.len();
+    let mut colons: i32 = 0;
+    let mut i: i32 = 0;
+    while (i < n) {
+        if (t.code_at(i) as i32 == 0x3A) {
+            colons += 1;
+        }
+        i += 1;
+    }
+    if (colons < 1 || colons > 2) {
+        return nil;
+    }
+    let last_colon = last_index_of(t, 0x3A);
+    let head = t.slice(0, last_colon);      // [hh?,] mm
+    let tail = t.slice(last_colon + 1, n);  // ss[,.]frac
+    let comma = last_index_of(tail, 0x2C);
+    let dot = last_index_of(tail, 0x2E);
+    let mut sep = comma;
+    if (dot > sep) {
+        sep = dot;
+    }
+    if (sep < 0) {
+        return nil;
+    }
+    let sec = tail.slice(0, sep);
+    let frac = tail.slice(sep + 1, tail.len());
+    if (!is_digits(sec) || !is_digits(frac)) {
+        return nil;
+    }
+    let mut mm_part = head;
+    let mut hh_part: ?str = nil;
+    let hcolon = last_index_of(head, 0x3A);
+    if (hcolon >= 0) {
+        hh_part = head.slice(0, hcolon);
+        mm_part = head.slice(hcolon + 1, head.len());
+    }
+    if (!is_digits(mm_part)) {
+        return nil;
+    }
+    if (hh_part != nil) {
+        let h: str = hh_part;
+        if (!is_digits(h)) {
+            return nil;
+        }
+    }
+    // JS `slice` clamps the end bound, rut's traps — clamp by hand
+    // (".5" / ".50" / ".500" scale by digit count).
+    let frac_len = frac.len();
+    let f = frac.slice(0, if (frac_len < 3) { frac_len } else { 3 });
+    let fl = f.len();
+    let mut ms: i64 = digits_value(sec) * 1000;
+    if (fl == 1) {
+        ms += digits_value(f) * 100;
+    } else if (fl == 2) {
+        ms += digits_value(f) * 10;
+    } else {
+        ms += digits_value(f);
+    }
+    ms += digits_value(mm_part) * 60000;
+    if (hh_part != nil) {
+        let h: str = hh_part;
+        ms += digits_value(h) * 3600000;
+    }
+    return ms;
+}
+
+// First whitespace-delimited token — the cue-end timestamp; VTT cue
+// settings (`align:start line:90%`) and SRT legacy coordinates follow.
+fn first_token(s: str) -> str {
+    let t = trim_start(s);
+    let n = t.len();
+    let mut end = n;
+    let sp = index_of(t, 0x20, 0);
+    if (sp >= 0 && sp < end) {
+        end = sp;
+    }
+    let tab = index_of(t, 0x09, 0);
+    if (tab >= 0 && tab < end) {
+        end = tab;
+    }
+    return t.slice(0, end);
+}
+
+// ---------------------------------------------------------------------------
+// LRC
+// ---------------------------------------------------------------------------
+
+// Lexer: consecutive `[inner]` groups from the start of a line.
+fn take_leading_tags(line: str) -> (Vec<str>, str) {
+    let mut tags = Vec<str>::new();
+    let mut rest = line;
+    while (rest.starts_with(0, "[")) {
+        let close = index_of(rest, 0x5D, 0);
+        if (close < 0) {
+            break; // unclosed bracket — not a tag
+        }
+        tags.push(rest.slice(1, close));
+        rest = rest.slice(close + 1, rest.len());
+    }
+    return (tags, rest);
+}
+
+// Strip enhanced-LRC word timings from line text: the A2 extension
+// `<mm:ss.xx> word` and the Foobar2000 `[mm:ss.xx] word` shape. Bracket
+// groups whose content is not a timestamp pass through verbatim.
+fn strip_word_tags(text: str) -> str {
+    let b = StringBuilder::with_cap(text.len());
+    let n = text.len();
+    let mut i: i32 = 0;
+    while (i < n) {
+        let c = text.code_at(i) as i32;
+        if (c == 0x3C || c == 0x5B) {
+            let close: i32 = if (c == 0x3C) { 0x3E } else { 0x5D };
+            let end = index_of(text, close, i + 1);
+            if (end > i + 1 && parse_timestamp(text.slice(i + 1, end)) != nil) {
+                i = end + 1;
+                continue;
+            }
+        }
+        b.append(text.slice(i, i + 1));
+        i += 1;
+    }
+    return b.build();
+}
+
+fn parse_lrc(text: str) -> ?LyricResult {
+    let mut artist: ?str = nil;
+    let mut album: ?str = nil;
+    let mut title: ?str = nil;
+    let mut lyricist: ?str = nil;
+    let mut author: ?str = nil;
+    let mut length: ?str = nil;
+    let mut offset: ?str = nil;
+    let mut lines = Vec<LyricLine>::new();
+    let rows = split_lines(strip_bom(text));
+    for (let raw_line of rows) {
+        let line = trim(raw_line);
+        if (line.len() == 0) {
+            continue;
+        }
+        let (tags, rest) = take_leading_tags(line);
+        if (tags.len == 0) {
+            continue; // untagged line — lenient skip
+        }
+        let first: str = tags[0];
+        if (parse_timestamp(first) != nil) {
+            // Timed line: every leading tag is a timestamp candidate,
+            // each seeding one entry that carries the word-tag-stripped
+            // text. A literal `\n` escape becomes a real line break —
+            // one entry then renders as several stacked lines — and an
+            // entry that is empty after unescaping (escape-only text)
+            // is dropped.
+            let line_text = trim(replace_all(strip_word_tags(rest), "\\n", "\n"));
+            if (line_text.len() == 0) {
+                continue;
+            }
+            for (let tag of tags) {
+                let t: str = tag;
+                let ms = parse_timestamp(t);
+                if (ms != nil) {
+                    let v: i64 = ms;
+                    lines.push(LyricLine { time_ms: v, duration_ms: nil, text: line_text });
+                }
+            }
+            continue;
+        }
+        // Info line: `[key:value]` — the first tag decides, one per line.
+        let colon = index_of(first, 0x3A, 0);
+        if (colon < 0) {
+            continue; // e.g. `[00]` — not valid info either
+        }
+        let key = trim(first.slice(0, colon));
+        let value = trim(first.slice(colon + 1, first.len()));
+        if (key.len() == 0 && value.len() == 0) {
+            continue; // `[:]` comment
+        }
+        // LRC info-tag key -> contract metadata key (`length` / `offset`
+        // pass through verbatim); unrecognized tags are ignored.
+        if (key == "ar") {
+            artist = value;
+        } else if (key == "al") {
+            album = value;
+        } else if (key == "ti") {
+            title = value;
+        } else if (key == "au") {
+            lyricist = value;
+        } else if (key == "by") {
+            author = value;
+        } else if (key == "length") {
+            length = value;
+        } else if (key == "offset") {
+            offset = value;
+        }
+    }
+    if (lines.len == 0) {
+        return nil; // nothing timed parsed — "not mine"
+    }
+    sort_lines(lines);
+    return LyricResult {
+        lines: merge_same_time(lines),
+        artist: artist,
+        album: album,
+        title: title,
+        lyricist: lyricist,
+        author: author,
+        length: length,
+        offset: offset,
+    };
+}
+
+// Merge sorted entries sharing a start time into one multi-line entry —
+// LRC files commonly repeat a time tag for the original line plus its
+// translation, and the lyric pane scrolls/highlights per entry. Text
+// identical to the previous sub-line collapses, so a duplicated tag
+// (`[00:12.00][00:12.00]chorus`, or the same line listed twice) never
+// renders the same line twice.
+fn merge_same_time(lines: Vec<LyricLine>) -> Vec<LyricLine> {
+    let mut out = Vec<LyricLine>::new();
+    for (let line of lines) {
+        let n = out.len;
+        let mut merged = false;
+        if (n > 0) {
+            let last: LyricLine = out[n - 1];
+            if (last.time_ms == line.time_ms) {
+                // the previous entry's last sub-line (after the final \n)
+                let brk = last_index_of(last.text, 0x0A);
+                let mut last_sub = last.text;
+                if (brk >= 0) {
+                    last_sub = last.text.slice(brk + 1, last.text.len());
+                }
+                if (last_sub != line.text) {
+                    out[n - 1] = LyricLine {
+                        time_ms: last.time_ms,
+                        duration_ms: last.duration_ms,
+                        text: f"{last.text}\n{line.text}",
+                    };
+                }
+                merged = true;
+            }
+        }
+        if (!merged) {
+            out.push(LyricLine { time_ms: line.time_ms, duration_ms: line.duration_ms, text: line.text });
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// SRT / WebVTT
+// ---------------------------------------------------------------------------
+
+// One raw cue: timing plus the un-stripped text rows joined with spaces.
+struct Cue {
+    from: i64,
+    to: ?i64,
+    text: str,
+}
+
+// A parsed `from --> to` line; `to` is nil when the end timestamp is
+// unparseable (the duration just drops).
+struct CueTiming {
+    from: i64,
+    to: ?i64,
+}
+
+fn is_arrow_line(line: str) -> bool {
+    return index_of_str(line, "-->", 0) >= 0;
+}
+
+// `from --> to [settings]` -> a CueTiming; a nil return rejects the
+// whole cue.
+fn parse_timing_line(line: str) -> ?CueTiming {
+    let arrow = index_of_str(line, "-->", 0);
+    if (arrow < 0) {
+        return nil;
+    }
+    let from = parse_timestamp(line.slice(0, arrow));
+    if (from == nil) {
+        return nil;
+    }
+    let f: i64 = from;
+    let to = parse_timestamp(first_token(line.slice(arrow + 3, line.len())));
+    return CueTiming { from: f, to: to };
+}
+
+fn is_vtt_block_keyword(line: str) -> bool {
+    let t = ascii_upper(trim(line));
+    if (t == "NOTE" || t == "STYLE" || t == "REGION") {
+        return true;
+    }
+    if (t.starts_with(0, "NOTE ") || t.starts_with(0, "STYLE ") || t.starts_with(0, "REGION ")) {
+        return true;
+    }
+    return false;
+}
+
+// Strip VTT/SRT inline markup (`<i>`, `<b>`, `<c.className>`, `<v Speaker>`…).
+// A `<` with no closing `>` (e.g. the lyric `love <3`) passes through.
+fn strip_angle_tags(text: str) -> str {
+    let b = StringBuilder::with_cap(text.len());
+    let n = text.len();
+    let mut i: i32 = 0;
+    while (i < n) {
+        let c = text.code_at(i) as i32;
+        if (c == 0x3C) {
+            let end = index_of(text, 0x3E, i + 1);
+            if (end > i + 1) {
+                i = end + 1;
+                continue;
+            }
+        }
+        b.append(text.slice(i, i + 1));
+        i += 1;
+    }
+    return b.build();
+}
+
+fn strip_cue_tags(text: str) -> str {
+    // `&nbsp;` -> plain space first, so entity spaces collapse with the rest.
+    return collapse_spaces(strip_angle_tags(replace_all(text, "&nbsp;", " ")));
+}
+
+fn parse_subtitle(text: str) -> ?LyricResult {
+    let rows = split_lines(strip_bom(text));
+    let n_rows = rows.len;
+    let mut is_vtt = false;
+    if (n_rows > 0) {
+        let r0: str = rows[0];
+        is_vtt = r0.starts_with(0, "WEBVTT");
+    }
+    let mut cues = Vec<Cue>::new();
+    let mut i: i32 = 0;
+    if (is_vtt) {
+        // Skip the header block (`WEBVTT` line + optional metadata lines)
+        // up to the first blank line.
+        while (i < n_rows) {
+            let row: str = rows[i];
+            if (trim(row).len() == 0) {
+                break;
+            }
+            i += 1;
+        }
+    }
+    while (i < n_rows) {
+        let line: str = rows[i];
+        if (trim(line).len() == 0) {
+            i += 1;
+            continue;
+        }
+        if (is_vtt && is_vtt_block_keyword(line)) {
+            i += 1;
+            while (i < n_rows) {
+                let row: str = rows[i];
+                if (trim(row).len() == 0) {
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        // A cue starts at its timing line; an optional id line (SRT index /
+        // VTT identifier) may precede it. Cue text never contains `-->`,
+        // so the arrow is a reliable anchor.
+        let mut timing: ?CueTiming = nil;
+        if (is_arrow_line(line)) {
+            timing = parse_timing_line(line);
+        } else if (i + 1 < n_rows) {
+            let next: str = rows[i + 1];
+            if (is_arrow_line(next)) {
+                timing = parse_timing_line(next);
+                i += 1;
+            }
+        }
+        if (timing == nil) {
+            i += 1; // resync: scan forward for the next cue
+            continue;
+        }
+        let t: CueTiming = timing;
+        i += 1;
+        let mut text_rows = Vec<str>::new();
+        while (i < n_rows) {
+            let row: str = rows[i];
+            if (trim(row).len() == 0 || is_arrow_line(row)) {
+                break;
+            }
+            text_rows.push(row);
+            i += 1;
+        }
+        cues.push(Cue { from: t.from, to: t.to, text: join_str(text_rows, " ") });
+    }
+    let mut lines = Vec<LyricLine>::new();
+    for (let cue of cues) {
+        let line_text = strip_cue_tags(cue.text);
+        if (line_text.len() == 0) {
+            continue;
+        }
+        let mut duration: ?i64 = nil;
+        // Cue end -> per-line duration (optional in the contract; the
+        // host currently derives it from the next line's start and
+        // ignores ours, but it is free to send and correct for sparse
+        // subtitles).
+        if (cue.to != nil) {
+            let to: i64 = cue.to;
+            if (to > cue.from) {
+                duration = to - cue.from;
+            }
+        }
+        lines.push(LyricLine { time_ms: cue.from, duration_ms: duration, text: line_text });
+    }
+    if (lines.len == 0) {
+        return nil; // no cues — "not mine"
+    }
+    sort_lines(lines);
+    return LyricResult {
+        lines: lines,
+        artist: nil,
+        album: nil,
+        title: nil,
+        lyricist: nil,
+        author: nil,
+        length: nil,
+        offset: nil,
+    };
+}
+
+// Stable insertion sort by start time — the JS `Array#sort` is stable,
+// and the same-time merge in `parse_lrc` relies on tied entries keeping
+// their file order. Lyric line counts are small; O(n^2) is fine.
+fn sort_lines(mut lines: Vec<LyricLine>) {
+    let n = lines.len;
+    let mut i: i32 = 1;
+    while (i < n) {
+        let key: LyricLine = lines[i];
+        let mut j: i32 = i - 1;
+        while (j >= 0) {
+            let cur: LyricLine = lines[j];
+            if (cur.time_ms > key.time_ms) {
+                lines[j + 1] = cur;
+                j -= 1;
+            } else {
+                break;
+            }
+        }
+        lines[j + 1] = key;
+        i += 1;
+    }
+}

@@ -4,6 +4,7 @@ use std::{
 };
 
 use tracing::subscriber::set_global_default;
+use tracing_subscriber::EnvFilter;
 
 pub fn logs_dir(dir: &str) -> PathBuf {
     Path::new(dir).join("logs")
@@ -49,12 +50,16 @@ fn create_log(dir: &str) -> (PathBuf, std::fs::File) {
     (log_file, file)
 }
 
-fn trace_level() -> tracing::Level {
-    #[allow(clippy::if_same_then_else)]
-    if std::env::var("EBUILD").is_ok() {
-        tracing::Level::INFO
-    } else {
-        tracing::Level::INFO
+/// App-wide log policy. INFO for everything the app writes, but the SQL
+/// engines emit one INFO line per executed statement (sqlx under
+/// `sqlx::query`, Sea-ORM's statement logging under `sea_orm`) — megabytes
+/// of noise per session in the log file (the in-app log page) and logcat,
+/// none of it diagnosable. Cap them at WARN. On host debugging an
+/// explicit `RUST_LOG` wins, on device nothing sets it.
+fn log_filter() -> EnvFilter {
+    match EnvFilter::try_from_default_env() {
+        Ok(filter) => filter,
+        Err(_) => EnvFilter::new("info,sqlx=warn,sea_orm=warn"),
     }
 }
 
@@ -63,7 +68,7 @@ fn setup_subscriber(dir: &str) {
     use tracing_subscriber::layer::SubscriberExt;
     let (p, log_file) = create_log(dir);
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(trace_level())
+        .with_env_filter(log_filter())
         .with_writer(log_file)
         .with_ansi(false)
         .finish();
@@ -76,7 +81,7 @@ fn setup_subscriber(dir: &str) {
 fn setup_subscriber(dir: &str) {
     let (p, log_file) = create_log(dir);
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(trace_level())
+        .with_env_filter(log_filter())
         .with_writer(log_file)
         .with_ansi(false)
         .finish();
@@ -91,6 +96,7 @@ fn setup_panic_hook() {
 
         tracing::error!("panic info: {}", info);
         tracing::error!("panic stacktrace: {}", stacktrace);
+        eprintln!("rust panic: {}\n{}", info, stacktrace);
 
         std::process::abort()
     }));

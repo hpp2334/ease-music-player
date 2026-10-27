@@ -1,0 +1,649 @@
+// S3 storage view — the tur_kit port of the apiVersion 1 TS view
+// (`src/view.ts`). The connect/edit form shown in the add-storage page
+// (create mode) and when editing an existing S3 storage (edit mode).
+//
+// Mode comes from `ease.context.storage_id()` (read once at `start`: nil =
+// create, a `plugin_storage_id` = edit). Edit-mode hydration (alias /
+// endpoint / region / bucket / access key from the plugin's `storage:<id>`
+// kv document) runs at MOUNT, not at boot — identity-bound rows must never
+// fire during `start`. The region field seeds the `us-east-1` default in
+// both modes (the TS initialRegion).
+//
+// The Connect button calls the plugin backend (`s3:connect`, a blocking
+// `ease.rpc.call` inside the mutation): the backend persists the config +
+// secret and answers `{storageId, created}`. On create the VIEW registers
+// the host storage row (`ease.context.create_storage` — its upcall pops
+// this page); on update it notifies the host so the dashboard shows the
+// new alias. (The apiVersion 1 backend did both host calls itself; the rut
+// split leaves the form-outcome side to the view.) Removal stays with the
+// host's top-bar trash icon (`storage:removeInstance` on the backend).
+//
+// No `ease.themes` — theme colors are an Android-only row and views must
+// boot headless (the check harness); the palette is static slate + indigo.
+
+use json::{ JsonReader, JsonWriter };
+use tur_host::ease::context::{ create_storage, notify_change, storage_id };
+use tur_host::ease::db::single_get;
+use tur_host::ease::rpc::call;
+use tur_kit::control_flow::control::{ Condition };
+use tur_kit::control_flow::lifecycle::{ Lifecycle };
+use tur_kit::flags::{ BorderPosition, CrossAlign, MainAlign, MainAxisSize };
+use tur_kit::gesture::pointer::{ MountEvent, PointerInteract };
+use tur_kit::handles::{ TextCtrl, UndoCtrl, View, mount, text_ctrl, undo_ctrl };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::layout::flex::{ Column, Row };
+use tur_kit::reactive::{ DeriveCtx, Mutation, MutationCtx, Readable, Source, derive, mutate, source, sv };
+use tur_kit::text::core::{ Text };
+use tur_kit::text::input::{ Input };
+
+// The static palette (0xRRGGBBAA — the kit's packing law).
+let PRIMARY: u64 = 0x4F46E5FFu64;
+let CARD: u64 = 0xFFFFFFFFu64;
+let TEXT: u64 = 0xFF1E293Bu64;
+let TEXT_MUTED: u64 = 0xFF64748Bu64;
+let DIVIDER: u64 = 0xFFE2E8F0u64;
+let ERROR: u64 = 0xFFDC2626u64;
+
+entry fn start() -> u64 {
+    // Mode: nil = create (no storage row yet), a real id = edit. Read once —
+    // the value never changes for the instance lifetime.
+    let sid = storage_id();
+    let mut sid_seed = "";
+    if (sid != nil) {
+        sid_seed = sid;
+    }
+    let storage_src: Source<str> = source<str>(sid_seed);
+
+    let ctrl_alias = text_ctrl();
+    let ctrl_endpoint = text_ctrl();
+    let ctrl_region = text_ctrl();
+    let ctrl_bucket = text_ctrl();
+    let ctrl_access = text_ctrl();
+    // Never replaced — a blank secret means "keep the stored one".
+    let ctrl_secret = text_ctrl();
+    let undo_alias = undo_ctrl();
+    let undo_endpoint = undo_ctrl();
+    let undo_region = undo_ctrl();
+    let undo_bucket = undo_ctrl();
+    let undo_access = undo_ctrl();
+    let undo_secret = undo_ctrl();
+
+    let status_text = source<str>("");
+    let status_is_error = source<bool>(false);
+
+    let status_visible: Readable<bool> = derive(fn (ctx: DeriveCtx) -> bool {
+        return ctx.get<str>(status_text) != "";
+    });
+    let save_label: Readable<str> = derive(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<str>(storage_src) != "") {
+            return "保存";
+        }
+        return "连接";
+    });
+    let secret_hint: Readable<str> = derive(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<str>(storage_src) != "") {
+            return "留空保持不变";
+        }
+        return "";
+    });
+
+    // Edit-mode hydration: at MOUNT (never at boot), seed the region default
+    // and — in edit mode — read the kv config and prefill the controllers.
+    // A corrupt/missing document keeps the seeds.
+    let b_hydrate = mutate(fn (ctx: MutationCtx, _e: MountEvent) {
+        ctrl_region.set_text("us-east-1");
+        let sid = storage_id();
+        if (sid == nil) {
+            return;
+        }
+        let s: str = sid;
+        let raw = single_get(f"storage:{s}");
+        if (raw == nil) {
+            return;
+        }
+        let doc: str = raw;
+        let cfg = decode_config(doc);
+        if (cfg == nil) {
+            return;
+        }
+        let c: StoredConfig = cfg;
+        ctrl_alias.set_text(c.alias);
+        ctrl_endpoint.set_text(c.endpoint);
+        if (c.region != "") {
+            ctrl_region.set_text(c.region);
+        }
+        ctrl_bucket.set_text(c.bucket);
+        ctrl_access.set_text(c.access_key_id);
+    });
+
+    let b_test = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let is_edit = ctx.get<str>(storage_src) != "";
+        let endpoint = trim(ctrl_endpoint.text());
+        let region = trim_or(ctrl_region.text(), "us-east-1");
+        let bucket = trim(ctrl_bucket.text());
+        let alias = trim(ctrl_alias.text());
+        let access_key_id = trim(ctrl_access.text());
+        let secret_key = ctrl_secret.text();
+        let invalid = validate(endpoint, alias, bucket, access_key_id, secret_key, is_edit);
+        if (invalid != "") {
+            ctx.set<str>(status_text, invalid);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<str>(status_text, "测试中...");
+        ctx.set<bool>(status_is_error, false);
+        let reply = call("s3:test", test_args(sid_opt(ctx.get<str>(storage_src)), endpoint, region, bucket, access_key_id, secret_key));
+        let r = parse_test_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, f"测试错误：{r.message}");
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<bool>(status_is_error, true);
+        if (r.outcome == "SUCCESS") {
+            ctx.set<str>(status_text, "测试成功");
+            ctx.set<bool>(status_is_error, false);
+        } else if (r.outcome == "UNAUTHORIZED") {
+            ctx.set<str>(status_text, "测试错误：认证或签名错误");
+        } else if (r.outcome == "TIMEOUT") {
+            ctx.set<str>(status_text, "测试错误：超时");
+        } else {
+            ctx.set<str>(status_text, "测试错误：其他错误");
+        }
+    });
+
+    let b_save = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let is_edit = ctx.get<str>(storage_src) != "";
+        let endpoint = trim(ctrl_endpoint.text());
+        let region = trim_or(ctrl_region.text(), "us-east-1");
+        let bucket = trim(ctrl_bucket.text());
+        let alias = trim(ctrl_alias.text());
+        let access_key_id = trim(ctrl_access.text());
+        let secret_key = ctrl_secret.text();
+        let invalid = validate(endpoint, alias, bucket, access_key_id, secret_key, is_edit);
+        if (invalid != "") {
+            ctx.set<str>(status_text, invalid);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<str>(status_text, "");
+        ctx.set<bool>(status_is_error, false);
+        let reply = call("s3:connect", connect_args(sid_opt(ctx.get<str>(storage_src)), endpoint, region, bucket, alias, access_key_id, secret_key));
+        let r = parse_connect_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, r.message);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        if (r.created) {
+            // register the host storage row — the upcall pops this page
+            if (r.storage_id != "") {
+                create_storage(r.storage_id);
+            }
+            ctx.set<str>(status_text, "");
+        } else {
+            // the backend rewrote the kv; the dashboard reflects the alias
+            notify_change();
+            ctx.set<str>(status_text, "已保存");
+            ctx.set<bool>(status_is_error, false);
+        }
+    });
+
+    // Gaps stay small: the host embeds this view in a fixed-height TurView
+    // with no scrolling — six fields + buttons must fit.
+    let form = Column()
+        .cross_alignment(CrossAlign::Stretch)
+        .main_axis_size(MainAxisSize::Min)
+        .query_key("s3-form")
+        .child(field_label("名称 (别名)"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(text_field(ctrl_alias, undo_alias, sv("S3"), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(field_label("端点地址 (Endpoint)"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(text_field(ctrl_endpoint, undo_endpoint, sv("https://s3.amazonaws.com"), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(field_label("区域 (Region)"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(text_field(ctrl_region, undo_region, sv("us-east-1"), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(field_label("存储桶 (Bucket)"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(text_field(ctrl_bucket, undo_bucket, sv("music"), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(field_label("Access Key ID"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(text_field(ctrl_access, undo_access, sv(""), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(field_label("Secret Access Key"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(text_field(ctrl_secret, undo_secret, secret_hint, true))
+        .child(SizedBox(0.0, 8.0).build())
+        .child(
+            Row()
+                .main_alignment(MainAlign::Start)
+                .cross_alignment(CrossAlign::Center)
+                .main_axis_size(MainAxisSize::Min)
+                .child(ghost_button("s3-test", "测试", b_test))
+                .child(SizedBox(12.0, 0.0).build())
+                .child(primary_button("s3-save", save_label, b_save))
+                .build(),
+        )
+        .child(SizedBox(0.0, 8.0).build())
+        .child(status_area(status_text, status_visible, status_is_error))
+        .build();
+
+    // mount runs the hydration mutation before the first frame paints
+    let root = Lifecycle()
+        .on_mount(b_hydrate)
+        .child(
+            Container()
+                .color(sv(CARD))
+                .padding(4.0)
+                .child(form)
+                .build(),
+        )
+        .build();
+    mount(root);
+    return 0;
+}
+
+// ---- the form pieces ----------------------------------------------------
+
+/// The prefilled config (the edit-mode hydration document).
+struct StoredConfig {
+    alias: str,
+    endpoint: str,
+    region: str,
+    bucket: str,
+    access_key_id: str,
+}
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?StoredConfig {
+    let mut r = JsonReader::of(doc);
+    r.begin_object();
+    let mut alias = "";
+    let mut endpoint = "";
+    let mut region = "";
+    let mut bucket = "";
+    let mut access_key_id = "";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                alias = v;
+            },
+            "endpoint" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                endpoint = v;
+            },
+            "region" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                region = v;
+            },
+            "bucket" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                bucket = v;
+            },
+            "accessKeyId" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                access_key_id = v;
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return StoredConfig {
+        alias: alias,
+        endpoint: endpoint,
+        region: region,
+        bucket: bucket,
+        access_key_id: access_key_id,
+    };
+}
+
+fn field_label(text: str) -> View {
+    return Text()
+        .text(sv(text))
+        .font_size(13.0)
+        .color(TEXT_MUTED)
+        .build();
+}
+
+fn text_field(ctrl: TextCtrl, undo: UndoCtrl, placeholder: Readable<str>, obscure: bool) -> View {
+    // the masked twin spells its own chain (construction is chained, never
+    // statement-mutated — `obscure` is a lane on the same builder)
+    if (obscure) {
+        let input = Input()
+            .controller(ctrl)
+            .undo(undo)
+            .placeholder(placeholder)
+            .obscure(sv(true))
+            .font_size(15.0)
+            .color(TEXT)
+            .cursor_color(PRIMARY)
+            .width_height(0.0, 22.0)
+            .build();
+        return field_box(input);
+    }
+    let input = Input()
+        .controller(ctrl)
+        .undo(undo)
+        .placeholder(placeholder)
+        .font_size(15.0)
+        .color(TEXT)
+        .cursor_color(PRIMARY)
+        .width_height(0.0, 22.0)
+        .build();
+    return field_box(input);
+}
+
+/// The bordered field box around a built input.
+fn field_box(input: View) -> View {
+    return Container()
+        .color(sv(CARD))
+        .border(DIVIDER, 1.0, BorderPosition::Inside)
+        .radius(sv(12.0f64))
+        .padding(7.0)
+        .child(input)
+        .build();
+}
+
+fn ghost_button(key: str, label: str, cb: Mutation<nil>) -> View {
+    let face = Container()
+        .radius(sv(24.0f64))
+        .padding(11.0)
+        .color(sv(CARD))
+        .border(PRIMARY, 1.0, BorderPosition::Inside)
+        .child(
+            Text()
+                .text(sv(label))
+                .font_size(15.0)
+                .color(PRIMARY)
+                .build(),
+        )
+        .build();
+    return PointerInteract()
+        .on_click(cb)
+        .query_key(key)
+        .child(face)
+        .build();
+}
+
+fn primary_button(key: str, label: Readable<str>, cb: Mutation<nil>) -> View {
+    let face = Container()
+        .radius(sv(24.0f64))
+        .padding(11.0)
+        .color(sv(PRIMARY))
+        .child(
+            Text()
+                .text(label)
+                .font_size(15.0)
+                .color(0xFFFFFFFFu64)
+                .build(),
+        )
+        .build();
+    return PointerInteract()
+        .on_click(cb)
+        .query_key(key)
+        .child(face)
+        .build();
+}
+
+/// The status line: the message rides its source, the tint swaps on
+/// `status_is_error` (Text.color is a static lane).
+fn status_area(status_text: Readable<str>, status_visible: Readable<bool>, status_is_error: Readable<bool>) -> View {
+    let err = Text()
+        .text(status_text)
+        .font_size(13.0)
+        .color(ERROR)
+        .query_key("s3-status")
+        .build();
+    let muted = Text()
+        .text(status_text)
+        .font_size(13.0)
+        .color(TEXT_MUTED)
+        .query_key("s3-status")
+        .build();
+    return Condition(status_visible)
+        .then(
+            Condition(status_is_error)
+                .then(err)
+                .else_branch(muted)
+                .build(),
+        )
+        .else_branch(SizedBox(0.0, 0.0).build())
+        .build();
+}
+
+// ---- the actions' helpers -------------------------------------------------
+
+fn is_ws(c: u32) -> bool {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}
+
+fn trim(s: str) -> str {
+    let n = s.len();
+    let mut a = 0;
+    while (a < n && is_ws(s.code_at(a))) {
+        a += 1;
+    }
+    let mut b = n;
+    while (b > a && is_ws(s.code_at(b - 1))) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+/// Trimmed, or the fallback when the result is empty (the region field).
+fn trim_or(s: str, fallback: str) -> str {
+    let t = trim(s);
+    if (t == "") {
+        return fallback;
+    }
+    return t;
+}
+
+/// The "" = create spelling of the mode source.
+fn sid_opt(sid: str) -> ?str {
+    if (sid == "") {
+        return nil;
+    }
+    return sid;
+}
+
+/// The connect-form validation (the TS `validate`, same messages).
+fn validate(endpoint: str, alias: str, bucket: str, access_key_id: str, secret_key: str, is_edit: bool) -> str {
+    if (endpoint == "") {
+        return "端点地址 (Endpoint) 不能为空";
+    }
+    if (alias == "") {
+        return "名称 (别名) 不能为空";
+    }
+    if (bucket == "") {
+        return "存储桶 (Bucket) 不能为空";
+    }
+    if (access_key_id == "") {
+        return "Access Key ID 不能为空";
+    }
+    if (secret_key == "" && !is_edit) {
+        return "Secret Access Key 不能为空";
+    }
+    return "";
+}
+
+// ---- the backend calls (arg building + envelope parsing) ------------------
+
+struct TestReply {
+    ok: bool,
+    message: str,
+    outcome: str,
+}
+
+struct ConnectReply {
+    ok: bool,
+    message: str,
+    storage_id: str,
+    created: bool,
+}
+
+fn test_args(storage_id: ?str, endpoint: str, region: str, bucket: str, access_key_id: str, secret_key: str) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    if (storage_id != nil) {
+        let s: str = storage_id;
+        w.key("storageId");
+        w.write_str(s);
+    }
+    w.key("endpoint");
+    w.write_str(endpoint);
+    w.key("region");
+    w.write_str(region);
+    w.key("bucket");
+    w.write_str(bucket);
+    w.key("accessKeyId");
+    w.write_str(access_key_id);
+    w.key("secretAccessKey");
+    w.write_str(secret_key);
+    w.end_object();
+    return w.finish();
+}
+
+fn connect_args(storage_id: ?str, endpoint: str, region: str, bucket: str, alias: str, access_key_id: str, secret_key: str) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    if (storage_id != nil) {
+        let s: str = storage_id;
+        w.key("storageId");
+        w.write_str(s);
+    }
+    w.key("endpoint");
+    w.write_str(endpoint);
+    w.key("region");
+    w.write_str(region);
+    w.key("bucket");
+    w.write_str(bucket);
+    w.key("alias");
+    w.write_str(alias);
+    w.key("accessKeyId");
+    w.write_str(access_key_id);
+    w.key("secretAccessKey");
+    w.write_str(secret_key);
+    w.end_object();
+    return w.finish();
+}
+
+/// `{"ok":true,"result":{"result":"SUCCESS"}}` / `{"ok":false,"error":"…"}`.
+fn parse_test_reply(reply: str) -> TestReply {
+    let mut r = JsonReader::of(reply);
+    r.begin_object();
+    let mut ok = false;
+    let mut have_ok = false;
+    let mut message = "";
+    let mut outcome = "OTHER_ERROR";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "ok") {
+            ok = r.read_bool();
+            have_ok = true;
+        } else if (k == "error") {
+            let v = r.read_str();
+            if (!r.failed()) {
+                message = v;
+            }
+        } else if (k == "result") {
+            r.begin_object();
+            while (r.more()) {
+                let rk = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (rk == "result") {
+                    let v = r.read_str();
+                    if (!r.failed()) {
+                        outcome = v;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (!have_ok) {
+        return TestReply { ok: false, message: "后台未响应", outcome: "OTHER_ERROR" };
+    }
+    return TestReply { ok: ok, message: message, outcome: outcome };
+}
+
+/// `{"ok":true,"result":{"storageId":"…","created":true}}` / the error shape.
+fn parse_connect_reply(reply: str) -> ConnectReply {
+    let mut r = JsonReader::of(reply);
+    r.begin_object();
+    let mut ok = false;
+    let mut have_ok = false;
+    let mut message = "";
+    let mut storage_id = "";
+    let mut created = false;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "ok") {
+            ok = r.read_bool();
+            have_ok = true;
+        } else if (k == "error") {
+            let v = r.read_str();
+            if (!r.failed()) {
+                message = v;
+            }
+        } else if (k == "result") {
+            r.begin_object();
+            while (r.more()) {
+                let rk = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (rk == "storageId") {
+                    let v = r.read_str();
+                    if (!r.failed()) {
+                        storage_id = v;
+                    }
+                } else if (rk == "created") {
+                    created = r.read_bool();
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (!have_ok) {
+        return ConnectReply { ok: false, message: "后台未响应", storage_id: "", created: false };
+    }
+    return ConnectReply { ok: ok, message: message, storage_id: storage_id, created: created };
+}

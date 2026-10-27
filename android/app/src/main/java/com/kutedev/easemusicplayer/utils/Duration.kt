@@ -1,12 +1,11 @@
 package com.kutedev.easemusicplayer.utils
 
-import uniffi.ease_client_backend.Music
-import java.time.Duration
+import com.kutedev.easemusicplayer.singleton.types.Music
 
 
-fun formatDuration(duration: Duration?): String {
-    if (duration != null) {
-        val all = duration.toMillis()
+fun formatDuration(durationMs: Long?): String {
+    if (durationMs != null) {
+        val all = durationMs
         val h = all / 1000 / 60 / 60
         val m = all / 1000 / 60 % 60
         val s = all / 1000 % 60
@@ -21,9 +20,9 @@ fun formatDuration(music: Music?): String {
 }
 
 fun toMusicDurationMs(music: Music?): ULong {
-    return music?.meta?.duration?.toMillis()?.toULong() ?: 0uL
+    return music?.meta?.duration?.toULong() ?: 0uL
 }
 
-fun toMusicDurationMs(duration: Duration): ULong {
-    return duration.toMillis().toULong()
+fun toMusicDurationMs(durationMs: Long): ULong {
+    return durationMs.toULong()
 }

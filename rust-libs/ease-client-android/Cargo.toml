@@ -1,0 +1,53 @@
+[package]
+name = "ease-client-android"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ease-client-backend = { path = "../ease-client-backend" }
+ease-client-schema = { workspace = true }
+ease-client-tokio = { path = "../ease-client-tokio" }
+ease-tur-rpc = { path = "../ease-tur-rpc" }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = "1.0"
+anyhow = { workspace = true }
+
+# 795538f = the post-boa→rut engine (JS rail deleted; host modules are
+# typed `tur_host` pkg rows; per-instance identity via `instance_data`;
+# the rut event-bus machinery rides rut pin 09dea6a inside tur).
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
+# The `Http` capability type the `ease.net` rows resolve through the
+# instance (the NativeHttp backend registers via tur-android's defaults).
+tur-net-capability = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
+rut-core = { git = "https://github.com/hpp2334/rut", rev = "09dea6a24b4e380eb7f9077f2e0abdf5f057e80d", default-features = false }
+rut-vm = { git = "https://github.com/hpp2334/rut", rev = "09dea6a24b4e380eb7f9077f2e0abdf5f057e80d", default-features = false }
+futures = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# CJK fallback fonts for the tur text pipeline (plugin_runtime/fonts.rs).
+# Resolves to the same 0.9.0 instance tur's parley stack compiles against.
+fontique = "0.9"
+
+jni = "0.21"
+ndk-context = "0.1"
+
+# OS entropy for the `ease.crypto` rows (random_bytes / random_uuid).
+getrandom = "0.3"
+
+# `ease.xml` rows (xml_to_json) + `ease.crypto` hashing — the WebDAV/S3
+# plugin support surface that replaces the old npm deps (fast-xml-parser,
+# js-md5, @noble/hashes).
+quick-xml = "0.36"
+md-5 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }

@@ -1,0 +1,479 @@
+// Play Counts — the rut port of the apiVersion 1 TS backend
+// (`src/backend.ts`). A headless backend with exactly one contract: the
+// `music:play` event. The host (`PluginRepository.bindPlayerEvents`)
+// dispatches each play to the plugin's bus and the fan-out stashes
+//
+//   {"type":"music:play","payload":{"musicId":"7","title":"…","ts":173…}}
+//
+// (the payload shape is `PluginEvent.MusicPlay.toJsonElement`); this
+// module drains it and appends one play row.
+//
+// Data model (plugin KV multi-value, append-only — the exact keys/shapes
+// the TS epoch wrote, so existing installs stay readable):
+//   key   = "plays:YYYY-MM-DD"
+//   value = JSON `{ musicId, title, ts }`
+// The view module (`view.rut`) scans the day keys back and aggregates
+// per musicId.
+//
+// Day keys: the TS bucketed by the device's LOCAL day (JS `Date`). rut has
+// no timezone row — both this module and the view bucket by UTC day, so
+// the writer and the reader always agree (plays near local midnight may
+// land on the adjacent UTC day; counts stay internally consistent).
+//
+// Duplicate-row compaction (the 0.0.8 repair): a host bug once delivered
+// every `music:play` ×N (N = activity starts in the host process), so
+// byte-identical duplicate rows exist in old installs. The TS ran the
+// compaction at module start; here it runs lazily on the FIRST event
+// instead — the compile/boot check harness loads backends with no
+// database, so `ease.db` rows must never fire at boot (same guard, same
+// once-per-install effect: the KV flag makes it a no-op after the first
+// run, and it survives backend reloads). The same lazy pass also re-keys
+// TS-era rows from device-local day buckets to this port's UTC buckets
+// (see REKEY_FLAG_KEY below).
+
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+use tur_host::ease::db::{ multi_append, multi_append_multi, multi_delete_multi, multi_get_all_multi, single_get, single_set };
+use tur_host::ease::rpc::{ subscribe_event, take_request };
+use tur_host::ease::time::now_unix_ms;
+
+// ---------------------------------------------------------------------------
+// Module lifecycle
+// ---------------------------------------------------------------------------
+
+/// The module record the engine slots at boot. `repaired` gates the lazy
+/// duplicate-row compaction to once per load (the KV flag beneath it makes
+/// it once per install).
+struct Ctx {
+    repaired: bool,
+}
+
+entry fn start() -> opaque {
+    subscribe_event("music:play", "op_on_music_play");
+    return opaque(Ctx { repaired: false });
+}
+
+// Nothing to dispose — the bus subscription dies with the instance.
+entry fn stop() {
+}
+
+// ---------------------------------------------------------------------------
+// The event handler
+// ---------------------------------------------------------------------------
+
+/// One decoded `music:play` payload.
+struct PlayEv {
+    music_id: str,
+    title: str,
+    ts: i64,
+}
+
+entry fn op_on_music_play(cx: opaque) -> str {
+    let c = opaque::downcast<Ctx>(cx);
+    if (c == nil) {
+        panic("music:play: cx is not a Ctx");
+    }
+    let mut cc: Ctx = c;
+    let raw = take_request();
+    if (!cc.repaired) {
+        compact_duplicate_rows();
+        cc.repaired = true;
+    }
+    if (raw.len() == 0) {
+        return err_envelope("music:play: no pending request");
+    }
+    let ev = decode_play(raw);
+    if (ev == nil) {
+        return err_envelope("music:play: malformed payload");
+    }
+    let e: PlayEv = ev;
+    if (e.music_id == "") {
+        // Null/missing musicId: nothing to count — skip instead of writing
+        // a junk row the view would have to filter.
+        return "{\"ok\":true,\"result\":null}";
+    }
+    multi_append(day_key_from_ms(e.ts), play_row_json(e.music_id, e.title, e.ts));
+    // Fire-and-forget dispatch — the answer is ignored.
+    return "{\"ok\":true,\"result\":null}";
+}
+
+/// Decode `{"type":"music:play","payload":{musicId,title,ts}}`; nil on any
+/// malformed shape. Missing optional fields degrade to "" / 0 (the stored
+/// row schema stays `{musicId, title, ts}` either way).
+fn decode_play(text: str) -> ?PlayEv {
+    let mut r = JsonReader::of(text);
+    let mut music_id = "";
+    let mut title = "";
+    let mut ts: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "payload") {
+            r.begin_object();
+            while (r.more()) {
+                let pk = r.next_key();
+                if (r.failed()) {
+                    return nil;
+                }
+                if (pk == "musicId") {
+                    let v = id_str(r);
+                    if (r.failed()) {
+                        return nil;
+                    }
+                    if (v != nil) {
+                        music_id = v;
+                    }
+                } else if (pk == "title") {
+                    let v = opt_str(r);
+                    if (r.failed()) {
+                        return nil;
+                    }
+                    if (v != nil) {
+                        title = v;
+                    }
+                } else if (pk == "ts") {
+                    if (!r.try_null()) {
+                        ts = r.read_i64();
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return PlayEv { music_id: music_id, title: title, ts: ts };
+}
+
+/// The `null`-or-string read: `null` → nil, a string → some, anything else
+/// → the reader's sticky error.
+fn opt_str(mut r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+/// The host sends `musicId` as a JSON NUMBER (`MusicId.value: Long` in
+/// `PluginEvent.toJsonElement`), and TS-era stored rows carry the raw
+/// number too — while the roster (`ease.library.playlists`) uses
+/// stringified ids. Accept both spellings and normalize to the string.
+/// (The reader's failures are sticky, so discriminate on the next token's
+/// first non-ws codepoint — 34 = `"`. — before reading; keep in sync with
+/// view.rut's `id_str`.)
+fn id_str(mut r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let rest = r.rest();
+    let mut i = 0;
+    let mut c: u32 = 0;
+    while (i < rest.len()) {
+        c = rest.code_at(i);
+        if (c != 32 && c != 10 && c != 13 && c != 9) {
+            break;
+        }
+        i += 1;
+    }
+    if (c == 34) {
+        let v = r.read_str();
+        if (r.failed()) {
+            return nil;
+        }
+        return v;
+    }
+    let n = r.read_i64();
+    if (r.failed()) {
+        return nil;
+    }
+    return f"{n}";
+}
+
+/// The stored play row — byte-shape-compatible with the TS append
+/// (`JSON.stringify({ musicId, title, ts })`).
+fn play_row_json(music_id: str, title: str, ts: i64) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("musicId");
+    w.write_str(music_id);
+    w.key("title");
+    w.write_str(title);
+    w.key("ts");
+    w.write_i64(ts);
+    w.end_object();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate-row compaction (the 0.0.8 repair — see the file header)
+// ---------------------------------------------------------------------------
+
+let REPAIR_FLAG_KEY: str = "repair:duplicate-rows";
+/// The TS keyed day buckets by device-LOCAL midnight; this port keys by
+/// UTC (see the file header). Upgraded installs carry rows under
+/// local-day keys, which sit +/-1 day from their UTC day (UTC-12..+14) —
+/// a play made 16:00-24:00 local (UTC+8) is keyed one day AHEAD of its
+/// UTC day and surfaces under "Today" a day late, forever. This second
+/// flag gates the one-time re-key: every scanned row moves to the UTC
+/// day its own `ts` names. (Separate from the dedupe flag: TS-era
+/// installs already consumed `repair:duplicate-rows` at module start —
+/// their re-key still has to run.)
+let REKEY_FLAG_KEY: str = "repair:utc-rekey";
+/// Scan horizon: one key per day that has plays, newest first — extended
+/// one day BEFORE today so legacy local-day keys one day behind (western
+/// timezones) are inside the scan. Generous for this schema's lifetime;
+/// a key older than the window simply stays un-migrated, never lost.
+let REPAIR_SCAN_DAYS: i64 = 400;
+
+fn compact_duplicate_rows() {
+    let dup_done = single_get(REPAIR_FLAG_KEY) != nil;
+    let rekey_done = single_get(REKEY_FLAG_KEY) != nil;
+    if (dup_done && rekey_done) {
+        return;
+    }
+    let mut keys = Vec<str>::new();
+    let mut i: i64 = -1;
+    while (i < REPAIR_SCAN_DAYS) {
+        keys.push(day_key_offset(i));
+        i += 1;
+    }
+    let grouped = multi_get_all_multi(json_str_array(keys));
+    // NOTE: `multi_append_multi` takes FLAT `{ key, value }` entries — one
+    // per appended row (the TS lost data the first time around on a
+    // `{ key, values }` grouping).
+    let mut changed = Vec<str>::new();
+    let mut re_append = Vec<str>::new();
+    let mut r = JsonReader::of(grouped);
+    r.begin_array();
+    while (r.more()) {
+        let mut key = "";
+        let mut values = Vec<str>::new();
+        r.begin_object();
+        while (r.more()) {
+            let k = r.next_key();
+            if (r.failed()) {
+                return;
+            }
+            if (k == "key") {
+                key = r.read_str();
+            } else if (k == "values") {
+                r.begin_array();
+                while (r.more()) {
+                    let v = r.read_str();
+                    if (r.failed()) {
+                        return;
+                    }
+                    values.push(v);
+                }
+                r.end_array();
+            } else {
+                r.skip_value();
+            }
+        }
+        r.end_object();
+        if (r.failed()) {
+            return;
+        }
+        // First occurrence wins: the duplicates were byte-identical (the
+        // same event serialized N times, down to the millisecond), and two
+        // genuine plays can never share one millisecond.
+        let mut kept = Vec<str>::new();
+        for (let raw of values) {
+            if (!vec_contains(kept, raw)) {
+                kept.push(raw);
+            }
+        }
+        // One rewrite pass does both repairs: the dedupe above collapses
+        // byte-identical rows, and every survivor moves to the UTC day
+        // its `ts` names (legacy local-day keys). Only days whose row set
+        // actually changed are rewritten — untouched days must NOT be
+        // re-appended (they'd duplicate; exactly the bug the TS's first
+        // attempt shipped), and the delete wipes a key's whole row set,
+        // so a no-op rewrite would lose data.
+        let mut key_changed = kept.len != values.len;
+        for (let v of kept) {
+            let target = row_target_key(key, v);
+            if (target != key) {
+                key_changed = true;
+            }
+        }
+        if (key_changed) {
+            changed.push(key);
+            for (let v of kept) {
+                re_append.push(kv_entry_json(row_target_key(key, v), v));
+            }
+        }
+    }
+    r.end_array();
+    if (changed.len > 0) {
+        let comma = ",";
+        multi_delete_multi(json_str_array(changed));
+        multi_append_multi(f"[{str_join(re_append, comma)}]");
+    }
+    single_set(REPAIR_FLAG_KEY, "done");
+    single_set(REKEY_FLAG_KEY, "done");
+}
+
+/// The UTC day key the row's own `ts` names — where the row belongs under
+/// UTC bucketing. Rows without a usable ts stay where they are.
+fn row_target_key(current: str, raw: str) -> str {
+    let ts = row_ts(raw);
+    if (ts <= 0) {
+        return current;
+    }
+    return day_key_from_ms(ts);
+}
+
+/// The `ts` field of a stored play row; 0 when absent/malformed.
+fn row_ts(raw: str) -> i64 {
+    let mut r = JsonReader::of(raw);
+    let mut ts: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 0;
+        }
+        if (k == "ts") {
+            ts = r.read_i64();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 0;
+    }
+    return ts;
+}
+
+/// `["a","b"]` — the `*Multi` row helpers' JSON array of strings.
+fn json_str_array(items: Vec<str>) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_array();
+    for (let s of items) {
+        w.write_str(s);
+    }
+    w.end_array();
+    return w.finish();
+}
+
+/// `{"key":…,"value":…}` — one flat `multi_append_multi` entry.
+fn kv_entry_json(key: str, value: str) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("key");
+    w.write_str(key);
+    w.key("value");
+    w.write_str(value);
+    w.end_object();
+    return w.finish();
+}
+
+fn vec_contains(items: Vec<str>, needle: str) -> bool {
+    for (let s of items) {
+        if (s == needle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// `",".join` over pre-encoded JSON fragments.
+fn str_join(items: Vec<str>, sep: str) -> str {
+    let mut b = StringBuilder::with_cap(256);
+    let mut first = true;
+    for (let s of items) {
+        if (!first) {
+            b.append(sep);
+        }
+        first = false;
+        b.append(s);
+    }
+    return b.build();
+}
+
+// ---------------------------------------------------------------------------
+// Day keys (UTC — see the file header)
+// ---------------------------------------------------------------------------
+
+fn day_key_from_ms(ms: i64) -> str {
+    let days = floordiv(ms, 86400000);
+    let ymd = civil_from_days(days);
+    let y = ymd.0;
+    let mo = ymd.1;
+    let d = ymd.2;
+    return f"plays:{y}-{pad2(mo)}-{pad2(d)}";
+}
+
+/// The day key `offset` days before now (0 = today).
+fn day_key_offset(offset: i64) -> str {
+    let now = now_unix_ms() as i64;
+    return day_key_from_ms(now - offset * 86400000i64);
+}
+
+fn pad2(n: i64) -> str {
+    if (n < 10) {
+        return f"0{n}";
+    }
+    return f"{n}";
+}
+
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) {
+        return q - 1;
+    }
+    return q;
+}
+
+/// Howard Hinnant's `civil_from_days` — days since the epoch to (y, m, d).
+/// (The literal suffixes are the kit's i64-arithmetic spelling.)
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z2 = z + 719468i64;
+    let era = floordiv(z2, 146097i64);
+    let doe = z2 - era * 146097i64;
+    let yoe = (doe - doe / 1460i64 + doe / 36524i64 - doe / 146096i64) / 365i64;
+    let y = yoe + era * 400i64;
+    let doy = doe - (365i64 * yoe + yoe / 4i64 - yoe / 100i64);
+    let mp = (5i64 * doy + 2i64) / 153i64;
+    let d = doy - (153i64 * mp + 2i64) / 5i64 + 1i64;
+    let mut m = mp + 3i64;
+    if (mp >= 10) {
+        m = mp - 9i64;
+    }
+    let mut yy = y;
+    if (m <= 2) {
+        yy = y + 1i64;
+    }
+    return (yy, m, d);
+}
+
+// ---------------------------------------------------------------------------
+// Envelope helpers
+// ---------------------------------------------------------------------------
+
+fn err_envelope(msg: str) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    w.key("ok");
+    w.write_bool(false);
+    w.key("error");
+    w.write_str(msg);
+    w.end_object();
+    return w.finish();
+}

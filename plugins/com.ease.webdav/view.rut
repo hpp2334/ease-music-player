@@ -1,0 +1,668 @@
+// WebDAV storage view — the tur_kit port of the apiVersion 1 TS view
+// (`src/view.ts`). The connect/edit form shown in the add-storage page
+// (create mode) and when editing an existing WebDAV storage (edit mode).
+//
+// Mode comes from `ease.context.storage_id()` (read once at `start`: nil =
+// create, a `plugin_storage_id` = edit). Edit-mode hydration (alias / addr /
+// username / anonymous from the plugin's `storage:<id>` kv document) runs at
+// MOUNT, not at boot — identity-bound rows must never fire during `start`.
+//
+// The Connect button calls the plugin backend (`webdav:connect`, a blocking
+// `ease.rpc.call` inside the mutation): the backend persists the config +
+// secret and answers `{storageId, created}`. On create the VIEW registers
+// the host storage row (`ease.context.create_storage` — its upcall pops
+// this page); on update it notifies the host so the dashboard shows the new
+// alias. (The apiVersion 1 backend did both host calls itself; the rut
+// split leaves the form-outcome side to the view.) Removal stays with the
+// host's top-bar trash icon (`storage:removeInstance` on the backend).
+//
+// No `ease.themes` — theme colors are an Android-only row and views must
+// boot headless (the check harness); the palette is static slate + indigo.
+
+use json::{ JsonReader, JsonWriter };
+use tur_host::ease::context::{ create_storage, notify_change, storage_id };
+use tur_host::ease::db::single_get;
+use tur_host::ease::rpc::call;
+use tur_kit::control_flow::control::{ Condition };
+use tur_kit::control_flow::lifecycle::{ Lifecycle };
+use tur_kit::flags::{ BorderPosition, CrossAlign, MainAlign, MainAxisSize };
+use tur_kit::gesture::pointer::{ MountEvent, PointerInteract };
+use tur_kit::handles::{ TextCtrl, UndoCtrl, View, mount, text_ctrl, undo_ctrl };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::layout::flex::{ Column, Row };
+use tur_kit::reactive::{ DeriveCtx, Mutation, MutationCtx, Readable, Source, derive, mutate, source, sv };
+use tur_kit::text::core::{ Text };
+use tur_kit::text::input::{ Input };
+
+// The static palette (0xRRGGBBAA — the kit's packing law).
+let PRIMARY: u64 = 0x4F46E5FFu64;
+let CARD: u64 = 0xFFFFFFFFu64;
+let TEXT: u64 = 0xFF1E293Bu64;
+let TEXT_MUTED: u64 = 0xFF64748Bu64;
+let DIVIDER: u64 = 0xFFE2E8F0u64;
+let ERROR: u64 = 0xFFDC2626u64;
+
+entry fn start() -> u64 {
+    // Mode: nil = create (no storage row yet), a real id = edit. Read once —
+    // the value never changes for the instance lifetime.
+    let sid = storage_id();
+    let mut sid_seed = "";
+    if (sid != nil) {
+        sid_seed = sid;
+    }
+    let storage_src: Source<str> = source<str>(sid_seed);
+
+    let ctrl_alias = text_ctrl();
+    let ctrl_addr = text_ctrl();
+    let ctrl_username = text_ctrl();
+    // Never replaced — a blank password means "keep the stored one".
+    let ctrl_password = text_ctrl();
+    let undo_alias = undo_ctrl();
+    let undo_addr = undo_ctrl();
+    let undo_username = undo_ctrl();
+    let undo_password = undo_ctrl();
+
+    let anonymous = source<bool>(false);
+    let status_text = source<str>("");
+    let status_is_error = source<bool>(false);
+
+    let show_creds: Readable<bool> = derive(fn (ctx: DeriveCtx) -> bool {
+        return !ctx.get<bool>(anonymous);
+    });
+    let status_visible: Readable<bool> = derive(fn (ctx: DeriveCtx) -> bool {
+        return ctx.get<str>(status_text) != "";
+    });
+    let save_label: Readable<str> = derive(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<str>(storage_src) != "") {
+            return "保存";
+        }
+        return "连接";
+    });
+    let check_fill: Readable<u64> = derive(fn (ctx: DeriveCtx) -> u64 {
+        if (ctx.get<bool>(anonymous)) {
+            return PRIMARY;
+        }
+        return CARD;
+    });
+    let password_hint: Readable<str> = derive(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<str>(storage_src) != "") {
+            return "留空保持不变";
+        }
+        return "";
+    });
+
+    // Edit-mode hydration: at MOUNT (never at boot), read the kv config and
+    // prefill the controllers. A corrupt/missing document starts blank.
+    let b_hydrate = mutate(fn (ctx: MutationCtx, _e: MountEvent) {
+        let sid = storage_id();
+        if (sid == nil) {
+            return;
+        }
+        let s: str = sid;
+        let raw = single_get(f"storage:{s}");
+        if (raw == nil) {
+            return;
+        }
+        let doc: str = raw;
+        let cfg = decode_config(doc);
+        if (cfg == nil) {
+            return;
+        }
+        let c: StoredConfig = cfg;
+        ctrl_alias.set_text(c.alias);
+        ctrl_addr.set_text(c.addr);
+        ctrl_username.set_text(c.username);
+        ctx.set<bool>(anonymous, c.is_anonymous);
+    });
+
+    let b_anon = mutate(fn (ctx: MutationCtx, _e: nil) {
+        ctx.set<bool>(anonymous, !ctx.get<bool>(anonymous));
+        ctx.set<str>(status_text, "");
+    });
+
+    let b_test = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let is_anon = ctx.get<bool>(anonymous);
+        let addr = trim(ctrl_addr.text());
+        let alias = trim(ctrl_alias.text());
+        let mut username = "";
+        let mut password = "";
+        if (!is_anon) {
+            username = trim(ctrl_username.text());
+            password = ctrl_password.text();
+        }
+        let invalid = validate(addr, alias, is_anon, username, password, ctx.get<str>(storage_src) != "");
+        if (invalid != "") {
+            ctx.set<str>(status_text, invalid);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<str>(status_text, "测试中...");
+        ctx.set<bool>(status_is_error, false);
+        let reply = call("webdav:test", test_args(sid_opt(ctx.get<str>(storage_src)), addr, username, password, is_anon));
+        let r = parse_test_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, f"测试错误：{r.message}");
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<bool>(status_is_error, true);
+        if (r.outcome == "SUCCESS") {
+            ctx.set<str>(status_text, "测试成功");
+            ctx.set<bool>(status_is_error, false);
+        } else if (r.outcome == "UNAUTHORIZED") {
+            ctx.set<str>(status_text, "测试错误：认证错误");
+        } else if (r.outcome == "TIMEOUT") {
+            ctx.set<str>(status_text, "测试错误：超时");
+        } else {
+            ctx.set<str>(status_text, "测试错误：其他错误");
+        }
+    });
+
+    let b_save = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let is_anon = ctx.get<bool>(anonymous);
+        let addr = trim(ctrl_addr.text());
+        let alias = trim(ctrl_alias.text());
+        let mut username = "";
+        let mut password = "";
+        if (!is_anon) {
+            username = trim(ctrl_username.text());
+            password = ctrl_password.text();
+        }
+        let invalid = validate(addr, alias, is_anon, username, password, ctx.get<str>(storage_src) != "");
+        if (invalid != "") {
+            ctx.set<str>(status_text, invalid);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<str>(status_text, "");
+        ctx.set<bool>(status_is_error, false);
+        let reply = call("webdav:connect", connect_args(sid_opt(ctx.get<str>(storage_src)), addr, alias, username, password, is_anon));
+        let r = parse_connect_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, r.message);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        if (r.created) {
+            // register the host storage row — the upcall pops this page
+            if (r.storage_id != "") {
+                create_storage(r.storage_id);
+            }
+            ctx.set<str>(status_text, "");
+        } else {
+            // the backend rewrote the kv; the dashboard reflects the alias
+            notify_change();
+            ctx.set<str>(status_text, "已保存");
+            ctx.set<bool>(status_is_error, false);
+        }
+    });
+
+    let form = Column()
+        .cross_alignment(CrossAlign::Stretch)
+        .main_axis_size(MainAxisSize::Min)
+        .query_key("webdav-form")
+        .child(field_label("服务器名称 (别名)"))
+        .child(SizedBox(0.0, 6.0).build())
+        .child(text_field(ctrl_alias, undo_alias, sv("WebDAV"), false))
+        .child(SizedBox(0.0, 16.0).build())
+        .child(field_label("服务器地址"))
+        .child(SizedBox(0.0, 6.0).build())
+        .child(text_field(ctrl_addr, undo_addr, sv("https://example.com/dav"), false))
+        .child(SizedBox(0.0, 16.0).build())
+        .child(anonymous_toggle(anonymous, check_fill, b_anon))
+        .child(SizedBox(0.0, 16.0).build())
+        .child(
+            Condition(show_creds)
+                .then(
+                    Column()
+                        .cross_alignment(CrossAlign::Stretch)
+                        .main_axis_size(MainAxisSize::Min)
+                        .child(field_label("用户名"))
+                        .child(SizedBox(0.0, 6.0).build())
+                        .child(text_field(ctrl_username, undo_username, sv(""), false))
+                        .child(SizedBox(0.0, 16.0).build())
+                        .child(field_label("密码"))
+                        .child(SizedBox(0.0, 6.0).build())
+                        .child(text_field(ctrl_password, undo_password, password_hint, true))
+                        .child(SizedBox(0.0, 16.0).build())
+                        .build(),
+                )
+                .else_branch(SizedBox(0.0, 0.0).build())
+                .build(),
+        )
+        .child(
+            Row()
+                .main_alignment(MainAlign::Start)
+                .cross_alignment(CrossAlign::Center)
+                .main_axis_size(MainAxisSize::Min)
+                .child(ghost_button("webdav-test", "测试", b_test))
+                .child(SizedBox(12.0, 0.0).build())
+                .child(primary_button("webdav-save", save_label, b_save))
+                .build(),
+        )
+        .child(SizedBox(0.0, 10.0).build())
+        .child(status_area(status_text, status_visible, status_is_error))
+        .build();
+
+    // mount runs the hydration mutation before the first frame paints
+    let root = Lifecycle()
+        .on_mount(b_hydrate)
+        .child(
+            Container()
+                .color(sv(CARD))
+                .padding(4.0)
+                .child(form)
+                .build(),
+        )
+        .build();
+    mount(root);
+    return 0;
+}
+
+// ---- the form pieces ----------------------------------------------------
+
+struct StoredConfig {
+    alias: str,
+    addr: str,
+    username: str,
+    is_anonymous: bool,
+}
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?StoredConfig {
+    let mut r = JsonReader::of(doc);
+    r.begin_object();
+    let mut alias = "";
+    let mut addr = "";
+    let mut username = "";
+    let mut anon = false;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                alias = v;
+            },
+            "addr" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                addr = v;
+            },
+            "username" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                username = v;
+            },
+            "isAnonymous" -> {
+                anon = r.read_bool();
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return StoredConfig { alias: alias, addr: addr, username: username, is_anonymous: anon };
+}
+
+fn field_label(text: str) -> View {
+    return Text()
+        .text(sv(text))
+        .font_size(13.0)
+        .color(TEXT_MUTED)
+        .build();
+}
+
+fn text_field(ctrl: TextCtrl, undo: UndoCtrl, placeholder: Readable<str>, obscure: bool) -> View {
+    // the masked twin spells its own chain (construction is chained, never
+    // statement-mutated — `obscure` is a lane on the same builder)
+    if (obscure) {
+        let input = Input()
+            .controller(ctrl)
+            .undo(undo)
+            .placeholder(placeholder)
+            .obscure(sv(true))
+            .font_size(15.0)
+            .color(TEXT)
+            .cursor_color(PRIMARY)
+            .width_height(0.0, 22.0)
+            .build();
+        return field_box(input);
+    }
+    let input = Input()
+        .controller(ctrl)
+        .undo(undo)
+        .placeholder(placeholder)
+        .font_size(15.0)
+        .color(TEXT)
+        .cursor_color(PRIMARY)
+        .width_height(0.0, 22.0)
+        .build();
+    return field_box(input);
+}
+
+/// The bordered field box around a built input.
+fn field_box(input: View) -> View {
+    return Container()
+        .color(sv(CARD))
+        .border(DIVIDER, 1.0, BorderPosition::Inside)
+        .radius(sv(12.0f64))
+        .padding(10.0)
+        .child(input)
+        .build();
+}
+
+/// The "匿名登录" toggle row (the box fills when on).
+fn anonymous_toggle(anonymous: Readable<bool>, fill: Readable<u64>, b_toggle: Mutation<nil>) -> View {
+    let on_label = Text()
+        .text(sv("匿名登录"))
+        .font_size(14.0)
+        .color(TEXT)
+        .build();
+    let off_label = Text()
+        .text(sv("匿名登录"))
+        .font_size(14.0)
+        .color(TEXT_MUTED)
+        .build();
+    return PointerInteract()
+        .on_click(b_toggle)
+        .query_key("webdav-anon")
+        .child(
+            Row()
+                .main_alignment(MainAlign::Start)
+                .cross_alignment(CrossAlign::Center)
+                .main_axis_size(MainAxisSize::Min)
+                .child(
+                    Container()
+                        .width_height(18.0, 18.0)
+                        .radius(sv(5.0f64))
+                        .border(DIVIDER, 1.0, BorderPosition::Inside)
+                        .color(fill)
+                        .build(),
+                )
+                .child(SizedBox(8.0, 0.0).build())
+                .child(
+                    Condition(anonymous)
+                        .then(on_label)
+                        .else_branch(off_label)
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}
+
+fn ghost_button(key: str, label: str, cb: Mutation<nil>) -> View {
+    let face = Container()
+        .radius(sv(24.0f64))
+        .padding(14.0)
+        .color(sv(CARD))
+        .border(PRIMARY, 1.0, BorderPosition::Inside)
+        .child(
+            Text()
+                .text(sv(label))
+                .font_size(15.0)
+                .color(PRIMARY)
+                .build(),
+        )
+        .build();
+    return PointerInteract()
+        .on_click(cb)
+        .query_key(key)
+        .child(face)
+        .build();
+}
+
+fn primary_button(key: str, label: Readable<str>, cb: Mutation<nil>) -> View {
+    let face = Container()
+        .radius(sv(24.0f64))
+        .padding(14.0)
+        .color(sv(PRIMARY))
+        .child(
+            Text()
+                .text(label)
+                .font_size(15.0)
+                .color(0xFFFFFFFFu64)
+                .build(),
+        )
+        .build();
+    return PointerInteract()
+        .on_click(cb)
+        .query_key(key)
+        .child(face)
+        .build();
+}
+
+/// The status line: the message rides its source, the tint swaps on
+/// `status_is_error` (Text.color is a static lane).
+fn status_area(status_text: Readable<str>, status_visible: Readable<bool>, status_is_error: Readable<bool>) -> View {
+    let err = Text()
+        .text(status_text)
+        .font_size(13.0)
+        .color(ERROR)
+        .query_key("webdav-status")
+        .build();
+    let muted = Text()
+        .text(status_text)
+        .font_size(13.0)
+        .color(TEXT_MUTED)
+        .query_key("webdav-status")
+        .build();
+    return Condition(status_visible)
+        .then(
+            Condition(status_is_error)
+                .then(err)
+                .else_branch(muted)
+                .build(),
+        )
+        .else_branch(SizedBox(0.0, 0.0).build())
+        .build();
+}
+
+// ---- the actions' helpers -------------------------------------------------
+
+fn trim(s: str) -> str {
+    let n = s.len();
+    let mut a = 0;
+    while (a < n && is_ws(s.code_at(a))) {
+        a += 1;
+    }
+    let mut b = n;
+    while (b > a && is_ws(s.code_at(b - 1))) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+fn is_ws(c: u32) -> bool {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}
+
+/// The "" = create spelling of the mode source.
+fn sid_opt(sid: str) -> ?str {
+    if (sid == "") {
+        return nil;
+    }
+    return sid;
+}
+
+/// The connect-form validation (the TS `validate`, same messages).
+fn validate(addr: str, alias: str, is_anon: bool, username: str, password: str, is_edit: bool) -> str {
+    if (addr == "") {
+        return "服务器地址不能为空";
+    }
+    if (alias == "") {
+        return "服务器名称 (别名) 不能为空";
+    }
+    if (!is_anon && username == "") {
+        return "用户名不能为空";
+    }
+    if (!is_anon && password == "" && !is_edit) {
+        return "密码不能为空";
+    }
+    return "";
+}
+
+// ---- the backend calls (arg building + envelope parsing) ------------------
+
+struct TestReply {
+    ok: bool,
+    message: str,
+    outcome: str,
+}
+
+struct ConnectReply {
+    ok: bool,
+    message: str,
+    storage_id: str,
+    created: bool,
+}
+
+fn test_args(storage_id: ?str, addr: str, username: str, password: str, is_anon: bool) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    if (storage_id != nil) {
+        let s: str = storage_id;
+        w.key("storageId");
+        w.write_str(s);
+    }
+    w.key("addr");
+    w.write_str(addr);
+    w.key("username");
+    w.write_str(username);
+    w.key("password");
+    w.write_str(password);
+    w.key("isAnonymous");
+    w.write_bool(is_anon);
+    w.end_object();
+    return w.finish();
+}
+
+fn connect_args(storage_id: ?str, addr: str, alias: str, username: str, password: str, is_anon: bool) -> str {
+    let mut w = JsonWriter::new();
+    w.begin_object();
+    if (storage_id != nil) {
+        let s: str = storage_id;
+        w.key("storageId");
+        w.write_str(s);
+    }
+    w.key("addr");
+    w.write_str(addr);
+    w.key("alias");
+    w.write_str(alias);
+    w.key("username");
+    w.write_str(username);
+    w.key("password");
+    w.write_str(password);
+    w.key("isAnonymous");
+    w.write_bool(is_anon);
+    w.end_object();
+    return w.finish();
+}
+
+/// `{"ok":true,"result":{"result":"SUCCESS"}}` / `{"ok":false,"error":"…"}`.
+fn parse_test_reply(reply: str) -> TestReply {
+    let mut r = JsonReader::of(reply);
+    r.begin_object();
+    let mut ok = false;
+    let mut have_ok = false;
+    let mut message = "";
+    let mut outcome = "OTHER_ERROR";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "ok") {
+            ok = r.read_bool();
+            have_ok = true;
+        } else if (k == "error") {
+            let v = r.read_str();
+            if (!r.failed()) {
+                message = v;
+            }
+        } else if (k == "result") {
+            r.begin_object();
+            while (r.more()) {
+                let rk = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (rk == "result") {
+                    let v = r.read_str();
+                    if (!r.failed()) {
+                        outcome = v;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (!have_ok) {
+        return TestReply { ok: false, message: "后台未响应", outcome: "OTHER_ERROR" };
+    }
+    return TestReply { ok: ok, message: message, outcome: outcome };
+}
+
+/// `{"ok":true,"result":{"storageId":"…","created":true}}` / the error shape.
+fn parse_connect_reply(reply: str) -> ConnectReply {
+    let mut r = JsonReader::of(reply);
+    r.begin_object();
+    let mut ok = false;
+    let mut have_ok = false;
+    let mut message = "";
+    let mut storage_id = "";
+    let mut created = false;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "ok") {
+            ok = r.read_bool();
+            have_ok = true;
+        } else if (k == "error") {
+            let v = r.read_str();
+            if (!r.failed()) {
+                message = v;
+            }
+        } else if (k == "result") {
+            r.begin_object();
+            while (r.more()) {
+                let rk = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (rk == "storageId") {
+                    let v = r.read_str();
+                    if (!r.failed()) {
+                        storage_id = v;
+                    }
+                } else if (rk == "created") {
+                    created = r.read_bool();
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (!have_ok) {
+        return ConnectReply { ok: false, message: "后台未响应", storage_id: "", created: false };
+    }
+    return ConnectReply { ok: ok, message: message, storage_id: storage_id, created: created };
+}
