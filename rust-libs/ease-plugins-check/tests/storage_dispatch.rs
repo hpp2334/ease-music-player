@@ -149,6 +149,47 @@ mod storage_dispatch {
         }
     }
 
+    /// The opener op too — the one streaming playback actually rides
+    /// first (`{"pluginId","storageId","path","offset"}` from
+    /// ease-js-storage's `get`); its decode loop is the on-device hole
+    /// the other gates missed.
+    #[test]
+    fn storage_get_opener_requests_decode() {
+        let cases = [
+            (
+                "com.ease.webdav",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/com.ease.webdav"),
+            ),
+            (
+                "com.ease.onedrive",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/com.ease.onedrive"),
+            ),
+            (
+                "com.ease.s3",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/com.ease.s3"),
+            ),
+        ];
+        for (id, dir) in cases {
+            let (bus, tx) = boot(id, dir);
+            // The exact ease-js-storage shape — including a non-ASCII,
+            // percent-encoded path like the restored device data carries.
+            let request = format!(
+                "{{\"op\":\"storage:get\",\"args\":{{\"pluginId\":\"{id}\",\"storageId\":\"{id}:186df89d-ac7f-490f-9ac1-2653c3172465\",\"path\":\"/data/musics/Youtube%202026/%E3%80%90%E6%AD%8C%E3%81%A3%E3%81%A6%E3%81%BF%E3%81%9F%E3%80%91test%20track.mp3\",\"offset\":0}}}}"
+            );
+            let reply = dispatch(&bus, &tx, "op_storage_get", &request);
+            assert!(
+                !reply.contains("bad storage:get request"),
+                "{id}: the storage:get args decode died sticky — {reply}"
+            );
+            // Past decode: the failure (no config in the harness db) must
+            // be the config-miss layer.
+            assert!(
+                reply.contains("no config"),
+                "{id}: expected the config-miss layer past decode, got: {reply}"
+            );
+        }
+    }
+
     /// Finding-4 gate: a scheme-less endpoint (`s3.amazonaws.com`) must
     /// normalize to https (the TS `normalizeEndpoint` default) — the connect
     /// op must NOT answer "invalid endpoint" for it. (Missing credentials
