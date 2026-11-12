@@ -30,7 +30,7 @@ use tur_engine::core::scheduler::WorkerPoolHandle;
 ///
 /// - `backend` (cap 2): all headless service backends,
 /// - `view` (cap 2): all TurView rendering instances.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct PluginWorkerPools {
     pub(crate) backend: WorkerPoolHandle,
     pub(crate) view: WorkerPoolHandle,

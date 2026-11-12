@@ -69,6 +69,7 @@ fn with_attached_env<R>(
 /// own `loadModule` uses on the host thread). The instance keeps executing
 /// on its worker lane, so the round-trip only queues + waits.
 #[cfg(target_os = "android")]
+#[derive(Debug)]
 struct AndroidDriver {
     handle: i64,
 }
@@ -76,16 +77,19 @@ struct AndroidDriver {
 #[cfg(target_os = "android")]
 impl ease_tur_rpc::RutDriver for AndroidDriver {
     fn call_entry_str(&self, name: &str, cx: u64) -> Result<String, String> {
-        tur_android::ops::with_app(self.handle, |app| {
-            futures::executor::block_on(app.call_rut_entry_cx_str(name, cx))
+        // `with_app` takes a `'static` closure — own the (borrowed) name.
+        let name = name.to_string();
+        tur_android::ops::with_app(self.handle, move |app| {
+            futures::executor::block_on(app.call_rut_entry_cx_str(&name, cx))
         })
         .ok_or_else(|| format!("instance {self:?} gone"))?
         .map_err(|e| e.to_string())
     }
 
     fn call_entry(&self, name: &str, cx: u64) -> Result<(), String> {
-        tur_android::ops::with_app(self.handle, |app| {
-            futures::executor::block_on(app.call_rut_entry_cx(name, cx)).map(|_| ())
+        let name = name.to_string();
+        tur_android::ops::with_app(self.handle, move |app| {
+            futures::executor::block_on(app.call_rut_entry_cx(&name, cx)).map(|_| ())
         })
         .ok_or_else(|| format!("instance {self:?} gone"))?
         .map_err(|e| e.to_string())

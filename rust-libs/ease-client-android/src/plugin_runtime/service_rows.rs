@@ -324,7 +324,7 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
         let instance_str = inst.0.unwrap_or_default();
         #[cfg(target_os = "android")]
         {
-            if let Err(e) = upcall_storage_host(&pid, &instance_str, "notifyChange") {
+            if let Err(e) = upcall_storage_host(pid.as_str(), &instance_str, "notifyChange") {
                 tracing::warn!("ease:context.notify_change upcall failed: {e}");
             }
         }
