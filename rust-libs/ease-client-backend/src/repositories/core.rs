@@ -58,38 +58,47 @@ impl DatabaseServer {
     /// (e.g. `BlobManager`). New entities should rely on SQLite autoincrement.
     #[allow(dead_code)]
     pub async fn alloc_id(&self, key: DbKeyAlloc) -> BResult<i64> {
+        use sea_orm::TransactionTrait;
+
+        // Serialize allocation against itself: two concurrent deferred
+        // BEGINs racing read→write upgrade into `SQLITE_BUSY_SNAPSHOT`
+        // (which busy_timeout does NOT retry). See `open_database` for
+        // the full SQLite concurrency model.
+        static ALLOC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _guard = ALLOC_LOCK.lock().await;
+
         let kind = match key {
             DbKeyAlloc::Playlist => 0,
             DbKeyAlloc::Music => 1,
             DbKeyAlloc::Storage => 2,
         };
 
+        // One transaction, ONE pooled connection: the historical
+        // `execute_unprepared("BEGIN …/COMMIT")` pattern scattered its
+        // statements across pool connections and only worked while the
+        // pool was (accidentally) capped at a single connection.
         let db = self.db();
-        db.execute_unprepared("BEGIN IMMEDIATE").await?;
-        let result = async {
-            let existing = id_alloc::Entity::find_by_id(kind).one(&db).await?;
-            let next_id = match existing {
-                Some(row) => {
-                    let cur = row.next_id;
-                    let mut am: id_alloc::ActiveModel = row.into();
-                    am.next_id = ActiveValue::Set(cur + 1);
-                    am.update(&db).await?;
-                    cur + 1
-                }
-                None => {
-                    let am = id_alloc::ActiveModel {
-                        kind: ActiveValue::Set(kind),
-                        next_id: ActiveValue::Set(1),
-                    };
-                    am.insert(&db).await?;
-                    1
-                }
-            };
-            Ok::<_, sea_orm::DbErr>(next_id)
-        }
-        .await;
-        db.execute_unprepared("COMMIT").await?;
-        Ok(result?)
+        let txn = db.begin().await?;
+        let existing = id_alloc::Entity::find_by_id(kind).one(&txn).await?;
+        let next_id = match existing {
+            Some(row) => {
+                let cur = row.next_id;
+                let mut am: id_alloc::ActiveModel = row.into();
+                am.next_id = ActiveValue::Set(cur + 1);
+                am.update(&txn).await?;
+                cur + 1
+            }
+            None => {
+                let am = id_alloc::ActiveModel {
+                    kind: ActiveValue::Set(kind),
+                    next_id: ActiveValue::Set(1),
+                };
+                am.insert(&txn).await?;
+                1
+            }
+        };
+        txn.commit().await?;
+        Ok(next_id)
     }
 }
 

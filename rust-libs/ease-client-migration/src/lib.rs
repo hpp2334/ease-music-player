@@ -94,13 +94,39 @@ fn legacy_redb_path(document_dir: &str) -> PathBuf {
 }
 
 /// Open or create the SQLite database at `<document_dir>/data.db`.
+///
+/// ## Concurrency model (SQLite has exactly one writer)
+///
+/// - **Pool**: sea-orm's SQLite driver defaults `max_connections` to 1
+///   when the caller passes a bare URL — a one-connection pool deadlocks
+///   the moment any two DB uses overlap (e.g. a storage-seam fetch inside
+///   a plugin row while any other query is in flight: the row's query
+///   parks on `acquire` forever and the rut lane hangs with it). Real
+///   headroom for the read-heavy app paths.
+/// - **WAL**: readers run concurrently with the single writer; SQLite
+///   itself still serializes writers (the `synchronous = NORMAL` pairing
+///   is the standard WAL setup).
+/// - **busy_timeout (5 s)**: a second writer queues on the write lock
+///   instead of erroring — that IS the single-writer enforcement.
+/// - Multi-statement write transactions (id/blob allocation) are pinned
+///   to one connection via Sea-ORM transactions and serialized against
+///   themselves with a process-wide mutex (a deferred `BEGIN` racing
+///   itself upgrade-deadlocks into `SQLITE_BUSY_SNAPSHOT`, which
+///   busy_timeout does not retry).
 pub async fn open_database(document_dir: &str) -> anyhow::Result<DbConn> {
     let path = data_db_path(document_dir);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let url = format!("sqlite://{}?mode=rwc", path.display());
-    let db = sea_orm::Database::connect(&url).await?;
+    let mut opts = sea_orm::ConnectOptions::new(&url);
+    opts.max_connections(8).map_sqlx_sqlite_opts(|sqlx_opts| {
+        sqlx_opts
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+            .busy_timeout(std::time::Duration::from_secs(5))
+    });
+    let db = sea_orm::Database::connect(opts).await?;
     Ok(db)
 }
 

@@ -51,20 +51,26 @@ impl BlobManager {
     }
 
     async fn allocate(&self) -> BResult<BlobId> {
-        self.db.execute_unprepared("BEGIN IMMEDIATE").await?;
-        let result = async {
-            let row = blob::Entity::find_by_id(blob::Model::ROW_ID)
-                .one(&self.db)
-                .await?
-                .expect("blob row is seeded by ease_client_migration::migrate");
-            let cur = row.next_id;
-            let mut am: blob::ActiveModel = row.into();
-            am.next_id = ActiveValue::Set(cur + 1);
-            am.update(&self.db).await?;
-            Ok::<_, sea_orm::DbErr>(BlobId::wrap(cur))
-        }
-        .await;
-        self.db.execute_unprepared("COMMIT").await?;
-        Ok(result?)
+        use sea_orm::TransactionTrait;
+
+        // Serialize allocation against itself (`SQLITE_BUSY_SNAPSHOT`
+        // upgrade races — see `DatabaseServer::alloc_id`).
+        static ALLOC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _guard = ALLOC_LOCK.lock().await;
+
+        // One transaction, ONE pooled connection (see
+        // `DatabaseServer::alloc_id` for why the historical
+        // `execute_unprepared("BEGIN …/COMMIT")` pattern was broken).
+        let txn = self.db.begin().await?;
+        let row = blob::Entity::find_by_id(blob::Model::ROW_ID)
+            .one(&txn)
+            .await?
+            .expect("blob row is seeded by ease_client_migration::migrate");
+        let cur = row.next_id;
+        let mut am: blob::ActiveModel = row.into();
+        am.next_id = ActiveValue::Set(cur + 1);
+        am.update(&txn).await?;
+        txn.commit().await?;
+        Ok(BlobId::wrap(cur))
     }
 }

@@ -15,6 +15,9 @@ postcard = { workspace = true }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 libsqlite3-sys = { workspace = true }
+# Direct dep only for `map_sqlx_sqlite_opts` (journal_mode / busy_timeout
+# configuration in `open_database`); version-unified with sea-orm's sqlx.
+sqlx = { version = "0.8", default-features = false, features = ["sqlite"] }
 async-trait = "0.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
