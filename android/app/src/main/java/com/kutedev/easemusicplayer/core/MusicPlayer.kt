@@ -106,14 +106,27 @@ class PlaybackService : android.app.Service() {
     @Volatile private var focusHeld: Boolean = false
 
     /**
-     * True while playback is paused *because audio focus was taken away*
-     * (vs. a user-initiated pause). Arms the auto-resume paths: the
-     * [AudioManager.AUDIOFOCUS_GAIN] listener and the active-playback
-     * watchdog below. Only set when playback was actually underway, so
-     * an already-idle session is never resurrected by a stray focus
-     * event.
+     * True between an [AudioManager.AUDIOFOCUS_LOSS]-family event and
+     * the matching [AudioManager.AUDIOFOCUS_GAIN] — the ownership
+     * mirror. Gates every *automatic* focus (re)request in
+     * [refreshForeground]: while another app legitimately holds focus
+     * (we received a loss — even while we were paused, which is exactly
+     * the steal case the old pause-cause flag missed), no background
+     * refresh may yank it back. Only explicit user play intent and the
+     * armed recovery watchdog clear it / re-request.
      */
-    @Volatile private var pausedByFocusLoss: Boolean = false
+    @Volatile private var focusLoss: Boolean = false
+
+    /**
+     * True while playback is paused *because audio focus was taken away
+     * while it was actually underway* (vs. a pause the user made, or a
+     * loss received while already paused). Arms the auto-resume paths:
+     * the [AudioManager.AUDIOFOCUS_GAIN] listener and the active-playback
+     * watchdog below. Ownership alone can't drive this — resuming on
+     * every GAIN would ghost-resume a player the user paused before,
+     * say, a phone call.
+     */
+    @Volatile private var resumeOnGain: Boolean = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var focusRecoveryPending: Runnable? = null
@@ -126,8 +139,8 @@ class PlaybackService : android.app.Service() {
                 bridge.logRaw("info", "audio becoming noisy → pause")
                 // The playback context changed under us (unplugged
                 // headphones) — this is not a focus-caused pause, so the
-                // focus-recovery watchdog must not resurrect it later.
-                pausedByFocusLoss = false
+                // focus-recovery paths must not resurrect it later.
+                resumeOnGain = false
                 playerControllerRepository.pause()
             }
         }
@@ -217,14 +230,17 @@ class PlaybackService : android.app.Service() {
             setCallback(object : MediaSessionCompat.Callback() {
                 // Every transport callback is a user action: void any
                 // pending focus-recovery so the watchdog never
-                // auto-resumes over an explicit user pause/stop.
+                // auto-resumes over an explicit user pause/stop, and a
+                // play also re-asserts focus ownership (user intent
+                // legitimately takes focus back from another app).
                 override fun onPlay() {
-                    pausedByFocusLoss = false
+                    resumeOnGain = false
+                    claimFocusForUserPlay()
                     playerControllerRepository.resume()
                 }
 
                 override fun onPause() {
-                    pausedByFocusLoss = false
+                    resumeOnGain = false
                     playerControllerRepository.pause()
                 }
 
@@ -235,7 +251,7 @@ class PlaybackService : android.app.Service() {
                 }
 
                 override fun onStop() {
-                    pausedByFocusLoss = false
+                    resumeOnGain = false
                     // Notification dismissal / transport stop: park the
                     // session (resumable) instead of wiping it.
                     playerControllerRepository.userStop()
@@ -279,7 +295,15 @@ class PlaybackService : android.app.Service() {
         }
         serviceScope.launch {
             playerRepository.loading.collectLatest { loading ->
+                val wasLoading = lastLoading
                 lastLoading = loading
+                // A rising loading edge is play intent in action (the
+                // optimistic flag in `play()` or an engine load): claim
+                // focus up front so the (network-bound) load window is
+                // already covered.
+                if (loading && !wasLoading) {
+                    claimFocusForUserPlay()
+                }
                 refreshForeground()
             }
         }
@@ -307,8 +331,10 @@ class PlaybackService : android.app.Service() {
         if (lastPlaying) {
             // Playback is happening again (user picked a track, or a
             // resumed load reached PLAYING) — whatever focus-recovery
-            // was pending is moot.
-            pausedByFocusLoss = false
+            // was pending is moot, and the user's play intent
+            // re-asserts focus ownership.
+            resumeOnGain = false
+            claimFocusForUserPlay()
             registerBecomingNoisy()
         }
         ensureWakeLock()
@@ -485,27 +511,30 @@ class PlaybackService : android.app.Service() {
         ensureWakeLock()
         val notification = buildNotification()
         if (lastMusic != null) {
-            // (Re)acquire audio focus for the visible player: the first
-            // promotion requests it; later promotions (user plays again
-            // after another app took focus) re-request it when not held.
-            // Same request object every time — see [buildAudioFocusRequest].
+            // (Re)acquire audio focus while we still believe we own it:
+            // the first promotion requests it, and later promotions
+            // (a play after another app took focus) re-request it when
+            // not held. Same request object every time — see
+            // [buildAudioFocusRequest].
             //
-            // NOT while paused-by-focus-loss: the pause itself runs
-            // through here, and re-requesting 100 ms after the loss
-            // would grant us the focus back (the framework re-grants the
-            // requester immediately), making the interruption's
-            // AUDIOFOCUS_GAIN never arrive and the watchdog's re-request
-            // a no-op — the player then sat paused forever. Recovery is
-            // owned by the GAIN listener / the watchdog below; a user
-            // play clears the flag first (transport callback or
-            // [onPlayStateChanged]).
-            if (!pausedByFocusLoss) {
+            // The single gate is [focusLoss]: after ANY loss event —
+            // including one received while we were paused, which is
+            // exactly the steal case (the old pause-cause flag missed
+            // it, so a late lyric/cover/metadata patch or an app-reopen
+            // reload re-requested focus and paused the other app) — no
+            // background refresh may yank focus back. Re-requesting
+            // after a loss is owned exclusively by user play intent
+            // ([claimFocusForUserPlay]) and the armed recovery watchdog
+            // ([maybeRecoverFocus]).
+            if (!focusLoss) {
                 requestAudioFocus()
             }
             promoteToForeground()
         } else {
-            // No track loaded — detach from foreground but keep the
-            // service alive so the session stays connected.
+            // No track loaded — detach from foreground, drop the
+            // notification, and give up any focus we still hold: a deck
+            // with nothing in it has no business owning audio focus.
+            abandonAudioFocus()
             stopForeground(STOP_FOREGROUND_DETACH)
             notificationManager?.notify(NOTIFICATION_ID, notification)
         }
@@ -703,9 +732,9 @@ class PlaybackService : android.app.Service() {
     /**
      * Submit [audioFocusRequest] whenever focus is not currently held:
      * on the first foreground promotion, when the user plays after the
-     * focus was taken away (heals a focus-less manual resume), and from
-     * the focus-recovery watchdog. Returns silently when focus is
-     * already held.
+     * focus was taken away ([claimFocusForUserPlay] heals a focus-less
+     * manual resume), and from the focus-recovery watchdog. Returns
+     * silently when focus is already held.
      */
     private fun requestAudioFocus() {
         val am = audioManager ?: return
@@ -751,7 +780,7 @@ class PlaybackService : android.app.Service() {
      */
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>) {
-            if (!pausedByFocusLoss) return
+            if (!resumeOnGain) return
             scheduleFocusRecoveryCheck()
         }
     }
@@ -766,7 +795,7 @@ class PlaybackService : android.app.Service() {
     }
 
     private fun maybeRecoverFocus() {
-        if (!pausedByFocusLoss) return
+        if (!resumeOnGain) return
         // `activePlaybackConfigurations` lists only players that are
         // actively playing — ours is paused, so anything listed belongs
         // to another app. A non-empty list (another player, or a call)
@@ -781,13 +810,26 @@ class PlaybackService : android.app.Service() {
         requestAudioFocus()
     }
 
+    /**
+     * User play intent (MediaSession transport, UI tap, autoplay reaching
+     * PLAYING): re-assert focus ownership. Clears [focusLoss] so the
+     * automatic refresh gate stops blocking, then requests — taking
+     * focus back from another app here is intended: the user asked for
+     * sound.
+     */
+    private fun claimFocusForUserPlay() {
+        focusLoss = false
+        requestAudioFocus()
+    }
+
     private fun onAudioFocusChange(focusChange: Int) {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS -> {
                 focusHeld = false
+                focusLoss = true
                 if (playerRepository.playing.value || playerRepository.loading.value) {
                     bridge.logRaw("info", "audio focus lost → pause (auto-resume armed)")
-                    pausedByFocusLoss = true
+                    resumeOnGain = true
                     playerControllerRepository.pause()
                 } else {
                     bridge.logRaw("info", "audio focus lost (idle — nothing to pause)")
@@ -796,9 +838,10 @@ class PlaybackService : android.app.Service() {
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 focusHeld = false
+                focusLoss = true
                 if (playerRepository.playing.value || playerRepository.loading.value) {
                     bridge.logRaw("info", "audio focus transient loss → pause (auto-resume armed)")
-                    pausedByFocusLoss = true
+                    resumeOnGain = true
                     playerControllerRepository.pause()
                 } else {
                     bridge.logRaw("info", "audio focus transient loss (idle — nothing to pause)")
@@ -806,8 +849,9 @@ class PlaybackService : android.app.Service() {
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
                 focusHeld = true
-                if (pausedByFocusLoss) {
-                    pausedByFocusLoss = false
+                focusLoss = false
+                if (resumeOnGain) {
+                    resumeOnGain = false
                     bridge.logRaw("info", "audio focus regained → resume")
                     playerControllerRepository.resume()
                 } else {
