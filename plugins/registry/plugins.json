@@ -12,7 +12,7 @@
         "zh-CN": "LRC、SRT、WebVTT 歌词文件解析器。应用的歌词显示完全由本插件驱动，应用内没有内置解析器。"
       },
       "zip": "zips/com.ease.lyricformats-0.3.0.zip",
-      "sha256": "7c30bdcf809b42c4ce8bac049f9e464422174467e98e58dad1ae185bcc55230b",
+      "sha256": "510bf75b9fb2c3f18be1d21b4be2b5407f9591c2ecbbfed110390d1144ce8548",
       "size": 30753,
       "apiVersion": 2
     },
@@ -28,8 +28,8 @@
         "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
       },
       "zip": "zips/com.ease.onedrive-0.1.0.zip",
-      "sha256": "6b93203fe968ae993a240f239c6c175393c85f92e542a9ef677f7feed6879970",
-      "size": 71053,
+      "sha256": "24bc3e180d3a6303a2e7507482e5f4c986df1462d87b3ef8d3eb7eae31222dfc",
+      "size": 71775,
       "icon": "icons/com.ease.onedrive.png",
       "apiVersion": 2
     },
@@ -45,8 +45,8 @@
         "zh-CN": "统计每首歌的播放次数，支持按时间段（今天到最近一年）和按播放列表成员过滤。"
       },
       "zip": "zips/com.ease.playcount-0.1.0.zip",
-      "sha256": "9abf18cf1ba49993aa33753ec826f4763d7815c710d23d20ad9037c5ad7daf39",
-      "size": 64368,
+      "sha256": "e9e2a24c5e407a21ce4d4802dd2f3e0ae1d4243413a2d385335639bf1aef7053",
+      "size": 69024,
       "icon": "icons/com.ease.playcount.png",
       "apiVersion": 2
     },
@@ -63,8 +63,8 @@
         "zh-CN": "S3 / 兼容 S3 的对象存储插件（ListObjectsV2 目录列表 + SigV4 签名区间下载；支持 AWS S3、Cloudflare R2、MinIO、B2 等）。"
       },
       "zip": "zips/com.ease.s3-0.2.0.zip",
-      "sha256": "28a835c8b18899acacfb9204e9554dd346ffa84116682b850072ae058ae6a5ac",
-      "size": 104460,
+      "sha256": "68e5faccd5411ef2119da35fd19a179bf8d72769b0d9c8fefdcafaff818cf0bd",
+      "size": 105281,
       "icon": "icons/com.ease.s3.png"
     },
     {
@@ -79,8 +79,8 @@
         "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
       },
       "zip": "zips/com.ease.webdav-0.1.0.zip",
-      "sha256": "bd32d566f3d62baa94715c821a3f00e19cef2e5d7fb36e8f89d30cd600e33ef3",
-      "size": 99934,
+      "sha256": "0e902e9c2d4df2cb164193834ff2b8e9010b86ca3c278f8d434b0ad413c949ac",
+      "size": 102042,
       "icon": "icons/com.ease.webdav.png",
       "apiVersion": 2
     }
