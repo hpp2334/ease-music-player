@@ -33,6 +33,13 @@ use super::shared::SharedStatus;
 /// [`Loaded`] payload, so the invariants "sink open ⟹ decoder open" and
 /// "conversion state exists ⟺ session exists" hold by construction.
 ///
+/// Waiting-on-the-source is deliberately NOT a phase: the worker tracks it
+/// as its own `starved` bit (pausing the sink directly through the
+/// session, like seek/volume) and publishes it as the shared `buffering`
+/// flag. The transport state stays `Playing` across a stall, so `playing`
+/// never flips off mid-play and `buffering == true` always coincides with
+/// silence by construction.
+///
 /// Private to this module: only [`Machine`] may touch a `Phase`.
 enum Phase {
     Idle,
@@ -44,7 +51,6 @@ enum Phase {
         /// consulted while playing. Reset when (re)entering `Playing`.
         last_position_emit: Instant,
     },
-    Buffering(Loaded),
     Ended(Loaded),
     /// Wedged. Any session it held was dropped; recovery is a fresh
     /// `load` or `stop`.
@@ -59,7 +65,6 @@ impl Phase {
             Phase::Loading => PlayerState::Loading,
             Phase::Paused(_) => PlayerState::Paused,
             Phase::Playing { .. } => PlayerState::Playing,
-            Phase::Buffering(_) => PlayerState::Buffering,
             Phase::Ended(_) => PlayerState::Ended,
             Phase::Error => PlayerState::Error,
         }
@@ -68,10 +73,9 @@ impl Phase {
     /// The live session, if this phase has one.
     fn loaded_mut(&mut self) -> Option<&mut Loaded> {
         match self {
-            Phase::Paused(loaded)
-            | Phase::Playing { loaded, .. }
-            | Phase::Buffering(loaded)
-            | Phase::Ended(loaded) => Some(loaded),
+            Phase::Paused(loaded) | Phase::Playing { loaded, .. } | Phase::Ended(loaded) => {
+                Some(loaded)
+            }
             Phase::Idle | Phase::Loading | Phase::Error => None,
         }
     }
@@ -102,7 +106,7 @@ fn morph(current: Phase, next: PlayerState) -> Phase {
         PlayerState::Error => Phase::Error,
         PlayerState::Playing => {
             let loaded = match current {
-                Phase::Paused(loaded) | Phase::Buffering(loaded) => loaded,
+                Phase::Paused(loaded) => loaded,
                 // Defensive: no-op transitions never reach `morph`, but
                 // keep the session rather than panic if that drifts.
                 Phase::Playing { loaded, .. } | Phase::Ended(loaded) => loaded,
@@ -115,25 +119,16 @@ fn morph(current: Phase, next: PlayerState) -> Phase {
                 last_position_emit: Instant::now(),
             }
         }
-        PlayerState::Buffering => {
-            let loaded = match current {
-                Phase::Playing { loaded, .. } => loaded,
-                phase => unreachable!("cannot morph {phase:?} into Buffering"),
-            };
-            Phase::Buffering(loaded)
-        }
         PlayerState::Paused => {
             let loaded = match current {
-                Phase::Playing { loaded, .. } | Phase::Buffering(loaded) => loaded,
+                Phase::Playing { loaded, .. } => loaded,
                 phase => unreachable!("cannot morph {phase:?} into Paused"),
             };
             Phase::Paused(loaded)
         }
         PlayerState::Ended => {
             let loaded = match current {
-                Phase::Playing { loaded, .. }
-                | Phase::Paused(loaded)
-                | Phase::Buffering(loaded) => loaded,
+                Phase::Playing { loaded, .. } | Phase::Paused(loaded) => loaded,
                 phase => unreachable!("cannot morph {phase:?} into Ended"),
             };
             Phase::Ended(loaded)
@@ -177,12 +172,6 @@ impl Machine {
     /// Whether the decode loop should be pumping.
     pub(super) fn is_playing(&self) -> bool {
         matches!(self.phase, Phase::Playing { .. })
-    }
-
-    /// Whether the session is parked waiting on source data (the worker
-    /// keeps its short tick to poll for the refill).
-    pub(super) fn is_buffering(&self) -> bool {
-        matches!(self.phase, Phase::Buffering(_))
     }
 
     /// Whether the player is parked in `Paused` with a live session. The
@@ -263,19 +252,6 @@ impl Machine {
         self.apply(WorkerEvent::EndOfStream);
     }
 
-    /// The source starved mid-play (`BufferUnderrun`): morph
-    /// `Playing → Buffering` — the sink keeps draining its ring while the
-    /// worker polls for the refill.
-    pub(super) fn buffer_underrun(&mut self) {
-        self.apply(WorkerEvent::BufferUnderrun);
-    }
-
-    /// Data arrived again (`BufferRefilled`): morph `Buffering → Playing`
-    /// and resume pumping.
-    pub(super) fn buffer_refilled(&mut self) {
-        self.apply(WorkerEvent::BufferRefilled);
-    }
-
     /// Start a load: discard any existing session, then publish
     /// `Loading`.
     ///
@@ -345,9 +321,10 @@ impl Machine {
                 // source).
                 loaded.pause();
             }
-            // `Buffering` keeps the stream running on purpose: the sink
-            // ring buffer drains what it has while the source stalls.
-            Phase::Buffering(_) | Phase::Idle | Phase::Loading | Phase::Error => {}
+            // A starved-but-`Playing` session pauses its own sink through
+            // the worker's starve handling (the `buffering` flag), not
+            // through a phase change.
+            Phase::Idle | Phase::Loading | Phase::Error => {}
         }
     }
 
@@ -417,8 +394,6 @@ mod tests {
             PlayerState::Playing
         );
         let (loaded, _fx) = loaded_session(2, 2);
-        assert_eq!(Phase::Buffering(loaded).state(), PlayerState::Buffering);
-        let (loaded, _fx) = loaded_session(2, 2);
         assert_eq!(Phase::Ended(loaded).state(), PlayerState::Ended);
         assert_eq!(Phase::Error.state(), PlayerState::Error);
     }
@@ -432,11 +407,8 @@ mod tests {
         // Playing → Paused (PauseRequested).
         phase = morph(phase, PlayerState::Paused);
         assert!(matches!(phase, Phase::Paused(_)));
-        // Paused → Playing → Buffering (BufferUnderrun).
+        // Paused → Playing → Ended (EndOfStream).
         phase = morph(phase, PlayerState::Playing);
-        phase = morph(phase, PlayerState::Buffering);
-        assert!(matches!(phase, Phase::Buffering(_)));
-        // Buffering → Ended (EndOfStream).
         phase = morph(phase, PlayerState::Ended);
         assert!(matches!(phase, Phase::Ended(_)));
 
@@ -458,7 +430,6 @@ mod tests {
         fx.shared.set_duration(Some(Duration::from_secs(60)));
 
         let phase = morph(Phase::Paused(loaded), PlayerState::Playing);
-        let phase = morph(phase, PlayerState::Buffering);
         let _phase = morph(phase, PlayerState::Ended);
 
         assert_eq!(fx.shared.position(), Duration::from_secs(42));
@@ -579,7 +550,10 @@ mod tests {
     }
 
     #[test]
-    fn underrun_and_refill_move_the_session_between_playing_and_buffering() {
+    fn starve_pauses_the_session_sink_and_refill_resumes_it() {
+        // Buffering is no longer a phase: the worker starve path pauses
+        // the sink directly through the session and publishes the flag;
+        // the phase (and the mirrored state) stays `Playing` throughout.
         let (loaded, fx) = loaded_session(2, 2);
         let shared = Arc::clone(&fx.shared);
         let rec = Arc::new(RecordingSink::default());
@@ -594,45 +568,25 @@ mod tests {
         machine.complete_load(loaded, false);
         machine.play();
 
-        machine.buffer_underrun();
-        assert_eq!(machine.state(), PlayerState::Buffering);
-        assert_eq!(fx.shared.state(), PlayerState::Buffering);
-
-        machine.buffer_refilled();
+        // The worker's starve choreography, straight from `begin_starve`:
+        // sink pause (through the session) — no machine involvement.
+        machine.loaded_mut().unwrap().pause();
         assert_eq!(machine.state(), PlayerState::Playing);
         assert_eq!(fx.shared.state(), PlayerState::Playing);
-
-        // The session survived both morphs: same sink, never stopped.
+        assert!(fx.log.recorded("pause"));
         assert!(!fx.log.recorded("stop"));
+
+        // And the refill's counterpart: sink resume through the session.
+        machine.loaded_mut().unwrap().resume();
+        assert_eq!(machine.state(), PlayerState::Playing);
+        assert!(fx.log.recorded("resume"));
         assert_eq!(
             recorded_states(&rec),
             vec![
                 PlayerState::Loading,
                 PlayerState::Paused,
-                PlayerState::Playing,
-                PlayerState::Buffering,
                 PlayerState::Playing
             ]
         );
-    }
-
-    #[test]
-    fn buffer_underrun_is_illegal_outside_playing() {
-        let rec = Arc::new(RecordingSink::default());
-        let mut machine = Machine::new(
-            Arc::new(SharedStatus::new()),
-            EventSinks {
-                cx: None,
-                player: Some(rec.clone()),
-            },
-        );
-
-        machine.buffer_underrun(); // illegal from Idle
-
-        assert_eq!(machine.state(), PlayerState::Idle);
-        assert!(matches!(
-            rec.events.lock().unwrap().first(),
-            Some(PlayerEvent::Error(_))
-        ));
     }
 }

@@ -157,7 +157,6 @@ pub enum PlayerStateRecord {
     Loading,
     Paused,
     Playing,
-    Buffering,
     Ended,
     Error,
 }
@@ -170,7 +169,6 @@ impl PlayerStateRecord {
             cantode::PlayerState::Loading => Self::Loading,
             cantode::PlayerState::Paused => Self::Paused,
             cantode::PlayerState::Playing => Self::Playing,
-            cantode::PlayerState::Buffering => Self::Buffering,
             cantode::PlayerState::Ended => Self::Ended,
             cantode::PlayerState::Error => Self::Error,
         }

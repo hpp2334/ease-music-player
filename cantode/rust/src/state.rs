@@ -22,13 +22,16 @@ use crate::CantodeError;
 /// - `Loading`: a source is being opened / decoded for the first time.
 /// - `Paused`: a source is loaded, the output stream is open but paused.
 /// - `Playing`: audio is flowing to the output device.
-/// - `Buffering`: the decode pipeline is waiting on the source (network
-///   stall, slow disk, ...) — the output stream is still open but will
-///   underflow shortly.
 /// - `Ended`: the loaded source reached its end. Seeking back resets to
 ///   `Paused` / `Playing`.
 /// - `Error`: an unrecoverable error occurred; the player is wedged until
 ///   the caller `load`s a fresh source or `stop`s.
+///
+/// Waiting-on-the-source (network stall, slow disk) is **not** a state: it
+/// rides alongside as the [`buffering`](crate::Player::buffering) flag —
+/// the transport state stays `Playing` and the sink is paused, so a stall
+/// never flips `playing` off and the flag always coincides with silence
+/// (see the worker's starve handling).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PlayerState {
     /// No source loaded, no output stream open.
@@ -40,8 +43,6 @@ pub enum PlayerState {
     Paused,
     /// Audio is flowing to the output device.
     Playing,
-    /// Decode pipeline waiting on the source (network stall, slow disk).
-    Buffering,
     /// Loaded source reached its end. Seeking back resets to `Paused`/`Playing`.
     Ended,
     /// Unrecoverable error; player is wedged until a fresh `load` or `stop`.
@@ -68,12 +69,6 @@ pub(crate) enum WorkerEvent {
     PauseRequested,
     /// `Player::stop` was called (drop the loaded source).
     StopRequested,
-    /// The source stalled during decode (network / slow I/O) — the read
-    /// deadline expired or the readiness pre-check tripped. `Playing →
-    /// Buffering`.
-    BufferUnderrun,
-    /// The buffer has data again; resume playback. `Buffering → Playing`.
-    BufferRefilled,
     /// The decoder reached end of stream.
     EndOfStream,
     /// An unrecoverable error occurred.
@@ -99,13 +94,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         // Load/Play/Pause are illegal before any source is loaded.
         (
             Idle,
-            LoadCompleted
-            | LoadCompletedAutoPlay
-            | PlayRequested
-            | PauseRequested
-            | BufferUnderrun
-            | BufferRefilled
-            | EndOfStream,
+            LoadCompleted | LoadCompletedAutoPlay | PlayRequested | PauseRequested | EndOfStream,
         ) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Idle"
@@ -124,7 +113,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         (Loading, PlayRequested) => Loading,
         (Loading, PauseRequested) => Loading,
         (Loading, LoadRequested) => Loading,
-        (Loading, BufferUnderrun | BufferRefilled | EndOfStream) => {
+        (Loading, EndOfStream) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Loading"
             )));
@@ -137,7 +126,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         (Paused, EndOfStream) => Ended, // a 0-length source
         (Paused, Failed) => Error,
         (Paused, LoadRequested) => Loading,
-        (Paused, LoadCompleted | LoadCompletedAutoPlay | BufferUnderrun | BufferRefilled) => {
+        (Paused, LoadCompleted | LoadCompletedAutoPlay) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Paused"
             )));
@@ -146,29 +135,13 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         // ---- Playing ----
         (Playing, PauseRequested) => Paused,
         (Playing, StopRequested) => Idle,
-        (Playing, BufferUnderrun) => Buffering,
         (Playing, EndOfStream) => Ended,
         (Playing, Failed) => Error,
         (Playing, LoadRequested) => Loading,
         (Playing, PlayRequested) => Playing, // no-op
-        (Playing, LoadCompleted | LoadCompletedAutoPlay | BufferRefilled) => {
+        (Playing, LoadCompleted | LoadCompletedAutoPlay) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Playing"
-            )));
-        }
-
-        // ---- Buffering ----
-        (Buffering, BufferRefilled) => Playing,
-        (Buffering, PauseRequested) => Paused,
-        (Buffering, StopRequested) => Idle,
-        (Buffering, EndOfStream) => Ended,
-        (Buffering, Failed) => Error,
-        (Buffering, LoadRequested) => Loading,
-        (Buffering, PlayRequested) => Buffering, // stays; worker picks up on refill
-        (Buffering, BufferUnderrun) => Buffering, // no-op
-        (Buffering, LoadCompleted | LoadCompletedAutoPlay) => {
-            return Err(CantodeError::InvalidState(format!(
-                "{ev:?} is illegal in state Buffering"
             )));
         }
 
@@ -177,7 +150,7 @@ pub(crate) fn transition(from: PlayerState, ev: WorkerEvent) -> Result<PlayerSta
         (Ended, PlayRequested | PauseRequested) => Ended, // stuck until load/seek
         (Ended, StopRequested) => Idle,
         (Ended, Failed) => Error,
-        (Ended, LoadCompleted | LoadCompletedAutoPlay | BufferUnderrun | BufferRefilled | EndOfStream) => {
+        (Ended, LoadCompleted | LoadCompletedAutoPlay | EndOfStream) => {
             return Err(CantodeError::InvalidState(format!(
                 "{ev:?} is illegal in state Ended"
             )));
@@ -243,8 +216,6 @@ mod tests {
             WorkerEvent::LoadCompletedAutoPlay,
             WorkerEvent::PlayRequested,
             WorkerEvent::PauseRequested,
-            WorkerEvent::BufferUnderrun,
-            WorkerEvent::BufferRefilled,
             WorkerEvent::EndOfStream,
         ] {
             illegal(PlayerState::Idle, ev);
@@ -296,11 +267,7 @@ mod tests {
 
     #[test]
     fn loading_illegal() {
-        for ev in [
-            WorkerEvent::BufferUnderrun,
-            WorkerEvent::BufferRefilled,
-            WorkerEvent::EndOfStream,
-        ] {
+        for ev in [WorkerEvent::EndOfStream] {
             illegal(PlayerState::Loading, ev);
         }
     }
@@ -349,11 +316,6 @@ mod tests {
         );
         legal(
             PlayerState::Playing,
-            WorkerEvent::BufferUnderrun,
-            PlayerState::Buffering,
-        );
-        legal(
-            PlayerState::Playing,
             WorkerEvent::EndOfStream,
             PlayerState::Ended,
         );
@@ -371,45 +333,6 @@ mod tests {
             PlayerState::Playing,
             WorkerEvent::PlayRequested,
             PlayerState::Playing,
-        );
-    }
-
-    #[test]
-    fn buffering_legal() {
-        legal(
-            PlayerState::Buffering,
-            WorkerEvent::BufferRefilled,
-            PlayerState::Playing,
-        );
-        legal(
-            PlayerState::Buffering,
-            WorkerEvent::PauseRequested,
-            PlayerState::Paused,
-        );
-        legal(
-            PlayerState::Buffering,
-            WorkerEvent::StopRequested,
-            PlayerState::Idle,
-        );
-        legal(
-            PlayerState::Buffering,
-            WorkerEvent::EndOfStream,
-            PlayerState::Ended,
-        );
-        legal(
-            PlayerState::Buffering,
-            WorkerEvent::Failed,
-            PlayerState::Error,
-        );
-        legal(
-            PlayerState::Buffering,
-            WorkerEvent::LoadRequested,
-            PlayerState::Loading,
-        );
-        legal(
-            PlayerState::Buffering,
-            WorkerEvent::BufferUnderrun,
-            PlayerState::Buffering,
         );
     }
 
@@ -459,8 +382,6 @@ mod tests {
             WorkerEvent::LoadCompletedAutoPlay,
             WorkerEvent::PlayRequested,
             WorkerEvent::PauseRequested,
-            WorkerEvent::BufferUnderrun,
-            WorkerEvent::BufferRefilled,
             WorkerEvent::EndOfStream,
             WorkerEvent::Failed,
         ] {

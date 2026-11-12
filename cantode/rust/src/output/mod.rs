@@ -60,7 +60,7 @@ pub trait AudioSink: Send {
     /// Must not block indefinitely: sinks should either grow their buffer
     /// (bounded) or drop samples when full and report backpressure via the
     /// returned [`crate::Result`]. The player worker uses the return value
-    /// to decide whether to enter `Buffering`.
+    /// to decide whether to arm its starve (the `buffering` flag).
     fn write(&mut self, frames: &[f32], start_ts: Duration) -> crate::Result<()>;
 
     /// Drop all samples currently buffered in the sink without closing the

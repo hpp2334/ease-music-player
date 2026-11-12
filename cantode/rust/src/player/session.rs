@@ -2,7 +2,7 @@
 //! loaded and its sink is open.
 //!
 //! The session moves as a unit between the payload-carrying `Phase`
-//! variants (`Paused` ↔ `Playing` ↔ `Buffering` → `Ended`); those
+//! variants (`Paused` ↔ `Playing` → `Ended`); those
 //! variant-to-variant moves destructure the session out rather than
 //! dropping it. True session exit — stop, replace by a new load,
 //! `Failed`, or worker teardown — happens in exactly one place:
@@ -75,7 +75,8 @@ pub(super) enum PumpOutcome {
     /// The decoder reached end of stream.
     EndOfStream,
     /// The source is starved but alive (a bounded read expired or the
-    /// readiness pre-check tripped). The worker morphs to `Buffering`.
+    /// readiness pre-check tripped). The worker arms its starve: sink
+    /// paused + `buffering` flag, transport stays `Playing`.
     NeedsData,
     /// A (non-fatal) decode error; the frame was skipped. Carries the
     /// error so the worker can surface it (deduplicated) as
@@ -462,7 +463,7 @@ mod tests {
     #[test]
     fn pump_maps_would_block_to_needs_data() {
         // A bounded-read expiry is "starved, not broken": the pump must
-        // surface NeedsData (the worker morphs to Buffering), not an
+        // surface NeedsData (the worker arms its starve), not an
         // error and not EOF.
         let (mut loaded, _fx) = loaded_session_with(
             StubDecoder {

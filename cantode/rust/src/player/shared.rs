@@ -21,7 +21,7 @@
 use std::collections::VecDeque;
 use std::sync::{
     Mutex,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
 
@@ -37,6 +37,13 @@ const TRANSITION_LOG_CAP: usize = 16;
 pub(super) struct SharedStatus {
     /// Mirrored by the machine's commit — its only writer.
     state: AtomicState,
+    /// True while the (still-`Playing`) session waits on source data:
+    /// set by the worker's starve path (which also pauses the sink), so
+    /// `buffering == true` always coincides with silence. Poll-visible
+    /// like `source_error` — embedders surface it without an event
+    /// subscription. Cleared by the refill gate, a user pause, a seek,
+    /// or session teardown.
+    buffering: AtomicBool,
     /// Last decoded-frame timestamp; reset by `Loaded::drop`.
     position: AtomicPosition,
     /// Duration of the loaded source; set by the worker on load success,
@@ -67,6 +74,7 @@ impl SharedStatus {
     pub(super) fn new() -> Self {
         Self {
             state: AtomicState::new(PlayerState::Idle),
+            buffering: AtomicBool::new(false),
             position: AtomicPosition::new(),
             duration: Mutex::new(None),
             buffered: Mutex::new(None),
@@ -79,6 +87,18 @@ impl SharedStatus {
     /// The externally-observable state. Lock-free.
     pub(super) fn state(&self) -> PlayerState {
         self.state.load()
+    }
+
+    /// Whether the session is waiting on source data (sink paused).
+    /// Lock-free.
+    pub(super) fn buffering(&self) -> bool {
+        self.buffering.load(Ordering::Relaxed)
+    }
+
+    /// Publish/clear the waiting-on-source flag. Worker only — set
+    /// together with the sink pause, cleared with the resume.
+    pub(super) fn set_buffering(&self, b: bool) {
+        self.buffering.store(b, Ordering::Relaxed);
     }
 
     /// Mirror a committed phase. [`Machine::commit`] only. Called exactly
@@ -152,13 +172,14 @@ impl SharedStatus {
     }
 
     /// Reset the session-scoped observables (position, duration,
-    /// buffered window, source error). `Loaded::drop` only — session
-    /// death is the one reset point.
+    /// buffered window, source error, buffering flag). `Loaded::drop`
+    /// only — session death is the one reset point.
     pub(super) fn reset_session_observables(&self) {
         self.position.store(Duration::ZERO);
         *self.duration.lock().unwrap() = None;
         *self.buffered.lock().unwrap() = None;
         *self.source_error.lock().unwrap() = None;
+        self.buffering.store(false, Ordering::Relaxed);
     }
 }
 
@@ -183,9 +204,8 @@ impl AtomicState {
             1 => PlayerState::Loading,
             2 => PlayerState::Paused,
             3 => PlayerState::Playing,
-            4 => PlayerState::Buffering,
-            5 => PlayerState::Ended,
-            6 => PlayerState::Error,
+            4 => PlayerState::Ended,
+            5 => PlayerState::Error,
             _ => PlayerState::Error,
         }
     }

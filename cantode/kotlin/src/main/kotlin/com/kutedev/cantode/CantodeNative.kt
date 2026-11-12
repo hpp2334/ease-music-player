@@ -18,10 +18,11 @@ internal object CantodeNative {
 
     /**
      * Batched engine snapshot as JSON:
-     * `{"state":"LOADING","stateSeq":3,"transitions":[{"seq":1,"state":"LOADING"},…],"positionMs":123,"durationMs":210000,"bufferedMs":15000}`
-     * (durationMs / bufferedMs `null` while unknown). Empty string = no
-     * player under this handle (gone / not yet created) — treat as a
-     * skipped poll tick.
+     * `{"state":"LOADING","stateSeq":3,"transitions":[{"seq":1,"state":"LOADING"},…],"buffering":false,"positionMs":123,"durationMs":210000,"bufferedMs":15000}`
+     * (durationMs / bufferedMs `null` while unknown; `buffering` true
+     * while a still-`PLAYING` session waits on source data — sink
+     * paused, nothing sounding). Empty string = no player under this
+     * handle (gone / not yet created) — treat as a skipped poll tick.
      */
     external fun poll(handle: Long, sinceSeq: Long): String
 

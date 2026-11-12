@@ -1201,16 +1201,18 @@ fn stall_freezes_then_resumes_with_continuity() {
     })
     .expect("position must freeze while the session stalls");
     assert!(frozen > Duration::from_millis(300), "froze at {frozen:?}");
-    // The starved window surfaces as Buffering (the sink keeps draining
-    // its ring); not a frozen-but-Playing position.
-    assert_eq!(harness.player.state(), PlayerState::Buffering);
+    // The starved window surfaces as the buffering flag with the sink
+    // paused — the transport state stays `Playing` (and the flag always
+    // coincides with silence).
+    assert!(harness.player.buffering());
+    assert_eq!(harness.player.state(), PlayerState::Playing);
 
     h.release_gate();
     assert!(
         wait_until(Duration::from_secs(3), || {
-            harness.player.state() == PlayerState::Playing
+            !harness.player.buffering()
         }),
-        "refill must morph back to Playing"
+        "refill must end the starve (clear the buffering flag)"
     );
     assert!(wait_for_ended(&harness.events, Duration::from_secs(10)));
 
@@ -1237,7 +1239,7 @@ fn persistent_error_parks_paused_with_the_error_visible() {
     );
     // The failing source parks on `Paused` — the terminal contract: the
     // spinner clears, the message is poll-visible, and the next play is
-    // the user-driven retry. (Possibly via a brief `Buffering` while the
+    // the user-driven retry. (Possibly via a brief starve while the
     // sticky error lands.) It must never reach `Ended` and never resume
     // playing on its own.
     assert!(
@@ -1273,12 +1275,12 @@ fn persistent_error_parks_paused_with_the_error_visible() {
 }
 
 #[test]
-fn sticky_error_while_buffering_parks_paused() {
+fn sticky_error_while_starved_parks_paused() {
     // The network dies just past the probe window: the load succeeds but
-    // the startup prebuffer (2 s) can never fill, so the player sits in
-    // `Buffering` — when the source goes sticky, the buffering tick must
-    // surface the failure and park (the screen-off stall, exactly), not
-    // buffer forever.
+    // the startup prebuffer (2 s) can never fill, so the player sits
+    // starved (buffering flag, sink paused) — when the source goes
+    // sticky, the starve tick must surface the failure and park (the
+    // screen-off stall, exactly), not buffer forever.
     let data = wav(2.0);
     let (fake, _h) = fake(Arc::clone(&data)).fail_from(4096).finish();
     let harness = harness_with_config(fake, 16 * 1024, Duration::from_secs(2), true);
@@ -1347,36 +1349,38 @@ const _: () = assert!(TWO_SECS_OF_WAV > 64 * 1024);
 #[test]
 fn autoplay_prebuffers_before_playing_when_the_window_is_thin() {
     // Only the first ~0.57 s has been "delivered": the autoplay load
-    // must park in `Buffering` instead of playing the thin window out
-    // (and stuttering). Raising the ceiling past the threshold lets
-    // the 400 KB readahead cross 2 s and play the rest through,
+    // must park starved (buffering flag, sink paused — transport
+    // `Playing`) instead of playing the thin window out (and
+    // stuttering). Raising the ceiling past the threshold lets the
+    // 400 KB readahead cross 2 s and play the rest through,
     // bit-exact, on the same session.
     let data = wav(3.0);
     let (fake, h) = fake(Arc::clone(&data)).deliver_until(100_000).finish();
     let harness = harness_with_config(fake, 400 * 1024, Duration::from_secs(2), true);
 
     // `load_and_play` returned with the startup prebuffer armed — the
-    // morph happened synchronously in the load command.
-    assert_eq!(harness.player.state(), PlayerState::Buffering);
+    // starve happened synchronously in the load command.
+    assert!(harness.player.buffering());
+    assert_eq!(harness.player.state(), PlayerState::Playing);
     // It holds while the cushion is below the threshold (readiness is
     // already `Ready` here — the gate is the cushion, not the bytes).
     let mut stayed = true;
     let hold_until = std::time::Instant::now() + Duration::from_millis(400);
     while std::time::Instant::now() < hold_until {
-        if harness.player.state() != PlayerState::Buffering {
+        if !harness.player.buffering() {
             stayed = false;
             break;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(stayed, "must stay Buffering while the cushion is below 2 s");
+    assert!(stayed, "must stay starved while the cushion is below 2 s");
 
     h.raise_deliver_until(data.len() as u64);
     assert!(
         wait_until(Duration::from_secs(3), || {
-            harness.player.state() == PlayerState::Playing
+            !harness.player.buffering()
         }),
-        "refill must cross the threshold and morph back to Playing"
+        "refill must cross the threshold and end the starve"
     );
     assert!(wait_for_ended(&harness.events, Duration::from_secs(10)));
 
@@ -1397,12 +1401,12 @@ fn refill_below_the_threshold_stays_parked() {
     let (fake, h) = fake(Arc::clone(&data)).deliver_until(44_100).finish();
     let harness = harness_with_config(fake, 64 * 1024, Duration::from_secs(2), true);
 
-    assert_eq!(harness.player.state(), PlayerState::Buffering);
+    assert!(harness.player.buffering());
     h.raise_deliver_until(data.len() as u64);
     let mut stayed = true;
     let hold_until = std::time::Instant::now() + Duration::from_millis(1200);
     while std::time::Instant::now() < hold_until {
-        if harness.player.state() != PlayerState::Buffering {
+        if !harness.player.buffering() {
             stayed = false;
             break;
         }
@@ -1428,9 +1432,9 @@ fn near_tail_refill_resumes_via_the_stream_end() {
     // A stall near the end of the track leaves less than the threshold
     // remaining (~0.57 s of a 4 s track): once the ceiling rises, the
     // window's end reaches the stream total and the refill must resume
-    // regardless of the cushion — short tails never wedge in
-    // `Buffering`. Playback starts un-gated here (not an autoplay load,
-    // and the window already holds ~3.4 s ≥ 2 s), so this also covers
+    // regardless of the cushion — short tails never wedge starved.
+    // Playback starts un-gated here (not an autoplay load, and the
+    // window already holds ~3.4 s ≥ 2 s), so this also covers
     // starving mid-play.
     let data = wav(4.0);
     let cap = (data.len() - 100_000) as u64;
@@ -1439,17 +1443,16 @@ fn near_tail_refill_resumes_via_the_stream_end() {
 
     harness.player.play().unwrap();
     assert!(
-        wait_until(Duration::from_secs(6), || {
-            harness.player.state() == PlayerState::Buffering
-        }),
-        "decode must starve at the ceiling (state: {:?})",
-        harness.player.state()
+        wait_until(Duration::from_secs(6), || harness.player.buffering()),
+        "decode must starve at the ceiling (state: {:?}, buffering: {})",
+        harness.player.state(),
+        harness.player.buffering()
     );
 
     h.raise_deliver_until(data.len() as u64);
     assert!(
         wait_until(Duration::from_secs(3), || {
-            harness.player.state() == PlayerState::Playing
+            !harness.player.buffering()
         }),
         "end-of-stream window must resume despite the thin cushion"
     );

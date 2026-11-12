@@ -35,17 +35,20 @@
 //! ```json
 //! {"state":"LOADING","stateSeq":3,
 //!  "transitions":[{"seq":1,"state":"LOADING"},{"seq":2,"state":"PLAYING"}],
+//!  "buffering":false,
 //!  "positionMs":1234,"durationMs":210000,"bufferedMs":15000}
 //! ```
 //!
 //! `transitions` are the engine's state-history entries after `sinceSeq`
 //! (see [`Player::transitions_since`]); replaying them lets a sampling
-//! poller recover sub-tick excursions. `durationMs` is `null` until a
-//! load completes. `bufferedMs` is the buffered frontier in media time
-//! (see [`Player::buffered_position`]); `null` for non-buffering sources
-//! or while the total length / duration is unknown. State names are
-//! `SCREAMING_SNAKE_CASE` — keep them in sync with the Kotlin
-//! `PlayerState` enum.
+//! poller recover sub-tick excursions. `buffering` is the
+//! waiting-on-source flag — true while a still-`Playing` session has its
+//! sink paused waiting for the refill (always silent in that window).
+//! `durationMs` is `null` until a load completes. `bufferedMs` is the
+//! buffered frontier in media time (see [`Player::buffered_position`]);
+//! `null` for non-buffering sources or while the total length / duration
+//! is unknown. State names are `SCREAMING_SNAKE_CASE` — keep them in
+//! sync with the Kotlin `PlayerState` enum.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -114,7 +117,6 @@ fn state_str(s: PlayerState) -> &'static str {
         PlayerState::Loading => "LOADING",
         PlayerState::Paused => "PAUSED",
         PlayerState::Playing => "PLAYING",
-        PlayerState::Buffering => "BUFFERING",
         PlayerState::Ended => "ENDED",
         PlayerState::Error => "ERROR",
     }
@@ -129,9 +131,10 @@ fn poll_json(p: &Player, since_seq: u64) -> String {
         .map(|(seq, st)| format!(r#"{{"seq":{seq},"state":"{}"}}"#, state_str(*st)))
         .collect();
     format!(
-        r#"{{"state":"{}","stateSeq":{state_seq},"transitions":[{}],"positionMs":{},"durationMs":{},"bufferedMs":{},"error":{}}}"#,
+        r#"{{"state":"{}","stateSeq":{state_seq},"transitions":[{}],"buffering":{},"positionMs":{},"durationMs":{},"bufferedMs":{},"error":{}}}"#,
         state_str(p.state()),
         transitions.join(","),
+        p.buffering(),
         p.position().as_millis(),
         p.duration().map(|d| d.as_millis().to_string()).unwrap_or_else(|| "null".into()),
         p.buffered_position().map(|d| d.as_millis().to_string()).unwrap_or_else(|| "null".into()),
@@ -271,7 +274,6 @@ mod tests {
         assert_eq!(state_str(PlayerState::Loading), "LOADING");
         assert_eq!(state_str(PlayerState::Paused), "PAUSED");
         assert_eq!(state_str(PlayerState::Playing), "PLAYING");
-        assert_eq!(state_str(PlayerState::Buffering), "BUFFERING");
         assert_eq!(state_str(PlayerState::Ended), "ENDED");
         assert_eq!(state_str(PlayerState::Error), "ERROR");
     }

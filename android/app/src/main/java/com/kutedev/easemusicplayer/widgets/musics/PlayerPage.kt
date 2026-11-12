@@ -744,11 +744,11 @@ private fun MusicPanel(
             }
         )
         // Loading/buffering is surfaced on the play/pause button itself:
-        // a spinner replaces the icon. Mid-play buffering (`Buffering`
-        // state surfaced as playing+loading) keeps the button tappable —
-        // pausing during a buffer stall is legal; initial load
-        // (`!playing && loading`) keeps it disabled since resume is a
-        // no-op while the engine is preparing.
+        // a spinner replaces the icon. Mid-play buffering (the engine's
+        // buffering flag — transport stays `Playing`, sink paused and
+        // silent) keeps the button tappable — pausing during a buffer
+        // stall is legal; initial load (`!playing && loading`) keeps it
+        // disabled since resume is a no-op while the engine is preparing.
         if (!playing) {
             EaseIconButton(
                 sizeType = EaseIconButtonSize.Large,

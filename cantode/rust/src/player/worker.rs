@@ -12,30 +12,44 @@
 //! `duration`) and the operational events (`MetadataReady`,
 //! `PositionChanged`, `Ended`).
 //!
-//! The loop parks in `recv_timeout`: **5 ms while `Playing` or
-//! `Buffering`** (so decode work / refill polls interleave with command
-//! handling — a command arriving mid-wait wakes the loop instantly; the
-//! timeout is the idle fallback, not added latency), **250 ms while
-//! `Paused` with a buffering source** (keeping the buffered-window
-//! observable live while the source's session thread fills the readahead
-//! window in the background), and one hour otherwise (pure event-driven
-//! idling, with the timeout acting only as a watchdog). Each timeout tick
-//! pumps exactly one frame while playing, polls the source's readiness
-//! while buffering, and refreshes the buffered-window mirror while
-//! paused. The pump loop is a
-//! buffer-*filler*, not the pacer: the sink's blocking write matches
-//! decode speed to playback speed once its ring is full, and the 5 ms
-//! quantum just guarantees the worker re-enters `recv_timeout` between
-//! every frame so queued commands preempt within one pump. A starved
-//! starved source surfaces as `Playing → Buffering` (readiness pre-check, or the
-//! 250 ms play-path read deadline) and back on refill — the sink keeps
-//! draining its ring across the morph. When decode hits EOF on a
-//! position-tracking sink, the loop keeps ticking as a **tail drain**:
-//! `Ended` fires only once the listener has actually heard the decoded
-//! tail — the output position reaches the end of what was decoded, or
-//! the sink's ring is found empty under a frozen clock (bookkeeping
-//! drift between container timestamps and counted samples), or the
-//! no-progress stall budget lapses.
+//! The loop parks in `recv_timeout`: **5 ms while `Playing`** (so decode
+//! work / starve-refill polls interleave with command handling — a
+//! command arriving mid-wait wakes the loop instantly; the timeout is
+//! the idle fallback, not added latency), **250 ms while `Paused` with a
+//! buffering source** (keeping the buffered-window observable live while
+//! the source's session thread fills the readahead window in the
+//! background), and one hour otherwise (pure event-driven idling, with
+//! the timeout acting only as a watchdog). Each timeout tick pumps
+//! exactly one frame while playing, polls the source's readiness while
+//! starved, and refreshes the buffered-window mirror while paused. The
+//! pump loop is a buffer-*filler*, not the pacer: the sink's blocking
+//! write matches decode speed to playback speed once its ring is full,
+//! and the 5 ms quantum just guarantees the worker re-enters
+//! `recv_timeout` between every frame so queued commands preempt within
+//! one pump.
+//!
+//! ## Starving (the `buffering` flag)
+//!
+//! A starved source (readiness pre-check tripped, or the 250 ms
+//! play-path read deadline) is **not a state change**: the transport
+//! stays `Playing` and the worker arms its `starved` bit — pausing the
+//! sink and publishing the shared `buffering` flag in the same breath.
+//! That pairing is the consistency contract: `buffering == true` always
+//! coincides with silence (the old `Playing → Buffering` morph left the
+//! sink draining its ~2 s ring, so the UI said buffering while music
+//! kept sounding). While starved the 5 ms tick polls the source's
+//! readiness; the refill resumes the sink only once the buffered cushion
+//! reaches [`Worker::min_buffer`] (see
+//! [`Worker::buffered_ahead_sufficient`]). A user pause/seek/stop/load
+//! clears the starve state; a pause parks clean, a seek re-opens the
+//! retry epoch and re-arms on the next pump if still starved.
+//!
+//! When decode hits EOF on a position-tracking sink, the loop keeps
+//! ticking as a **tail drain**: `Ended` fires only once the listener has
+//! actually heard the decoded tail — the output position reaches the end
+//! of what was decoded, or the sink's ring is found empty under a frozen
+//! clock (bookkeeping drift between container timestamps and counted
+//! samples), or the no-progress stall budget lapses.
 
 use std::{
     sync::{Arc, mpsc},
@@ -76,10 +90,11 @@ const DRAIN_MAX_STALL: Duration = Duration::from_secs(8);
 const DRAIN_SETTLE_TOLERANCE: Duration = Duration::from_millis(200);
 
 /// How often the worker refreshes the buffered-window observable while
-/// `Paused` with a buffering source. The 5 ms playing/buffering ticks
-/// refresh it on every pass anyway; this slow tick exists so a paused
-/// player still reports a window that keeps filling in the background
-/// (the source's session thread is independent of transport state).
+/// `Paused` with a buffering source. The 5 ms playing ticks (starved or
+/// not) refresh it on every pass anyway; this slow tick exists so a
+/// paused player still reports a window that keeps filling in the
+/// background (the source's session thread is independent of transport
+/// state).
 const BUFFERED_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Tail-drain state: decode reached EOF, but the sink still holds up to
@@ -137,6 +152,11 @@ pub(super) struct Worker {
     /// (pause/seek/stop/load) — a pause, for instance, freezes the
     /// output clock, and the re-pump after resume re-arms the drain.
     drain: Option<Drain>,
+    /// True while the still-`Playing` session waits on source data: the
+    /// sink is paused and the shared `buffering` flag is set (see the
+    /// module docs). Cleared by the refill gate, a user pause, a seek,
+    /// or a session drop.
+    starved: bool,
     /// The configured [`PlayerConfig::min_buffer_duration`]: playback
     /// start and underrun resume wait for this much buffered-ahead
     /// media time (see [`Worker::buffered_ahead_sufficient`]).
@@ -164,6 +184,7 @@ impl Worker {
             sinks,
             error_latched: false,
             drain: None,
+            starved: false,
             min_buffer,
         }
     }
@@ -179,9 +200,11 @@ impl Worker {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if self.machine.is_playing() {
-                        self.pump_once();
-                    } else if self.machine.is_buffering() {
-                        self.poll_refill();
+                        if self.starved {
+                            self.poll_refill();
+                        } else {
+                            self.pump_once();
+                        }
                     } else if self.machine.is_paused() {
                         // No pipeline work while paused — just keep the
                         // buffered-window mirror live while the source's
@@ -199,7 +222,7 @@ impl Worker {
 
     /// The park duration for the next `recv_timeout` iteration.
     ///
-    /// - 5 ms while `Playing` or `Buffering`, so decode work / refill
+    /// - 5 ms while `Playing` (starved or not), so decode work / refill
     ///   polls interleave with command handling — a command arriving
     ///   mid-wait wakes the loop instantly; the timeout is the idle
     ///   fallback, not added latency.
@@ -209,8 +232,8 @@ impl Worker {
     /// - One hour otherwise (pure event-driven idling, with the timeout
     ///   acting only as a watchdog).
     fn next_timeout(&mut self) -> Duration {
-        if self.machine.is_playing() || self.machine.is_buffering() {
-            // Short timeout so we can interleave decode work.
+        if self.machine.is_playing() {
+            // Short timeout so we can interleave decode / refill work.
             Duration::from_millis(5)
         } else if self.machine.is_paused() && self.session_reports_buffered() {
             BUFFERED_REFRESH_INTERVAL
@@ -229,7 +252,7 @@ impl Worker {
     }
 
     /// Mirror the session source's buffered window into the shared
-    /// observables. Called from the playing/buffering ticks and the slow
+    /// observables. Called from the playing / starve ticks and the slow
     /// paused tick — the read is a cheap lock on the source's state.
     fn refresh_buffered(&mut self) {
         if let Some(loaded) = self.machine.loaded_mut() {
@@ -243,23 +266,35 @@ impl Worker {
             Command::Shutdown => return true,
             Command::Load { source, reply, autoplay } => {
                 self.drain = None;
+                self.clear_starve();
                 let result = self.do_load(source, autoplay);
                 let _ = reply.send(match &result {
                     Ok(m) => LoadResult::Ok(m.clone()),
                     Err(e) => LoadResult::Err(e.clone()),
                 });
             }
-            Command::Play => self.machine.play(),
+            Command::Play => {
+                self.machine.play();
+                // A starved session stays starved across the no-op play
+                // (the refill gate owns the resume) — but the phase
+                // machinery may have re-entered `Playing` from `Paused`
+                // (resume after a user pause), which resumed the sink;
+                // if the source is still thin the next pump re-arms the
+                // starve within one tick. Nothing to do here.
+            }
             Command::Pause => {
                 self.drain = None;
+                self.clear_starve();
                 self.machine.pause();
             }
             Command::Stop => {
                 self.drain = None;
+                self.clear_starve();
                 self.do_stop();
             }
             Command::Unload { reply } => {
                 self.drain = None;
+                self.clear_starve();
                 let r = self.do_unload();
                 let _ = reply.send(r);
             }
@@ -328,19 +363,19 @@ impl Worker {
         // transition table inside the machine).
         self.machine.complete_load(loaded, autoplay);
         // Startup prebuffer: an autoplay load whose cushion is thinner
-        // than `min_buffer_duration` parks in `Buffering` (the same
-        // legal `Playing → Buffering` morph an underrun takes) until
-        // the refill poll sees the threshold. Starting on a thin window
-        // is exactly the "plays a beat, buffers, plays a beat" stutter
-        // this exists to prevent. Non-window sources, unknown
-        // durations, and windows that already cover the rest of the
-        // track fall straight through to `Playing`.
+        // than `min_buffer_duration` parks starved (sink paused,
+        // `buffering` flag set — the same starve choreography a mid-play
+        // underrun takes) until the refill poll sees the threshold.
+        // Starting on a thin window is exactly the "plays a beat,
+        // buffers, plays a beat" stutter this exists to prevent.
+        // Non-window sources, unknown durations, and windows that
+        // already cover the rest of the track fall straight through.
         if autoplay && !self.buffered_ahead_sufficient() {
             tracing::info!(
                 min_buffer_ms = self.min_buffer.as_millis() as u64,
                 "startup prebuffer armed"
             );
-            self.machine.buffer_underrun();
+            self.begin_starve();
         }
         Ok(meta)
     }
@@ -373,6 +408,11 @@ impl Worker {
         // the source with a fresh retry budget).
         self.error_latched = false;
         self.shared.set_source_error(None);
+        // A starved session seeks into a new epoch: end the starve (the
+        // sink resumes with the phase if playing) and let the next pump
+        // re-arm it if the new position is still starved — the cushion
+        // gate re-evaluates from the fresh window.
+        self.end_starve();
         Ok(actual)
     }
 
@@ -441,9 +481,12 @@ impl Worker {
                 }
             }
             PumpOutcome::NeedsData => {
-                // Starved but alive: park the pump (the sink drains its
-                // ring) until the refill poll sees data again.
-                self.machine.buffer_underrun();
+                // Starved but alive: pause the sink and arm the starve
+                // poll (the refill resumes once the cushion rebuilds).
+                // Pausing here — not draining the ring — is the
+                // consistency contract: the `buffering` flag and silence
+                // begin in the same breath.
+                self.begin_starve();
             }
             PumpOutcome::Skipped(err) => {
                 if let Some(e) = err {
@@ -465,9 +508,17 @@ impl Worker {
                     // skip-and-continue.
                     if let CantodeError::Source(msg) = &e {
                         self.shared.set_source_error(Some(msg.clone()));
-                        let drain_target = self.machine.loaded_mut().and_then(|loaded| {
-                            loaded.output_position().map(|_| loaded.decoded_through())
-                        });
+                        // A starved session has its sink paused — nothing
+                        // is sounding, so there is no tail to drain (the
+                        // frozen output clock would stall the drain out
+                        // its whole budget); park immediately instead.
+                        let drain_target = if self.starved {
+                            None
+                        } else {
+                            self.machine.loaded_mut().and_then(|loaded| {
+                                loaded.output_position().map(|_| loaded.decoded_through())
+                            })
+                        };
                         match drain_target {
                             Some(target) => {
                                 tracing::info!(
@@ -481,7 +532,10 @@ impl Worker {
                                     then: DrainEnd::Pause,
                                 });
                             }
-                            None => self.machine.pause(),
+                            None => {
+                                self.clear_starve();
+                                self.machine.pause();
+                            }
                         }
                     }
                     self.report_source_error(e);
@@ -541,7 +595,7 @@ impl Worker {
             // No session to drain (stop/load raced in) — end now.
             _ => true,
         };
-        // Same live-position mirror as the Buffering tick: the pump is
+        // Same live-position mirror as the starve tick: the pump is
         // parked, but the device keeps draining its ring.
         if let Some(pos) = live_pos {
             self.shared.set_position(pos);
@@ -589,25 +643,18 @@ impl Worker {
         self.machine.end_of_stream();
     }
 
-    /// While `Buffering`: poll the source's readiness and morph back to
-    /// `Playing` once data has arrived **and** the buffered cushion has
-    /// refilled to [`Worker::min_buffer`] (see
-    /// [`Worker::buffered_ahead_sufficient`]) — resuming on the first
-    /// byte would starve again a few hundred milliseconds later. Also
-    /// keeps the position observable live — the pump is parked, but the
-    /// device keeps draining its ring, so the audible position keeps
-    /// advancing until the ring runs dry.
+    /// While starved: poll the source's readiness and end the starve —
+    /// resuming the sink — once data has arrived **and** the buffered
+    /// cushion has refilled to [`Worker::min_buffer`] (see
+    /// [`Worker::buffered_ahead_sufficient`]); resuming on the first
+    /// byte would starve again a few hundred milliseconds later. The
+    /// position observable stays frozen at the pause point: nothing is
+    /// sounding while the sink is paused, and the cushion math measures
+    /// against exactly that frozen audible position.
     fn poll_refill(&mut self) {
-        // Every buffering tick refreshes the buffered-window mirror —
-        // this is the state where it visibly grows.
+        // Every starve tick refreshes the buffered-window mirror — this
+        // is the state where it visibly grows.
         self.refresh_buffered();
-        let live = self
-            .machine
-            .loaded_mut()
-            .and_then(|loaded| loaded.output_position());
-        if let Some(pos) = live {
-            self.shared.set_position(pos);
-        }
         let readiness = self
             .machine
             .loaded_mut()
@@ -615,28 +662,68 @@ impl Worker {
         match readiness {
             Some(crate::Readiness::Ready) => {
                 if self.buffered_ahead_sufficient() {
-                    self.machine.buffer_refilled();
+                    self.end_starve();
                 }
             }
             // The source is in its terminal-error state (readiness is
-            // the only window the worker has onto it from `Buffering`):
+            // the only window the worker has onto it while starved):
             // give the pump one tick so the hard error surfaces through
             // the normal decode path and the worker parks, instead of
             // buffering forever on a dead source (the screen-off network
             // death, exactly).
-            Some(crate::Readiness::Failed) => self.pump_buffering_once(),
+            Some(crate::Readiness::Failed) => self.pump_starved_once(),
             _ => {}
         }
     }
 
-    /// One decode attempt from `Buffering` when the source reports
+    /// Arm the starve: pause the sink and publish the `buffering` flag —
+    /// in the same breath, so the flag always coincides with silence.
+    /// Idempotent. Not a state change: the transport stays `Playing`.
+    fn begin_starve(&mut self) {
+        if self.starved {
+            return;
+        }
+        self.starved = true;
+        self.shared.set_buffering(true);
+        if let Some(loaded) = self.machine.loaded_mut() {
+            loaded.pause();
+        }
+        tracing::debug!("source starved — sink paused (buffering)");
+    }
+
+    /// End the starve: clear the flag and resume the sink when the
+    /// phase is `Playing` (a user pause ends the starve without the
+    /// resume — see [`Worker::clear_starve`]). Idempotent.
+    fn end_starve(&mut self) {
+        if !self.starved {
+            return;
+        }
+        self.starved = false;
+        self.shared.set_buffering(false);
+        if self.machine.is_playing() {
+            if let Some(loaded) = self.machine.loaded_mut() {
+                loaded.resume();
+            }
+            tracing::debug!("buffering resolved — sink resumed");
+        }
+    }
+
+    /// Drop the starve state without any resume side effect (user
+    /// pause/stop/load — the phase machinery owns the sink there).
+    /// Idempotent.
+    fn clear_starve(&mut self) {
+        self.starved = false;
+        self.shared.set_buffering(false);
+    }
+
+    /// One decode attempt while starved when the source reports
     /// [`Readiness::Failed`] — the terminal-error state. The attempt
     /// surfaces the sticky error through the normal decode path (the
     /// read returns it immediately; nothing decodes ahead), and the
-    /// worker parks. Without this the playing pump never runs from
-    /// `Buffering` and the player would buffer forever on a dead
-    /// source (the screen-off network death, exactly).
-    fn pump_buffering_once(&mut self) {
+    /// worker parks. Without this the playing pump never runs while
+    /// starved and the player would buffer forever on a dead source
+    /// (the screen-off network death, exactly).
+    fn pump_starved_once(&mut self) {
         let outcome = {
             let Some(loaded) = self.machine.loaded_mut() else {
                 return;
@@ -652,14 +739,16 @@ impl Worker {
                 // A dead source that reports EOF (or a stream whose tail
                 // drained below the threshold at the true end): end the
                 // track instead of buffering forever.
+                self.clear_starve();
                 self.finish_end_of_stream();
             }
             PumpOutcome::Skipped(err) => {
                 if let Some(e) = err {
                     if let CantodeError::Source(msg) = &e {
-                        // Nothing is sounding in `Buffering` — park
-                        // immediately (no drain).
+                        // Nothing is sounding while starved (the sink is
+                        // paused) — park immediately (no drain).
                         self.shared.set_source_error(Some(msg.clone()));
+                        self.clear_starve();
                         self.machine.pause();
                     }
                     self.report_source_error(e);
@@ -682,7 +771,7 @@ impl Worker {
     /// source without a buffered window (memory / local files), an
     /// unknown duration or total length — or when the window already
     /// covers the rest of the track (`end >= total`), so the tail of a
-    /// short track never wedges in `Buffering`.
+    /// short track never wedges starved.
     ///
     /// **Config constraint**: the threshold must stay below what the
     /// source's readahead window can hold in media time; a source that
@@ -759,6 +848,7 @@ mod tests {
             sinks: EventSinks::default(),
             error_latched: false,
             drain: None,
+            starved: false,
             min_buffer: Duration::ZERO,
         }
     }
@@ -1151,17 +1241,48 @@ mod tests {
         assert_eq!(worker.next_timeout(), Duration::from_secs(60 * 60));
     }
 
-    // ---- min-buffer refill gating ----
+    // ---- starve (buffering flag) + min-buffer refill gating ----
 
-    /// A worker resting in `Buffering` on a session whose decoder
-    /// reports `buffered` (a fixed window — enough for the gate logic;
-    /// window growth is covered by `tests/buffered_source.rs`).
-    fn buffering_worker(
+    /// An underrun (a WouldBlock read under the pump) arms the starve:
+    /// the `buffering` flag publishes, the sink pauses, and the
+    /// transport state stays `Playing` throughout.
+    #[test]
+    fn underrun_arms_the_starve_flag_and_pauses_the_sink() {
+        let (loaded, fx) = loaded_session_with(
+            StubDecoder {
+                fmt: AudioFormat::new(2, 48_000),
+                fail_once: Some(crate::CantodeError::WouldBlock),
+                eof: false,
+                buffered: None,
+            },
+            2,
+            2,
+        );
+        let mut worker = worker_with(
+            Machine::paused(loaded, Arc::clone(&fx.shared)),
+            Arc::clone(&fx.shared),
+        );
+        worker.machine.play();
+        assert!(!fx.shared.buffering());
+
+        worker.pump_once(); // the read would-blocks → starve
+
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        assert!(fx.shared.buffering());
+        assert!(fx.log.recorded("pause"));
+        assert!(!fx.log.recorded("stop"));
+    }
+
+    /// A starved worker (transport `Playing`, sink paused, flag set) on
+    /// a session whose decoder reports `buffered` (a fixed window —
+    /// enough for the gate logic; window growth is covered by
+    /// `tests/buffered_source.rs`). Returns the fixture for assertions.
+    fn starved_worker(
         buffered: Option<crate::BufferedRange>,
         duration: Option<Duration>,
         position: Duration,
         min_buffer: Duration,
-    ) -> Worker {
+    ) -> (Worker, crate::player::stubs::Fixture) {
         let (loaded, fx) = loaded_session_with(
             StubDecoder {
                 fmt: AudioFormat::new(2, 48_000),
@@ -1180,9 +1301,10 @@ mod tests {
         fx.shared.set_position(position);
         worker.min_buffer = min_buffer;
         worker.machine.play();
-        worker.machine.buffer_underrun();
-        assert_eq!(worker.machine.state(), PlayerState::Buffering);
-        worker
+        worker.begin_starve();
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        assert!(fx.shared.buffering());
+        (worker, fx)
     }
 
     #[test]
@@ -1190,7 +1312,7 @@ mod tests {
         // Window end at byte 100 of 1000 on a 10 s track = a 1 s
         // frontier; the audible position is 0 → a 1 s cushion, below
         // the 2 s threshold. The refill poll must keep parking.
-        let mut worker = buffering_worker(
+        let (mut worker, fx) = starved_worker(
             Some(crate::BufferedRange {
                 start: 0,
                 end: 100,
@@ -1203,14 +1325,16 @@ mod tests {
 
         worker.poll_refill();
 
-        assert_eq!(worker.machine.state(), PlayerState::Buffering);
+        assert!(fx.shared.buffering(), "must stay starved below the cushion");
+        assert_eq!(worker.machine.state(), PlayerState::Playing);
     }
 
     #[test]
     fn refill_resumes_once_the_cushion_reaches_the_threshold() {
         // Byte 300 of 1000 on a 10 s track = a 3 s frontier at position
-        // 0 → a 3 s cushion ≥ the 2 s threshold → morph to `Playing`.
-        let mut worker = buffering_worker(
+        // 0 → a 3 s cushion ≥ the 2 s threshold → end the starve: flag
+        // clears and the sink resumes (state stays `Playing`).
+        let (mut worker, fx) = starved_worker(
             Some(crate::BufferedRange {
                 start: 0,
                 end: 300,
@@ -1224,6 +1348,8 @@ mod tests {
         worker.poll_refill();
 
         assert_eq!(worker.machine.state(), PlayerState::Playing);
+        assert!(!fx.shared.buffering());
+        assert!(fx.log.recorded("resume"));
     }
 
     #[test]
@@ -1233,7 +1359,7 @@ mod tests {
         // audio still in the sink ring counts as cushion precisely so
         // this math (frontier − audible) matches what the listener
         // would hear before a second stall.
-        let mut worker = buffering_worker(
+        let (mut worker, fx) = starved_worker(
             Some(crate::BufferedRange {
                 start: 0,
                 end: 300,
@@ -1246,15 +1372,15 @@ mod tests {
 
         worker.poll_refill();
 
-        assert_eq!(worker.machine.state(), PlayerState::Buffering);
+        assert!(fx.shared.buffering());
     }
 
     #[test]
     fn refill_resumes_at_the_end_of_the_stream_regardless_of_the_threshold() {
         // The window covers the whole rest of the track (end == total):
         // nothing more can arrive, so even a 5 s threshold on a 1 s
-        // frontier must resume — short tails never wedge in `Buffering`.
-        let mut worker = buffering_worker(
+        // frontier must resume — short tails never wedge starved.
+        let (mut worker, fx) = starved_worker(
             Some(crate::BufferedRange {
                 start: 900,
                 end: 1000,
@@ -1267,14 +1393,15 @@ mod tests {
 
         worker.poll_refill();
 
-        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        assert!(!fx.shared.buffering());
+        assert!(fx.log.recorded("resume"));
     }
 
     #[test]
     fn refill_resumes_without_a_known_duration() {
         // No duration → the bytes→media-time mapping is impossible; the
         // gate degrades to readiness-only rather than parking forever.
-        let mut worker = buffering_worker(
+        let (mut worker, fx) = starved_worker(
             Some(crate::BufferedRange {
                 start: 0,
                 end: 1,
@@ -1287,14 +1414,14 @@ mod tests {
 
         worker.poll_refill();
 
-        assert_eq!(worker.machine.state(), PlayerState::Playing);
+        assert!(!fx.shared.buffering());
     }
 
     #[test]
     fn zero_threshold_restores_readiness_only_refill() {
         // `Duration::ZERO` opts out of the gate entirely — the legacy
         // resume-on-any-data behavior the pre-threshold suite pins.
-        let mut worker = buffering_worker(
+        let (mut worker, fx) = starved_worker(
             Some(crate::BufferedRange {
                 start: 0,
                 end: 1,
@@ -1307,6 +1434,50 @@ mod tests {
 
         worker.poll_refill();
 
+        assert!(!fx.shared.buffering());
+    }
+
+    #[test]
+    fn user_pause_lands_clean_while_starved() {
+        // A pause through the command door clears the starve state (the
+        // flag must not outlive the transport pause) and parks Paused.
+        let (mut worker, fx) = starved_worker(
+            Some(crate::BufferedRange {
+                start: 0,
+                end: 100,
+                total: Some(1000),
+            }),
+            Some(Duration::from_secs(10)),
+            Duration::ZERO,
+            Duration::from_secs(2),
+        );
+
+        worker.handle_command(Command::Pause);
+
+        assert_eq!(worker.machine.state(), PlayerState::Paused);
+        assert!(!fx.shared.buffering(), "the flag must not outlive the pause");
+    }
+
+    #[test]
+    fn seek_ends_the_starve_and_the_next_pump_can_re_arm_it() {
+        // A seek is a new epoch: the starve ends (sink resumes with the
+        // still-`Playing` phase) and if the new position is starved
+        // again, the very next pump re-arms it.
+        let (mut worker, fx) = starved_worker(
+            Some(crate::BufferedRange {
+                start: 0,
+                end: 100,
+                total: Some(1000),
+            }),
+            Some(Duration::from_secs(10)),
+            Duration::ZERO,
+            Duration::from_secs(2),
+        );
+
+        worker.do_seek(Duration::from_secs(1)).unwrap();
+
         assert_eq!(worker.machine.state(), PlayerState::Playing);
+        assert!(!fx.shared.buffering());
+        assert!(fx.log.recorded("resume"));
     }
 }

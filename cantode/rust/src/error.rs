@@ -45,8 +45,8 @@ pub enum CantodeError {
 
     /// A bounded read expired before data arrived — the play-path read
     /// deadline armed by the worker around a decode step. Not a failure:
-    /// the worker treats it as "needs data" and morphs to
-    /// [`PlayerState::Buffering`](crate::PlayerState::Buffering).
+    /// the worker treats it as "needs data" and arms its starve (the
+    /// `buffering` flag + sink pause).
     #[error("read deadline elapsed before data arrived")]
     WouldBlock,
 

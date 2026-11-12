@@ -299,8 +299,21 @@ pub struct PlayerHandle {
 
 impl PlayerHandle {
     pub(crate) fn new(cx: &PlayerContextHandle) -> Result<Self, BError> {
-        let player = cantode::Player::new(cx.context()).map_err(|e| BError::CustomError {
-            message: format!("Player::new: {e:?}"),
+        // Network playback policy: buffer 5 s of buffered-ahead media
+        // time before playback may start (autoplay load) or resume (a
+        // stall refill) — the cushion counts the source window plus the
+        // decoded sink ring against the audible position. The default
+        // cpal sink ring grows to match, and the 4 MiB default source
+        // readahead holds far more than 5 s of compressed audio, so the
+        // gate is always satisfiable. Local (non-windowed) sources are
+        // not gated.
+        let player = cantode::Player::with_config(
+            cx.context(),
+            cantode::PlayerConfig::default()
+                .min_buffer_duration(std::time::Duration::from_secs(5)),
+        )
+        .map_err(|e| BError::CustomError {
+            message: format!("Player::with_config: {e:?}"),
         })?;
         Ok(Self {
             player: Arc::new(player),

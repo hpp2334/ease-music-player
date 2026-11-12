@@ -37,10 +37,11 @@ class Cantode(
 
     private val _loading = MutableStateFlow(false)
     /**
-     * `true` while the engine is loading/buffering **or** for one poll
-     * tick after such an excursion completed between two polls (the
-     * one-tick visibility hold): fast sources still show loading
-     * feedback. Derived purely from engine transitions.
+     * `true` while the engine is loading a source **or** the live
+     * session waits on source data (the `buffering` flag — sink paused,
+     * nothing sounding). Derived purely from the engine snapshot each
+     * tick, so it never claims buffering while audio plays: the flag
+     * and the silence begin together engine-side.
      */
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
@@ -198,16 +199,10 @@ class Cantode(
         // engine-side (seek / new load) and mirrored here.
         _error.value = poll.error
 
-        // One-tick visibility hold: surface a Loading/Buffering excursion
-        // that already completed between polls for this single tick.
-        if (contiguous && poll.state == PlayerState.PLAYING) {
-            val loadishExcursion = entries.any {
-                it.state == PlayerState.LOADING || it.state == PlayerState.BUFFERING
-            }
-            if (loadishExcursion) {
-                _loading.value = true
-            }
-        }
+        // And the waiting-on-source flag: loading means "Loading state
+        // or a live starve" — read live each tick, never folded from
+        // (or held past) a transition.
+        _loading.value = poll.buffering || poll.state == PlayerState.LOADING
     }
 
     private fun applyObserved(newState: PlayerState, positionMs: Long, durationMs: Long?) {
@@ -219,7 +214,6 @@ class Cantode(
         _state.value = newState
         _positionMs.value = positionMs
         _durationMs.value = durationMs
-        _loading.value = newState == PlayerState.LOADING || newState == PlayerState.BUFFERING
     }
 
     companion object {

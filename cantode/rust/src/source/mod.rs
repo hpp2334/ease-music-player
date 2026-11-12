@@ -26,11 +26,11 @@ use std::time::Duration;
 /// would park a reader.
 ///
 /// An advisory signal for the player's play path: the worker consults it
-/// before each decode step so a starved network window surfaces as
-/// [`PlayerState::Buffering`](crate::PlayerState::Buffering) instead of a
-/// frozen-but-`Playing` position. Sources that can park (`BufferedSource`)
-/// override it; everything else defaults to [`Readiness::Ready`] and keeps
-/// the classic park semantics.
+/// before each decode step so a starved network window surfaces as the
+/// [`buffering`](crate::Player::buffering) flag (sink paused, still
+/// `Playing`) instead of a frozen-but-`Playing` position. Sources that
+/// can park (`BufferedSource`) override it; everything else defaults to
+/// [`Readiness::Ready`] and keeps the classic park semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Readiness {
     /// A read at the cursor will be satisfied without parking (data is

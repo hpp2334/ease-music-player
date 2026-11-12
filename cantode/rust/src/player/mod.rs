@@ -94,23 +94,24 @@ pub struct PlayerConfig {
     /// Unset by default. See [`AudioSinkFactory`].
     pub audio_sink_factory: Option<AudioSinkFactory>,
     /// Minimum buffered-ahead media time before playback may run: an
-    /// autoplay load and an underrun resume park in `Buffering` until
-    /// the source's window (plus whatever decoded audio the sink ring
-    /// still holds) covers at least this much of the track ahead of the
-    /// audible position — instead of resuming on the first byte and
-    /// starving again a few hundred milliseconds later.
+    /// autoplay load and an underrun resume park starved (sink paused,
+    /// [`Player::buffering`] set) until the source's window (plus
+    /// whatever decoded audio the sink ring still holds) covers at
+    /// least this much of the track ahead of the audible position —
+    /// instead of resuming on the first byte and starving again a few
+    /// hundred milliseconds later.
     ///
     /// Defaults to [`DEFAULT_MIN_BUFFER_DURATION`] (2 s). `Duration::ZERO`
     /// restores the resume-on-any-data behavior. The gate only applies
     /// to sources that report a buffered window, a known total length,
     /// and a known duration; a window that already covers the rest of
-    /// the track always resumes (short tails never wedge in `Buffering`).
+    /// the track always resumes (short tails never wedge starved).
     ///
     /// **Keep this below what the source's readahead window can hold**
     /// (in media time): a source that cannot buffer this much ahead
-    /// stays parked in `Buffering` until its window reaches the end of
-    /// the stream. The default 2 s sits far below cantode's 4 MiB
-    /// default readahead (minutes of compressed audio).
+    /// stays parked starved until its window reaches the end of the
+    /// stream. The default 2 s sits far below cantode's 4 MiB default
+    /// readahead (minutes of compressed audio).
     ///
     /// When unset (`audio_sink_factory`), the default cpal sink's ring
     /// buffer is grown to match this value so the threshold isn't
@@ -312,6 +313,15 @@ impl Player {
         self.shared.state()
     }
 
+    /// Whether the session is waiting on source data: the transport
+    /// state is still [`PlayerState::Playing`] but the sink is paused —
+    /// nothing is sounding (the flag and the silence begin together).
+    /// Lock-free read; set/cleared by the worker's starve handling,
+    /// reset by session teardown.
+    pub fn buffering(&self) -> bool {
+        self.shared.buffering()
+    }
+
     /// Current transition seq + the transitions recorded after `after`,
     /// in order. Lets a sampling client recover sub-sample excursions —
     /// e.g. a fast `Loading → Playing` that completed between two polls
@@ -366,10 +376,11 @@ impl Player {
 
     /// The last hard source error, if one is outstanding — the terminal
     /// "the source is broken" signal (network died, file vanished), as
-    /// distinct from transient starvation (which parks in `Buffering`
-    /// and never produces this). Session-scoped: cleared by a successful
-    /// seek (fresh source epoch) or session teardown. The worker also
-    /// parks on `Paused` when this fires.
+    /// distinct from transient starvation (which parks starved under
+    /// the [`buffering`](Player::buffering) flag and never produces
+    /// this). Session-scoped: cleared by a successful seek (fresh
+    /// source epoch) or session teardown. The worker also parks on
+    /// `Paused` when this fires.
     pub fn source_error(&self) -> Option<String> {
         self.shared.source_error()
     }

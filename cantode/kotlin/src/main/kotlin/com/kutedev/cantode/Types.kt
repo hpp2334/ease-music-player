@@ -5,6 +5,11 @@ import kotlinx.serialization.Serializable
 /**
  * The externally-observable engine state (mirrors cantode's
  * `PlayerState`; wire values are `SCREAMING_SNAKE_CASE`).
+ *
+ * Waiting-on-the-source is NOT a state: it rides alongside as the
+ * [buffering][Cantode.loading] flag — the transport state stays
+ * [PLAYING] across a stall and the sink is paused, so the flag always
+ * coincides with silence.
  */
 @Serializable
 enum class PlayerState {
@@ -19,9 +24,6 @@ enum class PlayerState {
 
     /** Audio is flowing to the output device. */
     PLAYING,
-
-    /** Decode pipeline waiting on the source (network stall, slow disk). */
-    BUFFERING,
 
     /** Loaded source reached its end. Seeking back restarts. */
     ENDED,
@@ -43,6 +45,12 @@ internal data class FfiPollSnapshot(
     val state: PlayerState,
     val stateSeq: Long = 0,
     val transitions: List<FfiTransition> = emptyList(),
+    /**
+     * True while a still-`PLAYING` session waits on source data — the
+     * sink is paused (nothing is sounding; the flag and the silence
+     * begin together). Cleared once the refill cushion rebuilds.
+     */
+    val buffering: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long? = null,
     /** Buffered frontier in media time; `null` for non-buffering
