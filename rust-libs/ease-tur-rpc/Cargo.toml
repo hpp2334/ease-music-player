@@ -6,11 +6,11 @@ publish = false
 description = "Private tur plugin RPC bridge (host⇄rut): a per-instance bus table (op → rut export) dispatched over the engine's guarded by-name entry calls."
 
 [dependencies]
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
 # The rut row surface (types + the pkg_fn!/pkg_async_fn! registration
 # macros) — same rev tur's workspace pins.
-rut-core = { git = "https://github.com/hpp2334/rut", rev = "09dea6a24b4e380eb7f9077f2e0abdf5f057e80d", default-features = false }
-rut-vm = { git = "https://github.com/hpp2334/rut", rev = "09dea6a24b4e380eb7f9077f2e0abdf5f057e80d", default-features = false }
+rut-core = { git = "https://github.com/hpp2334/rut", rev = "b44924f5cfd21f4345b3ae8575761f136ba7fb98", default-features = false }
+rut-vm = { git = "https://github.com/hpp2334/rut", rev = "b44924f5cfd21f4345b3ae8575761f136ba7fb98", default-features = false }
 tokio = { version = "1", features = ["sync"] }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +19,6 @@ thiserror = "1"
 tracing = "0.1"
 
 [dev-dependencies]
-tur-native = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
-tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "795538f014fab54c95d2cfdd6eaab433f911ec58" }
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
+tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

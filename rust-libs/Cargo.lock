@@ -1073,6 +1073,7 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "sqlx",
  "tempfile",
  "tokio",
  "tracing",
@@ -2036,7 +2037,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -3349,7 +3350,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls 0.23.44",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -3387,7 +3388,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -3938,7 +3939,7 @@ dependencies = [
 [[package]]
 name = "rut-ast"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 dependencies = [
  "rut-core",
  "rut-lexer",
@@ -3947,12 +3948,12 @@ dependencies = [
 [[package]]
 name = "rut-core"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 
 [[package]]
 name = "rut-driver"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 dependencies = [
  "rut-ast",
  "rut-core",
@@ -3969,12 +3970,12 @@ dependencies = [
 [[package]]
 name = "rut-lexer"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 
 [[package]]
 name = "rut-lir"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 dependencies = [
  "rut-ast",
  "rut-core",
@@ -3984,7 +3985,7 @@ dependencies = [
 [[package]]
 name = "rut-parser"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 dependencies = [
  "rut-ast",
  "rut-core",
@@ -3994,7 +3995,7 @@ dependencies = [
 [[package]]
 name = "rut-std"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 dependencies = [
  "hashbrown 0.14.5",
  "rut-core",
@@ -4004,7 +4005,7 @@ dependencies = [
 [[package]]
 name = "rut-vm"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 dependencies = [
  "rut-core",
  "rut-vm-threaded",
@@ -4013,7 +4014,7 @@ dependencies = [
 [[package]]
 name = "rut-vm-threaded"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=09dea6a24b4e380eb7f9077f2e0abdf5f057e80d#09dea6a24b4e380eb7f9077f2e0abdf5f057e80d"
+source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
 dependencies = [
  "rut-core",
 ]
@@ -5025,7 +5026,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -5408,7 +5409,7 @@ dependencies = [
 [[package]]
 name = "tur-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "android_logger",
  "futures",
@@ -5432,7 +5433,7 @@ dependencies = [
 [[package]]
 name = "tur-animation"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "rut-core",
  "rut-driver",
@@ -5445,7 +5446,7 @@ dependencies = [
 [[package]]
 name = "tur-clipboard-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "jni",
  "tracing",
@@ -5455,7 +5456,7 @@ dependencies = [
 [[package]]
 name = "tur-engine"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "futures",
  "glifo",
@@ -5483,7 +5484,7 @@ dependencies = [
 [[package]]
 name = "tur-filepicker-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "rut-core",
  "rut-driver",
@@ -5495,7 +5496,7 @@ dependencies = [
 [[package]]
 name = "tur-integration-tests"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "futures",
  "libc",
@@ -5510,7 +5511,7 @@ dependencies = [
 [[package]]
 name = "tur-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "futures",
  "parley",
@@ -5521,7 +5522,7 @@ dependencies = [
 [[package]]
 name = "tur-net-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "futures",
  "rut-core",
@@ -5534,7 +5535,7 @@ dependencies = [
 [[package]]
 name = "tur-net-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=795538f014fab54c95d2cfdd6eaab433f911ec58#795538f014fab54c95d2cfdd6eaab433f911ec58"
+source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
 dependencies = [
  "futures",
  "reqwest 0.12.28",
@@ -6130,7 +6131,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
