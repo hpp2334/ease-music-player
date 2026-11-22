@@ -1,0 +1,11 @@
+// time_host/src/mod.d.rut — the time lib's host rows (clock + parse).
+// The FORMATTERS are pure rut in the lib — these two are the only
+// host-backed members. The bodies live in the embedder (ease
+// `plugin_runtime/third::time`), bound under this scope.
+
+// unix ms now (wall clock)
+pub host fn now_unix_ms() -> u64;
+
+// parse an HTTP date (IMF-fixdate / RFC 850 / asctime) → unix ms;
+// 0 = unrecognized
+pub host fn parse_http_date(s: str) -> u64;

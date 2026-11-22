@@ -1,0 +1,19 @@
+{
+  // crypto — the standard hash/entropy utility lib (the old ease.crypto
+  // npm-dep replacements: md5 / base64 / SHA-2 / HMAC / UUID v4). A
+  // thin rut face over the `crypto_host` decl pkg — every fn is ONE
+  // forwarded host call; identity-free (nothing here resolves a
+  // plugin). Plugins reference this pkg by path in their rut.jsonc
+  // (`"crypto": { "path": "../../3rd/crypto" }`); `rut pack` embeds
+  // the whole closure under deps/ in the dist zip.
+  //
+  // Wrapper names differ from the row names on purpose: rut has no
+  // `use … as` rename, and a local fn of the same name as a directly
+  // imported row is the ambiguous spelling.
+  "name": "crypto",
+  "deps": {
+    "crypto_host": {
+      "path": "../crypto_host"
+    }
+  }
+}

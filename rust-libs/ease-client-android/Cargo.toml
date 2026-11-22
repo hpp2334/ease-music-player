@@ -34,6 +34,11 @@ tur-animation = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb4
 # The `Http` capability type the `ease.net` rows resolve through the
 # instance (the NativeHttp backend registers via tur-android's defaults).
 tur-net-capability = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+# rut-driver — the pkg/manifest/decl lane (Mounted / Manifest /
+# parse_manifest / lower_decl_module) the phase-2 `emp` + 3rd-party lib
+# offerings mount through. Same pin rut-core/rut-vm ride (the checkout
+# is shared, no duplicate-version split).
+rut-driver = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
 rut-core = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
 rut-vm = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
 futures = { workspace = true }

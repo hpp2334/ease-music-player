@@ -1,0 +1,230 @@
+// emp/src/mod.rut — the Ease Music Plugin SDK: one class per service
+// domain, the host-minted plugin handle the ONLY state (the strbuild
+// pattern: every member is ONE forwarded `emp_host` row, the handle
+// its first argument).
+//
+//   const db = Db(cx);        // services constructed FROM the handle
+//   db.set("k", "v");         // …used through plain method calls
+//
+// `cx` is `entry fn start(cx: opaque)`'s parameter — the embedder's
+// boot call delivers it; rut never mints a handle and a foreign
+// opaque traps `emp:{ns}:` at the row. Constructors only STORE the
+// handle (the boot law: constructing services at start touches no
+// host row, no network).
+//
+// The composite ops keep their JSON-string signatures, named for it
+// (`*_multi` take/answer JSON arrays/objects as str). `Theme` is
+// identity-free but app-owned (the host palette) — no field. Utilities
+// live in the 3rd-party libs (`plugins/3rd/`), not here.
+
+use emp_host::context::{ create_storage, notify_change, remove_storage, storage_id };
+use emp_host::db::{
+  list_keys, multi_append, multi_append_multi, multi_count, multi_count_multi, multi_delete,
+  multi_get_all, multi_get_all_multi, single_delete, single_delete_multi, single_get,
+  single_get_multi, single_set, single_set_multi,
+};
+use emp_host::library::{ covers, playlists };
+use emp_host::oauth::{ begin, new };
+use emp_host::secret::{ get, put, remove };
+use emp_host::themes::{ color, is_dark };
+
+// ---- Db — the plugin-scoped KV ------------------------------------
+
+pub class Db {
+    h: opaque;
+}
+
+impl Db {
+    [constructor] pub fn new(h: opaque) -> Self {
+        return Self { h };
+    }
+
+    pub fn get(self, key: str) -> ?str {
+        return single_get(self.h, key);
+    }
+
+    // keysJson: `["k1", "k2"]` → `{"k1": …, "k2": …}` (JSON strings in
+    // and out for every composite op)
+    pub fn get_multi(self, keys_json: str) -> str {
+        return single_get_multi(self.h, keys_json);
+    }
+
+    pub fn set(self, key: str, value: str) {
+        single_set(self.h, key, value);
+    }
+
+    // entriesJson: `{"k1": "v1", …}` — JSON-string signature
+    pub fn set_multi(self, entries_json: str) {
+        single_set_multi(self.h, entries_json);
+    }
+
+    pub fn delete(self, key: str) {
+        single_delete(self.h, key);
+    }
+
+    // keysJson: `["k1", …]` — JSON-string signature
+    pub fn delete_multi(self, keys_json: str) {
+        single_delete_multi(self.h, keys_json);
+    }
+
+    // drop a key's WHOLE multi list
+    pub fn delete_all(self, key: str) {
+        multi_delete(self.h, key);
+    }
+
+    pub fn append(self, key: str, value: str) {
+        multi_append(self.h, key, value);
+    }
+
+    // entriesJson: `{"k1": ["v", …], …}` — JSON-string signature
+    pub fn append_multi(self, entries_json: str) {
+        multi_append_multi(self.h, entries_json);
+    }
+
+    // a key's multi values, JSON-encoded
+    pub fn get_all(self, key: str) -> str {
+        return multi_get_all(self.h, key);
+    }
+
+    // keysJson: `["k1", …]` → `{"k1": […], …}` — JSON-string signature
+    pub fn get_all_multi(self, keys_json: str) -> str {
+        return multi_get_all_multi(self.h, keys_json);
+    }
+
+    pub fn count(self, key: str) -> u64 {
+        return multi_count(self.h, key);
+    }
+
+    // keysJson: `["k1", …]` → `{"k1": n, …}` — JSON-string signature
+    pub fn count_multi(self, keys_json: str) -> str {
+        return multi_count_multi(self.h, keys_json);
+    }
+
+    // the keys under `prefix`, JSON-encoded (`[{"key","kind"}, …]`)
+    pub fn list_keys(self, prefix: str) -> str {
+        return list_keys(self.h, prefix);
+    }
+}
+
+// ---- Secret — the plugin-scoped secret store ------------------------
+
+pub class Secret {
+    h: opaque;
+}
+
+impl Secret {
+    [constructor] pub fn new(h: opaque) -> Self {
+        return Self { h };
+    }
+
+    pub fn get(self, id: i64) -> ?str {
+        return get(self.h, id);
+    }
+
+    // answers the secret's id (the plugin keys its data by it)
+    pub fn put(self, secret: str) -> i64 {
+        return put(self.h, secret);
+    }
+
+    pub fn remove(self, id: i64) {
+        remove(self.h, id);
+    }
+}
+
+// ---- OAuth — the flow mint + the browser hand-off -------------------
+
+pub class OAuth {
+    h: opaque;
+}
+
+impl OAuth {
+    [constructor] pub fn new(h: opaque) -> Self {
+        return Self { h };
+    }
+
+    // mint a flow id (the plugin keys its flow data by it in its own
+    // KV) — `new` is the constructor's name, so the member is `mint`
+    pub fn mint(self) -> str {
+        return new(self.h);
+    }
+
+    // open the browser flow for a minted id
+    pub fn begin(self, flow: str) {
+        begin(self.h, flow);
+    }
+}
+
+// ---- Theme — the host palette (identity-free, no field) --------------
+
+pub class Theme { }
+
+impl Theme {
+    [constructor] pub fn new() -> Self {
+        return Self { };
+    }
+
+    // a theme color by role name, `#RRGGBBAA`
+    pub fn color(self, name: str) -> str {
+        return color(name);
+    }
+
+    pub fn is_dark(self) -> bool {
+        return is_dark();
+    }
+}
+
+// ---- Context — storage-row lifecycle ---------------------------------
+
+pub class Context {
+    h: opaque;
+}
+
+impl Context {
+    [constructor] pub fn new(h: opaque) -> Self {
+        return Self { h };
+    }
+
+    // the host re-reads this plugin's storage rows (after config edits)
+    pub fn notify_change(self) {
+        notify_change(self.h);
+    }
+
+    // publish a storage row from config the plugin stored in its KV
+    pub fn create_storage(self, plugin_storage_id: str) {
+        create_storage(self.h, plugin_storage_id);
+    }
+
+    pub fn remove_storage(self, plugin_storage_id: str) {
+        remove_storage(self.h, plugin_storage_id);
+    }
+
+    // this view's storage identity: nil = create mode, a
+    // `plugin_storage_id` = edit mode (read once at start)
+    pub fn storage_id(self) -> ?str {
+        return storage_id(self.h);
+    }
+}
+
+// ---- Library — read-only host data ------------------------------------
+
+pub class Library {
+    h: opaque;
+}
+
+impl Library {
+    [constructor] pub fn new(h: opaque) -> Self {
+        return Self { h };
+    }
+
+    // the playlist roster: `[{"id","title","musicIds"}, …]`
+    pub fn playlists(self) -> str {
+        return playlists(self.h);
+    }
+
+    // cover thumbnails for stringified music ids:
+    // `[{"musicId","id"}, …]` — `id` is the registered engine image
+    // resource (bytes never enter the script)
+    pub fn covers(self, music_ids_json: str) -> str {
+        return covers(self.h, music_ids_json);
+    }
+}

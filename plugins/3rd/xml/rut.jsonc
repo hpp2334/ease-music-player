@@ -1,0 +1,11 @@
+{
+  // xml — the XML→JSON decoder lib (the old fast-xml-parser
+  // replacement; the PROPFIND/multistatus decoder). One forwarded
+  // host call over `xml_host::to_json`; identity-free.
+  "name": "xml",
+  "deps": {
+    "xml_host": {
+      "path": "../xml_host"
+    }
+  }
+}

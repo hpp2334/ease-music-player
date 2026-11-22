@@ -1,0 +1,18 @@
+{
+  // net — the HTTP lib (the old ease.net row family, identity-free):
+  // full-featured HTTP over the engine's `Http` capability (upstream's
+  // rut net rows carry no headers/body; every provider needs
+  // `Authorization` / `Depth` / PROPFIND bodies).
+  //
+  // `fetch` is the sync one-shot every plugin op uses (entry-fn-safe —
+  // the drive runs on the shared tokio runtime, never the worker
+  // lane). `start` + the settled-task accessors expose the async
+  // drive; the `await`-shaped body lane (`finish`) stays host-only
+  // this phase (its rut face wants the async-weave wrapper — phase 3).
+  "name": "net",
+  "deps": {
+    "net_host": {
+      "path": "../net_host"
+    }
+  }
+}

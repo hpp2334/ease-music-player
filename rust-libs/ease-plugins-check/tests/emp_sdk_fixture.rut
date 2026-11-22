@@ -1,0 +1,44 @@
+// emp_sdk_fixture.rut — the phase-2 SDK check's backend-shaped fixture
+// (host-side, ease-plugins-check): constructs every `emp` service from
+// the boot handle and drives REAL `emp_host` rows through them. The
+// theme class is constructed but its members are never called — the
+// palette rows trap on a non-Android host (the upcalls have no Kotlin
+// side here), and this fixture checks the identity + KV lanes.
+
+use emp::{ Context, Db, Library, OAuth, Secret, Theme };
+
+// the boot: all six services constructed FROM the handle, one real KV
+// write through Db (the boot law — construction itself touches no row)
+entry fn start(cx: opaque) {
+    const db = Db(cx);
+    const secret = Secret(cx);
+    const _oauth = OAuth(cx);
+    const _theme = Theme();
+    const _ctx = Context(cx);
+    const _lib = Library(cx);
+    db.set("boot", "ok");
+}
+
+// the round-trip probe the test addresses by the boot identity: a KV
+// set/get through Db, an OAuth flow mint, and a secret put/get round
+// trip — every answer rides a REAL emp_host row.
+entry fn op_roundtrip(cx: opaque) -> str {
+    const db = Db(cx);
+    db.set("greeting", "hola");
+    let v = db.get("greeting");
+    let flow = OAuth(cx).mint();
+    const secret = Secret(cx);
+    let sid = secret.put("s3cret");
+    let back = secret.get(sid);
+    let sid2 = db.get("boot");
+    return f"{v}|{flow}|{back}|{sid2}";
+}
+
+// the foreign-opaque gate: a service built on a script-minted box must
+// TRAP at the row with the `emp:` message — never answer. (The lane
+// delivers the boot box; the fixture ignores it and builds its own.)
+entry fn op_forge(_cx: opaque) -> str {
+    const db = Db(opaque(12345));
+    db.set("k", "v");
+    return "no trap";
+}

@@ -50,6 +50,28 @@ impl PluginWorkerPools {
 /// `createInstance` both resolve their pool here.
 static POOLS: Mutex<Option<HashMap<i64, PluginWorkerPools>>> = Mutex::new(None);
 
+/// Views' minted plugin handles: instance handle → (runtime handle, cx
+/// id). Filed by `createInstance` (the handle is minted + stamped
+/// there); the `loadModule` trampoline resolves the boot identity from
+/// it and the `destroy` / `destroySettled` trampolines pop it. (The
+/// headless backends' identities live in `TurEngineHost.cxs` — same
+/// law, different owner.)
+static VIEW_CXS: Mutex<Option<HashMap<i64, (i64, u64)>>> = Mutex::new(None);
+
+fn file_view_cx(instance: i64, runtime: i64, cx: u64) {
+    VIEW_CXS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(instance, (runtime, cx));
+}
+
+fn drop_view_cx(instance: i64) {
+    if let Some(map) = VIEW_CXS.lock().unwrap().as_mut() {
+        map.remove(&instance);
+    }
+}
+
 fn file_pools(runtime_handle: i64, pools: PluginWorkerPools) {
     POOLS
         .lock()
@@ -96,7 +118,26 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     handle: tur_android::jlong,
     source_handle: tur_android::jlong,
 ) {
-    tur_android::ops::load_module(&mut env, handle, source_handle)
+    // The cx-bearing lane: a view spawned by OUR createInstance carries a
+    // minted plugin handle — resolve its boot identity and load with it
+    // (`entry fn start(cx: opaque)` receives the handle). Anything else
+    // (a foreign instance) falls through to the plain engine op.
+    let cx = VIEW_CXS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(&handle).copied());
+    match cx {
+        Some((runtime_handle, start_cx)) => {
+            crate::plugin_runtime::load::load_module_source(
+                runtime_handle,
+                handle,
+                source_handle,
+                Some(start_cx),
+            );
+        }
+        None => tur_android::ops::load_module(&mut env, handle, source_handle),
+    }
 }
 
 /// `TurNative.registerModuleSource(runtimeHandle, source): long` — register
@@ -205,6 +246,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     _class: tur_android::JClass,
     handle: tur_android::jlong,
 ) {
+    drop_view_cx(handle);
     tur_android::ops::destroy(handle)
 }
 
@@ -221,6 +263,7 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
     _class: tur_android::JClass,
     handle: tur_android::jlong,
 ) -> tur_android::jboolean {
+    drop_view_cx(handle);
     tur_android::ops::destroy_settled(handle)
 }
 
@@ -284,7 +327,16 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
         ((base_color_argb >> 24) & 0xFF) as u8,
     );
     let view_pool = view_pool_for(runtime_handle);
-    tur_android::ops::create_instance(
+    // The host-minted plugin handle for this view instance (its stamp
+    // carries `PluginId` + the storage `PluginInstance`): the `emp_host`
+    // rows resolve identity from it, and its id is the boot argument the
+    // `loadModule` trampoline passes to `start(cx)`.
+    let plugin_handle = crate::plugin_runtime::emp::PluginHandle::mint(
+        crate::plugin_runtime::PluginId::new(pid.clone()),
+        crate::plugin_runtime::PluginInstance(instance_opt.clone()),
+    );
+    let start_cx = plugin_handle.id();
+    let instance_handle = tur_android::ops::create_instance(
         &mut env,
         runtime_handle,
         frame_loop,
@@ -300,10 +352,15 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
                 cx.define::<crate::plugin_runtime::PluginInstance>(
                     crate::plugin_runtime::PluginInstance(instance_opt.clone()),
                 );
+                cx.define::<crate::plugin_runtime::emp::PluginHandle>(plugin_handle);
             })
         },
         base_color,
-    )
+    );
+    if instance_handle != 0 {
+        file_view_cx(instance_handle, runtime_handle, start_cx);
+    }
+    instance_handle
 }
 
 /// `TurNative.attachInstance(handle, surface, width, height, dpr)` — the

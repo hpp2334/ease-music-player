@@ -35,6 +35,12 @@ pub(crate) struct TurEngineHost {
     /// at build time — `extract_rpc` pairs it with the driver into the
     /// [`RpcClient`]. Popped on extract / dropped on close.
     buses: std::sync::Mutex<HashMap<i64, Arc<RpcBus>>>,
+    /// Per spawned headless instance: the minted [`PluginHandle`] id —
+    /// `load_headless_module` passes it as the boot's `start_cx` (the
+    /// phase-1 lane) so the module's `entry fn start(cx: opaque)`
+    /// receives its plugin handle. Popped at load (one shot) / dropped
+    /// on close.
+    cxs: std::sync::Mutex<HashMap<i64, u64>>,
 }
 
 impl TurEngineHost {
@@ -44,6 +50,7 @@ impl TurEngineHost {
             asset_manager,
             loops: Default::default(),
             buses: Default::default(),
+            cxs: Default::default(),
         }
     }
 }
@@ -178,8 +185,18 @@ impl PluginEngineHost for TurEngineHost {
             let bus_for_stamp = bus.clone();
             let loops = &self.loops;
             let buses = &self.buses;
+            let cxs = &self.cxs;
             let backend_pool =
                 crate::plugin_runtime::plugin_jni::backend_pool_for(runtime_handle);
+            // The host-minted plugin handle: stamped into the instance's
+            // data (the `emp_host` rows' identity) and delivered to the
+            // module's `entry fn start(cx: opaque)` at load (its id is the
+            // sealed boot argument).
+            let plugin_handle = crate::plugin_runtime::emp::PluginHandle::mint(
+                crate::plugin_runtime::PluginId::new(pid.clone()),
+                crate::plugin_runtime::PluginInstance(None),
+            );
+            let start_cx = plugin_handle.id();
             with_attached_env(move |env| {
                 let class = crate::plugin_runtime::host_cache::frame_loop_class()
                     .ok_or_else(|| anyhow::anyhow!("FrameLoop class not cached (createRuntime not run)"))?;
@@ -210,6 +227,9 @@ impl PluginEngineHost for TurEngineHost {
                                 crate::plugin_runtime::PluginInstance(None),
                             );
                             cx.define::<RpcBusCell>(RpcBusCell(bus_for_stamp.clone()));
+                            cx.define::<crate::plugin_runtime::emp::PluginHandle>(
+                                plugin_handle,
+                            );
                         })
                     },
                     // Never attached to a surface — the base color is moot.
@@ -219,6 +239,7 @@ impl PluginEngineHost for TurEngineHost {
                     anyhow::bail!("create_instance returned 0 (see logcat)");
                 }
                 buses.lock().unwrap().insert(instance, bus);
+                cxs.lock().unwrap().insert(instance, start_cx);
                 // Guard cell + wake wiring (mirrors TurInstance.init).
                 let cell = env
                     .new_object(
@@ -254,13 +275,15 @@ impl PluginEngineHost for TurEngineHost {
     fn load_headless_module(&self, instance_handle: i64, source_handle: i64) {
         #[cfg(target_os = "android")]
         {
-            // `ops::load_module` takes an env it never uses for anything but
-            // exception handling — attach for the call to preserve the exact
-            // engine path (posted, FIFO behind the spawn).
-            let _ = with_attached_env(|env| {
-                tur_android::ops::load_module(env, instance_handle, source_handle);
-                Ok(())
-            });
+            // The minted boot identity (one shot — popped here; a load
+            // that never ran leaves it for close to drop).
+            let start_cx = self.cxs.lock().unwrap().remove(&instance_handle);
+            crate::plugin_runtime::load::load_module_source(
+                self.runtime_handle,
+                instance_handle,
+                source_handle,
+                start_cx,
+            );
         }
         #[cfg(not(target_os = "android"))]
         {
@@ -308,6 +331,7 @@ impl PluginEngineHost for TurEngineHost {
         {
             let globals = self.loops.lock().unwrap().remove(&instance_handle);
             self.buses.lock().unwrap().remove(&instance_handle);
+            self.cxs.lock().unwrap().remove(&instance_handle);
             let _ = with_attached_env(|env| {
                 if let Some((loop_ref, cell_ref)) = globals {
                     let class = crate::plugin_runtime::host_cache::frame_loop_class()

@@ -1,0 +1,22 @@
+{
+  // emp — the Ease Music Plugin SDK: one class per service domain, the
+  // host-minted plugin handle the ONLY state (the strbuild pattern —
+  // every member is ONE forwarded `emp_host` row with the handle as
+  // its first argument).
+  //
+  // The handle is constructor-injected: `entry fn start(cx: opaque)`
+  // receives it from the embedder's boot call, and every service is
+  // constructed FROM it (`const db = Db(cx)`). rut code never mints
+  // one; a foreign opaque traps `emp:{ns}:` at the row.
+  //
+  // Utilities (crypto / xml / net / time) are NOT here — they are the
+  // standard 3rd-party libs (`plugins/3rd/`); `emp` deps stay
+  // `["emp_host"]`. The Rpc class lands with the phase-3 dispatch
+  // redesign.
+  "name": "emp",
+  "deps": {
+    "emp_host": {
+      "path": "."
+    }
+  }
+}

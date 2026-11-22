@@ -1,0 +1,10 @@
+{
+  // net_host — the Rust-backed half of the net lib: full-featured HTTP
+  // over the engine's `Http` capability (the reqwest lane registers in
+  // the embedder's defaults). A pure declaration surface: the bodies
+  // install in the embedder (the ease app's `plugin_runtime/third::net`
+  // — `finish` is the one async row, the five-row family), bound under
+  // this scope. Identity-free.
+  "name": "net_host",
+  "type": "host"
+}

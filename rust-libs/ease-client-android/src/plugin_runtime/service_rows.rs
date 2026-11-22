@@ -21,6 +21,12 @@
 //! Blocking: DB round-trips `block_on` the shared tokio runtime (ms-scale,
 //! the old bridges' discipline); storage-lifecycle mutations spawn instead
 //! (they can chain upcalls and must never re-enter the pump).
+//!
+//! The per-op WORK lives in the identity-parametrized `op_*` helpers
+//! (plugin id + context in, [`rut_vm::Trap`] out) — the phase-2 `emp_host`
+//! rows ([`super::emp`]) forward the same helpers with the identity
+//! decoded from the leading handle opaque instead of the instance slot.
+//! One body source, two identity laws.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -113,297 +119,139 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
 
     row_fn!(handles, "ease::db::single_get", (key: &str) -> Option<String>, {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let key = key.to_string();
-        let v = block_on("single_get", db.plugin_kv_single_get(pid.as_str(), &key))?;
-        Ok(v)
+        op_db_single_get(&db_of(&handles)?, pid.as_str(), key)
     });
 
     row_fn!(handles, "ease::db::single_get_multi", (keys_json: &str) -> String, {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let keys: Vec<String> = parse_json(keys_json, "keys")?;
-        let rows = block_on("single_get_multi", db.plugin_kv_single_get_multi(pid.as_str(), keys))?;
-        Ok(serde_json::to_string(&rows).expect("entry rows serialize"))
+        op_db_single_get_multi(&db_of(&handles)?, pid.as_str(), keys_json)
     });
 
     row_fn!(handles, "ease::db::single_set", (key: &str, value: &str) -> (), {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        block_on("single_set", db.plugin_kv_single_set(pid.as_str(), key, value))?;
-        Ok(())
+        op_db_single_set(&db_of(&handles)?, pid.as_str(), key, value)
     });
 
     row_fn!(handles, "ease::db::single_set_multi", (entries_json: &str) -> (), {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let entries: Vec<PluginKvEntry> = parse_json(entries_json, "entries")?;
-        block_on("single_set_multi", db.plugin_kv_single_set_multi(pid.as_str(), entries))?;
-        Ok(())
+        op_db_single_set_multi(&db_of(&handles)?, pid.as_str(), entries_json)
     });
 
     row_fn!(handles, "ease::db::single_delete", (key: &str) -> (), {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        block_on("single_delete", db.plugin_kv_single_delete(pid.as_str(), key))?;
-        Ok(())
+        op_db_single_delete(&db_of(&handles)?, pid.as_str(), key)
     });
 
     row_fn!(handles, "ease::db::single_delete_multi", (keys_json: &str) -> (), {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let keys: Vec<String> = parse_json(keys_json, "keys")?;
-        block_on("single_delete_multi", db.plugin_kv_single_delete_multi(pid.as_str(), keys))?;
-        Ok(())
+        op_db_single_delete_multi(&db_of(&handles)?, pid.as_str(), keys_json)
     });
 
     row_fn!(handles, "ease::db::multi_append", (key: &str, value: &str) -> (), {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        block_on("multi_append", db.plugin_kv_multi_append(pid.as_str(), key, value))?;
-        Ok(())
+        op_db_multi_append(&db_of(&handles)?, pid.as_str(), key, value)
     });
 
     row_fn!(handles, "ease::db::multi_append_multi", (entries_json: &str) -> (), {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let entries: Vec<PluginKvEntry> = parse_json(entries_json, "entries")?;
-        block_on("multi_append_multi", db.plugin_kv_multi_append_multi(pid.as_str(), entries))?;
-        Ok(())
+        op_db_multi_append_multi(&db_of(&handles)?, pid.as_str(), entries_json)
     });
 
     row_fn!(handles, "ease::db::multi_get_all", (key: &str) -> String, {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let values = block_on("multi_get_all", db.plugin_kv_multi_get_all(pid.as_str(), key))?;
-        Ok(serde_json::to_string(&values).expect("values serialize"))
+        op_db_multi_get_all(&db_of(&handles)?, pid.as_str(), key)
     });
 
     row_fn!(handles, "ease::db::multi_get_all_multi", (keys_json: &str) -> String, {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let keys: Vec<String> = parse_json(keys_json, "keys")?;
-        let rows = block_on("multi_get_all_multi", db.plugin_kv_multi_get_all_multi(pid.as_str(), keys))?;
-        Ok(serde_json::to_string(&rows).expect("multi rows serialize"))
+        op_db_multi_get_all_multi(&db_of(&handles)?, pid.as_str(), keys_json)
     });
 
     row_fn!(handles, "ease::db::multi_count", (key: &str) -> u64, {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let n = block_on("multi_count", db.plugin_kv_multi_count(pid.as_str(), key))?;
-        Ok(n as u64)
+        op_db_multi_count(&db_of(&handles)?, pid.as_str(), key)
     });
 
     row_fn!(handles, "ease::db::multi_count_multi", (keys_json: &str) -> String, {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let keys: Vec<String> = parse_json(keys_json, "keys")?;
-        let rows = block_on("multi_count_multi", db.plugin_kv_multi_count_multi(pid.as_str(), keys))?;
-        Ok(serde_json::to_string(&rows).expect("count rows serialize"))
+        op_db_multi_count_multi(&db_of(&handles)?, pid.as_str(), keys_json)
     });
 
     row_fn!(handles, "ease::db::multi_delete", (key: &str) -> (), {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        block_on("multi_delete", db.plugin_kv_multi_delete(pid.as_str(), key))?;
-        Ok(())
+        op_db_multi_delete(&db_of(&handles)?, pid.as_str(), key)
     });
 
     row_fn!(handles, "ease::db::multi_delete_multi", (keys_json: &str) -> (), {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let keys: Vec<String> = parse_json(keys_json, "keys")?;
-        block_on("multi_delete_multi", db.plugin_kv_multi_delete_multi(pid.as_str(), keys))?;
-        Ok(())
+        op_db_multi_delete_multi(&db_of(&handles)?, pid.as_str(), keys_json)
     });
 
     row_fn!(handles, "ease::db::list_keys", (prefix: &str) -> String, {
         let pid = plugin_id("db", &handles)?;
-        let db = db_of(&handles)?;
-        let rows = block_on("list_keys", db.plugin_kv_list_keys(pid.as_str(), prefix))?;
-        let out: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|info| {
-                serde_json::json!({ "key": info.key, "kind": info.kind.as_i32() })
-            })
-            .collect();
-        Ok(serde_json::to_string(&out).expect("key infos serialize"))
+        op_db_list_keys(&db_of(&handles)?, pid.as_str(), prefix)
     });
 
     // ---- secret -------------------------------------------------------------
 
     row_fn!(handles, "ease::secret::get", (id: i64) -> Option<String>, {
         let (pid, db) = secret_parts(&handles)?;
-        let v = block_on("get", db.secret_get(scope_of(&pid), SecretId::wrap(id)))?;
-        Ok(v)
+        op_secret_get(&db, pid.as_str(), id)
     });
 
     row_fn!(handles, "ease::secret::put", (secret: &str) -> i64, {
         let (pid, db) = secret_parts(&handles)?;
-        let secret = secret.to_string();
-        let id = block_on("put", db.secret_put(scope_of(&pid), secret))?;
-        Ok(*id.as_ref())
+        op_secret_put(&db, pid.as_str(), secret)
     });
 
     row_fn!(handles, "ease::secret::remove", (id: i64) -> (), {
         let (pid, db) = secret_parts(&handles)?;
-        block_on("remove", db.secret_remove(scope_of(&pid), SecretId::wrap(id)))?;
-        Ok(())
+        op_secret_remove(&db, pid.as_str(), id)
     });
 
     // ---- oauth ---------------------------------------------------------------
 
     row_fn!(handles, "ease::oauth::new", () -> String, {
         plugin_id("oauth", &handles)?; // gate to plugin-bound instances
-        let n = OAUTH_FLOW_SEQ.fetch_add(1, Ordering::Relaxed);
-        Ok(format!("oauth-{n}"))
+        Ok(op_oauth_new())
     });
 
     row_fn!(handles, "ease::oauth::begin", (oauth_id: &str) -> (), {
         let pid = plugin_id("oauth", &handles)?;
-        let oauth_id = oauth_id.to_string();
-        #[cfg(target_os = "android")]
-        {
-            if let Err(e) = upcall_start_oauth(pid.as_ref(), &oauth_id) {
-                tracing::warn!("ease:oauth.begin({oauth_id}) upcall failed: {e}");
-            }
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            let _ = (pid.as_ref(), oauth_id);
-            tracing::debug!("ease:oauth.begin ignored (non-Android target)");
-        }
-        Ok(())
+        op_oauth_begin(pid.as_str(), oauth_id)
     });
 
     // ---- themes ---------------------------------------------------------------
 
     row_fn!(handles, "ease::themes::color", (name: &str) -> String, {
         let _ = plugin_id("themes", &handles)?;
-        let name = name.to_string();
-        #[cfg(target_os = "android")]
-        {
-            theme_upcall_color(&name).map_err(|e| {
-                rut_vm::Trap::new(
-                    TrapKind::Invalid,
-                    format!("ease:themes.color: host upcall failed: {e}"),
-                )
-            })
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            let _ = name;
-            Err(rut_vm::Trap::new(
-                TrapKind::Invalid,
-                "ease:themes.color: theme is only available on Android",
-            ))
-        }
+        op_theme_color(name)
     });
 
     row_fn!(handles, "ease::themes::is_dark", () -> bool, {
         let _ = plugin_id("themes", &handles)?;
-        #[cfg(target_os = "android")]
-        {
-            // Upcall failure degrades to the light default (the old
-            // bridge's `unwrap_or(false)`), never a trap.
-            Ok(theme_upcall_is_dark().unwrap_or(false))
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            Err(rut_vm::Trap::new(
-                TrapKind::Invalid,
-                "ease:themes.is_dark: theme is only available on Android",
-            ))
-        }
+        op_theme_is_dark()
     });
 
     // ---- context --------------------------------------------------------------
 
     row_fn!(handles, "ease::context::notify_change", () -> (), {
         let (pid, inst) = resolve_instance(&handles)?;
-        let instance_str = inst.0.unwrap_or_default();
-        #[cfg(target_os = "android")]
-        {
-            if let Err(e) = upcall_storage_host(pid.as_str(), &instance_str, "notifyChange") {
-                tracing::warn!("ease:context.notify_change upcall failed: {e}");
-            }
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            let _ = (pid, instance_str);
-            tracing::debug!("ease:context.notify_change ignored (non-Android target)");
-        }
+        op_context_notify_change(pid.as_str(), inst.0);
         Ok(())
     });
 
     row_fn!(handles, "ease::context::create_storage", (plugin_storage_id: &str) -> (), {
-        use ease_client_schema::{PluginId as Pid, PluginStorageId as Psid, StorageHandle};
-
         let pid = plugin_id("context", &handles)?;
         let cx = backend_cx("context", &handles)?;
-        let plugin_storage_id = plugin_storage_id.to_string();
-        let pid_str = pid.as_str().to_string();
-        let instance = plugin_storage_id.clone();
-
-        // Spawned (never block_on on the worker): the DB work chains the
-        // Kotlin upcall, so ordering is preserved without re-entering the
-        // pump.
-        ease_client_tokio::tokio_runtime().spawn(async move {
-            let handle = StorageHandle::Plugin {
-                plugin_id: Pid::new(pid_str.clone()),
-                plugin_storage_id: Psid::new(instance.clone()),
-            };
-            let result = cx
-                .database_server()
-                .obtain_storage(&handle)
-                .await
-                .map(|id| {
-                    ease_client_backend::services::evict_storage_backend_cache(&cx, id);
-                    id
-                });
-            match result {
-                Ok(id) => {
-                    tracing::debug!(
-                        "create_storage: registered {instance} as storage {:?}",
-                        id.as_ref()
-                    );
-                    #[cfg(target_os = "android")]
-                    {
-                        if let Err(e) = upcall_storage_host(&pid_str, &instance, "storageCreated") {
-                            tracing::warn!("ease:context.create_storage upcall failed: {e}");
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("ease:context.create_storage failed for {instance}: {e:?}");
-                }
-            }
-        });
+        op_context_create_storage(cx, pid.as_str(), plugin_storage_id);
         Ok(())
     });
 
     row_fn!(handles, "ease::context::remove_storage", (plugin_storage_id: &str) -> (), {
-        use ease_client_schema::StorageId;
-
         let pid = plugin_id("context", &handles)?;
         let cx = backend_cx("context", &handles)?;
-        let plugin_storage_id = plugin_storage_id.to_string();
-        let pid_str = pid.as_str().to_string();
-
-        ease_client_tokio::tokio_runtime().spawn(async move {
-            let rows = cx.database_server().load_all_storage_rows().await?;
-            let id = rows
-                .into_iter()
-                .find(|r| {
-                    r.plugin_id.as_deref() == Some(pid_str.as_str())
-                        && r.plugin_storage_id.as_deref() == Some(plugin_storage_id.as_str())
-                })
-                .map(|r| StorageId::wrap(r.id));
-            if let Some(id) = id {
-                ease_client_backend::services::storage::remove_storage(&cx, id).await?;
-            }
-            Ok::<_, ease_client_backend::error::BError>(())
-        });
+        op_context_remove_storage(cx, pid.as_str(), plugin_storage_id);
         Ok(())
     });
 
@@ -421,43 +269,12 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
 
     row_fn!(handles, "ease::library::playlists", () -> String, {
         let cx = backend_cx("library", &handles)?;
-        let db: Arc<DatabaseServer> = cx.database_server().clone();
-        let result: BResult<Vec<serde_json::Value>> = block_on_async("playlists", async move {
-            let playlists = db.load_playlists().await?;
-            let edges = db.load_all_playlist_music_edges().await?;
-
-            let mut grouped: HashMap<i64, Vec<i64>> = HashMap::new();
-            for edge in edges {
-                grouped
-                    .entry(*edge.playlist_id.as_ref())
-                    .or_default()
-                    .push(*edge.music_id.as_ref());
-            }
-
-            let out = playlists
-                .into_iter()
-                .map(|p| {
-                    let id = *p.id.as_ref();
-                    let music_ids: Vec<String> = grouped
-                        .remove(&id)
-                        .unwrap_or_default()
-                        .iter()
-                        .map(|m| m.to_string())
-                        .collect();
-                    Ok(serde_json::json!({
-                        "id": id.to_string(),
-                        "title": p.title,
-                        "musicIds": music_ids,
-                    }))
-                })
-                .collect::<BResult<Vec<_>>>();
-            Ok::<_, ease_client_backend::error::BError>(out)
-        })?;
-        Ok(serde_json::to_string(&result).expect("playlists serialize"))
+        op_library_playlists(&cx)
     });
 
     row_fn!(handles, "ease::library::covers", (music_ids_json: &str) -> String, {
-        Ok(covers_row(&handles, music_ids_json)?)
+        let cx = backend_cx("library", &handles)?;
+        op_library_covers(&cx, &handles, music_ids_json)
     });
 
     // ---- rpc.call (view → its own backend) --------------------------------------
@@ -468,7 +285,7 @@ pub fn install(cx: &mut RutPkgCx<'_>) {
 }
 
 // ---------------------------------------------------------------------------
-// shared row helpers
+// the per-op helpers — identity-parametrized work shared with emp_host
 // ---------------------------------------------------------------------------
 
 /// The context-bridge identity pair (plugin id + storage instance).
@@ -495,10 +312,6 @@ fn secret_parts(
     let pid = plugin_id("secret", handles)?;
     let db = backend_cx("secret", handles)?.database_server().clone();
     Ok((pid, db))
-}
-
-fn scope_of(pid: &PluginId) -> SecretScope {
-    SecretScope::Plugin(ease_client_schema::PluginId::new(pid.as_str()))
 }
 
 fn parse_json<T: serde::de::DeserializeOwned>(s: &str, what: &str) -> Result<T, rut_vm::Trap> {
@@ -539,9 +352,345 @@ fn block_on_async<R, E: std::fmt::Debug>(
         })
 }
 
-// ---------------------------------------------------------------------------
-// covers
-// ---------------------------------------------------------------------------
+// ---- db ops ---------------------------------------------------------------
+
+pub(crate) fn op_db_single_get(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<Option<String>, rut_vm::Trap> {
+    let key = key.to_string();
+    block_on("single_get", db.plugin_kv_single_get(pid, &key))
+}
+
+pub(crate) fn op_db_single_get_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    let rows = block_on("single_get_multi", db.plugin_kv_single_get_multi(pid, keys))?;
+    Ok(serde_json::to_string(&rows).expect("entry rows serialize"))
+}
+
+pub(crate) fn op_db_single_set(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+    value: &str,
+) -> Result<(), rut_vm::Trap> {
+    block_on("single_set", db.plugin_kv_single_set(pid, key, value))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_single_set_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    entries_json: &str,
+) -> Result<(), rut_vm::Trap> {
+    let entries: Vec<PluginKvEntry> = parse_json(entries_json, "entries")?;
+    block_on("single_set_multi", db.plugin_kv_single_set_multi(pid, entries))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_single_delete(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<(), rut_vm::Trap> {
+    block_on("single_delete", db.plugin_kv_single_delete(pid, key))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_single_delete_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<(), rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    block_on("single_delete_multi", db.plugin_kv_single_delete_multi(pid, keys))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_multi_append(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+    value: &str,
+) -> Result<(), rut_vm::Trap> {
+    block_on("multi_append", db.plugin_kv_multi_append(pid, key, value))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_multi_append_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    entries_json: &str,
+) -> Result<(), rut_vm::Trap> {
+    let entries: Vec<PluginKvEntry> = parse_json(entries_json, "entries")?;
+    block_on("multi_append_multi", db.plugin_kv_multi_append_multi(pid, entries))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_multi_get_all(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<String, rut_vm::Trap> {
+    let values = block_on("multi_get_all", db.plugin_kv_multi_get_all(pid, key))?;
+    Ok(serde_json::to_string(&values).expect("values serialize"))
+}
+
+pub(crate) fn op_db_multi_get_all_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    let rows = block_on("multi_get_all_multi", db.plugin_kv_multi_get_all_multi(pid, keys))?;
+    Ok(serde_json::to_string(&rows).expect("multi rows serialize"))
+}
+
+pub(crate) fn op_db_multi_count(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<u64, rut_vm::Trap> {
+    let n = block_on("multi_count", db.plugin_kv_multi_count(pid, key))?;
+    Ok(n as u64)
+}
+
+pub(crate) fn op_db_multi_count_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    let rows = block_on("multi_count_multi", db.plugin_kv_multi_count_multi(pid, keys))?;
+    Ok(serde_json::to_string(&rows).expect("count rows serialize"))
+}
+
+pub(crate) fn op_db_multi_delete(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<(), rut_vm::Trap> {
+    block_on("multi_delete", db.plugin_kv_multi_delete(pid, key))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_multi_delete_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<(), rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    block_on("multi_delete_multi", db.plugin_kv_multi_delete_multi(pid, keys))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_list_keys(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    prefix: &str,
+) -> Result<String, rut_vm::Trap> {
+    let rows = block_on("list_keys", db.plugin_kv_list_keys(pid, prefix))?;
+    let out: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|info| {
+            serde_json::json!({ "key": info.key, "kind": info.kind.as_i32() })
+        })
+        .collect();
+    Ok(serde_json::to_string(&out).expect("key infos serialize"))
+}
+
+// ---- secret ops -----------------------------------------------------------
+
+pub(crate) fn op_secret_get(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    id: i64,
+) -> Result<Option<String>, rut_vm::Trap> {
+    let scope = SecretScope::Plugin(ease_client_schema::PluginId::new(pid));
+    block_on("get", db.secret_get(scope, SecretId::wrap(id)))
+}
+
+pub(crate) fn op_secret_put(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    secret: &str,
+) -> Result<i64, rut_vm::Trap> {
+    let scope = SecretScope::Plugin(ease_client_schema::PluginId::new(pid));
+    let secret = secret.to_string();
+    let id = block_on("put", db.secret_put(scope, secret))?;
+    Ok(*id.as_ref())
+}
+
+pub(crate) fn op_secret_remove(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    id: i64,
+) -> Result<(), rut_vm::Trap> {
+    let scope = SecretScope::Plugin(ease_client_schema::PluginId::new(pid));
+    block_on("remove", db.secret_remove(scope, SecretId::wrap(id)))
+}
+
+// ---- oauth ops ------------------------------------------------------------
+
+/// Mint the next flow id. The caller gates to plugin-bound instances
+/// (the old rows resolve the instance slot; the emp rows decode the
+/// handle) — the mint itself keeps no state.
+pub(crate) fn op_oauth_new() -> String {
+    let n = OAUTH_FLOW_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("oauth-{n}")
+}
+
+pub(crate) fn op_oauth_begin(pid: &str, oauth_id: &str) -> Result<(), rut_vm::Trap> {
+    let oauth_id = oauth_id.to_string();
+    #[cfg(target_os = "android")]
+    {
+        if let Err(e) = upcall_start_oauth(pid, &oauth_id) {
+            tracing::warn!("ease:oauth.begin({oauth_id}) upcall failed: {e}");
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (pid, oauth_id);
+        tracing::debug!("ease:oauth.begin ignored (non-Android target)");
+    }
+    Ok(())
+}
+
+// ---- theme ops ------------------------------------------------------------
+
+pub(crate) fn op_theme_color(name: &str) -> Result<String, rut_vm::Trap> {
+    let name = name.to_string();
+    #[cfg(target_os = "android")]
+    {
+        theme_upcall_color(&name).map_err(|e| {
+            rut_vm::Trap::new(
+                TrapKind::Invalid,
+                format!("ease:themes.color: host upcall failed: {e}"),
+            )
+        })
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = name;
+        Err(rut_vm::Trap::new(
+            TrapKind::Invalid,
+            "ease:themes.color: theme is only available on Android",
+        ))
+    }
+}
+
+pub(crate) fn op_theme_is_dark() -> Result<bool, rut_vm::Trap> {
+    #[cfg(target_os = "android")]
+    {
+        // Upcall failure degrades to the light default (the old
+        // bridge's `unwrap_or(false)`), never a trap.
+        Ok(theme_upcall_is_dark().unwrap_or(false))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Err(rut_vm::Trap::new(
+            TrapKind::Invalid,
+            "ease:themes.is_dark: theme is only available on Android",
+        ))
+    }
+}
+
+// ---- context ops ----------------------------------------------------------
+
+pub(crate) fn op_context_notify_change(pid: &str, instance: Option<String>) {
+    let instance_str = instance.unwrap_or_default();
+    #[cfg(target_os = "android")]
+    {
+        if let Err(e) = upcall_storage_host(pid, &instance_str, "notifyChange") {
+            tracing::warn!("ease:context.notify_change upcall failed: {e}");
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (pid, instance_str);
+        tracing::debug!("ease:context.notify_change ignored (non-Android target)");
+    }
+}
+
+/// The storage-lifecycle mutations SPAWN (never block_on on the worker):
+/// the DB work chains the Kotlin upcall, so ordering is preserved
+/// without re-entering the pump.
+pub(crate) fn op_context_create_storage(
+    cx: ease_client_backend::ctx::BackendContext,
+    pid: &str,
+    plugin_storage_id: &str,
+) {
+    use ease_client_schema::{PluginId as Pid, PluginStorageId as Psid, StorageHandle};
+
+    let plugin_storage_id = plugin_storage_id.to_string();
+    let pid_str = pid.to_string();
+    let instance = plugin_storage_id.clone();
+
+    ease_client_tokio::tokio_runtime().spawn(async move {
+        let handle = StorageHandle::Plugin {
+            plugin_id: Pid::new(pid_str.clone()),
+            plugin_storage_id: Psid::new(instance.clone()),
+        };
+        let result = cx
+            .database_server()
+            .obtain_storage(&handle)
+            .await
+            .map(|id| {
+                ease_client_backend::services::evict_storage_backend_cache(&cx, id);
+                id
+            });
+        match result {
+            Ok(id) => {
+                tracing::debug!(
+                    "create_storage: registered {instance} as storage {:?}",
+                    id.as_ref()
+                );
+                #[cfg(target_os = "android")]
+                {
+                    if let Err(e) = upcall_storage_host(&pid_str, &instance, "storageCreated") {
+                        tracing::warn!("ease:context.create_storage upcall failed: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("ease:context.create_storage failed for {instance}: {e:?}");
+            }
+        }
+    });
+}
+
+pub(crate) fn op_context_remove_storage(
+    cx: ease_client_backend::ctx::BackendContext,
+    pid: &str,
+    plugin_storage_id: &str,
+) {
+    use ease_client_schema::StorageId;
+
+    let plugin_storage_id = plugin_storage_id.to_string();
+    let pid_str = pid.to_string();
+
+    ease_client_tokio::tokio_runtime().spawn(async move {
+        let rows = cx.database_server().load_all_storage_rows().await?;
+        let id = rows
+            .into_iter()
+            .find(|r| {
+                r.plugin_id.as_deref() == Some(pid_str.as_str())
+                    && r.plugin_storage_id.as_deref() == Some(plugin_storage_id.as_str())
+            })
+            .map(|r| StorageId::wrap(r.id));
+        if let Some(id) = id {
+            ease_client_backend::services::storage::remove_storage(&cx, id).await?;
+        }
+        Ok::<_, ease_client_backend::error::BError>(())
+    });
+}
+
+// ---- library ops ----------------------------------------------------------
 
 /// Thumbnail long edge. Covers render at 44 px in plugin lists; 2× covers
 /// high-density screens while keeping a decoded thumbnail at ~30 KB RGBA
@@ -566,15 +715,54 @@ fn decode_cover_thumbnail(bytes: &[u8]) -> Option<tur_engine::ImageResource> {
     tur_engine::ImageResource::from_rgba(rgba.as_raw(), w, h)
 }
 
+pub(crate) fn op_library_playlists(
+    cx: &ease_client_backend::ctx::BackendContext,
+) -> Result<String, rut_vm::Trap> {
+    let db: Arc<DatabaseServer> = cx.database_server().clone();
+    let result: BResult<Vec<serde_json::Value>> = block_on_async("playlists", async move {
+        let playlists = db.load_playlists().await?;
+        let edges = db.load_all_playlist_music_edges().await?;
+
+        let mut grouped: HashMap<i64, Vec<i64>> = HashMap::new();
+        for edge in edges {
+            grouped
+                .entry(*edge.playlist_id.as_ref())
+                .or_default()
+                .push(*edge.music_id.as_ref());
+        }
+
+        let out = playlists
+            .into_iter()
+            .map(|p| {
+                let id = *p.id.as_ref();
+                let music_ids: Vec<String> = grouped
+                    .remove(&id)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect();
+                Ok(serde_json::json!({
+                    "id": id.to_string(),
+                    "title": p.title,
+                    "musicIds": music_ids,
+                }))
+            })
+            .collect::<BResult<Vec<_>>>();
+        Ok::<_, ease_client_backend::error::BError>(out)
+    })?;
+    Ok(serde_json::to_string(&result).expect("playlists serialize"))
+}
+
 /// `covers(musicIdsJson: str) -> str` — `musicIds` is a JSON array of the
 /// stringified music row ids; the answer is `[{"musicId": "...", "id": n | null}]`
 /// where `id` is the registered engine image resource (bytes never enter
-/// the script).
-fn covers_row(
+/// the script). `handles` only carries the image registry the thumbnails
+/// register into — identity rides `cx` + the caller's plugin id.
+pub(crate) fn op_library_covers(
+    cx: &ease_client_backend::ctx::BackendContext,
     handles: &std::rc::Rc<RutHandles>,
     music_ids_json: &str,
 ) -> Result<String, rut_vm::Trap> {
-    let cx = backend_cx("library", handles)?;
     let db: Arc<DatabaseServer> = cx.database_server().clone();
 
     let ids: Vec<String> = parse_json(music_ids_json, "musicIds")?;
@@ -752,7 +940,7 @@ fn theme_upcall_color(name: &str) -> Result<String, String> {
             "(Ljava/lang/String;)Ljava/lang/String;",
             &[JValue::Object(&name_jstr)],
         )
-        .map_err(|e| format!("call_static_method: {e}"))?;
+        .map_err(|e| format!("ret.l: {e}"))?;
     let obj = ret.l().map_err(|e| format!("ret.l: {e}"))?;
     // Kotlin answers null for an unknown role. `get_string(null)` would
     // throw a JVM NPE that jni-rs reports WITHOUT clearing, poisoning the
@@ -785,6 +973,6 @@ fn theme_upcall_is_dark() -> Result<bool, String> {
     let class = unsafe { JClass::from_raw(raw_class) };
     let ret = env
         .call_static_method(class, "isDark", "()Z", &[])
-        .map_err(|e| format!("call_static_method: {e}"))?;
+        .map_err(|e| format!("ret.z: {e}"))?;
     Ok(ret.z().map_err(|e| format!("ret.z: {e}"))?)
 }

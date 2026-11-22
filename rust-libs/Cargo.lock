@@ -1003,6 +1003,7 @@ dependencies = [
  "ndk-context",
  "quick-xml",
  "rut-core",
+ "rut-driver",
  "rut-vm",
  "serde",
  "serde_json",

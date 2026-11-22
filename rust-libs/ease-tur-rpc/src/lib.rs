@@ -425,6 +425,48 @@ fn install_rpc_rows(cx: &mut tur_engine::core::rut_runtime::RutPkgCx<'_>) {
     });
 }
 
+/// The rpc row BODIES under `pkg`'s own name scope, bound at the
+/// `rpc::register` / `rpc::subscribe_event` / `rpc::take_request`
+/// scope-relative keys — the relocation seam the plugin-epoch plan
+/// spells: an embedder's own host pkg whose DECL carries the rows at
+/// path `rpc` (the `emp_host` shape) calls this to carry the same
+/// bodies under its namespace, instead of [`TurRpcBusPlugin`] pushing
+/// its own pkg. The row DECLS stay with the caller.
+///
+/// Phase-2 status (recorded): the ease app keeps the rpc rows in
+/// `tur_host` (path `ease/rpc`, bound by [`install_rpc_rows`] above) —
+/// relocating them into `emp_host` now would dual-register the bus rows
+/// across two live namespaces for un-migrated plugins to trip over, and
+/// the phase-3 redesign replaces bind/dispatch with the cx lanes
+/// anyway. `emp` ships no Rpc class this phase; this helper exists so
+/// phase 3 can drop the rows into `emp_host` without touching the bus
+/// again.
+#[allow(dead_code)]
+pub fn install_rows(
+    pkg: &mut rut_vm::interp::HostPkg,
+    handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
+) {
+    // register(op, export) — bind op → entry fn name.
+    let h = handles.clone();
+    rut_vm::pkg_fn!(pkg, "rpc::register", (&str, &str) -> (), move |_vm: &mut rut_vm::interp::Vm, op: &str, export: &str| {
+        bus_of(&h).register_op(op, export);
+        Ok(())
+    });
+
+    // subscribe_event(type, export).
+    let h = handles.clone();
+    rut_vm::pkg_fn!(pkg, "rpc::subscribe_event", (&str, &str) -> (), move |_vm: &mut rut_vm::interp::Vm, ty: &str, export: &str| {
+        bus_of(&h).subscribe_event(ty, export);
+        Ok(())
+    });
+
+    // take_request() -> str — the pending call/event payload ("" = none).
+    let h = handles.clone();
+    rut_vm::pkg_fn!(pkg, "rpc::take_request", () -> String, move |_vm: &mut rut_vm::interp::Vm| {
+        Ok(bus_of(&h).take_request())
+    });
+}
+
 /// Resolve the bus: instance data first (the embedder-stamped slot), then
 /// the plugin state (the host-test path minted at register).
 fn bus_of(handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>) -> Arc<RpcBus> {

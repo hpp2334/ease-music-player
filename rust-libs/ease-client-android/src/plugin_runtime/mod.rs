@@ -10,7 +10,9 @@
 //! ([`PluginBackendCx`]), and the host rows read it back from the instance —
 //! no process-wide singleton whose entry could outlive a destroyed backend.
 //!
-//! The bridge exposes one host pkg to rut modules — the `ease` rows:
+//! The bridge exposes the `ease` host pkg to rut modules — the `ease`
+//! rows (the OLD surface, alive until phase 5 so un-migrated plugins
+//! keep compiling):
 //!
 //! - `ease.db` / `ease.secret` / `ease.oauth` / `ease.themes` /
 //!   `ease.context` / `ease.library` — the host services (KV, secrets,
@@ -22,24 +24,43 @@
 //!   surface that replaced the old npm plugin deps (md5 / base64 / SHA-2 /
 //!   HMAC / UUID, XML, full-featured HTTP, HTTP dates).
 //!
+//! Phase 2 of the plugin epoch ADDED the new surface beside it (never
+//! replacing — the migration is phase 5):
+//!
+//! - `emp_host` + `emp` ([`emp`]) — the SDK: the host rows carry a
+//!   leading handle opaque (the host-minted [`emp::PluginHandle`],
+//!   delivered to `entry fn start(cx: opaque)` through the phase-1
+//!   boot lane), and the `emp` classes (`Db` / `Secret` / `OAuth` /
+//!   `Theme` / `Context` / `Library`) wrap them one forwarded call per
+//!   member.
+//! - `crypto` / `xml` / `net` / `time` ([`third`]) — the identity-free
+//!   utilities as standard rut pkg folders (`plugins/3rd/`), offered
+//!   into the compile session by `include_str!` (one source of truth
+//!   with what a `rut pack` closure would embed).
+//!
 //! Rows are **typed** (`rut_core::types`): scalars cross as str/u64/i64/
 //! f64/bool, binary as bytes, composites as JSON strings, host objects as
 //! opaques. Per-instance identity: the host stamps a [`PluginId`] (and for
 //! edit-mode views a [`PluginInstance`]) into the engine's `instance_data`
-//! at build time (`TurAppBuilder::instance_data`) — rows resolve the calling
-//! plugin through it, never from a rut argument. The value is script-
+//! at build time (`TurAppBuilder::instance_data`) — the OLD rows resolve
+//! the calling plugin through it, never from a rut argument; the `emp_host`
+//! rows resolve it through the decoded handle instead (same stamps, minted
+//! into a [`emp::PluginHandle`] at build time). Both are script-
 //! unforgeable.
 //!
 //! There is no JS in the plugin system: modules are rut sources loaded by
 //! opaque `ModuleSourceRegistry` handles, and every host entry point is a
 //! typed row.
 
+pub mod emp;
 pub mod engine;
 pub mod fonts;
 pub mod host_cache;
+pub mod load;
 pub mod plugin;
 pub mod plugin_jni;
 pub mod service_rows;
+pub mod third;
 pub mod util_rows;
 
 pub use plugin::EaseMusicPlugin;
