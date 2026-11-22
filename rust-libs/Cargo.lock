@@ -3939,8 +3939,9 @@ dependencies = [
 [[package]]
 name = "rut-ast"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
+source = "git+https://github.com/hpp2334/rut?rev=460e8887ab6193dccc985aa253657a9681677e88#460e8887ab6193dccc985aa253657a9681677e88"
 dependencies = [
+ "once_cell",
  "rut-core",
  "rut-lexer",
 ]
@@ -3948,18 +3949,17 @@ dependencies = [
 [[package]]
 name = "rut-core"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
+source = "git+https://github.com/hpp2334/rut?rev=460e8887ab6193dccc985aa253657a9681677e88#460e8887ab6193dccc985aa253657a9681677e88"
 
 [[package]]
 name = "rut-driver"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
+source = "git+https://github.com/hpp2334/rut?rev=460e8887ab6193dccc985aa253657a9681677e88#460e8887ab6193dccc985aa253657a9681677e88"
 dependencies = [
  "rut-ast",
  "rut-core",
  "rut-lexer",
  "rut-lir",
- "rut-parser",
  "rut-vm",
  "serde_json",
  "sha2",
@@ -3970,22 +3970,12 @@ dependencies = [
 [[package]]
 name = "rut-lexer"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
+source = "git+https://github.com/hpp2334/rut?rev=460e8887ab6193dccc985aa253657a9681677e88#460e8887ab6193dccc985aa253657a9681677e88"
 
 [[package]]
 name = "rut-lir"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
-dependencies = [
- "rut-ast",
- "rut-core",
- "rut-lexer",
-]
-
-[[package]]
-name = "rut-parser"
-version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
+source = "git+https://github.com/hpp2334/rut?rev=460e8887ab6193dccc985aa253657a9681677e88#460e8887ab6193dccc985aa253657a9681677e88"
 dependencies = [
  "rut-ast",
  "rut-core",
@@ -3995,7 +3985,7 @@ dependencies = [
 [[package]]
 name = "rut-std"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
+source = "git+https://github.com/hpp2334/rut?rev=460e8887ab6193dccc985aa253657a9681677e88#460e8887ab6193dccc985aa253657a9681677e88"
 dependencies = [
  "hashbrown 0.14.5",
  "rut-core",
@@ -4005,7 +3995,7 @@ dependencies = [
 [[package]]
 name = "rut-vm"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
+source = "git+https://github.com/hpp2334/rut?rev=460e8887ab6193dccc985aa253657a9681677e88#460e8887ab6193dccc985aa253657a9681677e88"
 dependencies = [
  "rut-core",
  "rut-vm-threaded",
@@ -4014,7 +4004,7 @@ dependencies = [
 [[package]]
 name = "rut-vm-threaded"
 version = "0.2.0"
-source = "git+https://github.com/hpp2334/rut?rev=b44924f5cfd21f4345b3ae8575761f136ba7fb98#b44924f5cfd21f4345b3ae8575761f136ba7fb98"
+source = "git+https://github.com/hpp2334/rut?rev=460e8887ab6193dccc985aa253657a9681677e88#460e8887ab6193dccc985aa253657a9681677e88"
 dependencies = [
  "rut-core",
 ]
@@ -5409,7 +5399,7 @@ dependencies = [
 [[package]]
 name = "tur-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "android_logger",
  "futures",
@@ -5433,7 +5423,7 @@ dependencies = [
 [[package]]
 name = "tur-animation"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "rut-core",
  "rut-driver",
@@ -5446,7 +5436,7 @@ dependencies = [
 [[package]]
 name = "tur-clipboard-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "jni",
  "tracing",
@@ -5456,7 +5446,7 @@ dependencies = [
 [[package]]
 name = "tur-engine"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "glifo",
@@ -5469,7 +5459,6 @@ dependencies = [
  "rut-core",
  "rut-driver",
  "rut-lexer",
- "rut-parser",
  "rut-std",
  "rut-vm",
  "thiserror 2.0.20",
@@ -5484,7 +5473,7 @@ dependencies = [
 [[package]]
 name = "tur-filepicker-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "rut-core",
  "rut-driver",
@@ -5496,7 +5485,7 @@ dependencies = [
 [[package]]
 name = "tur-integration-tests"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "libc",
@@ -5511,7 +5500,7 @@ dependencies = [
 [[package]]
 name = "tur-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "parley",
@@ -5522,7 +5511,7 @@ dependencies = [
 [[package]]
 name = "tur-net-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "rut-core",
@@ -5535,7 +5524,7 @@ dependencies = [
 [[package]]
 name = "tur-net-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=e13dd9830d204221a9b3af285c0f95ca8f431901#e13dd9830d204221a9b3af285c0f95ca8f431901"
+source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "reqwest 0.12.28",

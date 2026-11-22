@@ -55,7 +55,7 @@ entry fn start() -> u64 {
     // Mode: nil = create (no storage row yet), a real id = edit. Read once —
     // the value never changes for the instance lifetime.
     let sid = storage_id();
-    let mut sid_seed = "";
+    let sid_seed = "";
     if (sid != nil) {
         sid_seed = sid;
     }
@@ -105,7 +105,7 @@ entry fn start() -> u64 {
         // slot (the `oauth:exchange` handler consumes it) and fires the
         // browser flow — business data never crosses the host.
         let alias = trim(ctrl_alias.text());
-        let mut w = JsonWriter::new();
+        let w = JsonWriter::new();
         w.begin_object();
         w.key("alias");
         w.write_str(alias);
@@ -134,7 +134,7 @@ entry fn start() -> u64 {
             return;
         }
         let alias = trim(ctrl_alias.text());
-        let mut w = JsonWriter::new();
+        let w = JsonWriter::new();
         w.begin_object();
         w.key("alias");
         w.write_str(alias);
@@ -197,10 +197,10 @@ struct StoredConfig {
 
 /// Decode the persisted config document; nil on corrupt JSON.
 fn decode_config(doc: str) -> ?StoredConfig {
-    let mut r = JsonReader::of(doc);
+    let r = JsonReader::of(doc);
     r.begin_object();
-    let mut alias = "";
-    let mut secret_id: i64 = 0;
+    let alias = "";
+    let secret_id: i64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -314,12 +314,12 @@ struct ConnectReply {
 }
 
 fn parse_connect_reply(reply: str) -> ConnectReply {
-    let mut r = JsonReader::of(reply);
+    let r = JsonReader::of(reply);
     r.begin_object();
-    let mut ok = false;
-    let mut have_ok = false;
-    let mut message = "";
-    let mut fired = false;
+    let ok = false;
+    let have_ok = false;
+    let message = "";
+    let fired = false;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -364,11 +364,11 @@ fn parse_connect_reply(reply: str) -> ConnectReply {
 
 fn trim(s: str) -> str {
     let n = s.len();
-    let mut a = 0;
+    let a = 0;
     while (a < n && is_ws(s.code_at(a))) {
         a += 1;
     }
-    let mut b = n;
+    let b = n;
     while (b > a && is_ws(s.code_at(b - 1))) {
         b -= 1;
     }

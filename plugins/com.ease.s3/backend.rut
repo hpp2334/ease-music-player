@@ -210,7 +210,7 @@ fn ok_env(result_json: str) -> str {
 }
 
 fn err_env(msg: str) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.write_str(msg);
     return f"{{\"ok\":false,\"error\":{w.finish()}}}";
 }
@@ -232,8 +232,8 @@ fn lower_code(c: u32) -> u32 {
 
 fn lower(s: str) -> str {
     let n = s.len();
-    let mut b = StringBuilder::with_cap(n);
-    let mut i = 0;
+    let b = StringBuilder::with_cap(n);
+    let i = 0;
     while (i < n) {
         b.append(str::from_code(lower_code(s.code_at(i))));
         i += 1;
@@ -248,7 +248,7 @@ fn ci_eq(a: str, b: str) -> bool {
     if (n != b.len()) {
         return false;
     }
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         if (lower_code(a.code_at(i)) != lower_code(b.code_at(i))) {
             return false;
@@ -263,7 +263,7 @@ fn starts_with_ci(s: str, at: i32, prefix: str) -> bool {
     if (at < 0 || s.len() < at + n) {
         return false;
     }
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         if (lower_code(s.code_at(at + i)) != lower_code(prefix.code_at(i))) {
             return false;
@@ -279,7 +279,7 @@ fn contains_ci(hay: str, needle: str) -> bool {
     if (m == 0) {
         return true;
     }
-    let mut i = 0;
+    let i = 0;
     while (i + m <= n) {
         if (starts_with_ci(hay, i, needle)) {
             return true;
@@ -293,7 +293,7 @@ fn contains_ci(hay: str, needle: str) -> bool {
 fn str_less(a: str, b: str) -> bool {
     let n = a.len();
     let m = b.len();
-    let mut i = 0;
+    let i = 0;
     while (i < n && i < m) {
         let ca = a.code_at(i);
         let cb = b.code_at(i);
@@ -307,11 +307,11 @@ fn str_less(a: str, b: str) -> bool {
 
 fn trim(s: str) -> str {
     let n = s.len();
-    let mut a = 0;
+    let a = 0;
     while (a < n && is_ws(s.code_at(a))) {
         a += 1;
     }
-    let mut b = n;
+    let b = n;
     while (b > a && is_ws(s.code_at(b - 1))) {
         b -= 1;
     }
@@ -332,7 +332,7 @@ fn ends_with(s: str, suffix: str) -> bool {
 
 fn find_from(s: str, from: i32, c: u32) -> i32 {
     let n = s.len();
-    let mut i = from;
+    let i = from;
     while (i < n) {
         if (s.code_at(i) == c) {
             return i;
@@ -344,8 +344,8 @@ fn find_from(s: str, from: i32, c: u32) -> i32 {
 
 fn find_last(s: str, c: u32) -> i32 {
     let n = s.len();
-    let mut last = -1;
-    let mut i = 0;
+    let last = -1;
+    let i = 0;
     while (i < n) {
         if (s.code_at(i) == c) {
             last = i;
@@ -360,7 +360,7 @@ fn is_digits(s: str) -> bool {
     if (n == 0) {
         return false;
     }
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         let c = s.code_at(i);
         if (c < 48 || c > 57) {
@@ -372,9 +372,9 @@ fn is_digits(s: str) -> bool {
 }
 
 fn str_to_i64(s: str) -> i64 {
-    let mut acc: i64 = 0;
+    let acc: i64 = 0;
     let n = s.len();
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         acc = acc * 10i64 + (s.code_at(i) as i64 - 48i64);
         i += 1;
@@ -399,8 +399,8 @@ fn hex_digit_val(c: u32) -> i32 {
 /// next HMAC round needs the raw key bytes).
 fn hex_decode(s: str) -> bytes {
     let n = s.len();
-    let mut v = Vec<u8>::new();
-    let mut i = 0;
+    let v = Vec<u8>::new();
+    let i = 0;
     while (i + 1 < n) {
         let hi = hex_digit_val(s.code_at(i));
         let lo = hex_digit_val(s.code_at(i + 1));
@@ -423,7 +423,7 @@ fn byte_hex(b: u64) -> str {
 
 /// The last `/`-separated segment, tolerating a trailing slash.
 fn last_segment(p: str) -> str {
-    let mut t = p;
+    let t = p;
     if (ends_with(t, "/")) {
         t = t.slice(0, t.len() - 1);
     }
@@ -444,8 +444,8 @@ fn last_segment(p: str) -> str {
 /// and the canonical request — they must match byte-for-byte.
 fn s3_encode(s: str, keep_slash: bool) -> str {
     let n = s.len();
-    let mut b = StringBuilder::with_cap(n * 3 + 1);
-    let mut i = 0;
+    let b = StringBuilder::with_cap(n * 3 + 1);
+    let i = 0;
     while (i < n) {
         let c = s.code_at(i);
         let keep = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
@@ -472,12 +472,12 @@ fn s3_encode(s: str, keep_slash: bool) -> str {
     return b.build();
 }
 
-fn hex_byte_push(mut bytes: Vec<u8>, hi: i32, lo: i32) {
+fn hex_byte_push(bytes: Vec<u8>, hi: i32, lo: i32) {
     bytes.push((hi * 16 + lo) as u8);
 }
 
 /// Push one codepoint's UTF-8 bytes (the decode's re-encoding half).
-fn utf8_push(mut bytes: Vec<u8>, c: u32) {
+fn utf8_push(bytes: Vec<u8>, c: u32) {
     if (c < 0x80) {
         bytes.push(c as u8);
     } else if (c < 0x800) {
@@ -500,8 +500,8 @@ fn utf8_push(mut bytes: Vec<u8>, c: u32) {
 /// is never a space).
 fn s3_decode(s: str) -> str {
     let n = s.len();
-    let mut bytes = Vec<u8>::new();
-    let mut i = 0;
+    let bytes = Vec<u8>::new();
+    let i = 0;
     while (i < n) {
         let c = s.code_at(i);
         if (c == 37 && i + 2 < n) {
@@ -533,7 +533,7 @@ fn scheme_end(s: str) -> i32 {
     if (!((c0 >= 97 && c0 <= 122) || (c0 >= 65 && c0 <= 90))) {
         return -1;
     }
-    let mut i = 1;
+    let i = 1;
     while (i < n) {
         let c = s.code_at(i);
         if (c == 58) {
@@ -554,7 +554,7 @@ fn scheme_end(s: str) -> i32 {
 
 fn rstrip_slashes(s: str) -> str {
     let n = s.len();
-    let mut b = n;
+    let b = n;
     // Strip ALL trailing slashes — a root-only base (`/`) must become ""
     // or every URL join doubles the slash (strict routers 301).
     while (b > 0 && s.code_at(b - 1) == 47) {
@@ -565,7 +565,7 @@ fn rstrip_slashes(s: str) -> str {
 
 fn lstrip_slashes(s: str) -> str {
     let n = s.len();
-    let mut a = 0;
+    let a = 0;
     while (a < n && s.code_at(a) == 47) {
         a += 1;
     }
@@ -574,7 +574,7 @@ fn lstrip_slashes(s: str) -> str {
 
 fn contains_ws(s: str) -> bool {
     let n = s.len();
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         if (is_ws(s.code_at(i))) {
             return true;
@@ -592,8 +592,8 @@ fn normalize_endpoint(input: str) -> ?Endpoint {
     if (trimmed == "") {
         return nil;
     }
-    let mut s = trimmed;
-    let mut scheme = "https";
+    let s = trimmed;
+    let scheme = "https";
     let se = scheme_end(s);
     if (se != -1) {
         let sch = s.slice(0, se);
@@ -612,8 +612,8 @@ fn normalize_endpoint(input: str) -> ?Endpoint {
         s = s.slice(8, s.len());
     }
     let slash = find_from(s, 0, 47);
-    let mut authority = s;
-    let mut base_path = "";
+    let authority = s;
+    let base_path = "";
     if (slash != -1) {
         authority = s.slice(0, slash);
         base_path = rstrip_slashes(s.slice(slash, s.len()));
@@ -622,7 +622,7 @@ fn normalize_endpoint(input: str) -> ?Endpoint {
     if (authority == "" || contains_ws(authority) || authority.code_at(0) == 58) {
         return nil;
     }
-    let mut host = authority;
+    let hostname = authority;
     let colon = find_last(authority, 58);
     if (colon != -1) {
         let port = authority.slice(colon + 1, authority.len());
@@ -632,17 +632,17 @@ fn normalize_endpoint(input: str) -> ?Endpoint {
         // Strip explicit default ports — the net layer's URL parser drops
         // them, so the Host header (and the signed `host` value) must match.
         if ((scheme == "http" && port == "80") || (scheme == "https" && port == "443")) {
-            host = authority.slice(0, colon);
+            hostname = authority.slice(0, colon);
         }
     }
-    return Endpoint { origin: f"{scheme}://{host}{base_path}", host: host, base_path: base_path };
+    return Endpoint { origin: f"{scheme}://{hostname}{base_path}", host: hostname, base_path: base_path };
 }
 
 /// Host `dir` ("", "/", "/music/album") → S3 list prefix ("", "music/album/").
 fn dir_to_prefix(dir: str) -> str {
-    let mut d = lstrip_slashes(dir);
+    let d = lstrip_slashes(dir);
     let n = d.len();
-    let mut b = n;
+    let b = n;
     while (b > 0 && d.code_at(b - 1) == 47) {
         b -= 1;
     }
@@ -661,11 +661,11 @@ fn path_to_key(path: str) -> str {
 /// Canonical URI for a request (also used verbatim as the URL's path):
 /// `/[basePath/]bucket[/key]`, strictly encoded with slashes preserved.
 fn canonical_uri(ep: Endpoint, bucket: str, key: str) -> str {
-    let mut base = "";
+    let base = "";
     if (ep.base_path != "") {
         base = s3_encode(ep.base_path, true);
     }
-    let mut uri = f"{base}/{s3_encode(bucket, false)}";
+    let uri = f"{base}/{s3_encode(bucket, false)}";
     if (key != "") {
         uri = f"{uri}/{s3_encode(key, true)}";
     }
@@ -682,7 +682,7 @@ fn kv_key(instance: str) -> str {
 
 /// The optional-string read: `null` → nil, a string → some, anything else
 /// (or a truncated body) → the reader's sticky error.
-fn read_opt_str(mut r: JsonReader) -> ?str {
+fn read_opt_str(r: JsonReader) -> ?str {
     if (r.try_null()) {
         return nil;
     }
@@ -703,14 +703,14 @@ fn opt_str_or(v: ?str, fallback: str) -> str {
 
 /// Decode the persisted config document; nil on corrupt JSON.
 fn decode_config(doc: str) -> ?Config {
-    let mut r = JsonReader::of(doc);
+    let r = JsonReader::of(doc);
     r.begin_object();
-    let mut alias: ?str = nil;
-    let mut endpoint: ?str = nil;
-    let mut region: ?str = nil;
-    let mut bucket: ?str = nil;
-    let mut access_key_id: ?str = nil;
-    let mut secret_id: i64 = 0;
+    let alias: ?str = nil;
+    let endpoint: ?str = nil;
+    let region: ?str = nil;
+    let bucket: ?str = nil;
+    let access_key_id: ?str = nil;
+    let secret_id: i64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -758,7 +758,7 @@ fn config_of(instance: str) -> ?Config {
     if (cfg == nil) {
         return nil;
     }
-    let mut c: Config = cfg;
+    let c: Config = cfg;
     if (c.alias == "") {
         c.alias = instance;
     }
@@ -784,7 +784,7 @@ fn load_secret(conf: Config) -> str {
 /// The persisted config document (the TS `configToJson` — the exact key
 /// names keep legacy configs readable).
 fn config_json(conf: Config) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("alias");
     w.write_str(conf.alias);
@@ -817,7 +817,7 @@ fn bucket_ok(bucket: str) -> bool {
     if (!is_alnum(bucket.code_at(0)) || !is_alnum(bucket.code_at(n - 1))) {
         return false;
     }
-    let mut i = 1;
+    let i = 1;
     while (i < n - 1) {
         let c = bucket.code_at(i);
         if (!is_alnum(c) && c != 46 && c != 95 && c != 45) {
@@ -838,13 +838,13 @@ fn is_alnum(c: u32) -> bool {
 
 /// Sort the query params by key (then value) in place — insertion sort, the
 /// param sets here are tiny.
-fn sort_query(mut keys: Vec<str>, mut vals: Vec<str>) {
+fn sort_query(keys: Vec<str>, vals: Vec<str>) {
     let n = keys.len;
-    let mut i = 1;
+    let i = 1;
     while (i < n) {
         let kk = keys[i];
         let kv = vals[i];
-        let mut j = i - 1;
+        let j = i - 1;
         while (j >= 0 && query_less(kk, kv, keys[j], vals[j])) {
             keys[j + 1] = keys[j];
             vals[j + 1] = vals[j];
@@ -866,11 +866,11 @@ fn query_less(k1: str, v1: str, k2: str, v2: str) -> bool {
 /// Canonical query string: params sorted by key (then value), strictly
 /// encoded, joined `k=v` with `&`. The SAME string doubles as the request
 /// URL's query — servers don't care about order, the signature does.
-fn canonical_query(mut keys: Vec<str>, mut vals: Vec<str>) -> str {
+fn canonical_query(keys: Vec<str>, vals: Vec<str>) -> str {
     sort_query(keys, vals);
-    let mut b = StringBuilder::with_cap(64);
+    let b = StringBuilder::with_cap(64);
     let n = keys.len;
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         if (i > 0) {
             b.append("&");
@@ -905,7 +905,7 @@ fn build_signed_request(conf: Config, secret_key: str, key: str, qk: Vec<str>, q
     let ms = now_unix_ms();
     let amz_date = format_amz_date(ms);
     let date_stamp = amz_date.slice(0, 8);
-    let mut region = conf.region;
+    let region = conf.region;
     if (region == "") {
         region = DEFAULT_REGION;
     }
@@ -913,7 +913,7 @@ fn build_signed_request(conf: Config, secret_key: str, key: str, qk: Vec<str>, q
     // Canonical headers in sorted (lowercase) name order — the signed set is
     // exactly host [+ range] + x-amz-content-sha256 + x-amz-date. The
     // spec's trimall is a no-op here: every value is synthesized clean.
-    let mut cr = StringBuilder::with_cap(512);
+    let cr = StringBuilder::with_cap(512);
     cr.append("GET\n");
     cr.append(uri);
     cr.append("\n");
@@ -925,7 +925,7 @@ fn build_signed_request(conf: Config, secret_key: str, key: str, qk: Vec<str>, q
     }
     cr.append(f"x-amz-content-sha256:{EMPTY_PAYLOAD_SHA256}\n");
     cr.append(f"x-amz-date:{amz_date}\n");
-    let mut signed_headers = "host;x-amz-content-sha256;x-amz-date";
+    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
     if (range != "") {
         signed_headers = "host;range;x-amz-content-sha256;x-amz-date";
     }
@@ -937,7 +937,7 @@ fn build_signed_request(conf: Config, secret_key: str, key: str, qk: Vec<str>, q
 
     // String to sign (step 2).
     let hashed = sha256_hex(encode_utf8(canonical_request));
-    let mut sts = StringBuilder::with_cap(256);
+    let sts = StringBuilder::with_cap(256);
     sts.append(ALGORITHM);
     sts.append("\n");
     sts.append(amz_date);
@@ -951,14 +951,14 @@ fn build_signed_request(conf: Config, secret_key: str, key: str, qk: Vec<str>, q
     let signature = hmac_sha256_hex(signing_key, encode_utf8(sts.build()));
     let authorization = f"{ALGORITHM} Credential={conf.access_key_id}/{date_stamp}/{region}/{S3_SERVICE}/{AMZ_TERMINATOR}, SignedHeaders={signed_headers}, Signature={signature}";
 
-    let mut url = f"{ep.origin}{uri}";
+    let url = f"{ep.origin}{uri}";
     if (query != "") {
         url = f"{url}?{query}";
     }
 
     // Wire headers: signed names are lowercase per the SigV4 spec, but
     // `Range` goes out in conventional casing.
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("url");
     w.write_str(url);
@@ -999,15 +999,15 @@ fn marked_transport_error(msg: str) -> str {
 /// with lowercased names (the three this plugin reads are captured).
 fn sync_get(opts: str) -> SyncResp {
     let reply = request_sync(opts);
-    let mut r = JsonReader::of(reply);
+    let r = JsonReader::of(reply);
     r.begin_object();
-    let mut status: u64 = 0;
-    let mut status_text = "";
-    let mut body_b64 = "";
-    let mut err = "";
-    let mut content_range: ?str = nil;
-    let mut content_type: ?str = nil;
-    let mut content_length: ?str = nil;
+    let status: u64 = 0;
+    let status_text = "";
+    let body_b64 = "";
+    let err = "";
+    let content_range: ?str = nil;
+    let content_type: ?str = nil;
+    let content_length: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1089,7 +1089,7 @@ fn parse_s3_error(body_b64: str) -> ?S3Error {
         return nil;
     }
     let t: str = tree;
-    let mut r = JsonReader::of(t);
+    let r = JsonReader::of(t);
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1117,9 +1117,9 @@ fn parse_s3_error(body_b64: str) -> ?S3Error {
 }
 
 /// One `<Error>` el: `{code, message}` — nil when the Code el is missing.
-fn error_el(mut r: JsonReader) -> ?S3Error {
-    let mut code: ?str = nil;
-    let mut message: ?str = nil;
+fn error_el(r: JsonReader) -> ?S3Error {
+    let code: ?str = nil;
+    let message: ?str = nil;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1158,8 +1158,8 @@ fn error_el(mut r: JsonReader) -> ?S3Error {
 /// UNAUTHORIZED prefix; the S3 error document's Code/Message (else the
 /// status text) ride the message.
 fn http_error_text(status: u64, status_text: str, body_b64: str) -> str {
-    let mut code = "";
-    let mut message = trim(status_text);
+    let code = "";
+    let message = trim(status_text);
     let parsed = parse_s3_error(body_b64);
     if (parsed != nil) {
         let p: S3Error = parsed;
@@ -1222,8 +1222,8 @@ fn parse_iso_date(s: str) -> u64 {
 }
 
 fn iso_num(s: str, at: i32, n: i32) -> i64 {
-    let mut acc: i64 = 0;
-    let mut i = at;
+    let acc: i64 = 0;
+    let i = at;
     while (i < at + n) {
         let c = s.code_at(i);
         if (c < 48 || c > 57) {
@@ -1237,7 +1237,7 @@ fn iso_num(s: str, at: i32, n: i32) -> i64 {
 
 /// Howard Hinnant's `days_from_civil`.
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let mut yy = y;
+    let yy = y;
     if (m <= 2) {
         yy = y - 1;
     }
@@ -1262,8 +1262,8 @@ fn floordiv(a: i64, b: i64) -> i64 {
 // ---------------------------------------------------------------------------
 
 /// The `text` member of one el (nil when absent).
-fn el_text(mut r: JsonReader) -> ?str {
-    let mut found: ?str = nil;
+fn el_text(r: JsonReader) -> ?str {
+    let found: ?str = nil;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1290,8 +1290,8 @@ fn el_text(mut r: JsonReader) -> ?str {
 /// Walk the decoded tree: 0 = ok, 1 = unparsable, 2 = no ListBucketResult
 /// root (a silent `[]` once hid a runtime gap as an "empty directory" —
 /// a missing root stays an error, like the TS threw).
-fn walk_list_tree(tree: str, mut cx: ListCx) -> i32 {
-    let mut r = JsonReader::of(tree);
+fn walk_list_tree(tree: str, cx: ListCx) -> i32 {
+    let r = JsonReader::of(tree);
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1317,7 +1317,7 @@ fn walk_list_tree(tree: str, mut cx: ListCx) -> i32 {
     return 0;
 }
 
-fn walk_root_children(mut r: JsonReader, mut cx: ListCx) -> i32 {
+fn walk_root_children(r: JsonReader, cx: ListCx) -> i32 {
     r.begin_object();
     while (r.more()) {
         let tag = r.next_key();
@@ -1341,7 +1341,7 @@ fn walk_root_children(mut r: JsonReader, mut cx: ListCx) -> i32 {
 }
 
 /// One el or an array of els (single-element pages take the same path).
-fn each_lbr(mut r: JsonReader, mut cx: ListCx) -> i32 {
+fn each_lbr(r: JsonReader, cx: ListCx) -> i32 {
     if (r.rest().starts_with(0, "[")) {
         r.begin_array();
         while (r.more()) {
@@ -1363,7 +1363,7 @@ fn each_lbr(mut r: JsonReader, mut cx: ListCx) -> i32 {
 /// One ListBucketResult el: Contents / CommonPrefixes / IsTruncated /
 /// NextContinuationToken (the truncated flag and the token are collected
 /// independently — document order doesn't matter).
-fn walk_lbr_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
+fn walk_lbr_el(r: JsonReader, cx: ListCx) -> i32 {
     cx.found_root = true;
     r.begin_object();
     while (r.more()) {
@@ -1419,7 +1419,7 @@ fn walk_lbr_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
     return 0;
 }
 
-fn each_contents(mut r: JsonReader, mut cx: ListCx) -> i32 {
+fn each_contents(r: JsonReader, cx: ListCx) -> i32 {
     if (r.rest().starts_with(0, "[")) {
         r.begin_array();
         while (r.more()) {
@@ -1440,10 +1440,10 @@ fn each_contents(mut r: JsonReader, mut cx: ListCx) -> i32 {
 
 /// One Contents el: Key (decoded — AWS URL-encodes, MinIO doesn't; a
 /// tolerant decode keeps the input verbatim on failure), Size, LastModified.
-fn walk_contents_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
-    let mut key: ?str = nil;
-    let mut size: ?str = nil;
-    let mut lastmod: ?str = nil;
+fn walk_contents_el(r: JsonReader, cx: ListCx) -> i32 {
+    let key: ?str = nil;
+    let size: ?str = nil;
+    let lastmod: ?str = nil;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1486,7 +1486,7 @@ fn walk_contents_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
     return 0;
 }
 
-fn each_prefixes(mut r: JsonReader, mut cx: ListCx) -> i32 {
+fn each_prefixes(r: JsonReader, cx: ListCx) -> i32 {
     if (r.rest().starts_with(0, "[")) {
         r.begin_array();
         while (r.more()) {
@@ -1507,7 +1507,7 @@ fn each_prefixes(mut r: JsonReader, mut cx: ListCx) -> i32 {
 
 /// One CommonPrefixes el: the inner Prefix el is what repeats in practice;
 /// the single-el form is accepted too.
-fn walk_cp_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
+fn walk_cp_el(r: JsonReader, cx: ListCx) -> i32 {
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1545,7 +1545,7 @@ fn walk_cp_el(mut r: JsonReader, mut cx: ListCx) -> i32 {
     return 0;
 }
 
-fn each_prefix_text(mut r: JsonReader, mut cx: ListCx) -> i32 {
+fn each_prefix_text(r: JsonReader, cx: ListCx) -> i32 {
     if (r.rest().starts_with(0, "[")) {
         r.begin_array();
         while (r.more()) {
@@ -1573,7 +1573,7 @@ fn each_prefix_text(mut r: JsonReader, mut cx: ListCx) -> i32 {
 /// URL-encodes keys, MinIO returns them raw — the decoded form is the
 /// canonical key the plugin re-encodes for `storage:get`); folder-marker
 /// keys are elided; the path is "/" + key.
-fn push_file_row(mut cx: ListCx, key_text: str, size: ?str, lastmod: ?str) {
+fn push_file_row(cx: ListCx, key_text: str, size: ?str, lastmod: ?str) {
     let key = s3_decode(key_text);
     if (key == "") {
         return;
@@ -1586,7 +1586,7 @@ fn push_file_row(mut cx: ListCx, key_text: str, size: ?str, lastmod: ?str) {
     }
     let path = f"/{key}";
     let name = last_segment(key);
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("name");
     w.write_str(name);
@@ -1618,15 +1618,15 @@ fn push_file_row(mut cx: ListCx, key_text: str, size: ?str, lastmod: ?str) {
 
 /// One directory row (the CommonPrefixes half): the trailing slash trims;
 /// the queried prefix itself never re-lists.
-fn push_dir_row(mut cx: ListCx, prefix_text: str) {
-    let mut trimmed = s3_decode(prefix_text);
+fn push_dir_row(cx: ListCx, prefix_text: str) {
+    let trimmed = s3_decode(prefix_text);
     if (ends_with(trimmed, "/")) {
         trimmed = trimmed.slice(0, trimmed.len() - 1);
     }
     if (trimmed == "") {
         return;
     }
-    let mut own = "";
+    let own = "";
     if (cx.prefix.len() > 0) {
         own = cx.prefix.slice(0, cx.prefix.len() - 1);
     }
@@ -1635,7 +1635,7 @@ fn push_dir_row(mut cx: ListCx, prefix_text: str) {
     }
     let path = f"/{trimmed}";
     let name = last_segment(trimmed);
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("name");
     w.write_str(name);
@@ -1651,14 +1651,14 @@ fn push_dir_row(mut cx: ListCx, prefix_text: str) {
 /// Sort (dirs first via the key's d/f flag, then by path — matching the TS
 /// comparator), drop adjacent duplicates (S3 pages are disjoint and keys
 /// unique; the dedupe only guards degenerate servers), join the JSON rows.
-fn render_entries(mut cx: ListCx) -> str {
+fn render_entries(cx: ListCx) -> str {
     sort_rows(cx.keys, cx.jsons);
-    let mut out = StringBuilder::with_cap(256);
+    let out = StringBuilder::with_cap(256);
     out.append("[");
-    let mut first = true;
-    let mut prev = "";
-    let mut have_prev = false;
-    let mut i = 0;
+    let first = true;
+    let prev = "";
+    let have_prev = false;
+    let i = 0;
     while (i < cx.keys.len) {
         let k = cx.keys[i];
         if (!have_prev || k != prev) {
@@ -1676,13 +1676,13 @@ fn render_entries(mut cx: ListCx) -> str {
     return out.build();
 }
 
-fn sort_rows(mut keys: Vec<str>, mut jsons: Vec<str>) {
+fn sort_rows(keys: Vec<str>, jsons: Vec<str>) {
     let n = keys.len;
-    let mut i = 1;
+    let i = 1;
     while (i < n) {
         let kk = keys[i];
         let kj = jsons[i];
-        let mut j = i - 1;
+        let j = i - 1;
         while (j >= 0 && str_less(kk, keys[j])) {
             keys[j + 1] = keys[j];
             jsons[j + 1] = jsons[j];
@@ -1703,7 +1703,7 @@ fn sort_rows(mut keys: Vec<str>, mut jsons: Vec<str>) {
 /// prefix), the entry array JSON otherwise.
 fn list_impl(conf: Config, secret_key: str, dir: str) -> (?str, str) {
     let prefix = dir_to_prefix(dir);
-    let mut cx = ListCx {
+    let cx = ListCx {
         prefix: prefix,
         keys: Vec<str>::new(),
         jsons: Vec<str>::new(),
@@ -1711,11 +1711,11 @@ fn list_impl(conf: Config, secret_key: str, dir: str) -> (?str, str) {
         truncated: false,
         token_raw: "",
     };
-    let mut token = "";
-    let mut pages: i32 = 0;
+    let token = "";
+    let pages: i32 = 0;
     while (true) {
-        let mut qk = Vec<str>::new();
-        let mut qv = Vec<str>::new();
+        let qk = Vec<str>::new();
+        let qv = Vec<str>::new();
         qk.push("list-type");
         qv.push("2");
         qk.push("delimiter");
@@ -1742,7 +1742,7 @@ fn list_impl(conf: Config, secret_key: str, dir: str) -> (?str, str) {
             return (nil, "s3: ListObjectsV2 response has no ListBucketResult root");
         }
         pages += 1;
-        let mut next = "";
+        let next = "";
         if (cx.truncated) {
             next = cx.token_raw;
         }
@@ -1765,7 +1765,7 @@ fn list_impl(conf: Config, secret_key: str, dir: str) -> (?str, str) {
 /// chunked-pull contract the opener's body is discarded, so pulling the
 /// whole remainder here would double every download.) The session parks the
 /// signing inputs under a fresh `sid`.
-fn open_impl(conf: Config, secret_key: str, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
+fn open_impl(conf: Config, secret_key: str, path: str, offset: u64, c: Ctx) -> (?str, str) {
     let key = path_to_key(path);
     let signed = build_signed_request(conf, secret_key, key, Vec<str>::new(), Vec<str>::new(), f"bytes={offset}-{offset}");
     if (signed == nil) {
@@ -1782,11 +1782,11 @@ fn open_impl(conf: Config, secret_key: str, path: str, offset: u64, mut c: Ctx) 
     // S3 always honors Range (206 + Content-Range), but a gateway that
     // doesn't gets the same `dataOffset: 0` fallback as the WebDAV plugin:
     // the host drops the prefix bytes itself.
-    let mut range_honored = resp.status == 206;
+    let range_honored = resp.status == 206;
     if (resp.content_range != nil) {
         range_honored = true;
     }
-    let mut data_offset = offset;
+    let data_offset = offset;
     if (!range_honored) {
         data_offset = 0;
     }
@@ -1794,7 +1794,7 @@ fn open_impl(conf: Config, secret_key: str, path: str, offset: u64, mut c: Ctx) 
     // Content-Length on a Range response is the partial length. (With the
     // single-byte opener it only falls back to Content-Length when the
     // server ignored the Range — where that length is the full size.)
-    let mut total: i64 = -1;
+    let total: i64 = -1;
     if (resp.content_range != nil) {
         let s: str = resp.content_range;
         let slash = find_last(s, 47);
@@ -1813,8 +1813,8 @@ fn open_impl(conf: Config, secret_key: str, path: str, offset: u64, mut c: Ctx) 
         }
     }
     // claim a session slot
-    let mut slot: i32 = -1;
-    let mut i: i32 = 0;
+    let slot: i32 = -1;
+    let i: i32 = 0;
     while (i < POOL) {
         if (c.sess_sid[i] == 0) {
             slot = i;
@@ -1835,7 +1835,7 @@ fn open_impl(conf: Config, secret_key: str, path: str, offset: u64, mut c: Ctx) 
     c.sess_ak[slot] = conf.access_key_id;
     c.sess_sk[slot] = secret_key;
     let name = last_segment(path);
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("sid");
     w.write_i64(sid as i64);
@@ -1862,7 +1862,7 @@ fn open_impl(conf: Config, secret_key: str, path: str, offset: u64, mut c: Ctx) 
 }
 
 fn session_of(c: Ctx, sid: u64) -> ?Session {
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < POOL) {
         if (sid != 0 && c.sess_sid[i] == sid) {
             let ep = c.sess_ep[i];
@@ -1894,8 +1894,8 @@ fn session_of(c: Ctx, sid: u64) -> ?Session {
     return nil;
 }
 
-fn release_impl(mut c: Ctx, sid: u64) -> bool {
-    let mut i: i32 = 0;
+fn release_impl(c: Ctx, sid: u64) -> bool {
+    let i: i32 = 0;
     while (i < POOL) {
         if (sid != 0 && c.sess_sid[i] == sid) {
             c.sess_sid[i] = 0;
@@ -1950,7 +1950,7 @@ fn chunk_impl(s: Session, offset: u64, len: u64) -> (?str, str) {
 }
 
 fn chunk_json(data_b64: str, eof: bool) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("data");
     w.write_str(data_b64);
@@ -1972,7 +1972,7 @@ fn resolve_test(a: TestArgs) -> (?Config, str) {
     let access_key_id = trim(a.access_key_id);
     let secret_key = a.secret_key;
     if (secret_key != "" || a.storage_id == nil) {
-        let mut region = trim(a.region);
+        let region = trim(a.region);
         if (region == "") {
             region = DEFAULT_REGION;
         }
@@ -1990,7 +1990,7 @@ fn resolve_test(a: TestArgs) -> (?Config, str) {
     if (stored == nil) {
         return (nil, "");
     }
-    let mut conf: Config = stored;
+    let conf: Config = stored;
     if (endpoint != "") {
         conf.endpoint = endpoint;
     }
@@ -2013,8 +2013,8 @@ fn test_impl(a: TestArgs) -> str {
     }
     let conf: Config = conf_o;
     let secret_key: str = resolved.1;
-    let mut qk = Vec<str>::new();
-    let mut qv = Vec<str>::new();
+    let qk = Vec<str>::new();
+    let qv = Vec<str>::new();
     qk.push("list-type");
     qv.push("2");
     qk.push("max-keys");
@@ -2041,12 +2041,12 @@ fn test_impl(a: TestArgs) -> str {
 /// the reply document `{storageId, created}`.
 fn connect_impl(args: ConnectArgs) -> (?str, str) {
     let endpoint = trim(args.endpoint);
-    let mut region = trim(args.region);
+    let region = trim(args.region);
     if (region == "") {
         region = DEFAULT_REGION;
     }
     let bucket = trim(args.bucket);
-    let mut alias = trim(args.alias);
+    let alias = trim(args.alias);
     if (alias == "") {
         alias = "S3";
     }
@@ -2067,7 +2067,7 @@ fn connect_impl(args: ConnectArgs) -> (?str, str) {
     if (args.storage_id != nil) {
         // Update: keep the existing secret unless a new one is given.
         let sid: str = args.storage_id;
-        let mut secret_id: i64 = 0;
+        let secret_id: i64 = 0;
         let existing = config_of(sid);
         if (existing != nil) {
             let e: Config = existing;
@@ -2089,7 +2089,7 @@ fn connect_impl(args: ConnectArgs) -> (?str, str) {
             secret_id: secret_id,
         };
         single_set(kv_key(sid), config_json(conf));
-        let mut w = JsonWriter::new();
+        let w = JsonWriter::new();
         w.begin_object();
         w.key("storageId");
         w.write_str(sid);
@@ -2114,7 +2114,7 @@ fn connect_impl(args: ConnectArgs) -> (?str, str) {
         secret_id: secret_id,
     };
     single_set(kv_key(instance), config_json(conf));
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("storageId");
     w.write_str(instance);
@@ -2128,8 +2128,8 @@ fn connect_impl(args: ConnectArgs) -> (?str, str) {
 /// parked on it, ask the host to delete the storage row, and reload the
 /// dashboard. Called from the host trash button (`storage:removeInstance`
 /// via `storage_plugin.remove_instance`).
-fn remove_instance_impl(mut c: Ctx, storage_id: str) {
-    let mut endpoint = "";
+fn remove_instance_impl(c: Ctx, storage_id: str) {
+    let endpoint = "";
     let existing = config_of(storage_id);
     if (existing != nil) {
         let e: Config = existing;
@@ -2140,7 +2140,7 @@ fn remove_instance_impl(mut c: Ctx, storage_id: str) {
     }
     // free the sessions parked on this instance's config (the chunk op
     // carries only `sid`, so a surviving slot would serve a dead instance)
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < POOL) {
         if (c.sess_sid[i] != 0) {
             let ep = c.sess_ep[i];
@@ -2172,7 +2172,7 @@ fn remove_instance_impl(mut c: Ctx, storage_id: str) {
 
 /// Position the cursor inside the envelope's `args` object (`{"op":…,
 /// "args":{…}}` — the caller decodes fields then closes the object).
-fn enter_args(mut r: JsonReader) -> bool {
+fn enter_args(r: JsonReader) -> bool {
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -2198,12 +2198,12 @@ entry fn op_storage_list(cx: opaque) -> str {
         panic("storage:list: cx is not a Ctx");
     }
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("s3: bad storage:list request");
     }
-    let mut storage_id: ?str = nil;
-    let mut dir: ?str = nil;
+    let storage_id: ?str = nil;
+    let dir: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2243,15 +2243,15 @@ entry fn op_storage_get(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:get: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("s3: bad storage:get request");
     }
-    let mut storage_id: ?str = nil;
-    let mut path: ?str = nil;
-    let mut offset: u64 = 0;
+    let storage_id: ?str = nil;
+    let path: ?str = nil;
+    let offset: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2294,13 +2294,13 @@ entry fn op_storage_get_chunk(cx: opaque) -> str {
     }
     let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("s3: bad storage:get-chunk request");
     }
-    let mut sid: u64 = 0;
-    let mut offset: u64 = 0;
-    let mut len: u64 = 0;
+    let sid: u64 = 0;
+    let offset: u64 = 0;
+    let len: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2339,13 +2339,13 @@ entry fn op_storage_release(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:release: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("s3: bad storage:release request");
     }
-    let mut sid: u64 = 0;
+    let sid: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2369,13 +2369,13 @@ entry fn op_storage_remove_instance(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:removeInstance: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("s3: bad storage:removeInstance request");
     }
-    let mut storage_id: ?str = nil;
+    let storage_id: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2404,16 +2404,16 @@ entry fn op_s3_test(cx: opaque) -> str {
         panic("s3:test: cx is not a Ctx");
     }
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("s3: bad s3:test request");
     }
-    let mut storage_id: ?str = nil;
-    let mut endpoint = "";
-    let mut region = "";
-    let mut bucket = "";
-    let mut access_key_id = "";
-    let mut secret_key = "";
+    let storage_id: ?str = nil;
+    let endpoint = "";
+    let region = "";
+    let bucket = "";
+    let access_key_id = "";
+    let secret_key = "";
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2441,7 +2441,7 @@ entry fn op_s3_test(cx: opaque) -> str {
         access_key_id: access_key_id,
         secret_key: secret_key,
     });
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("result");
     w.write_str(outcome);
@@ -2455,17 +2455,17 @@ entry fn op_s3_connect(cx: opaque) -> str {
         panic("s3:connect: cx is not a Ctx");
     }
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("s3: bad s3:connect request");
     }
-    let mut storage_id: ?str = nil;
-    let mut endpoint = "";
-    let mut region = "";
-    let mut bucket = "";
-    let mut alias = "";
-    let mut access_key_id = "";
-    let mut secret_key = "";
+    let storage_id: ?str = nil;
+    let endpoint = "";
+    let region = "";
+    let bucket = "";
+    let alias = "";
+    let access_key_id = "";
+    let secret_key = "";
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2497,7 +2497,7 @@ entry fn op_s3_connect(cx: opaque) -> str {
     });
     let o = out.0;
     if (o == nil) {
-        let mut msg = out.1;
+        let msg = out.1;
         if (msg == "") {
             msg = "s3: connect failed";
         }

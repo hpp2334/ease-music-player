@@ -18,17 +18,21 @@ serde = { workspace = true }
 serde_json = "1.0"
 anyhow = { workspace = true }
 
-# 795538f = the post-boa→rut engine (JS rail deleted; host modules are
-# typed `tur_host` pkg rows; per-instance identity via `instance_data`;
-# the rut event-bus machinery rides rut pin 09dea6a inside tur).
-tur-android = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
-tur-animation = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
+# 3b34983 = tur main (2026-11-22). Host modules stay typed `tur_host`
+# pkg rows with per-instance identity via `instance_data`; the rut pin
+# rides 460e8887 inside tur — the drop-mut law (bindings/params are
+# mutable by default, the `mut` keyword is gone), `host`/`when` now
+# reserved, the parser merge (rut-ast owns the parser), std-v18, the
+# glob leaf + the Name vocabulary, and tur's own .rut sources swept by
+# the rut formatter.
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
 # The `Http` capability type the `ease.net` rows resolve through the
 # instance (the NativeHttp backend registers via tur-android's defaults).
-tur-net-capability = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
-rut-core = { git = "https://github.com/hpp2334/rut", rev = "b44924f5cfd21f4345b3ae8575761f136ba7fb98", default-features = false }
-rut-vm = { git = "https://github.com/hpp2334/rut", rev = "b44924f5cfd21f4345b3ae8575761f136ba7fb98", default-features = false }
+tur-net-capability = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+rut-core = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+rut-vm = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
 futures = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 

@@ -10,11 +10,11 @@ ease-client-android = { path = "../ease-client-android" }
 ease-client-backend = { path = "../ease-client-backend" }
 ease-client-tokio = { path = "../ease-client-tokio" }
 ease-tur-rpc = { path = "../ease-tur-rpc" }
-tur-engine = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
 
 [dev-dependencies]
-tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
-tur-native = { git = "https://github.com/hpp2334/tur", rev = "e13dd9830d204221a9b3af285c0f95ca8f431901" }
+tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
 serde_json = "1"
 futures = { workspace = true }
 tokio = { version = "1", features = ["rt", "macros"] }

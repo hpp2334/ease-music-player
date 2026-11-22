@@ -46,7 +46,7 @@ entry fn start() -> u64 {
     // Mode: nil = create (no storage row yet), a real id = edit. Read once —
     // the value never changes for the instance lifetime.
     let sid = storage_id();
-    let mut sid_seed = "";
+    let sid_seed = "";
     if (sid != nil) {
         sid_seed = sid;
     }
@@ -124,8 +124,8 @@ entry fn start() -> u64 {
         let is_anon = ctx.get<bool>(anonymous);
         let addr = trim(ctrl_addr.text());
         let alias = trim(ctrl_alias.text());
-        let mut username = "";
-        let mut password = "";
+        let username = "";
+        let password = "";
         if (!is_anon) {
             username = trim(ctrl_username.text());
             password = ctrl_password.text();
@@ -162,8 +162,8 @@ entry fn start() -> u64 {
         let is_anon = ctx.get<bool>(anonymous);
         let addr = trim(ctrl_addr.text());
         let alias = trim(ctrl_alias.text());
-        let mut username = "";
-        let mut password = "";
+        let username = "";
+        let password = "";
         if (!is_anon) {
             username = trim(ctrl_username.text());
             password = ctrl_password.text();
@@ -270,12 +270,12 @@ struct StoredConfig {
 
 /// Decode the persisted config document; nil on corrupt JSON.
 fn decode_config(doc: str) -> ?StoredConfig {
-    let mut r = JsonReader::of(doc);
+    let r = JsonReader::of(doc);
     r.begin_object();
-    let mut alias = "";
-    let mut addr = "";
-    let mut username = "";
-    let mut anon = false;
+    let alias = "";
+    let addr = "";
+    let username = "";
+    let anon = false;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -471,11 +471,11 @@ fn status_area(status_text: Readable<str>, status_visible: Readable<bool>, statu
 
 fn trim(s: str) -> str {
     let n = s.len();
-    let mut a = 0;
+    let a = 0;
     while (a < n && is_ws(s.code_at(a))) {
         a += 1;
     }
-    let mut b = n;
+    let b = n;
     while (b > a && is_ws(s.code_at(b - 1))) {
         b -= 1;
     }
@@ -527,7 +527,7 @@ struct ConnectReply {
 }
 
 fn test_args(storage_id: ?str, addr: str, username: str, password: str, is_anon: bool) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     if (storage_id != nil) {
         let s: str = storage_id;
@@ -547,7 +547,7 @@ fn test_args(storage_id: ?str, addr: str, username: str, password: str, is_anon:
 }
 
 fn connect_args(storage_id: ?str, addr: str, alias: str, username: str, password: str, is_anon: bool) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     if (storage_id != nil) {
         let s: str = storage_id;
@@ -570,12 +570,12 @@ fn connect_args(storage_id: ?str, addr: str, alias: str, username: str, password
 
 /// `{"ok":true,"result":{"result":"SUCCESS"}}` / `{"ok":false,"error":"…"}`.
 fn parse_test_reply(reply: str) -> TestReply {
-    let mut r = JsonReader::of(reply);
+    let r = JsonReader::of(reply);
     r.begin_object();
-    let mut ok = false;
-    let mut have_ok = false;
-    let mut message = "";
-    let mut outcome = "OTHER_ERROR";
+    let ok = false;
+    let have_ok = false;
+    let message = "";
+    let outcome = "OTHER_ERROR";
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -618,13 +618,13 @@ fn parse_test_reply(reply: str) -> TestReply {
 
 /// `{"ok":true,"result":{"storageId":"…","created":true}}` / the error shape.
 fn parse_connect_reply(reply: str) -> ConnectReply {
-    let mut r = JsonReader::of(reply);
+    let r = JsonReader::of(reply);
     r.begin_object();
-    let mut ok = false;
-    let mut have_ok = false;
-    let mut message = "";
-    let mut storage_id = "";
-    let mut created = false;
+    let ok = false;
+    let have_ok = false;
+    let message = "";
+    let storage_id = "";
+    let created = false;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {

@@ -901,6 +901,30 @@ fn installed_api_version(root: &Path, plugin_id: &str) -> Option<i64> {
     parse_manifest(&text).ok()?.api_version
 }
 
+/// The declared version of an installed copy, or `None` when the folder
+/// is missing / the manifest doesn't parse. The bootstrap's outdated-heal
+/// compares it against the bundled zip's version ([`zip_manifest_version`]).
+fn installed_version(root: &Path, plugin_id: &str) -> Option<String> {
+    let text = std::fs::read_to_string(root.join(plugin_id).join("manifest.json")).ok()?;
+    parse_manifest(&text).ok().map(|m| m.version)
+}
+
+/// Peek a zip's root `manifest.json` version without installing — the
+/// bootstrap compares it against the installed folder to decide whether
+/// an installed bundled plugin is outdated (e.g. the rut grammar moved
+/// under it and the sources need the zip this build actually ships).
+fn zip_manifest_version(bytes: &[u8]) -> Option<String> {
+    use std::io::Read as _;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut text = String::new();
+    archive
+        .by_name("manifest.json")
+        .ok()?
+        .read_to_string(&mut text)
+        .ok()?;
+    parse_manifest(&text).ok().map(|m| m.version)
+}
+
 /// Read + base64 a contribution icon (raster only: PNG/WebP/JPEG, ≤
 /// [`MAX_ICON_BYTES`]). Name rules mirror zip-entry sanitization, so a
 /// hand-edited manifest can't escape the plugin dir. Any violation logs a
@@ -1662,7 +1686,10 @@ pub fn remove_custom_source(app_document_dir: &str, url: &str) -> BResult<()> {
 ///    re-forced. An installed-but-API-incompatible copy is healed from
 ///    the bundled zip (a pre-versioning install or an app downgrade —
 ///    the bundled zip always matches this engine, and an explicit
-///    disabled flag survives the heal). A failed install stays
+///    disabled flag survives the heal), and so is an installed-but-
+///    OUTDATED copy (the bundled zip's version is strictly newer — e.g.
+///    the rut grammar moved under the plugin sources; a newer registry
+///    install is never clobbered). A failed install stays
 ///    unrecorded and retries next start.
 /// 2. **First-run pass** (guarded by `firstRunDone`): install any plugin
 ///    referenced by an existing storage row (upgrade path); non-bundled
@@ -1674,22 +1701,48 @@ pub async fn bootstrap(cx: &crate::ctx::BackendContext, app_document_dir: &str) 
     let mut mutated = false;
 
     // 1) Bundled plugins — ensure-install (fresh installs AND upgrades),
-    //    plus a heal pass: an installed-but-API-incompatible copy (a
+    //    plus heal passes: an installed-but-API-incompatible copy (a
     //    pre-versioning install, or an app downgrade) is replaced by the
-    //    bundled zip, which is built against this engine. A deliberate
-    //    user uninstall (folder gone, id still recorded) is never
-    //    re-forced.
+    //    bundled zip, which is built against this engine, and so is an
+    //    installed-but-OUTDATED copy (the bundled zip's version is newer —
+    //    e.g. the rut grammar moved under the plugin sources and this
+    //    build ships fixed ones). A NEWER installed copy (from the
+    //    registry) is never clobbered, an app rollback never downgrades,
+    //    and a deliberate user uninstall (folder gone, id still recorded)
+    //    is never re-forced.
     {
         let state = read_state(app_document_dir);
         let mut recorded = state.bundled_installed.clone();
         let mut changed = false;
         for id in BUNDLED_PLUGINS {
             let recorded_already = recorded.iter().any(|r| r == id);
+            // Peek the bundled zip up front: its manifest version drives
+            // the outdated-heal decision, and the install below reuses
+            // the bytes.
+            let host = shared.engine_host();
+            let Some(bytes) = host
+                .as_ref()
+                .and_then(|h| h.read_bundled_asset(&format!("plugin-bundles/{id}.zip")))
+            else {
+                tracing::error!(
+                    "plugin bootstrap: bundled zip '{id}' missing (engine host not bound?)"
+                );
+                continue;
+            };
             if is_installed(&root, id) {
-                if plugin_api_supported(installed_api_version(&root, id)) {
+                // Outdated = the bundled zip is strictly NEWER than the
+                // installed copy (unknown versions fall back to the
+                // API-compat gate alone).
+                let outdated = match (installed_version(&root, id), zip_manifest_version(&bytes)) {
+                    (Some(installed), Some(bundled)) => {
+                        compare_versions(&installed, &bundled) == Ordering::Less
+                    }
+                    _ => false,
+                };
+                if plugin_api_supported(installed_api_version(&root, id)) && !outdated {
                     // Already present and compatible (e.g. installed from
-                    // the registry before this app version bundled it) —
-                    // keep the user's copy.
+                    // the registry before this app version bundled it, or
+                    // newer than the bundle) — keep the user's copy.
                     if !recorded_already {
                         recorded.push(id.to_string());
                         changed = true;
@@ -1697,48 +1750,41 @@ pub async fn bootstrap(cx: &crate::ctx::BackendContext, app_document_dir: &str) 
                     continue;
                 }
                 tracing::info!(
-                    "plugin bootstrap: '{id}' installed but API-incompatible — \
-                     replacing with the bundled copy"
+                    "plugin bootstrap: '{id}' installed but {} — \
+                     replacing with the bundled copy",
+                    if outdated { "outdated" } else { "API-incompatible" }
                 );
             } else if recorded_already {
                 // Deliberately uninstalled by the user — never re-force.
                 continue;
             }
-            let host = shared.engine_host();
-            match host.as_ref().and_then(|h| h.read_bundled_asset(&format!("plugin-bundles/{id}.zip"))) {
-                Some(bytes) => {
-                    // The heal path is not user-initiated — preserve an
-                    // explicit disabled flag across the reinstall.
-                    let was_disabled = read_state(app_document_dir)
-                        .enabled
-                        .get(*id)
-                        .is_some_and(|&e| !e);
-                    match install_bytes_and_enable(cx, app_document_dir, bytes).await {
-                        Ok(_) => {
-                            if was_disabled {
-                                let _ = mutate_state(app_document_dir, |s| PluginState {
-                                    enabled: {
-                                        let mut enabled = s.enabled;
-                                        enabled.insert(id.to_string(), false);
-                                        enabled
-                                    },
-                                    ..s
-                                });
-                            }
-                            if !recorded_already {
-                                recorded.push(id.to_string());
-                            }
-                            changed = true;
-                            mutated = true;
-                        }
-                        Err(e) => {
-                            tracing::error!("plugin bootstrap: bundled install '{id}' failed: {e}")
-                        }
+            // The heal path is not user-initiated — preserve an
+            // explicit disabled flag across the reinstall.
+            let was_disabled = read_state(app_document_dir)
+                .enabled
+                .get(*id)
+                .is_some_and(|&e| !e);
+            match install_bytes_and_enable(cx, app_document_dir, bytes).await {
+                Ok(_) => {
+                    if was_disabled {
+                        let _ = mutate_state(app_document_dir, |s| PluginState {
+                            enabled: {
+                                let mut enabled = s.enabled;
+                                enabled.insert(id.to_string(), false);
+                                enabled
+                            },
+                            ..s
+                        });
                     }
+                    if !recorded_already {
+                        recorded.push(id.to_string());
+                    }
+                    changed = true;
+                    mutated = true;
                 }
-                None => tracing::error!(
-                    "plugin bootstrap: bundled zip '{id}' missing (engine host not bound?)"
-                ),
+                Err(e) => {
+                    tracing::error!("plugin bootstrap: bundled install '{id}' failed: {e}")
+                }
             }
         }
         if changed {

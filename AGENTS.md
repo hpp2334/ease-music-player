@@ -161,7 +161,7 @@ Plugins are **installable at runtime**, not baked into assets. Installed plugins
 
 ### Prerequisites
 - **JDK 21** (CI uses Zulu 21).
-- **Rust** via the workspace pin (`rust-libs/rust-toolchain.toml` = `nightly-2026-07-15`, matching tur@795538f) + `cargo-ndk@3.5.4` + `rustup target add aarch64-linux-android --toolchain nightly-2026-07-15` + `cargo-nextest`.
+- **Rust** via the workspace pin (`rust-libs/rust-toolchain.toml` = `nightly-2026-07-15`, matching tur@3b34983) + `cargo-ndk@3.5.4` + `rustup target add aarch64-linux-android --toolchain nightly-2026-07-15` + `cargo-nextest`.
 - **Android SDK** (compileSdk 35 / minSdk 29 / targetSdk 34) + **NDK r27c** with `ANDROID_NDK_HOME` set.
 - **pnpm** for running the TypeScript scripts.
 - The JNI build is a pure `cargo ndk build -p ease-client-android` (no bindgen/host-dylib step). The cdylib name `libease_client_android.so` must stay in sync with `System.loadLibrary("ease_client_android")` (declared once in `EaseMusicPlayerApplication`).

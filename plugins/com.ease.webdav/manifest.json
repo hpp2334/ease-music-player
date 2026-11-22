@@ -1,7 +1,7 @@
 {
   "id": "com.ease.webdav",
   "name": { "en-US": "WebDAV", "zh-CN": "WebDAV" },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 2,
   "description": {
     "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless rut plugin.",

@@ -84,7 +84,7 @@ entry fn op_lyric_parse(cx: opaque) -> str {
     // key the host resolves candidates by. The old JS backend keyed on
     // `parserId`; the extension is the stricter, host-mirrored form.
     let ext = file_ext_lower(r.file_name);
-    let mut parsed: ?LyricResult = nil;
+    let parsed: ?LyricResult = nil;
     if (ext == "lrc") {
         parsed = parse_lrc(text);
     } else if (ext == "srt" || ext == "vtt") {
@@ -103,10 +103,10 @@ entry fn op_lyric_parse(cx: opaque) -> str {
 // reads; unknown keys are skipped, never a failure. Nil on any
 // malformed shape.
 fn decode_request(text: str) -> ?Req {
-    let mut r = JsonReader::of(text);
-    let mut parser_id = "";
-    let mut file_name = "";
-    let mut content = "";
+    let r = JsonReader::of(text);
+    let parser_id = "";
+    let file_name = "";
+    let content = "";
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -228,11 +228,11 @@ fn is_ws(c: i32) -> bool {
 
 fn trim(s: str) -> str {
     let n = s.len();
-    let mut a: i32 = 0;
+    let a: i32 = 0;
     while (a < n && is_ws(s.code_at(a) as i32)) {
         a += 1;
     }
-    let mut b: i32 = n;
+    let b: i32 = n;
     while (b > a && is_ws(s.code_at(b - 1) as i32)) {
         b -= 1;
     }
@@ -241,7 +241,7 @@ fn trim(s: str) -> str {
 
 fn trim_start(s: str) -> str {
     let n = s.len();
-    let mut a: i32 = 0;
+    let a: i32 = 0;
     while (a < n && is_ws(s.code_at(a) as i32)) {
         a += 1;
     }
@@ -251,7 +251,7 @@ fn trim_start(s: str) -> str {
 // First index of one codepoint at/after `from`, -1 when absent.
 fn index_of(s: str, c: i32, from: i32) -> i32 {
     let n = s.len();
-    let mut k = from;
+    let k = from;
     while (k < n) {
         if (s.code_at(k) as i32 == c) {
             return k;
@@ -263,7 +263,7 @@ fn index_of(s: str, c: i32, from: i32) -> i32 {
 
 // Last index of one codepoint, -1 when absent.
 fn last_index_of(s: str, c: i32) -> i32 {
-    let mut k = s.len() - 1;
+    let k = s.len() - 1;
     while (k >= 0) {
         if (s.code_at(k) as i32 == c) {
             return k;
@@ -278,7 +278,7 @@ fn index_of_str(s: str, needle: str, from: i32) -> i32 {
     let n = s.len();
     let m = needle.len();
     if (m == 0) { return from; }
-    let mut k = from;
+    let k = from;
     while (k + m <= n) {
         if (s.starts_with(k, needle)) {
             return k;
@@ -294,7 +294,7 @@ fn replace_all(s: str, needle: str, repl: str) -> str {
     let m = needle.len();
     if (m == 0) { return s; }
     let b = StringBuilder::with_cap(n);
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         if (i + m <= n && s.starts_with(i, needle)) {
             b.append(repl);
@@ -310,7 +310,7 @@ fn replace_all(s: str, needle: str, repl: str) -> str {
 fn is_digits(s: str) -> bool {
     let n = s.len();
     if (n == 0) { return false; }
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         let c = s.code_at(i) as i32;
         if (c < 0x30 || c > 0x39) {
@@ -324,9 +324,9 @@ fn is_digits(s: str) -> bool {
 // A run of ASCII digits as its numeric value (the JS `Number(s)` of a
 // digit-only string).
 fn digits_value(s: str) -> i64 {
-    let mut v: i64 = 0;
+    let v: i64 = 0;
     let n = s.len();
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         v = v * 10 + (s.code_at(i) as i32 - 0x30) as i64;
         i += 1;
@@ -340,7 +340,7 @@ fn digits_value(s: str) -> i64 {
 fn ascii_lower(s: str) -> str {
     let b = StringBuilder::with_cap(s.len());
     let n = s.len();
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         let c = s.code_at(i) as i32;
         if (c >= 0x41 && c <= 0x5A) {
@@ -356,7 +356,7 @@ fn ascii_lower(s: str) -> str {
 fn ascii_upper(s: str) -> str {
     let b = StringBuilder::with_cap(s.len());
     let n = s.len();
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         let c = s.code_at(i) as i32;
         if (c >= 0x61 && c <= 0x7A) {
@@ -378,17 +378,17 @@ fn ascii_upper(s: str) -> str {
 // doubled and fails to produce cues (null, "not mine"), exactly as the
 // old backend did.
 fn split_lines(text: str) -> Vec<str> {
-    let mut out = Vec<str>::new();
+    let out = Vec<str>::new();
     let n = text.len();
-    let mut chunk_start: i32 = 0;
-    let mut i: i32 = 0;
+    let chunk_start: i32 = 0;
+    let i: i32 = 0;
     while (i <= n) {
         if (i == n || text.code_at(i) as i32 == 0x0A) {
             // one JS split("\n") chunk — carve it on \r, empties kept
             let chunk = text.slice(chunk_start, i);
             let m = chunk.len();
-            let mut piece_start: i32 = 0;
-            let mut j: i32 = 0;
+            let piece_start: i32 = 0;
+            let j: i32 = 0;
             while (j <= m) {
                 if (j == m || chunk.code_at(j) as i32 == 0x0D) {
                     out.push(chunk.slice(piece_start, j));
@@ -415,9 +415,9 @@ fn strip_bom(text: str) -> str {
 // Collapse whitespace runs to single spaces and trim both ends.
 fn collapse_spaces(text: str) -> str {
     let b = StringBuilder::with_cap(text.len());
-    let mut pending = false;
+    let pending = false;
     let n = text.len();
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         let c = text.code_at(i) as i32;
         if (c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D) {
@@ -438,7 +438,7 @@ fn collapse_spaces(text: str) -> str {
 fn join_str(parts: Vec<str>, sep: str) -> str {
     let b = StringBuilder::with_cap(64);
     let n = parts.len;
-    let mut k: i32 = 0;
+    let k: i32 = 0;
     while (k < n) {
         if (k > 0) {
             b.append(sep);
@@ -454,7 +454,7 @@ fn join_str(parts: Vec<str>, sep: str) -> str {
 // after the last `/`), or "" for extensionless names / a trailing dot —
 // mirrors the host's `file_extension`.
 fn file_ext_lower(name: str) -> str {
-    let mut base = name;
+    let base = name;
     let slash = last_index_of(name, 0x2F);
     if (slash >= 0) {
         base = name.slice(slash + 1, name.len());
@@ -475,8 +475,8 @@ fn file_ext_lower(name: str) -> str {
 fn parse_timestamp(s: str) -> ?i64 {
     let t = trim(s);
     let n = t.len();
-    let mut colons: i32 = 0;
-    let mut i: i32 = 0;
+    let colons: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         if (t.code_at(i) as i32 == 0x3A) {
             colons += 1;
@@ -491,7 +491,7 @@ fn parse_timestamp(s: str) -> ?i64 {
     let tail = t.slice(last_colon + 1, n);  // ss[,.]frac
     let comma = last_index_of(tail, 0x2C);
     let dot = last_index_of(tail, 0x2E);
-    let mut sep = comma;
+    let sep = comma;
     if (dot > sep) {
         sep = dot;
     }
@@ -503,8 +503,8 @@ fn parse_timestamp(s: str) -> ?i64 {
     if (!is_digits(sec) || !is_digits(frac)) {
         return nil;
     }
-    let mut mm_part = head;
-    let mut hh_part: ?str = nil;
+    let mm_part = head;
+    let hh_part: ?str = nil;
     let hcolon = last_index_of(head, 0x3A);
     if (hcolon >= 0) {
         hh_part = head.slice(0, hcolon);
@@ -524,7 +524,7 @@ fn parse_timestamp(s: str) -> ?i64 {
     let frac_len = frac.len();
     let f = frac.slice(0, if (frac_len < 3) { frac_len } else { 3 });
     let fl = f.len();
-    let mut ms: i64 = digits_value(sec) * 1000;
+    let ms: i64 = digits_value(sec) * 1000;
     if (fl == 1) {
         ms += digits_value(f) * 100;
     } else if (fl == 2) {
@@ -545,7 +545,7 @@ fn parse_timestamp(s: str) -> ?i64 {
 fn first_token(s: str) -> str {
     let t = trim_start(s);
     let n = t.len();
-    let mut end = n;
+    let end = n;
     let sp = index_of(t, 0x20, 0);
     if (sp >= 0 && sp < end) {
         end = sp;
@@ -563,8 +563,8 @@ fn first_token(s: str) -> str {
 
 // Lexer: consecutive `[inner]` groups from the start of a line.
 fn take_leading_tags(line: str) -> (Vec<str>, str) {
-    let mut tags = Vec<str>::new();
-    let mut rest = line;
+    let tags = Vec<str>::new();
+    let rest = line;
     while (rest.starts_with(0, "[")) {
         let close = index_of(rest, 0x5D, 0);
         if (close < 0) {
@@ -582,7 +582,7 @@ fn take_leading_tags(line: str) -> (Vec<str>, str) {
 fn strip_word_tags(text: str) -> str {
     let b = StringBuilder::with_cap(text.len());
     let n = text.len();
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         let c = text.code_at(i) as i32;
         if (c == 0x3C || c == 0x5B) {
@@ -600,14 +600,14 @@ fn strip_word_tags(text: str) -> str {
 }
 
 fn parse_lrc(text: str) -> ?LyricResult {
-    let mut artist: ?str = nil;
-    let mut album: ?str = nil;
-    let mut title: ?str = nil;
-    let mut lyricist: ?str = nil;
-    let mut author: ?str = nil;
-    let mut length: ?str = nil;
-    let mut offset: ?str = nil;
-    let mut lines = Vec<LyricLine>::new();
+    let artist: ?str = nil;
+    let album: ?str = nil;
+    let title: ?str = nil;
+    let lyricist: ?str = nil;
+    let author: ?str = nil;
+    let length: ?str = nil;
+    let offset: ?str = nil;
+    let lines = Vec<LyricLine>::new();
     let rows = split_lines(strip_bom(text));
     for (let raw_line of rows) {
         let line = trim(raw_line);
@@ -691,16 +691,16 @@ fn parse_lrc(text: str) -> ?LyricResult {
 // (`[00:12.00][00:12.00]chorus`, or the same line listed twice) never
 // renders the same line twice.
 fn merge_same_time(lines: Vec<LyricLine>) -> Vec<LyricLine> {
-    let mut out = Vec<LyricLine>::new();
+    let out = Vec<LyricLine>::new();
     for (let line of lines) {
         let n = out.len;
-        let mut merged = false;
+        let merged = false;
         if (n > 0) {
             let last: LyricLine = out[n - 1];
             if (last.time_ms == line.time_ms) {
                 // the previous entry's last sub-line (after the final \n)
                 let brk = last_index_of(last.text, 0x0A);
-                let mut last_sub = last.text;
+                let last_sub = last.text;
                 if (brk >= 0) {
                     last_sub = last.text.slice(brk + 1, last.text.len());
                 }
@@ -775,7 +775,7 @@ fn is_vtt_block_keyword(line: str) -> bool {
 fn strip_angle_tags(text: str) -> str {
     let b = StringBuilder::with_cap(text.len());
     let n = text.len();
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         let c = text.code_at(i) as i32;
         if (c == 0x3C) {
@@ -799,13 +799,13 @@ fn strip_cue_tags(text: str) -> str {
 fn parse_subtitle(text: str) -> ?LyricResult {
     let rows = split_lines(strip_bom(text));
     let n_rows = rows.len;
-    let mut is_vtt = false;
+    let is_vtt = false;
     if (n_rows > 0) {
         let r0: str = rows[0];
         is_vtt = r0.starts_with(0, "WEBVTT");
     }
-    let mut cues = Vec<Cue>::new();
-    let mut i: i32 = 0;
+    let cues = Vec<Cue>::new();
+    let i: i32 = 0;
     if (is_vtt) {
         // Skip the header block (`WEBVTT` line + optional metadata lines)
         // up to the first blank line.
@@ -837,7 +837,7 @@ fn parse_subtitle(text: str) -> ?LyricResult {
         // A cue starts at its timing line; an optional id line (SRT index /
         // VTT identifier) may precede it. Cue text never contains `-->`,
         // so the arrow is a reliable anchor.
-        let mut timing: ?CueTiming = nil;
+        let timing: ?CueTiming = nil;
         if (is_arrow_line(line)) {
             timing = parse_timing_line(line);
         } else if (i + 1 < n_rows) {
@@ -853,7 +853,7 @@ fn parse_subtitle(text: str) -> ?LyricResult {
         }
         let t: CueTiming = timing;
         i += 1;
-        let mut text_rows = Vec<str>::new();
+        let text_rows = Vec<str>::new();
         while (i < n_rows) {
             let row: str = rows[i];
             if (trim(row).len() == 0 || is_arrow_line(row)) {
@@ -864,13 +864,13 @@ fn parse_subtitle(text: str) -> ?LyricResult {
         }
         cues.push(Cue { from: t.from, to: t.to, text: join_str(text_rows, " ") });
     }
-    let mut lines = Vec<LyricLine>::new();
+    let lines = Vec<LyricLine>::new();
     for (let cue of cues) {
         let line_text = strip_cue_tags(cue.text);
         if (line_text.len() == 0) {
             continue;
         }
-        let mut duration: ?i64 = nil;
+        let duration: ?i64 = nil;
         // Cue end -> per-line duration (optional in the contract; the
         // host currently derives it from the next line's start and
         // ignores ours, but it is free to send and correct for sparse
@@ -902,12 +902,12 @@ fn parse_subtitle(text: str) -> ?LyricResult {
 // Stable insertion sort by start time — the JS `Array#sort` is stable,
 // and the same-time merge in `parse_lrc` relies on tied entries keeping
 // their file order. Lyric line counts are small; O(n^2) is fine.
-fn sort_lines(mut lines: Vec<LyricLine>) {
+fn sort_lines(lines: Vec<LyricLine>) {
     let n = lines.len;
-    let mut i: i32 = 1;
+    let i: i32 = 1;
     while (i < n) {
         let key: LyricLine = lines[i];
-        let mut j: i32 = i - 1;
+        let j: i32 = i - 1;
         while (j >= 0) {
             let cur: LyricLine = lines[j];
             if (cur.time_ms > key.time_ms) {

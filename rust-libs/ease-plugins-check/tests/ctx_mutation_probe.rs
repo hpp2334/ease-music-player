@@ -1,7 +1,8 @@
-//! Decisive semantics probes for the rut pin tur@795538f ships (the things
+//! Decisive semantics probes for the rut pin tur@3b34983 ships (the things
 //! compile+boot checks cannot see): does state written through an
 //! `opaque::downcast` binding persist across entry calls — via the binding
-//! itself, via a `let mut` copy, and via a `mut` parameter?
+//! itself, via a copy, and via a parameter? (Bindings are mutable by
+//! default — the drop-mut law; the `mut` keyword is gone from the grammar.)
 
 #[cfg(test)]
 mod probes {
@@ -12,8 +13,8 @@ mod probes {
     use tur_integration_tests::TurTestApp;
 
     /// `set_in_place` writes through the downcast binding directly;
-    /// `set_via_copy` writes through a `let mut` copy; `set_via_param`
-    /// takes the record as a `mut` parameter and writes there. `get`
+    /// `set_via_copy` writes through a copy; `set_via_param`
+    /// takes the record as a parameter and writes there. `get`
     /// answers all three. If value semantics rule, only the first
     /// persists; if downcast yields a cell alias and copies alias the
     /// same cell, all three do.
@@ -29,7 +30,7 @@ entry fn start() -> opaque {
 }
 
 entry fn set_in_place(cx: opaque) -> str {
-    let mut c = opaque::downcast<Ctx>(cx);
+    let c = opaque::downcast<Ctx>(cx);
     if (c == nil) {
         panic("set_in_place: cx");
     }
@@ -38,26 +39,26 @@ entry fn set_in_place(cx: opaque) -> str {
 }
 
 entry fn set_via_copy(cx: opaque) -> str {
-    let mut c = opaque::downcast<Ctx>(cx);
+    let c = opaque::downcast<Ctx>(cx);
     if (c == nil) {
         panic("set_via_copy: cx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     cc.via_copy = 1;
     return "{\"ok\":true,\"result\":true}";
 }
 
 entry fn set_via_param(cx: opaque) -> str {
-    let mut c = opaque::downcast<Ctx>(cx);
+    let c = opaque::downcast<Ctx>(cx);
     if (c == nil) {
         panic("set_via_param: cx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     write_param(cc);
     return "{\"ok\":true,\"result\":true}";
 }
 
-fn write_param(mut p: Ctx) {
+fn write_param(p: Ctx) {
     p.via_param = 1;
 }
 
@@ -93,9 +94,9 @@ entry fn get(cx: opaque) -> str {
             .call_rut_entry_cx_str("get", app.rut_start_answer())
             .expect("get");
         // THE LAW this pins: rut's downcast yields a cell alias, struct
-        // bindings share that cell (no copy), and `mut` params write
-        // through. The plugins' persistent-state pattern (ctx record in
-        // `start() -> opaque`, mutated through copies and `mut` params)
+        // bindings share that cell (no copy), and params write through
+        // (mutable by default). The plugins' persistent-state pattern (ctx
+        // record in `start() -> opaque`, mutated through copies and params)
         // depends on it — if a future rut pin turns copies into value
         // semantics, this fails and every session/config cache needs a
         // redesign.

@@ -84,7 +84,8 @@ struct ListCx {
 }
 
 /// The prop fields merged across a response's propstat blocks. A struct so
-/// the walk's by-value `mut` params write through to the caller's cell.
+/// the walk's by-value params (mutable by default) write through to the
+/// caller's cell.
 struct PropAcc {
     display: ?str,
     is_dir: bool,
@@ -215,7 +216,7 @@ fn ok_bool(v: bool) -> str {
 }
 
 fn err_env(msg: str) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.write_str(msg);
     return f"{{\"ok\":false,\"error\":{w.finish()}}}";
 }
@@ -244,8 +245,8 @@ fn upper_code(c: u32) -> u32 {
 
 fn lower(s: str) -> str {
     let n = s.len();
-    let mut b = StringBuilder::with_cap(n);
-    let mut i = 0;
+    let b = StringBuilder::with_cap(n);
+    let i = 0;
     while (i < n) {
         b.append(str::from_code(lower_code(s.code_at(i))));
         i += 1;
@@ -255,8 +256,8 @@ fn lower(s: str) -> str {
 
 fn upper(s: str) -> str {
     let n = s.len();
-    let mut b = StringBuilder::with_cap(n);
-    let mut i = 0;
+    let b = StringBuilder::with_cap(n);
+    let i = 0;
     while (i < n) {
         b.append(str::from_code(upper_code(s.code_at(i))));
         i += 1;
@@ -269,7 +270,7 @@ fn starts_with_ci(s: str, at: i32, prefix: str) -> bool {
     if (at < 0 || s.len() < at + n) {
         return false;
     }
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         if (lower_code(s.code_at(at + i)) != lower_code(prefix.code_at(i))) {
             return false;
@@ -285,7 +286,7 @@ fn contains_ci(hay: str, needle: str) -> bool {
     if (m == 0) {
         return true;
     }
-    let mut i = 0;
+    let i = 0;
     while (i + m <= n) {
         if (starts_with_ci(hay, i, needle)) {
             return true;
@@ -299,7 +300,7 @@ fn contains_ci(hay: str, needle: str) -> bool {
 fn str_less(a: str, b: str) -> bool {
     let n = a.len();
     let m = b.len();
-    let mut i = 0;
+    let i = 0;
     while (i < n && i < m) {
         let ca = a.code_at(i);
         let cb = b.code_at(i);
@@ -313,11 +314,11 @@ fn str_less(a: str, b: str) -> bool {
 
 fn trim(s: str) -> str {
     let n = s.len();
-    let mut a = 0;
+    let a = 0;
     while (a < n && is_ws(s.code_at(a))) {
         a += 1;
     }
-    let mut b = n;
+    let b = n;
     while (b > a && is_ws(s.code_at(b - 1))) {
         b -= 1;
     }
@@ -338,7 +339,7 @@ fn ends_with(s: str, suffix: str) -> bool {
 
 fn find_from(s: str, from: i32, c: u32) -> i32 {
     let n = s.len();
-    let mut i = from;
+    let i = from;
     while (i < n) {
         if (s.code_at(i) == c) {
             return i;
@@ -373,7 +374,7 @@ fn is_digits(s: str) -> bool {
     if (n == 0) {
         return false;
     }
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         let c = s.code_at(i);
         if (c < 48 || c > 57) {
@@ -385,9 +386,9 @@ fn is_digits(s: str) -> bool {
 }
 
 fn str_to_i64(s: str) -> i64 {
-    let mut acc: i64 = 0;
+    let acc: i64 = 0;
     let n = s.len();
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         acc = acc * 10i64 + (s.code_at(i) as i64 - 48i64);
         i += 1;
@@ -397,8 +398,8 @@ fn str_to_i64(s: str) -> i64 {
 
 fn reverse_str(s: str) -> str {
     let n = s.len();
-    let mut b = StringBuilder::with_cap(n);
-    let mut i = n;
+    let b = StringBuilder::with_cap(n);
+    let i = n;
     while (i > 0) {
         b.append(s.slice(i - 1, i));
         i -= 1;
@@ -415,8 +416,8 @@ fn reverse_str(s: str) -> str {
 /// uppercase-hex UTF-8 escaping for everything else).
 fn encode_path(p: str) -> str {
     let n = p.len();
-    let mut b = StringBuilder::with_cap(n * 3 + 1);
-    let mut i = 0;
+    let b = StringBuilder::with_cap(n * 3 + 1);
+    let i = 0;
     while (i < n) {
         let c = p.code_at(i);
         let keep = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
@@ -450,8 +451,8 @@ fn encode_path(p: str) -> str {
 /// (the TS threw and kept the raw text — close enough for display names).
 fn url_decode(s: str) -> str {
     let n = s.len();
-    let mut bytes = Vec<u8>::new();
-    let mut i = 0;
+    let bytes = Vec<u8>::new();
+    let i = 0;
     while (i < n) {
         let c = s.code_at(i);
         if (c == 37 && i + 2 < n) {
@@ -489,7 +490,7 @@ fn rstrip_slashes(s: str) -> str {
     // must yield an empty base path, or `build_url`'s join would double
     // the slash (`//music/`), which strict routers 301-redirect.
     let n = s.len();
-    let mut b = n;
+    let b = n;
     while (b > 0 && s.code_at(b - 1) == 47) {
         b -= 1;
     }
@@ -498,7 +499,7 @@ fn rstrip_slashes(s: str) -> str {
 
 fn lstrip_slashes(s: str) -> str {
     let n = s.len();
-    let mut a = 0;
+    let a = 0;
     while (a < n && s.code_at(a) == 47) {
         a += 1;
     }
@@ -531,7 +532,7 @@ fn build_url(addr: str, path: str, is_dir: bool) -> ?str {
     let p: AddrParts = parts;
     let base = rstrip_slashes(p.base_path);
     let rest = lstrip_slashes(path);
-    let mut joined = f"{base}/{rest}";
+    let joined = f"{base}/{rest}";
     if (is_dir && !ends_with(joined, "/")) {
         joined = f"{joined}/";
     }
@@ -546,7 +547,7 @@ fn href_to_path(addr: str, href: str) -> str {
         return "/";
     }
     let p: AddrParts = parts;
-    let mut h = href;
+    let h = href;
     if (starts_with_ci(h, 0, "http://") || starts_with_ci(h, 0, "https://")) {
         let colon = find_from(h, 0, 58);
         let slash = find_from(h, colon + 3, 47);
@@ -570,8 +571,8 @@ fn href_to_path(addr: str, href: str) -> str {
 /// The last `/`-separated segment (the TS `path.split("/").pop()`).
 fn last_segment(path: str) -> str {
     let n = path.len();
-    let mut last = -1;
-    let mut i = 0;
+    let last = -1;
+    let i = 0;
     while (i < n) {
         if (path.code_at(i) == 47) {
             last = i;
@@ -594,13 +595,13 @@ fn kv_key(instance: str) -> str {
 
 /// Decode the persisted config document; nil on corrupt JSON.
 fn decode_config(doc: str) -> ?Config {
-    let mut r = JsonReader::of(doc);
+    let r = JsonReader::of(doc);
     r.begin_object();
-    let mut alias: ?str = nil;
-    let mut addr: ?str = nil;
-    let mut username: ?str = nil;
-    let mut anon = false;
-    let mut secret_id: i64 = 0;
+    let alias: ?str = nil;
+    let addr: ?str = nil;
+    let username: ?str = nil;
+    let anon = false;
+    let secret_id: i64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -634,15 +635,15 @@ fn decode_config(doc: str) -> ?Config {
     if (r.failed()) {
         return nil;
     }
-    let mut a = "";
+    let a = "";
     if (alias != nil) {
         a = alias;
     }
-    let mut ad = "";
+    let ad = "";
     if (addr != nil) {
         ad = addr;
     }
-    let mut u = "";
+    let u = "";
     if (username != nil) {
         u = username;
     }
@@ -661,7 +662,7 @@ fn config_of(instance: str) -> ?Config {
     if (cfg == nil) {
         return nil;
     }
-    let mut c: Config = cfg;
+    let c: Config = cfg;
     if (c.alias == "") {
         c.alias = instance;
     }
@@ -710,7 +711,7 @@ fn is_param_name_char(c: u32) -> bool {
 /// unsupported algorithms (SHA-256 variants).
 fn parse_digest(header: str) -> ?DigestParams {
     let n = header.len();
-    let mut i = 0;
+    let i = 0;
     while (i < n && is_ws(header.code_at(i))) {
         i += 1;
     }
@@ -718,11 +719,11 @@ fn parse_digest(header: str) -> ?DigestParams {
         return nil;
     }
     i += 6;
-    let mut realm = "";
-    let mut nonce = "";
-    let mut qop_auth = false;
-    let mut opaque: ?str = nil;
-    let mut algorithm = "MD5";
+    let realm = "";
+    let nonce = "";
+    let qop_auth = false;
+    let opaque: ?str = nil;
+    let algorithm = "MD5";
     while (i < n) {
         while (i < n && (is_ws(header.code_at(i)) || header.code_at(i) == 44)) {
             i += 1;
@@ -748,10 +749,10 @@ fn parse_digest(header: str) -> ?DigestParams {
         while (i < n && is_ws(header.code_at(i))) {
             i += 1;
         }
-        let mut value = "";
+        let value = "";
         if (i < n && header.code_at(i) == 34) {
             i += 1;
-            let mut b = StringBuilder::with_cap(16);
+            let b = StringBuilder::with_cap(16);
             while (i < n && header.code_at(i) != 34) {
                 if (header.code_at(i) == 92 && i + 1 < n) {
                     i += 1;
@@ -773,10 +774,10 @@ fn parse_digest(header: str) -> ?DigestParams {
             "nonce" -> { nonce = value; },
             "qop" -> {
                 // the qop list is comma-separated; "auth" anywhere enables it
-                let mut rest = value;
+                let rest = value;
                 while (rest != "") {
                     let comma = find_from(rest, 0, 44);
-                    let mut item = rest;
+                    let item = rest;
                     if (comma != -1) {
                         item = rest.slice(0, comma);
                         rest = rest.slice(comma + 1, rest.len());
@@ -808,8 +809,8 @@ fn parse_digest(header: str) -> ?DigestParams {
 fn random_hex16() -> str {
     let raw = random_bytes(8);
     let n = raw.len();
-    let mut b = StringBuilder::with_cap(16);
-    let mut i = 0;
+    let b = StringBuilder::with_cap(16);
+    let i = 0;
     while (i < n) {
         b.append(byte_hex(raw[i] as u64));
         i += 1;
@@ -820,9 +821,9 @@ fn random_hex16() -> str {
 /// nc as 8 lowercase hex digits (the RFC's count field).
 fn nc_hex(nc: i64) -> str {
     let digits = "0123456789abcdef";
-    let mut v = nc;
-    let mut b = StringBuilder::with_cap(8);
-    let mut i = 0;
+    let v = nc;
+    let b = StringBuilder::with_cap(8);
+    let i = 0;
     while (i < 8) {
         let d = (v % 16i64) as i32;
         v = v / 16i64;
@@ -844,7 +845,7 @@ fn authorization_for(scheme: str, username: str, password: str, uri: str, method
     }
     let p: DigestParams = parsed;
     let cnonce = random_hex16();
-    let mut ha1 = md5_hex(encode_utf8(f"{username}:{p.realm}:{password}"));
+    let ha1 = md5_hex(encode_utf8(f"{username}:{p.realm}:{password}"));
     if (p.algorithm == "MD5-SESS") {
         ha1 = md5_hex(encode_utf8(f"{ha1}:{p.nonce}:{cnonce}"));
     }
@@ -852,8 +853,8 @@ fn authorization_for(scheme: str, username: str, password: str, uri: str, method
     let ncx = nc_hex(nc);
     // RFC 7616 (qop=auth) vs RFC 2069 (no qop) — different response hashes;
     // older NAS/embedded DAV servers challenge without qop.
-    let mut response = md5_hex(encode_utf8(f"{ha1}:{p.nonce}:{ha2}"));
-    let mut hdr = f"Digest username=\"{username}\", realm=\"{p.realm}\", nonce=\"{p.nonce}\", uri=\"{uri}\", algorithm={p.algorithm}, response=\"{response}\"";
+    let response = md5_hex(encode_utf8(f"{ha1}:{p.nonce}:{ha2}"));
+    let hdr = f"Digest username=\"{username}\", realm=\"{p.realm}\", nonce=\"{p.nonce}\", uri=\"{uri}\", algorithm={p.algorithm}, response=\"{response}\"";
     if (p.qop_auth) {
         response = md5_hex(encode_utf8(f"{ha1}:{p.nonce}:{ncx}:{cnonce}:auth:{ha2}"));
         hdr = f"Digest username=\"{username}\", realm=\"{p.realm}\", nonce=\"{p.nonce}\", uri=\"{uri}\", algorithm={p.algorithm}, qop=auth, nc={ncx}, cnonce=\"{cnonce}\", response=\"{response}\"";
@@ -868,7 +869,7 @@ fn authorization_for(scheme: str, username: str, password: str, uri: str, method
 /// The cached challenge header for `addr`, or nil when absent (read-only —
 /// the nc bump happens once per attempt in `next_nc`).
 fn challenge_for(c: Ctx, addr: str) -> ?str {
-    let mut i = 0;
+    let i = 0;
     while (i < POOL) {
         let a = c.ch_addr[i];
         if (a != nil) {
@@ -882,9 +883,9 @@ fn challenge_for(c: Ctx, addr: str) -> ?str {
     return nil;
 }
 
-fn cache_challenge(mut c: Ctx, addr: str, header: str) {
-    let mut slot = -1;
-    let mut i = 0;
+fn cache_challenge(c: Ctx, addr: str, header: str) {
+    let slot = -1;
+    let i = 0;
     while (i < POOL) {
         let a = c.ch_addr[i];
         if (a == nil) {
@@ -910,8 +911,8 @@ fn cache_challenge(mut c: Ctx, addr: str, header: str) {
 
 /// Bump (or seed) the challenge counter for `addr` and answer the count for
 /// this attempt (the first Digest request on a challenge uses nc=1).
-fn next_nc(mut c: Ctx, addr: str) -> i64 {
-    let mut i = 0;
+fn next_nc(c: Ctx, addr: str) -> i64 {
+    let i = 0;
     while (i < POOL) {
         let a = c.ch_addr[i];
         if (a != nil) {
@@ -926,8 +927,8 @@ fn next_nc(mut c: Ctx, addr: str) -> i64 {
     return 1;
 }
 
-fn drop_challenge(mut c: Ctx, addr: str) {
-    let mut i = 0;
+fn drop_challenge(c: Ctx, addr: str) {
+    let i = 0;
     while (i < POOL) {
         let a = c.ch_addr[i];
         if (a != nil) {
@@ -961,7 +962,7 @@ fn marked_transport_error(msg: str) -> str {
 }
 
 fn request_opts(spec: ReqSpec, auth: ?str) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("url");
     w.write_str(spec.url);
@@ -1002,9 +1003,9 @@ fn request_opts(spec: ReqSpec, auth: ?str) -> str {
 /// Read one header out of the net row's `{name: value}` JSON
 /// (names arrive lowercased).
 fn header_of(headers_json: str, name: str) -> ?str {
-    let mut r = JsonReader::of(headers_json);
+    let r = JsonReader::of(headers_json);
     r.begin_object();
-    let mut found: ?str = nil;
+    let found: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1030,8 +1031,8 @@ fn header_of(headers_json: str, name: str) -> ?str {
 /// The reply envelope's `headers` member as one `{name: value}` JSON
 /// string (names arrive lowercased; copied key-by-key so the envelope
 /// walk keeps its cursor — rut has no map to park it in).
-fn copy_headers(mut r: JsonReader) -> str {
-    let mut w = JsonWriter::new();
+fn copy_headers(r: JsonReader) -> str {
+    let w = JsonWriter::new();
     w.begin_object();
     r.begin_object();
     while (r.more()) {
@@ -1060,12 +1061,12 @@ fn copy_headers(mut r: JsonReader) -> str {
 /// `error` — status 0, empty body — is the transport-failure lane;
 /// `timeout`-ish messages get the host's TIMEOUT prefix.
 fn decode_sync_reply(reply: str) -> ?DavResp {
-    let mut r = JsonReader::of(reply);
-    let mut status: u64 = 0;
-    let mut status_text: ?str = nil;
-    let mut headers_json = "{}";
-    let mut body_b64: ?str = nil;
-    let mut err: ?str = nil;
+    let r = JsonReader::of(reply);
+    let status: u64 = 0;
+    let status_text: ?str = nil;
+    let headers_json = "{}";
+    let body_b64: ?str = nil;
+    let err: ?str = nil;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1102,11 +1103,11 @@ fn decode_sync_reply(reply: str) -> ?DavResp {
             };
         }
     }
-    let mut bt = "";
+    let bt = "";
     if (body_b64 != nil) {
         bt = body_b64;
     }
-    let mut st = "";
+    let st = "";
     if (status_text != nil) {
         st = status_text;
     }
@@ -1128,7 +1129,7 @@ fn sync_round_trip(opts: str, auth: ?str) -> ?DavResp {
     if (resp == nil) {
         return nil;
     }
-    let mut d: DavResp = resp;
+    let d: DavResp = resp;
     d.auth_used = auth;
     return d;
 }
@@ -1136,8 +1137,8 @@ fn sync_round_trip(opts: str, auth: ?str) -> ?DavResp {
 /// One attempt: send with the given scheme (nil = unauthenticated) through
 /// the blocking `request_sync` row; the reply envelope decodes into the
 /// DavResp columns (transport failures ride the reply's `error`).
-fn dav_attempt(spec: ReqSpec, creds: Creds, scheme: ?str, mut c: Ctx) -> DavResp {
-    let mut auth: ?str = nil;
+fn dav_attempt(spec: ReqSpec, creds: Creds, scheme: ?str, c: Ctx) -> DavResp {
+    let auth: ?str = nil;
     if (scheme != nil && !creds.is_anonymous) {
         let s: str = scheme;
         auth = authorization_for(s, creds.username, creds.password, spec.uri, spec.method, next_nc(c, creds.addr));
@@ -1166,13 +1167,13 @@ fn resp_failed(err: str, auth: ?str) -> DavResp {
 /// preemptive Basic when credentials exist (or the cached Digest challenge),
 /// one 401 retry answering the server's `WWW-Authenticate` (Basic or
 /// Digest).
-fn dav_request(spec: ReqSpec, creds: Creds, mut c: Ctx) -> DavResp {
+fn dav_request(spec: ReqSpec, creds: Creds, c: Ctx) -> DavResp {
     let cached = challenge_for(c, creds.addr);
-    let mut first: ?str = cached;
+    let first: ?str = cached;
     if (first == nil && !creds.is_anonymous && creds.username != "") {
         first = "Basic";
     }
-    let mut r = dav_attempt(spec, creds, first, c);
+    let r = dav_attempt(spec, creds, first, c);
     if (!r.failed && r.status == 401 && !creds.is_anonymous) {
         let www = header_of(r.headers, "www-authenticate");
         if (www != nil) {
@@ -1196,7 +1197,7 @@ fn dav_request(spec: ReqSpec, creds: Creds, mut c: Ctx) -> DavResp {
         let st = r.status_text;
         if (r.status == 401) {
             let www = header_of(r.headers, "www-authenticate");
-            let mut detail = st;
+            let detail = st;
             if (www != nil) {
                 let w: str = www;
                 detail = f"{st} {w}";
@@ -1219,8 +1220,8 @@ fn dav_request(spec: ReqSpec, creds: Creds, mut c: Ctx) -> DavResp {
 /// bare `response` all match `response` (the TS `removeNSPrefix` shape).
 fn tag_is(tag: str, local: str) -> bool {
     let n = tag.len();
-    let mut start = 0;
-    let mut i = 0;
+    let start = 0;
+    let i = 0;
     while (i < n) {
         if (tag.code_at(i) == 58) {
             start = i + 1;
@@ -1234,8 +1235,8 @@ fn tag_is(tag: str, local: str) -> bool {
 /// idiom is the github-viewer reader loop — `begin_object` / `next_key` /
 /// `skip_value`; a child value is one el or an array of els (the array lane
 /// rides the `rest()` look-ahead).
-fn walk_multistatus(tree: str, mut out: ListCx) -> bool {
-    let mut r = JsonReader::of(tree);
+fn walk_multistatus(tree: str, out: ListCx) -> bool {
+    let r = JsonReader::of(tree);
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1253,7 +1254,7 @@ fn walk_multistatus(tree: str, mut out: ListCx) -> bool {
 }
 
 /// The root el's `children` object: `{tag: el | [el…]}`.
-fn walk_root_children(mut r: JsonReader, out: ListCx) {
+fn walk_root_children(r: JsonReader, out: ListCx) {
     r.begin_object();
     while (r.more()) {
         let tag = r.next_key();
@@ -1269,7 +1270,7 @@ fn walk_root_children(mut r: JsonReader, out: ListCx) {
     r.end_object();
 }
 
-fn each_multistatus(mut r: JsonReader, out: ListCx) {
+fn each_multistatus(r: JsonReader, out: ListCx) {
     if (r.rest().starts_with(0, "[")) {
         r.begin_array();
         while (r.more()) {
@@ -1282,7 +1283,7 @@ fn each_multistatus(mut r: JsonReader, out: ListCx) {
 }
 
 /// One `multistatus` el: iterate its responses.
-fn walk_ms_el(mut r: JsonReader, out: ListCx) {
+fn walk_ms_el(r: JsonReader, out: ListCx) {
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1298,7 +1299,7 @@ fn walk_ms_el(mut r: JsonReader, out: ListCx) {
     r.end_object();
 }
 
-fn walk_ms_children(mut r: JsonReader, out: ListCx) {
+fn walk_ms_children(r: JsonReader, out: ListCx) {
     r.begin_object();
     while (r.more()) {
         let tag = r.next_key();
@@ -1314,7 +1315,7 @@ fn walk_ms_children(mut r: JsonReader, out: ListCx) {
     r.end_object();
 }
 
-fn each_response(mut r: JsonReader, out: ListCx) {
+fn each_response(r: JsonReader, out: ListCx) {
     if (r.rest().starts_with(0, "[")) {
         r.begin_array();
         while (r.more()) {
@@ -1328,9 +1329,9 @@ fn each_response(mut r: JsonReader, out: ListCx) {
 
 /// One `response` el: `href` + every `propstat`'s `prop` merged (the TS
 /// whole-block scan).
-fn walk_response_el(mut r: JsonReader, mut out: ListCx) {
-    let mut href: ?str = nil;
-    let mut acc = PropAcc { display: nil, is_dir: false, size: -1, created: 0, modified: 0 };
+fn walk_response_el(r: JsonReader, out: ListCx) {
+    let href: ?str = nil;
+    let acc = PropAcc { display: nil, is_dir: false, size: -1, created: 0, modified: 0 };
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1365,7 +1366,7 @@ fn walk_response_el(mut r: JsonReader, mut out: ListCx) {
     push_entry(out, trim(h), acc.display, acc.is_dir, acc.size, acc.created, acc.modified);
 }
 
-fn each_propstat(mut r: JsonReader, mut acc: PropAcc) {
+fn each_propstat(r: JsonReader, acc: PropAcc) {
     if (r.rest().starts_with(0, "[")) {
         r.begin_array();
         while (r.more()) {
@@ -1377,7 +1378,7 @@ fn each_propstat(mut r: JsonReader, mut acc: PropAcc) {
     }
 }
 
-fn walk_propstat_el(mut r: JsonReader, mut acc: PropAcc) {
+fn walk_propstat_el(r: JsonReader, acc: PropAcc) {
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1408,7 +1409,7 @@ fn walk_propstat_el(mut r: JsonReader, mut acc: PropAcc) {
 /// The `prop` el: resourcetype / getcontentlength / getlastmodified /
 /// creationdate / displayname (case-insensitive — servers vary prop-name
 /// casing even though RFC 4918 defines them lowercase).
-fn walk_prop(mut r: JsonReader, mut acc: PropAcc) {
+fn walk_prop(r: JsonReader, acc: PropAcc) {
     r.begin_object();
     while (r.more()) {
         let tag = r.next_key();
@@ -1456,8 +1457,8 @@ fn walk_prop(mut r: JsonReader, mut acc: PropAcc) {
 }
 
 /// Does this el's children contain a `collection` child (any ns)?
-fn has_collection_child(mut r: JsonReader) -> bool {
-    let mut found = false;
+fn has_collection_child(r: JsonReader) -> bool {
+    let found = false;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1486,8 +1487,8 @@ fn has_collection_child(mut r: JsonReader) -> bool {
 }
 
 /// The `text` member of one el (nil when absent).
-fn el_text(mut r: JsonReader) -> ?str {
-    let mut found: ?str = nil;
+fn el_text(r: JsonReader) -> ?str {
+    let found: ?str = nil;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1538,8 +1539,8 @@ fn parse_iso_date(s: str) -> u64 {
 }
 
 fn iso_num(s: str, at: i32, n: i32) -> i64 {
-    let mut acc: i64 = 0;
-    let mut i = at;
+    let acc: i64 = 0;
+    let i = at;
     while (i < at + n) {
         let c = s.code_at(i);
         if (c < 48 || c > 57) {
@@ -1553,7 +1554,7 @@ fn iso_num(s: str, at: i32, n: i32) -> i64 {
 
 /// Howard Hinnant's `days_from_civil` (the host time rows use the same).
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let mut yy = y;
+    let yy = y;
     if (m <= 2) {
         yy = y - 1;
     }
@@ -1579,7 +1580,7 @@ fn floordiv(a: i64, b: i64) -> i64 {
 
 /// The listing: `("", err)` on failure (err carries the marked prefix),
 /// the result JSON otherwise.
-fn list_impl(creds: Creds, dir: str, mut c: Ctx) -> (?str, str) {
+fn list_impl(creds: Creds, dir: str, c: Ctx) -> (?str, str) {
     let url = build_url(creds.addr, dir, true);
     if (url == nil) {
         return (nil, "webdav: invalid server address");
@@ -1606,7 +1607,7 @@ fn list_impl(creds: Creds, dir: str, mut c: Ctx) -> (?str, str) {
         return (nil, "webdav: unparsable PROPFIND response");
     }
     let t: str = tree;
-    let mut dir_trimmed = dir;
+    let dir_trimmed = dir;
     if (ends_with(dir_trimmed, "/")) {
         dir_trimmed = dir_trimmed.slice(0, dir_trimmed.len() - 1);
     }
@@ -1619,12 +1620,12 @@ fn list_impl(creds: Creds, dir: str, mut c: Ctx) -> (?str, str) {
 
 /// Sort (the prefix does the ordering), strip the prefix, join the JSON
 /// objects into the result array.
-fn render_entries(mut cx: ListCx) -> str {
+fn render_entries(cx: ListCx) -> str {
     let rows = cx.rows;
     sort_rows(rows);
-    let mut out = StringBuilder::with_cap(256);
+    let out = StringBuilder::with_cap(256);
     out.append("[");
-    let mut first = true;
+    let first = true;
     for (let row of rows) {
         if (!first) {
             out.append(",");
@@ -1638,12 +1639,12 @@ fn render_entries(mut cx: ListCx) -> str {
 
 /// Dirs first, then by path — the row's sort prefix makes this a plain str
 /// ordering (insertion sort; listings are small).
-fn sort_rows(mut rows: Vec<str>) {
+fn sort_rows(rows: Vec<str>) {
     let n = rows.len;
-    let mut i = 1;
+    let i = 1;
     while (i < n) {
         let key = rows[i];
-        let mut j = i - 1;
+        let j = i - 1;
         while (j >= 0 && str_less(key, rows[j])) {
             rows[j + 1] = rows[j];
             j -= 1;
@@ -1663,8 +1664,8 @@ fn row_json(row: str) -> str {
 /// Convert one PROPFIND response to the sortable row (skipping the dir
 /// itself + the root, deriving the name from the href when the server
 /// omitted displayname).
-fn push_entry(mut cx: ListCx, href: str, display: ?str, is_dir: bool, size: i64, created: u64, modified: u64) {
-    let mut path = href_to_path(cx.addr, href);
+fn push_entry(cx: ListCx, href: str, display: ?str, is_dir: bool, size: i64, created: u64, modified: u64) {
+    let path = href_to_path(cx.addr, href);
     if (path == "/" || path == "") {
         return;
     }
@@ -1674,14 +1675,14 @@ fn push_entry(mut cx: ListCx, href: str, display: ?str, is_dir: bool, size: i64,
     if (path == cx.dir_trimmed) {
         return;
     }
-    let mut name = "";
+    let name = "";
     if (display != nil) {
         name = url_decode(display);
     }
     if (name == "") {
         name = url_decode(last_segment(path));
     }
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("name");
     w.write_str(name);
@@ -1702,7 +1703,7 @@ fn push_entry(mut cx: ListCx, href: str, display: ?str, is_dir: bool, size: i64,
         w.write_i64(modified as i64);
     }
     w.end_object();
-    let mut flag = "f";
+    let flag = "f";
     if (is_dir) {
         flag = "d";
     }
@@ -1723,7 +1724,7 @@ fn push_entry(mut cx: ListCx, href: str, display: ?str, is_dir: bool, size: i64,
 /// dataOffset) parks in the pool under a fresh `sid`.
 /// The opener: `("", err)` on failure (err carries the marked prefix),
 /// the `{sid, meta}` JSON otherwise.
-fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
+fn open_impl(creds: Creds, path: str, offset: u64, c: Ctx) -> (?str, str) {
     let url = build_url(creds.addr, path, false);
     if (url == nil) {
         return (nil, "webdav: invalid server address");
@@ -1748,11 +1749,11 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
     // A server that ignored the Range answers 200 with the full body from
     // byte 0 — meta.dataOffset tells the host to drop the prefix itself.
     let content_range = header_of(resp.headers, "content-range");
-    let mut range_honored = resp.status == 206;
+    let range_honored = resp.status == 206;
     if (content_range != nil) {
         range_honored = true;
     }
-    let mut data_offset = offset;
+    let data_offset = offset;
     if (!range_honored) {
         data_offset = 0;
     }
@@ -1762,7 +1763,7 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
     // (`bytes o-o/*`, server doesn't know the size) must stay unknown —
     // only fall back to Content-Length when NO Content-Range rode the
     // response at all (the range-ignoring 200's full-body length).
-    let mut total: i64 = -1;
+    let total: i64 = -1;
     let cr = header_of(resp.headers, "content-range");
     if (cr != nil) {
         let s: str = cr;
@@ -1784,8 +1785,8 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
         }
     }
     // claim a session slot
-    let mut slot = -1;
-    let mut i = 0;
+    let slot = -1;
+    let i = 0;
     while (i < POOL) {
         if (c.sess_sid[i] == 0) {
             slot = i;
@@ -1804,7 +1805,7 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
     c.sess_doff[slot] = data_offset;
     let name = last_segment(path);
     let ctype = header_of(resp.headers, "content-type");
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("sid");
     w.write_i64(sid as i64);
@@ -1831,7 +1832,7 @@ fn open_impl(creds: Creds, path: str, offset: u64, mut c: Ctx) -> (?str, str) {
 }
 
 fn session_of(c: Ctx, sid: u64) -> ?Session {
-    let mut i = 0;
+    let i = 0;
     while (i < POOL) {
         if (sid != 0 && c.sess_sid[i] == sid) {
             let u = c.sess_url[i];
@@ -1846,8 +1847,8 @@ fn session_of(c: Ctx, sid: u64) -> ?Session {
     return nil;
 }
 
-fn release_impl(mut c: Ctx, sid: u64) -> bool {
-    let mut i = 0;
+fn release_impl(c: Ctx, sid: u64) -> bool {
+    let i = 0;
     while (i < POOL) {
         if (sid != 0 && c.sess_sid[i] == sid) {
             c.sess_sid[i] = 0;
@@ -1868,7 +1869,7 @@ fn release_impl(mut c: Ctx, sid: u64) -> bool {
 /// falls back to the full challenge/retry.
 /// One chunk: `("", err)` on failure (err carries the marked prefix),
 /// the `{data, eof}` JSON otherwise.
-fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, mut c: Ctx) -> (?str, str) {
+fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, c: Ctx) -> (?str, str) {
     let end = offset + len - 1u64;
     let parts = split_addr(sess.url);
     if (parts == nil) {
@@ -1883,7 +1884,7 @@ fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, mut c: Ctx) ->
         propfind: false,
         range: f"bytes={offset}-{end}",
     };
-    let mut resp = dav_attempt(spec, creds, sess.auth, c);
+    let resp = dav_attempt(spec, creds, sess.auth, c);
     if (resp.failed || resp.status == 401) {
         resp = dav_request(spec, creds, c);
         // The fallback re-authed against a fresh challenge — re-park its
@@ -1899,7 +1900,7 @@ fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, mut c: Ctx) ->
     // 416 = the pull landed past EOF (exact-multiple-of-len files): the
     // stream is done, not failed — match S3's mapping.
     if (resp.status == 416) {
-        let mut w0 = JsonWriter::new();
+        let w0 = JsonWriter::new();
         w0.begin_object();
         w0.key("data");
         w0.write_str("");
@@ -1914,7 +1915,7 @@ fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, mut c: Ctx) ->
     let data = resp.body;
     let n = data.len();
     let eof = (n as u64) < len;
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("data");
     w.write_str(base64_encode(data));
@@ -1930,7 +1931,7 @@ fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, mut c: Ctx) ->
 
 /// The `webdav:test` outcome — drives the connect form's status text.
 /// "SUCCESS" | "UNAUTHORIZED" | "TIMEOUT" | "OTHER_ERROR".
-fn test_impl(creds: Creds, mut c: Ctx) -> str {
+fn test_impl(creds: Creds, c: Ctx) -> str {
     let url = build_url(creds.addr, "/", true);
     if (url == nil) {
         return "OTHER_ERROR";
@@ -1969,12 +1970,12 @@ fn test_impl(creds: Creds, mut c: Ctx) -> str {
 /// password keeps the stored secret.
 fn connect_impl(args: ConnectArgs) -> ?str {
     let addr = trim(args.addr);
-    let mut alias = trim(args.alias);
+    let alias = trim(args.alias);
     if (alias == "") {
         alias = "WebDAV";
     }
-    let mut username = "";
-    let mut password = "";
+    let username = "";
+    let password = "";
     if (!args.is_anonymous) {
         username = trim(args.username);
         password = args.password;
@@ -1985,8 +1986,8 @@ fn connect_impl(args: ConnectArgs) -> ?str {
     if (!args.is_anonymous && username == "") {
         return nil;
     }
-    let mut instance = args.storage_id;
-    let mut created = false;
+    let instance = args.storage_id;
+    let created = false;
     if (instance == nil) {
         // create: password required for non-anonymous servers
         if (!args.is_anonymous && password == "") {
@@ -1997,7 +1998,7 @@ fn connect_impl(args: ConnectArgs) -> ?str {
     }
     let id: str = instance;
     // update: keep the existing secret unless a new password is given
-    let mut secret_id: i64 = 0;
+    let secret_id: i64 = 0;
     let existing = config_of(id);
     if (existing != nil) {
         let e: Config = existing;
@@ -2010,7 +2011,7 @@ fn connect_impl(args: ConnectArgs) -> ?str {
         }
         secret_id = new_id;
     }
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("alias");
     w.write_str(alias);
@@ -2028,7 +2029,7 @@ fn connect_impl(args: ConnectArgs) -> ?str {
     }
     w.end_object();
     single_set(kv_key(id), w.finish());
-    let mut rw = JsonWriter::new();
+    let rw = JsonWriter::new();
     rw.begin_object();
     rw.key("storageId");
     rw.write_str(id);
@@ -2041,7 +2042,7 @@ fn connect_impl(args: ConnectArgs) -> ?str {
 /// Remove an instance: drop its config (kv) + password secret, ask the host
 /// to delete the storage row, and reload the dashboard (the host trash
 /// button's `storage:removeInstance`).
-fn remove_instance_impl(mut c: Ctx, storage_id: str) {
+fn remove_instance_impl(c: Ctx, storage_id: str) {
     let existing = config_of(storage_id);
     if (existing != nil) {
         let e: Config = existing;
@@ -2061,7 +2062,7 @@ fn remove_instance_impl(mut c: Ctx, storage_id: str) {
 
 /// Position the cursor inside the envelope's `args` object (`{"op":…,
 /// "args":{…}}` — the caller decodes fields then closes the object).
-fn enter_args(mut r: JsonReader) -> bool {
+fn enter_args(r: JsonReader) -> bool {
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -2083,7 +2084,7 @@ fn enter_args(mut r: JsonReader) -> bool {
 
 /// The optional-string read: `null` → nil, a string → some, anything else
 /// (or a truncated body) → the reader's sticky error.
-fn read_opt_str(mut r: JsonReader) -> ?str {
+fn read_opt_str(r: JsonReader) -> ?str {
     if (r.try_null()) {
         return nil;
     }
@@ -2107,14 +2108,14 @@ entry fn op_storage_list(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:list: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("webdav: bad storage:list request");
     }
-    let mut storage_id: ?str = nil;
-    let mut dir: ?str = nil;
+    let storage_id: ?str = nil;
+    let dir: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2154,15 +2155,15 @@ entry fn op_storage_get(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:get: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("webdav: bad storage:get request");
     }
-    let mut storage_id: ?str = nil;
-    let mut path: ?str = nil;
-    let mut offset: u64 = 0;
+    let storage_id: ?str = nil;
+    let path: ?str = nil;
+    let offset: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2203,15 +2204,15 @@ entry fn op_storage_get_chunk(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:get-chunk: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("webdav: bad storage:get-chunk request");
     }
-    let mut sid: u64 = 0;
-    let mut offset: u64 = 0;
-    let mut len: u64 = 0;
+    let sid: u64 = 0;
+    let offset: u64 = 0;
+    let len: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2264,7 +2265,7 @@ fn creds_for_session(c: Ctx, url: str) -> ?Creds {
     let want: AddrParts = parts;
     let keys = list_instance_keys();
     let n = keys.len;
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         let key = keys[i];
         let cfg = config_of(key);
@@ -2287,11 +2288,11 @@ fn creds_for_session(c: Ctx, url: str) -> ?Creds {
 fn list_instance_keys() -> Vec<str> {
     let out = Vec<str>::new();
     let raw = list_keys("storage:");
-    let mut r = JsonReader::of(raw);
+    let r = JsonReader::of(raw);
     r.begin_array();
     while (r.more()) {
         r.begin_object();
-        let mut key: ?str = nil;
+        let key: ?str = nil;
         while (r.more()) {
             let k = r.next_key();
             if (r.failed()) {
@@ -2325,13 +2326,13 @@ entry fn op_storage_release(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:release: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("webdav: bad storage:release request");
     }
-    let mut sid: u64 = 0;
+    let sid: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2355,13 +2356,13 @@ entry fn op_storage_remove_instance(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:removeInstance: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("webdav: bad storage:removeInstance request");
     }
-    let mut storage_id: ?str = nil;
+    let storage_id: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2389,17 +2390,17 @@ entry fn op_webdav_test(cx: opaque) -> str {
     if (c == nil) {
         panic("webdav:test: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("webdav: bad webdav:test request");
     }
-    let mut storage_id: ?str = nil;
-    let mut addr = "";
-    let mut username = "";
-    let mut password = "";
-    let mut anon = false;
+    let storage_id: ?str = nil;
+    let addr = "";
+    let username = "";
+    let password = "";
+    let anon = false;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -2426,7 +2427,7 @@ entry fn op_webdav_test(cx: opaque) -> str {
         is_anonymous: anon,
     });
     let outcome = test_impl(creds, cc);
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("result");
     w.write_str(outcome);
@@ -2456,11 +2457,11 @@ fn resolve_test_creds(a: TestArgs) -> Creds {
         };
     }
     let conf: Config = cfg;
-    let mut addr = a.addr;
+    let addr = a.addr;
     if (addr == "") {
         addr = conf.addr;
     }
-    let mut username = a.username;
+    let username = a.username;
     if (username == "") {
         username = conf.username;
     }
@@ -2478,16 +2479,16 @@ entry fn op_webdav_connect(cx: opaque) -> str {
         panic("webdav:connect: cx is not a Ctx");
     }
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("webdav: bad webdav:connect request");
     }
-    let mut storage_id: ?str = nil;
-    let mut addr = "";
-    let mut alias = "";
-    let mut username = "";
-    let mut password = "";
-    let mut anon = false;
+    let storage_id: ?str = nil;
+    let addr = "";
+    let alias = "";
+    let username = "";
+    let password = "";
+    let anon = false;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {

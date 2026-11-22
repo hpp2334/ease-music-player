@@ -139,8 +139,9 @@ Rust-family syntax. The corpus (`tur-upstream rut/cases/`, esp.
 - Entries: `entry fn start() -> opaque` (+ optional `entry fn stop()`);
   op entries as above.
 - Structs: `struct S { a: str, b: u64 }` — literal `S { a: "x", b: 0 }`;
-  fields always public; `mut` bindings/params for field writes
-  (`fn bump(mut s: S) { s.b = s.b + 1.0; }`).
+  fields always public; bindings/params are mutable by default (the
+  drop-mut law — `mut` is gone from the grammar; write fields freely:
+  `fn bump(s: S) { s.b = s.b + 1.0; }`, `const` for the shallow opt-out).
 - Locals: `let x: ?str = nil;` optionals; `when v { "a" -> {...}, else -> {...} }`;
   `for (let row of rows)`; `while (cond)`; `f"…{x}…"` with `{{`/`}}`
   escapes for literal braces; `x as u64` casts; unannotated float locals
@@ -150,7 +151,7 @@ Rust-family syntax. The corpus (`tur-upstream rut/cases/`, esp.
   `decode_utf8`.
 - JSON (std pkg, offered): `use json::{ decodeJson, JsonReader,
   JsonDeserialize, DecodeErrorKind, DecodeJsonError };` — records spell
-  `impl S { pub fn decode(mut r: JsonReader) -> (?Self, ?DecodeJsonError)
+  `impl S { pub fn decode(r: JsonReader) -> (?Self, ?DecodeJsonError)
   { ... } }` (see github-viewer/schema.rut for the full reader idiom:
   `r.begin_object() / while (r.more()) { when (r.next_key()) { "k" ->
   {…}, else -> { r.skip_value(); } } / r.end_object() / r.failed() /

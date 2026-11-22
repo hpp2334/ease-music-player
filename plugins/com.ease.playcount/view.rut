@@ -310,9 +310,9 @@ fn refresh_now(ctx: MutationCtx, s: State) {
 
     // The range's day keys, newest first ("Last N days" includes today).
     let days = range_days_of(ctx.get<str>(s.sel_range));
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_array();
-    let mut d: i64 = 0;
+    let d: i64 = 0;
     while (d < days) {
         w.write_str(day_key_offset(d));
         d += 1;
@@ -326,12 +326,12 @@ fn refresh_now(ctx: MutationCtx, s: State) {
     // plain string membership is exact. A playlist deleted between page
     // opens degrades to no filtering.
     let sel = ctx.get<str>(s.sel_playlist);
-    let mut allowed: ?Vec<str> = nil;
+    let allowed: ?Vec<str> = nil;
     if (sel != PLAYLIST_ALL) {
         allowed = roster_music_ids(ctx.get<opaque>(s.roster), sel);
     }
 
-    let mut agg = Agg { ids: Vec<str>::new(), titles: Vec<str>::new(), counts: Vec<i64>::new() };
+    let agg = Agg { ids: Vec<str>::new(), titles: Vec<str>::new(), counts: Vec<i64>::new() };
     aggregate(grouped, allowed, agg);
 
     // Rank count-desc. Rows carry the range's max count so every bar
@@ -340,18 +340,18 @@ fn refresh_now(ctx: MutationCtx, s: State) {
     // The padded-count prefix makes the rank a plain str ordering
     // (ascending — the publisher below walks it backwards).
     let n: i32 = agg.ids.len;
-    let mut top: i64 = 0;
-    let mut k: i32 = 0;
+    let top: i64 = 0;
+    let k: i32 = 0;
     while (k < n) {
         if (agg.counts[k] > top) {
             top = agg.counts[k];
         }
         k += 1;
     }
-    let mut rows = Vec<str>::new();
+    let rows = Vec<str>::new();
     k = 0;
     while (k < n) {
-        let mut b = StringBuilder::with_cap(128);
+        let b = StringBuilder::with_cap(128);
         b.append(pad10(agg.counts[k]));
         b.append(str::from_code(1));
         b.append(entry_row_json(agg.ids[k], agg.titles[k], agg.counts[k], top));
@@ -363,9 +363,9 @@ fn refresh_now(ctx: MutationCtx, s: State) {
     // Covers for the top of the list (newest rank first). Only ids not
     // cached yet are requested — a cover registers at most once per page
     // open, and failures just leave the fallback disc.
-    let mut want = Vec<str>::new();
-    let mut picked: u64 = 0;
-    let mut i = n;
+    let want = Vec<str>::new();
+    let picked: u64 = 0;
+    let i = n;
     while (i > 0 && picked < COVER_BATCH) {
         i -= 1;
         let id = agg.ids[i];
@@ -380,7 +380,7 @@ fn refresh_now(ctx: MutationCtx, s: State) {
 
     // Publish count-desc (strip the padded prefix).
     let fresh = list_new();
-    let mut j = rows.len;
+    let j = rows.len;
     while (j > 0) {
         j -= 1;
         let row = rows[j];
@@ -394,7 +394,7 @@ fn refresh_now(ctx: MutationCtx, s: State) {
 /// The `{"musicId","title","count","top"}` row the ranked list renders
 /// from.
 fn entry_row_json(music_id: str, title: str, count: i64, top: i64) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("musicId");
     w.write_str(music_id);
@@ -411,8 +411,8 @@ fn entry_row_json(music_id: str, title: str, count: i64, top: i64) -> str {
 /// The `multi_get_all_multi` walk: `[{key, values:[row,…]}, …]` — every
 /// stored play row counted (subject to the membership filter). Corrupt
 /// rows are skipped, never fatal (the TS's defensive parse).
-fn aggregate(grouped: str, allowed: ?Vec<str>, mut agg: Agg) {
-    let mut r = JsonReader::of(grouped);
+fn aggregate(grouped: str, allowed: ?Vec<str>, agg: Agg) {
+    let r = JsonReader::of(grouped);
     r.begin_array();
     while (r.more()) {
         r.begin_object();
@@ -441,10 +441,10 @@ fn aggregate(grouped: str, allowed: ?Vec<str>, mut agg: Agg) {
 }
 
 /// One stored play row (`{musicId, title, ts}`) → +1 for its musicId.
-fn bump(mut agg: Agg, raw: str, allowed: ?Vec<str>) {
-    let mut r = JsonReader::of(raw);
-    let mut music_id = "";
-    let mut title = UNKNOWN_TITLE;
+fn bump(agg: Agg, raw: str, allowed: ?Vec<str>) {
+    let r = JsonReader::of(raw);
+    let music_id = "";
+    let title = UNKNOWN_TITLE;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -484,7 +484,7 @@ fn bump(mut agg: Agg, raw: str, allowed: ?Vec<str>) {
         }
     }
     let n: i32 = agg.ids.len;
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < n) {
         if (agg.ids[i] == music_id) {
             agg.counts[i] = agg.counts[i] + 1;
@@ -507,11 +507,11 @@ fn bump(mut agg: Agg, raw: str, allowed: ?Vec<str>) {
 /// `[{"musicId":"…","id":n|null}]` (id = the engine image resource; null =
 /// no cover / undecodable — the rows keep the fallback art).
 fn fill_covers(covers_map: MapHandle, answer: str) {
-    let mut r = JsonReader::of(answer);
+    let r = JsonReader::of(answer);
     r.begin_array();
     while (r.more()) {
-        let mut music_id = "";
-        let mut id: i64 = 0;
+        let music_id = "";
+        let id: i64 = 0;
         r.begin_object();
         while (r.more()) {
             let k = r.next_key();
@@ -555,11 +555,11 @@ struct EntryV {
 }
 
 fn decode_entry(item: str) -> ?EntryV {
-    let mut r = JsonReader::of(item);
-    let mut music_id = "";
-    let mut title = "";
-    let mut count: i64 = 0;
-    let mut top: i64 = 0;
+    let r = JsonReader::of(item);
+    let music_id = "";
+    let title = "";
+    let count: i64 = 0;
+    let top: i64 = 0;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -599,7 +599,7 @@ fn ready_body(entries: Source<opaque>, covers_map: MapHandle) -> View {
     });
     let top_label: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
         let n = value_len(ctx.get<opaque>(entries));
-        let mut m: u64 = 3;
+        let m: u64 = 3;
         if (n < m) {
             m = n;
         }
@@ -666,12 +666,12 @@ fn ranked_row(i: u64, item: str, covers_map: MapHandle) -> View {
     // The medal spec (the TS `medalSpec`): top 3 get podium discs, the
     // tail a small muted disc. The medal is the ONLY tier-colored element
     // on a card.
-    let mut d: f64 = 28.0;
-    let mut fill: u64 = BAR_TRACK;
-    let mut ring: u64 = BAR_TRACK;
-    let mut num: u64 = TEXT_MUTED;
-    let mut fs: f64 = 12.0;
-    let mut bw: f64 = 1.0;
+    let d: f64 = 28.0;
+    let fill: u64 = BAR_TRACK;
+    let ring: u64 = BAR_TRACK;
+    let num: u64 = TEXT_MUTED;
+    let fs: f64 = 12.0;
+    let bw: f64 = 1.0;
     if (rank == 1) {
         d = 48.0;
         fill = GOLD;
@@ -1061,9 +1061,9 @@ struct OptionV {
 }
 
 fn decode_option(item: str) -> ?OptionV {
-    let mut r = JsonReader::of(item);
-    let mut value = "";
-    let mut label = "";
+    let r = JsonReader::of(item);
+    let value = "";
+    let label = "";
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1165,10 +1165,10 @@ struct PlaylistV {
     music_ids: Vec<str>;
 }
 
-fn decode_playlist(mut r: JsonReader) -> ?PlaylistV {
-    let mut id = "";
-    let mut title = "";
-    let mut ids = Vec<str>::new();
+fn decode_playlist(r: JsonReader) -> ?PlaylistV {
+    let id = "";
+    let title = "";
+    let ids = Vec<str>::new();
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1204,7 +1204,7 @@ fn decode_playlist(mut r: JsonReader) -> ?PlaylistV {
 /// playlist so `value_item` reads them back singly).
 fn parse_roster(raw: str) -> ListHandle {
     let out = list_new();
-    let mut r = JsonReader::of(raw);
+    let r = JsonReader::of(raw);
     r.begin_array();
     while (r.more()) {
         let p = decode_playlist(r);
@@ -1212,7 +1212,7 @@ fn parse_roster(raw: str) -> ListHandle {
             break;
         }
         let pl: PlaylistV = p;
-        let mut w = JsonWriter::new();
+        let w = JsonWriter::new();
         w.begin_object();
         w.key("id");
         w.write_str(pl.id);
@@ -1233,9 +1233,9 @@ fn parse_roster(raw: str) -> ListHandle {
 
 fn roster_music_ids(roster: opaque, id: str) -> ?Vec<str> {
     let n = value_len(roster);
-    let mut i: u64 = 0;
+    let i: u64 = 0;
     while (i < n) {
-        let mut r = JsonReader::of(value_item(roster, i));
+        let r = JsonReader::of(value_item(roster, i));
         let p = decode_playlist(r);
         if (p != nil) {
             let pl: PlaylistV = p;
@@ -1250,9 +1250,9 @@ fn roster_music_ids(roster: opaque, id: str) -> ?Vec<str> {
 
 fn roster_title(roster: opaque, id: str) -> str {
     let n = value_len(roster);
-    let mut i: u64 = 0;
+    let i: u64 = 0;
     while (i < n) {
-        let mut r = JsonReader::of(value_item(roster, i));
+        let r = JsonReader::of(value_item(roster, i));
         let p = decode_playlist(r);
         if (p != nil) {
             let pl: PlaylistV = p;
@@ -1270,7 +1270,7 @@ fn range_options() -> ListHandle {
     let ids = range_ids();
     let labels = range_labels();
     let out = list_new();
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < RANGE_COUNT) {
         out.push(option_row_json(ids[i], labels[i]));
         i += 1;
@@ -1283,9 +1283,9 @@ fn playlist_options(roster: opaque) -> ListHandle {
     let out = list_new();
     out.push(option_row_json(PLAYLIST_ALL, "All Playlists"));
     let n = value_len(roster);
-    let mut i: u64 = 0;
+    let i: u64 = 0;
     while (i < n) {
-        let mut r = JsonReader::of(value_item(roster, i));
+        let r = JsonReader::of(value_item(roster, i));
         let p = decode_playlist(r);
         if (p != nil) {
             let pl: PlaylistV = p;
@@ -1299,7 +1299,7 @@ fn playlist_options(roster: opaque) -> ListHandle {
 }
 
 fn option_row_json(value: str, label: str) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("value");
     w.write_str(value);
@@ -1315,7 +1315,7 @@ fn option_row_json(value: str, label: str) -> str {
 
 fn range_index_of(id: str) -> i32 {
     let ids = range_ids();
-    let mut i: i32 = 0;
+    let i: i32 = 0;
     while (i < RANGE_COUNT) {
         if (ids[i] == id) {
             return i;
@@ -1346,8 +1346,8 @@ fn range_label_of(id: str) -> str {
 /// The header's headline number (the TS `total$` derive).
 fn entries_total(entries: opaque) -> i64 {
     let n = value_len(entries);
-    let mut sum: i64 = 0;
-    let mut i: u64 = 0;
+    let sum: i64 = 0;
+    let i: u64 = 0;
     while (i < n) {
         let e = decode_entry(value_item(entries, i));
         if (e != nil) {
@@ -1374,7 +1374,7 @@ fn is_digits(s: str) -> bool {
     if (n == 0) {
         return false;
     }
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         let c = s.code_at(i);
         if (c < 48 || c > 57) {
@@ -1390,13 +1390,13 @@ fn is_digits(s: str) -> bool {
 /// Stored play rows carry `musicId` as a NUMBER (the TS `JSON.stringify`ed
 /// the raw host payload) while roster ids are strings — accept both and
 /// normalize to the string. (Keep in sync with backend.rut's `id_str`.)
-fn id_str(mut r: JsonReader) -> ?str {
+fn id_str(r: JsonReader) -> ?str {
     if (r.try_null()) {
         return nil;
     }
     let rest = r.rest();
-    let mut i = 0;
-    let mut c: u32 = 0;
+    let i = 0;
+    let c: u32 = 0;
     while (i < rest.len()) {
         c = rest.code_at(i);
         if (c != 32 && c != 10 && c != 13 && c != 9) {
@@ -1418,7 +1418,7 @@ fn id_str(mut r: JsonReader) -> ?str {
     return f"{n}";
 }
 
-fn opt_str(mut r: JsonReader) -> ?str {
+fn opt_str(r: JsonReader) -> ?str {
     if (r.try_null()) {
         return nil;
     }
@@ -1431,7 +1431,7 @@ fn opt_str(mut r: JsonReader) -> ?str {
 
 fn find_from(s: str, from: i32, c: u32) -> i32 {
     let n = s.len();
-    let mut i = from;
+    let i = from;
     while (i < n) {
         if (s.code_at(i) == c) {
             return i;
@@ -1446,9 +1446,9 @@ fn find_from(s: str, from: i32, c: u32) -> i32 {
 /// the right, then the fixed-width reversal (the webdav nc_hex pattern).
 fn pad10(v: i64) -> str {
     let digits = "0123456789";
-    let mut b = StringBuilder::with_cap(10);
-    let mut rest = v;
-    let mut n: i64 = 0;
+    let b = StringBuilder::with_cap(10);
+    let rest = v;
+    let n: i64 = 0;
     while (n < 10) {
         let d = rest % 10;
         rest = rest / 10;
@@ -1461,8 +1461,8 @@ fn pad10(v: i64) -> str {
 
 fn reverse_str(s: str) -> str {
     let n = s.len();
-    let mut b = StringBuilder::with_cap(n);
-    let mut i: i32 = n;
+    let b = StringBuilder::with_cap(n);
+    let i: i32 = n;
     while (i > 0) {
         b.append(s.slice(i - 1, i));
         i -= 1;
@@ -1512,11 +1512,11 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let doy = doe - (365i64 * yoe + yoe / 4i64 - yoe / 100i64);
     let mp = (5i64 * doy + 2i64) / 153i64;
     let d = doy - (153i64 * mp + 2i64) / 5i64 + 1i64;
-    let mut m = mp + 3i64;
+    let m = mp + 3i64;
     if (mp >= 10) {
         m = mp - 9i64;
     }
-    let mut yy = y;
+    let yy = y;
     if (m <= 2) {
         yy = y + 1i64;
     }
@@ -1526,7 +1526,7 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 /// `["a","b"]` — the `multi_get_all_multi` keys JSON (also kept in sync
 /// with backend.rut's twin).
 fn json_str_array(items: Vec<str>) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_array();
     for (let s of items) {
         w.write_str(s);
@@ -1539,7 +1539,7 @@ fn json_str_array(items: Vec<str>) -> str {
 fn str_less(a: str, b: str) -> bool {
     let n = a.len();
     let m = b.len();
-    let mut i = 0;
+    let i = 0;
     while (i < n && i < m) {
         let ca = a.code_at(i);
         let cb = b.code_at(i);
@@ -1552,12 +1552,12 @@ fn str_less(a: str, b: str) -> bool {
 }
 
 /// Insertion sort ascending (the day's distinct tracks are a modest list).
-fn sort_rows(mut rows: Vec<str>) {
+fn sort_rows(rows: Vec<str>) {
     let n: i32 = rows.len;
-    let mut i: i32 = 1;
+    let i: i32 = 1;
     while (i < n) {
         let key = rows[i];
-        let mut j = i - 1;
+        let j = i - 1;
         while (j >= 0 && str_less(key, rows[j])) {
             rows[j + 1] = rows[j];
             j -= 1;

@@ -152,7 +152,7 @@ fn ok_bool(v: bool) -> str {
 }
 
 fn err_env(msg: str) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.write_str(msg);
     return f"{{\"ok\":false,\"error\":{w.finish()}}}";
 }
@@ -173,7 +173,7 @@ fn starts_with_ci(s: str, at: i32, prefix: str) -> bool {
     if (at < 0 || s.len() < at + n) {
         return false;
     }
-    let mut i = 0;
+    let i = 0;
     while (i < n) {
         if (lower_code(s.code_at(at + i)) != lower_code(prefix.code_at(i))) {
             return false;
@@ -189,7 +189,7 @@ fn contains_ci(hay: str, needle: str) -> bool {
     if (m == 0) {
         return true;
     }
-    let mut i = 0;
+    let i = 0;
     while (i + m <= n) {
         if (starts_with_ci(hay, i, needle)) {
             return true;
@@ -203,7 +203,7 @@ fn contains_ci(hay: str, needle: str) -> bool {
 fn str_less(a: str, b: str) -> bool {
     let n = a.len();
     let m = b.len();
-    let mut i = 0;
+    let i = 0;
     while (i < n && i < m) {
         let ca = a.code_at(i);
         let cb = b.code_at(i);
@@ -230,8 +230,8 @@ fn ends_with(s: str, suffix: str) -> bool {
 /// The last `/`-separated segment (the TS `path.split("/").pop()`).
 fn last_segment(path: str) -> str {
     let n = path.len();
-    let mut last = -1;
-    let mut i = 0;
+    let last = -1;
+    let i = 0;
     while (i < n) {
         if (path.code_at(i) == 47) {
             last = i;
@@ -288,8 +288,8 @@ fn append_percent_utf8(b: StringBuilder, c: u32) {
 /// else UTF-8 percent-escaped — the token endpoint's form fields.
 fn form_component_encode(s: str) -> str {
     let n = s.len();
-    let mut b = StringBuilder::with_cap(n * 3 + 1);
-    let mut i = 0;
+    let b = StringBuilder::with_cap(n * 3 + 1);
+    let i = 0;
     while (i < n) {
         let c = s.code_at(i);
         let keep = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
@@ -312,8 +312,8 @@ fn form_component_encode(s: str) -> str {
 /// rule; the TS sent paths raw, which broke on `#` / space).
 fn encode_graph_path(p: str) -> str {
     let n = p.len();
-    let mut b = StringBuilder::with_cap(n * 3 + 1);
-    let mut i = 0;
+    let b = StringBuilder::with_cap(n * 3 + 1);
+    let i = 0;
     while (i < n) {
         let c = p.code_at(i);
         let keep = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
@@ -343,10 +343,10 @@ fn kv_key(instance: str) -> str {
 
 /// Decode the persisted config document; nil on corrupt JSON.
 fn decode_config(doc: str) -> ?Config {
-    let mut r = JsonReader::of(doc);
+    let r = JsonReader::of(doc);
     r.begin_object();
-    let mut alias: ?str = nil;
-    let mut secret_id: i64 = 0;
+    let alias: ?str = nil;
+    let secret_id: i64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -371,7 +371,7 @@ fn decode_config(doc: str) -> ?Config {
     if (r.failed()) {
         return nil;
     }
-    let mut a = "";
+    let a = "";
     if (alias != nil) {
         a = alias;
     }
@@ -392,7 +392,7 @@ fn config_of(instance: str) -> ?Config {
     if (cfg == nil) {
         return nil;
     }
-    let mut c: Config = cfg;
+    let c: Config = cfg;
     if (c.alias == "") {
         c.alias = instance;
     }
@@ -418,7 +418,7 @@ fn save_refresh_token(instance: str, old_id: i64, token: str) {
         return;
     }
     let c: Config = cfg;
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("alias");
     w.write_str(c.alias);
@@ -433,7 +433,7 @@ fn save_refresh_token(instance: str, old_id: i64, token: str) {
 // ---------------------------------------------------------------------------
 
 fn token_cache_get(c: Ctx, instance: str) -> ?str {
-    let mut i = 0;
+    let i = 0;
     while (i < TOKEN_POOL) {
         let inst = c.tok_inst[i];
         if (inst != nil) {
@@ -448,9 +448,9 @@ fn token_cache_get(c: Ctx, instance: str) -> ?str {
 }
 
 /// Cache (or refresh) an instance's access token; a full pool evicts slot 0.
-fn token_cache_put(mut c: Ctx, instance: str, token: str) {
-    let mut free: i32 = -1;
-    let mut i = 0;
+fn token_cache_put(c: Ctx, instance: str, token: str) {
+    let free: i32 = -1;
+    let i = 0;
     while (i < TOKEN_POOL) {
         let inst = c.tok_inst[i];
         if (inst != nil) {
@@ -471,8 +471,8 @@ fn token_cache_put(mut c: Ctx, instance: str, token: str) {
     c.tok_access[free] = token;
 }
 
-fn token_cache_drop(mut c: Ctx, instance: str) {
-    let mut i = 0;
+fn token_cache_drop(c: Ctx, instance: str) {
+    let i = 0;
     while (i < TOKEN_POOL) {
         let inst = c.tok_inst[i];
         if (inst != nil) {
@@ -491,7 +491,7 @@ fn token_cache_drop(mut c: Ctx, instance: str) {
 // ---------------------------------------------------------------------------
 
 fn session_of(c: Ctx, sid: u64) -> ?Session {
-    let mut i = 0;
+    let i = 0;
     while (i < SESS_POOL) {
         if (sid != 0 && c.sess_sid[i] == sid) {
             let inst = c.sess_inst[i];
@@ -508,8 +508,8 @@ fn session_of(c: Ctx, sid: u64) -> ?Session {
     return nil;
 }
 
-fn release_impl(mut c: Ctx, sid: u64) -> bool {
-    let mut i = 0;
+fn release_impl(c: Ctx, sid: u64) -> bool {
+    let i = 0;
     while (i < SESS_POOL) {
         if (sid != 0 && c.sess_sid[i] == sid) {
             c.sess_sid[i] = 0;
@@ -547,7 +547,7 @@ fn marked_transport_error(msg: str) -> str {
 /// The `request_sync` opts document (`{"url","method","headers","body"}` —
 /// bodies ride `{"text": …}`; a body implies the OAuth form content type).
 fn graph_opts(url: str, method: str, auth: ?str, range: ?str, body_text: ?str) -> str {
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("url");
     w.write_str(url);
@@ -586,12 +586,12 @@ fn graph_opts(url: str, method: str, auth: ?str, range: ?str, body_text: ?str) -
 /// the body. `failed` covers transport errors (the reply's `error` field).
 fn http_send(opts: str) -> GraphResp {
     let reply = request_sync(opts);
-    let mut r = JsonReader::of(reply);
+    let r = JsonReader::of(reply);
     r.begin_object();
-    let mut status: u64 = 0;
-    let mut status_text = "";
-    let mut body_b64 = "";
-    let mut err = "";
+    let status: u64 = 0;
+    let status_text = "";
+    let body_b64 = "";
+    let err = "";
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -639,7 +639,7 @@ fn http_send(opts: str) -> GraphResp {
 /// One Graph call with the TS `withRetry` semantics: ensure a token, send,
 /// on a 401 rotate the refresh token once and retry; a still-401 reply (or
 /// any other >= 400) fails with the host-mapped prefix.
-fn graph_call(mut c: Ctx, instance: str, method: str, url: str, range: ?str, body_text: ?str) -> GraphResp {
+fn graph_call(c: Ctx, instance: str, method: str, url: str, range: ?str, body_text: ?str) -> GraphResp {
     let got = ensure_token(c, instance);
     let tok = got.0;
     if (tok == nil) {
@@ -647,7 +647,7 @@ fn graph_call(mut c: Ctx, instance: str, method: str, url: str, range: ?str, bod
         return failed_resp(e);
     }
     let t: str = tok;
-    let mut resp = http_send(graph_opts(url, method, f"bearer {t}", range, body_text));
+    let resp = http_send(graph_opts(url, method, f"bearer {t}", range, body_text));
     if (!resp.failed && resp.status == 401) {
         let got2 = refresh_access(c, instance);
         let fresh = got2.0;
@@ -691,10 +691,10 @@ fn redeem_token(grant: str, extra_key: str, extra_value: str) -> (?str, ?str, st
         return (nil, nil, f"token {grant} failed: {resp.status} {resp.status_text}");
     }
     let text = decode_utf8(resp.body);
-    let mut r = JsonReader::of(text);
+    let r = JsonReader::of(text);
     r.begin_object();
-    let mut access: ?str = nil;
-    let mut refresh: ?str = nil;
+    let access: ?str = nil;
+    let refresh: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -724,7 +724,7 @@ fn redeem_token(grant: str, extra_key: str, extra_value: str) -> (?str, ?str, st
 }
 
 /// Rotate the refresh token, persist it, cache the fresh access token.
-fn refresh_access(mut c: Ctx, instance: str) -> (?str, str) {
+fn refresh_access(c: Ctx, instance: str) -> (?str, str) {
     let cfg = config_of(instance);
     if (cfg == nil) {
         return (nil, f"onedrive: no config for instance {instance}");
@@ -750,7 +750,7 @@ fn refresh_access(mut c: Ctx, instance: str) -> (?str, str) {
 }
 
 /// The cached access token, or a fresh one (the TS `ensureToken`).
-fn ensure_token(mut c: Ctx, instance: str) -> (?str, str) {
+fn ensure_token(c: Ctx, instance: str) -> (?str, str) {
     let cached = token_cache_get(c, instance);
     if (cached != nil) {
         let t: str = cached;
@@ -790,8 +790,8 @@ fn parse_iso_date(s: str) -> u64 {
 }
 
 fn iso_num(s: str, at: i32, n: i32) -> i64 {
-    let mut acc: i64 = 0;
-    let mut i = at;
+    let acc: i64 = 0;
+    let i = at;
     while (i < at + n) {
         let c = s.code_at(i);
         if (c < 48 || c > 57) {
@@ -805,7 +805,7 @@ fn iso_num(s: str, at: i32, n: i32) -> i64 {
 
 /// Howard Hinnant's `days_from_civil` (the host time rows use the same).
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let mut yy = y;
+    let yy = y;
     if (m <= 2) {
         yy = y - 1;
     }
@@ -838,14 +838,14 @@ fn compute_list_url(dir: str) -> str {
 
 /// The listing: `("", err)` on failure (err carries the marked prefix),
 /// the result JSON otherwise. Follows `@odata.nextLink` until exhausted.
-fn list_impl(mut c: Ctx, instance: str, dir: str) -> (?str, str) {
-    let mut url = compute_list_url(dir);
-    let mut base = dir;
+fn list_impl(c: Ctx, instance: str, dir: str) -> (?str, str) {
+    let url = compute_list_url(dir);
+    let base = dir;
     while (ends_with(base, "/")) {
         base = base.slice(0, base.len() - 1);
     }
-    let mut cx = ListCx { dir_trimmed: base, rows: Vec<str>::new() };
-    let mut more = true;
+    let cx = ListCx { dir_trimmed: base, rows: Vec<str>::new() };
+    let more = true;
     while (more) {
         let resp = graph_call(c, instance, "GET", url, nil, nil);
         if (resp.failed) {
@@ -868,10 +868,10 @@ fn list_impl(mut c: Ctx, instance: str, dir: str) -> (?str, str) {
 
 /// Decode one listing page into `cx`; `(ok, nextLink)` — ok false on any
 /// malformed shape.
-fn decode_page(text: str, mut cx: ListCx) -> (bool, ?str) {
-    let mut r = JsonReader::of(text);
+fn decode_page(text: str, cx: ListCx) -> (bool, ?str) {
+    let r = JsonReader::of(text);
     r.begin_object();
-    let mut next: ?str = nil;
+    let next: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -908,13 +908,13 @@ fn decode_page(text: str, mut cx: ListCx) -> (bool, ?str) {
 /// One driveItem of the `value` array: name + file/folder facet + the two
 /// timestamps. Items with no name or no facet are skipped (the TS pushed
 /// `undefined` names / dropped non-file non-folder items).
-fn decode_item(mut r: JsonReader, mut cx: ListCx) {
-    let mut name: ?str = nil;
-    let mut is_dir = false;
-    let mut is_file = false;
-    let mut size: i64 = -1;
-    let mut created: u64 = 0;
-    let mut modified: u64 = 0;
+fn decode_item(r: JsonReader, cx: ListCx) {
+    let name: ?str = nil;
+    let is_dir = false;
+    let is_file = false;
+    let size: i64 = -1;
+    let created: u64 = 0;
+    let modified: u64 = 0;
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -961,7 +961,7 @@ fn decode_item(mut r: JsonReader, mut cx: ListCx) {
 
 /// The optional-string read: `null` → nil, a string → some, anything else
 /// (or a truncated body) → the reader's sticky error.
-fn read_opt_str(mut r: JsonReader) -> ?str {
+fn read_opt_str(r: JsonReader) -> ?str {
     if (r.try_null()) {
         return nil;
     }
@@ -973,7 +973,7 @@ fn read_opt_str(mut r: JsonReader) -> ?str {
 }
 
 /// An RFC 3339 timestamp field: absent/null → 0, else parsed (0 on junk).
-fn iso_field(mut r: JsonReader) -> u64 {
+fn iso_field(r: JsonReader) -> u64 {
     let v = read_opt_str(r);
     if (r.failed()) {
         return 0;
@@ -987,12 +987,12 @@ fn iso_field(mut r: JsonReader) -> u64 {
 
 /// Convert one driveItem to the sortable row (files carry `size`, both
 /// facets carry the timestamps when present).
-fn push_entry(mut cx: ListCx, name: str, is_dir: bool, size: i64, created: u64, modified: u64) {
-    let mut path = f"/{name}";
+fn push_entry(cx: ListCx, name: str, is_dir: bool, size: i64, created: u64, modified: u64) {
+    let path = f"/{name}";
     if (cx.dir_trimmed != "") {
         path = f"{cx.dir_trimmed}/{name}";
     }
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("name");
     w.write_str(name);
@@ -1013,7 +1013,7 @@ fn push_entry(mut cx: ListCx, name: str, is_dir: bool, size: i64, created: u64, 
         w.write_i64(modified as i64);
     }
     w.end_object();
-    let mut flag = "f";
+    let flag = "f";
     if (is_dir) {
         flag = "d";
     }
@@ -1024,12 +1024,12 @@ fn push_entry(mut cx: ListCx, name: str, is_dir: bool, size: i64, created: u64, 
 
 /// Sort (the prefix does the ordering), strip the prefix, join the JSON
 /// objects into the result array.
-fn render_entries(mut cx: ListCx) -> str {
+fn render_entries(cx: ListCx) -> str {
     let rows = cx.rows;
     sort_rows(rows);
-    let mut out = StringBuilder::with_cap(256);
+    let out = StringBuilder::with_cap(256);
     out.append("[");
-    let mut first = true;
+    let first = true;
     for (let row of rows) {
         if (!first) {
             out.append(",");
@@ -1043,12 +1043,12 @@ fn render_entries(mut cx: ListCx) -> str {
 
 /// Dirs first, then by path — the row's sort prefix makes this a plain str
 /// ordering (insertion sort; listings are small).
-fn sort_rows(mut rows: Vec<str>) {
+fn sort_rows(rows: Vec<str>) {
     let n = rows.len;
-    let mut i = 1;
+    let i = 1;
     while (i < n) {
         let key = rows[i];
-        let mut j = i - 1;
+        let j = i - 1;
         while (j >= 0 && str_less(key, rows[j])) {
             rows[j + 1] = rows[j];
             j -= 1;
@@ -1068,7 +1068,7 @@ fn row_json(row: str) -> str {
 /// First index of one codepoint at/after `from`, -1 when absent.
 fn find_from(s: str, from: i32, c: u32) -> i32 {
     let n = s.len();
-    let mut i = from;
+    let i = from;
     while (i < n) {
         if (s.code_at(i) == c) {
             return i;
@@ -1088,7 +1088,7 @@ fn find_from(s: str, from: i32, c: u32) -> i32 {
 /// `dataOffset` declares the requested offset.
 /// The opener: `("", err)` on failure (err carries the marked prefix),
 /// the `{sid, meta}` JSON otherwise.
-fn open_impl(mut c: Ctx, instance: str, path: str, offset: u64) -> (?str, str) {
+fn open_impl(c: Ctx, instance: str, path: str, offset: u64) -> (?str, str) {
     let url = f"{ONEDRIVE_ROOT_API}/root:{encode_graph_path(path)}";
     let resp = graph_call(c, instance, "GET", url, nil, nil);
     if (resp.failed) {
@@ -1101,8 +1101,8 @@ fn open_impl(mut c: Ctx, instance: str, path: str, offset: u64) -> (?str, str) {
     }
     let m: Meta = meta;
     // claim a session slot
-    let mut slot: i32 = -1;
-    let mut i = 0;
+    let slot: i32 = -1;
+    let i = 0;
     while (i < SESS_POOL) {
         if (c.sess_sid[i] == 0) {
             slot = i;
@@ -1118,11 +1118,11 @@ fn open_impl(mut c: Ctx, instance: str, path: str, offset: u64) -> (?str, str) {
     c.sess_sid[slot] = sid;
     c.sess_inst[slot] = instance;
     c.sess_path[slot] = path;
-    let mut name = m.name;
+    let name = m.name;
     if (name == "") {
         name = last_segment(path);
     }
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("sid");
     w.write_i64(sid as i64);
@@ -1148,11 +1148,11 @@ fn open_impl(mut c: Ctx, instance: str, path: str, offset: u64) -> (?str, str) {
 /// The opener's driveItem: `name` / `size` / `file.mimeType` (+ a `folder`
 /// facet tolerated for a mis-pathed dir). Nil on any malformed shape.
 fn decode_meta(doc: str) -> ?Meta {
-    let mut r = JsonReader::of(doc);
+    let r = JsonReader::of(doc);
     r.begin_object();
-    let mut name: ?str = nil;
-    let mut size: i64 = -1;
-    let mut mime: ?str = nil;
+    let name: ?str = nil;
+    let size: i64 = -1;
+    let mime: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1193,11 +1193,11 @@ fn decode_meta(doc: str) -> ?Meta {
     if (r.failed()) {
         return nil;
     }
-    let mut n = "";
+    let n = "";
     if (name != nil) {
         n = name;
     }
-    let mut m = "";
+    let m = "";
     if (mime != nil) {
         m = mime;
     }
@@ -1209,7 +1209,7 @@ fn decode_meta(doc: str) -> ?Meta {
 /// carries data AND eof). The 401 rotation rides `graph_call`.
 /// One chunk: `("", err)` on failure (err carries the marked prefix),
 /// the `{data, eof}` JSON otherwise.
-fn chunk_impl(mut c: Ctx, sess: Session, offset: u64, len: u64) -> (?str, str) {
+fn chunk_impl(c: Ctx, sess: Session, offset: u64, len: u64) -> (?str, str) {
     let end = offset + len - 1u64;
     let url = f"{ONEDRIVE_ROOT_API}/root:{encode_graph_path(sess.path)}:/content";
     let resp = graph_call(c, sess.instance, "GET", url, f"bytes={offset}-{end}", nil);
@@ -1219,7 +1219,7 @@ fn chunk_impl(mut c: Ctx, sess: Session, offset: u64, len: u64) -> (?str, str) {
     // 416 = the pull landed past EOF (exact-multiple-of-len files): the
     // stream is done, not failed — match S3's mapping.
     if (resp.status == 416) {
-        let mut w0 = JsonWriter::new();
+        let w0 = JsonWriter::new();
         w0.begin_object();
         w0.key("data");
         w0.write_str("");
@@ -1231,7 +1231,7 @@ fn chunk_impl(mut c: Ctx, sess: Session, offset: u64, len: u64) -> (?str, str) {
     let data = resp.body;
     let n = data.len();
     let eof = (n as u64) < len;
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("data");
     w.write_str(base64_encode(data));
@@ -1263,9 +1263,9 @@ fn take_pending(oauth_id: str) -> ?str {
         return nil;
     }
     let doc: str = raw;
-    let mut r = JsonReader::of(doc);
+    let r = JsonReader::of(doc);
     r.begin_object();
-    let mut alias: ?str = nil;
+    let alias: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1291,7 +1291,7 @@ fn take_pending(oauth_id: str) -> ?str {
 /// storage instance, persist its config + refresh token, prime the token
 /// cache, and answer its id. The user-facing alias comes from the flow's
 /// pending slot — never from the host.
-fn exchange_impl(mut c: Ctx, code: str, oauth_id: str) -> (?str, str) {
+fn exchange_impl(c: Ctx, code: str, oauth_id: str) -> (?str, str) {
     let got = redeem_token("authorization_code", "code", code);
     let access = got.0;
     let refresh = got.1;
@@ -1303,7 +1303,7 @@ fn exchange_impl(mut c: Ctx, code: str, oauth_id: str) -> (?str, str) {
     let rf: str = refresh;
     let instance = f"onedrive:{random_uuid()}";
     let secret_id = put(rf);
-    let mut alias = "OneDrive";
+    let alias = "OneDrive";
     let pend = take_pending(oauth_id);
     if (pend != nil) {
         let p: str = pend;
@@ -1311,7 +1311,7 @@ fn exchange_impl(mut c: Ctx, code: str, oauth_id: str) -> (?str, str) {
             alias = p;
         }
     }
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("alias");
     w.write_str(alias);
@@ -1326,7 +1326,7 @@ fn exchange_impl(mut c: Ctx, code: str, oauth_id: str) -> (?str, str) {
 /// Remove an instance: drop its config (kv) + refresh-token secret + cached
 /// token, ask the host to delete the storage row, and reload the dashboard
 /// (the host trash button's `storage:removeInstance`).
-fn remove_instance_impl(mut c: Ctx, storage_id: str) {
+fn remove_instance_impl(c: Ctx, storage_id: str) {
     let raw = single_get(kv_key(storage_id));
     if (raw != nil) {
         let doc: str = raw;
@@ -1354,7 +1354,7 @@ fn remove_instance_impl(mut c: Ctx, storage_id: str) {
 /// host). Answers `(fired, error)`.
 fn connect_flow_impl(alias: str) -> (bool, str) {
     let oauth_id = new();
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("alias");
     if (alias != "") {
@@ -1380,11 +1380,11 @@ entry fn op_onedrive_connect(cx: opaque) -> str {
         panic("onedrive:connect: cx is not a Ctx");
     }
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("onedrive: bad onedrive:connect request");
     }
-    let mut alias: ?str = nil;
+    let alias: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1399,7 +1399,7 @@ entry fn op_onedrive_connect(cx: opaque) -> str {
         }
     }
     let got = connect_flow_impl(opt_str_or(alias, ""));
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("fired");
     w.write_bool(got.0);
@@ -1415,7 +1415,7 @@ entry fn op_onedrive_connect(cx: opaque) -> str {
 
 /// Position the cursor inside the envelope's `args` object (`{"op":…,
 /// "args":{…}}` — the caller decodes fields then closes the object).
-fn enter_args(mut r: JsonReader) -> bool {
+fn enter_args(r: JsonReader) -> bool {
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -1448,14 +1448,14 @@ entry fn op_storage_list(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:list: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("onedrive: bad storage:list request");
     }
-    let mut storage_id: ?str = nil;
-    let mut dir: ?str = nil;
+    let storage_id: ?str = nil;
+    let dir: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1489,15 +1489,15 @@ entry fn op_storage_get(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:get: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("onedrive: bad storage:get request");
     }
-    let mut storage_id: ?str = nil;
-    let mut path: ?str = nil;
-    let mut offset: u64 = 0;
+    let storage_id: ?str = nil;
+    let path: ?str = nil;
+    let offset: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1532,15 +1532,15 @@ entry fn op_storage_get_chunk(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:get-chunk: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("onedrive: bad storage:get-chunk request");
     }
-    let mut sid: u64 = 0;
-    let mut offset: u64 = 0;
-    let mut len: u64 = 0;
+    let sid: u64 = 0;
+    let offset: u64 = 0;
+    let len: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1579,13 +1579,13 @@ entry fn op_storage_release(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:release: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("onedrive: bad storage:release request");
     }
-    let mut sid: u64 = 0;
+    let sid: u64 = 0;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1608,13 +1608,13 @@ entry fn op_storage_remove_instance(cx: opaque) -> str {
     if (c == nil) {
         panic("storage:removeInstance: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("onedrive: bad storage:removeInstance request");
     }
-    let mut storage_id: ?str = nil;
+    let storage_id: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1642,7 +1642,7 @@ entry fn op_oauth_url(cx: opaque) -> str {
         panic("oauth:url: cx is not a Ctx");
     }
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("onedrive: bad oauth:url request");
     }
@@ -1655,7 +1655,7 @@ entry fn op_oauth_url(cx: opaque) -> str {
         }
         r.skip_value();
     }
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("url");
     w.write_str(authorize_url());
@@ -1668,14 +1668,14 @@ entry fn op_oauth_exchange(cx: opaque) -> str {
     if (c == nil) {
         panic("oauth:exchange: cx is not a Ctx");
     }
-    let mut cc: Ctx = c;
+    let cc: Ctx = c;
     let req = take_request();
-    let mut r = JsonReader::of(req);
+    let r = JsonReader::of(req);
     if (!enter_args(r)) {
         return err_env("onedrive: bad oauth:exchange request");
     }
-    let mut oauth_id: ?str = nil;
-    let mut code: ?str = nil;
+    let oauth_id: ?str = nil;
+    let code: ?str = nil;
     while (r.more()) {
         let k = r.next_key();
         if (r.failed()) {
@@ -1701,7 +1701,7 @@ entry fn op_oauth_exchange(cx: opaque) -> str {
         return err_env(out.1);
     }
     let id: str = o;
-    let mut w = JsonWriter::new();
+    let w = JsonWriter::new();
     w.begin_object();
     w.key("storageId");
     w.write_str(id);

@@ -59,7 +59,7 @@ jobs:
         run: |
           cargo install --locked cargo-ndk@3.5.4 || true
           # The workspace pins its toolchain via rust-libs/rust-toolchain.toml
-          # (tur@795538f builds on this nightly) — the Android target must be
+          # (tur@3b34983 builds on this nightly) — the Android target must be
           # installed for THAT toolchain, not the runner default.
           rustup target add aarch64-linux-android --toolchain nightly-2026-07-15
       - name: Install cargo nextest
