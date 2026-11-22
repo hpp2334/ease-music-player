@@ -40,3 +40,17 @@ ease-client-schema = { path = "./ease-client-schema" }
 ease-client-migration = { path = "./ease-client-migration" }
 ease-client-tokio = { path = "./ease-client-tokio" }
 ease-order-key = { path = "./ease-order-key" }
+
+# Local tur engine (phase 1 of the plugin-epoch plan): the git pins above
+# (rev 3b349831) resolve to the sibling checkout while the engine lanes
+# land upstream. Covers every tur crate this workspace references;
+# ease-tur-rpc's rut-core/rut-vm stay on their hpp2334/rut git pin
+# (deliberately NOT patched). Remove this section once tur's rev bump
+# lands upstream.
+[patch."https://github.com/hpp2334/tur"]
+tur-engine = { path = "../../tur/libs/tur-engine" }
+tur-animation = { path = "../../tur/libs/tur-animation" }
+tur-android = { path = "../../tur/libs/tur-android" }
+tur-net-capability = { path = "../../tur/libs/tur-net-capability" }
+tur-native = { path = "../../tur/libs/tur-native" }
+tur-integration-tests = { path = "../../tur/libs/tur-integration-tests" }

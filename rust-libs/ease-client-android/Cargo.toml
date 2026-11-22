@@ -25,6 +25,9 @@ anyhow = { workspace = true }
 # reserved, the parser merge (rut-ast owns the parser), std-v18, the
 # glob leaf + the Name vocabulary, and tur's own .rut sources swept by
 # the rut formatter.
+# Phase 1 (plugin-epoch engine lanes): this git rev resolves through the
+# local [patch."https://github.com/hpp2334/tur"] section in ../Cargo.toml
+# (sibling checkout /tur) until the engine bump lands upstream.
 tur-android = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
 tur-engine = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
 tur-animation = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }

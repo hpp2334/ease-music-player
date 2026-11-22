@@ -5399,7 +5399,6 @@ dependencies = [
 [[package]]
 name = "tur-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "android_logger",
  "futures",
@@ -5423,7 +5422,6 @@ dependencies = [
 [[package]]
 name = "tur-animation"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "rut-core",
  "rut-driver",
@@ -5436,7 +5434,6 @@ dependencies = [
 [[package]]
 name = "tur-clipboard-android"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "jni",
  "tracing",
@@ -5446,7 +5443,6 @@ dependencies = [
 [[package]]
 name = "tur-engine"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "glifo",
@@ -5473,7 +5469,6 @@ dependencies = [
 [[package]]
 name = "tur-filepicker-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "rut-core",
  "rut-driver",
@@ -5485,7 +5480,6 @@ dependencies = [
 [[package]]
 name = "tur-integration-tests"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "libc",
@@ -5500,7 +5494,6 @@ dependencies = [
 [[package]]
 name = "tur-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "parley",
@@ -5511,7 +5504,6 @@ dependencies = [
 [[package]]
 name = "tur-net-capability"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "rut-core",
@@ -5524,7 +5516,6 @@ dependencies = [
 [[package]]
 name = "tur-net-native"
 version = "0.1.0"
-source = "git+https://github.com/hpp2334/tur?rev=3b349831ab22cb464c7e6a556479cd2c4f383521#3b349831ab22cb464c7e6a556479cd2c4f383521"
 dependencies = [
  "futures",
  "reqwest 0.12.28",
