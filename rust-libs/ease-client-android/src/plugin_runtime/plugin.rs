@@ -16,7 +16,8 @@
 //! - [`emp::install`] — the NEW SDK surface: the `emp_host` host pkg
 //!   (service rows with a leading handle opaque — the host-minted
 //!   [`emp::PluginHandle`] the phase-1 boot lane delivers to
-//!   `start(cx)`) + the `emp` class pkg offered beside it.
+//!   `start(cx)`) + the `emp` class pkg offered beside it. The rpc
+//!   bind-table rows mount through `ease_tur_rpc::install_rows` (phase 3).
 //! - [`third::install`] — the NEW identity-free util libs (`crypto`,
 //!   `xml`, `net`, `time`) as standard rut pkgs from `plugins/3rd/`.
 //!
@@ -77,7 +78,7 @@ impl Plugin for EaseMusicPlugin {
         ctx.push_rut_ext(std::rc::Rc::new(third::install));
 
         tracing::info!(
-            "EaseMusicPlugin registered ease (db + secret + oauth + themes + context + library + rpc.call; utilities: crypto + xml + net + time) + emp (emp_host + the emp class SDK) + the 3rd libs (crypto + xml + net + time)"
+            "EaseMusicPlugin registered ease (db + secret + oauth + themes + context + library + rpc.call; utilities: crypto + xml + net + time) + emp (emp_host incl. the rpc bind table + the emp class SDK) + the 3rd libs (crypto + xml + net + time)"
         );
         Ok(())
     }

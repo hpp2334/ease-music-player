@@ -36,9 +36,10 @@
 //!
 //! [`install`] pushes `emp_host`'s decl rows + offered mounts in BOTH
 //! phases and its body pkg only at boot — `install_host_pkg` sees the
-//! spec exactly once. The rpc rows are NOT relocated into `emp_host`
-//! this phase (recorded decision: they stay in `tur_host` only until
-//! the phase-3 redesign; `emp` ships no Rpc class).
+//! spec exactly once. The rpc bind-table rows (`rpc::bind` / `rpc::handler`
+//! / `rpc::call`) are part of that one mount: their bodies relocate from
+//! `ease_tur_rpc::install_rows` (phase 3), and `emp` ships the `Rpc`
+//! class over them.
 //!
 //! # Boot law
 //!

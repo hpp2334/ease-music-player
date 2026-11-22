@@ -16,7 +16,9 @@
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use ease_tur_rpc::{RpcBus, RpcClient, RpcError, RutDriver, TurRpcBusPlugin};
+use ease_tur_rpc::{
+    DispatchAnswer, RpcBus, RpcClient, RpcError, RutDriver, TurRpcBusPlugin,
+};
 use serde_json::json;
 use tur_integration_tests::TurTestApp;
 
@@ -81,6 +83,12 @@ enum Cmd {
     Token(mpsc::SyncSender<u64>),
 }
 
+/// The engine's missing-export refusal — the fixture is old-style (no
+/// dispatch entries), so the capability probe reads exactly this.
+fn no_export(name: &str) -> String {
+    format!("module eval: call_rut_entry: no export `{name}` (a control entry must exist)")
+}
+
 impl RutDriver for TestDriver {
     fn call_entry_str(&self, name: &str, cx: u64) -> Result<String, String> {
         let (rtx, rrx) = mpsc::sync_channel(1);
@@ -103,6 +111,26 @@ impl RutDriver for TestDriver {
         let (rtx, rrx) = mpsc::sync_channel(1);
         self.tx.send(Cmd::Token(rtx)).ok();
         rrx.recv().unwrap_or(0)
+    }
+
+    fn call_dispatch_str(
+        &self,
+        name: &str,
+        _cx: u64,
+        _op: &str,
+        _args: &str,
+    ) -> Result<DispatchAnswer, String> {
+        Err(no_export(name))
+    }
+
+    fn call_dispatch_bytes(
+        &self,
+        name: &str,
+        _cx: u64,
+        _op: &str,
+        _args: &[u8],
+    ) -> Result<DispatchAnswer, String> {
+        Err(no_export(name))
     }
 }
 
@@ -147,7 +175,9 @@ fn boot() -> RpcClient {
         }
     });
     ready_rx.recv().expect("driver thread booted");
-    RpcClient::new(bus, Arc::new(TestDriver { tx }))
+    // The old-style fixture: no boot identity (0) — the bind-table lane
+    // cannot be addressed and the probe falls straight to the bus.
+    RpcClient::new(bus, Arc::new(TestDriver { tx }), 0)
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -225,12 +255,32 @@ fn a_not_booted_module_is_a_transport_error() {
         fn start_token(&self) -> u64 {
             0
         }
+        fn call_dispatch_str(
+            &self,
+            _name: &str,
+            _cx: u64,
+            _op: &str,
+            _args: &str,
+        ) -> Result<DispatchAnswer, String> {
+            Err("dead".into())
+        }
+        fn call_dispatch_bytes(
+            &self,
+            _name: &str,
+            _cx: u64,
+            _op: &str,
+            _args: &[u8],
+        ) -> Result<DispatchAnswer, String> {
+            Err("dead".into())
+        }
     }
     // The op IS registered (the module's start ran far enough to bind it),
-    // but the boot never answered a context token.
+    // but the boot never answered a context token. The probe's transport
+    // failure reads conservatively as the bus lane, and the bus dispatch
+    // surfaces the familiar not-booted transport error.
     let bus = RpcBus::new();
     bus.register_op("echo", "op_echo");
-    let client = RpcClient::new(bus, Arc::new(DeadDriver));
+    let client = RpcClient::new(bus, Arc::new(DeadDriver), 0);
     let err = runtime()
         .block_on(client.call_host("echo", json!({})))
         .expect_err("not booted");

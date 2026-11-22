@@ -6,9 +6,15 @@
 //! per-instance data slot. `themes` stays identity-free (app-owned
 //! host palette — the `Theme` class has no field).
 //!
-//! The rpc rows are NOT here (recorded phase-2 decision: they stay in
-//! `tur_host` only until the phase-3 redesign — see
-//! `ease_tur_rpc::install_rows`).
+//! The rpc bind-table rows (`rpc::bind` / `rpc::handler` — the phase-3
+//! dispatch redesign) live HERE: their bodies relocate from
+//! `ease_tur_rpc::install_rows` (the one-owner rule — emp_host is the
+//! single mount), their identity decode is `ease_tur_rpc`'s
+//! [`RpcIdentity`] stamp (the same minted id the `RpcClient` dispatches
+//! with), and the view→backend `rpc::call` row keeps the old row's
+//! envelope shape behind the handle. The OLD stash-bus rows
+//! (`ease.rpc.register` / `subscribe_event` / `take_request`) stay in
+//! `tur_host` only (never dual-mounted here) until phase 5 deletes them.
 
 use std::sync::Arc;
 
@@ -77,6 +83,12 @@ pub(crate) fn decl() -> Vec<rut_driver::HostRow> {
         row("library", "playlists", h(vec![]), TY_STR),
         row("library", "covers", h(vec![TY_STR]), TY_STR),
     ]
+    // ---- rpc (the phase-3 bind table — bodies relocate from
+    // ease-tur-rpc; the view→backend call row joins them here) ----
+    .into_iter()
+    .chain(ease_tur_rpc::bind_rows_decl())
+    .chain(vec![row("rpc", "call", h(vec![TY_STR, TY_STR]), TY_STR)])
+    .collect::<Vec<_>>()
 }
 
 /// The body pkg. Keys are the scope-relative path spellings
@@ -239,6 +251,25 @@ pub(crate) fn pkg(handles: &std::rc::Rc<RutHandles>) -> rut_vm::interp::HostPkg 
     emp_row!(handles, "library::covers", (music_ids_json: &str) -> String, "library", handle, {
         let _ = handle;
         op_library_covers(&backend_cx("library", handles)?, handles, music_ids_json)
+    });
+
+    // ---- rpc (the phase-3 bind table) -------------------------------------
+
+    // The bind/dispatch rows' bodies mount from ease-tur-rpc (one owner —
+    // the relocation seam); their leading-handle decode is the
+    // `RpcIdentity` stamp (the same minted id `RpcClient` dispatches with).
+    ease_tur_rpc::install_rows(&mut pkg, handles);
+
+    // call(op, argsJson) -> envelope str — the view→backend call row, the
+    // old `ease.rpc.call` shape behind the handle.
+    emp_row!(handles, "rpc::call", (op: &str, args_json: &str) -> String, "rpc", handle, {
+        let _ = handles;
+        crate::plugin_runtime::service_rows::rpc_call_envelope(
+            &backend_cx("rpc", handles)?,
+            handle.plugin_id(),
+            op,
+            args_json,
+        )
     });
 
     pkg

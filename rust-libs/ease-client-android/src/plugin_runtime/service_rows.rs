@@ -821,18 +821,19 @@ pub(crate) fn op_library_covers(
 // ---------------------------------------------------------------------------
 
 /// `call(op, argsJson) -> envelope str` — route a view's call to its
-/// plugin's backend bus. Blocking (control calls are ms-scale; the view's
-/// VM task waits on the backend's host-thread round-trip). The envelope
-/// passes through: `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`.
-fn rpc_call_row(
-    handles: &std::rc::Rc<RutHandles>,
+/// plugin's backend bus (the OLD row's body, shared with the NEW
+/// `emp_host::rpc::call` row — the identity comes in resolved either
+/// way). Blocking (control calls are ms-scale; the view's VM task waits
+/// on the backend's host-thread round-trip). The envelope passes through:
+/// `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`.
+pub(crate) fn rpc_call_envelope(
+    cx: &ease_client_backend::ctx::BackendContext,
+    plugin_id: &str,
     op: &str,
     args_json: &str,
 ) -> Result<String, rut_vm::Trap> {
-    let pid = plugin_id("rpc", handles)?;
-    let cx = backend_cx("rpc", handles)?;
     let args: serde_json::Value = parse_json(args_json, "args")?;
-    let Some(client) = cx.service_rpc_for(pid.as_str()) else {
+    let Some(client) = cx.service_rpc_for(plugin_id) else {
         return Ok(serde_json::to_string(&ease_tur_rpc::err_envelope(
             "the plugin backend is not running",
         ))
@@ -846,6 +847,17 @@ fn rpc_call_row(
         Err(e) => Ok(serde_json::to_string(&ease_tur_rpc::err_envelope(&e.to_string()))
             .expect("envelope serializes")),
     }
+}
+
+/// The OLD row: identity resolved from the per-instance slot.
+fn rpc_call_row(
+    handles: &std::rc::Rc<RutHandles>,
+    op: &str,
+    args_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let pid = plugin_id("rpc", handles)?;
+    let cx = backend_cx("rpc", handles)?;
+    rpc_call_envelope(&cx, pid.as_str(), op, args_json)
 }
 
 // ---------------------------------------------------------------------------

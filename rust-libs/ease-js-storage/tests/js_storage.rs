@@ -13,7 +13,9 @@
 
 use ease_js_storage::JsStorageBackend;
 use ease_remote_storage::StorageBackend;
-use ease_tur_rpc::{RpcBus, RpcClient, RutDriver, TurRpcBusPlugin};
+use ease_tur_rpc::{
+    DispatchAnswer, RpcBus, RpcClient, RutDriver, TurRpcBindPlugin, TurRpcBusPlugin,
+};
 use std::sync::mpsc;
 use std::sync::Arc;
 use tur_integration_tests::TurTestApp;
@@ -82,7 +84,27 @@ entry fn op_release(cx: opaque) -> str {
 enum Cmd {
     CallStr(String, u64, mpsc::SyncSender<Result<String, String>>),
     Call(String, u64, mpsc::SyncSender<Result<(), String>>),
+    DispatchStr(
+        String,
+        u64,
+        String,
+        String,
+        mpsc::SyncSender<Result<DispatchAnswer, String>>,
+    ),
+    DispatchBytes(
+        String,
+        u64,
+        String,
+        Vec<u8>,
+        mpsc::SyncSender<Result<DispatchAnswer, String>>,
+    ),
     Token(mpsc::SyncSender<u64>),
+}
+
+/// The engine's missing-export refusal — the old fixture has no dispatch
+/// entries, so the capability probe reads exactly this.
+fn no_export(name: &str) -> String {
+    format!("module eval: call_rut_entry: no export `{name}` (a control entry must exist)")
 }
 
 impl RutDriver for TestDriver {
@@ -107,6 +129,46 @@ impl RutDriver for TestDriver {
         let (rtx, rrx) = mpsc::sync_channel(1);
         self.tx.send(Cmd::Token(rtx)).ok();
         rrx.recv().unwrap_or(0)
+    }
+
+    fn call_dispatch_str(
+        &self,
+        name: &str,
+        cx: u64,
+        op: &str,
+        args: &str,
+    ) -> Result<DispatchAnswer, String> {
+        let (rtx, rrx) = mpsc::sync_channel(1);
+        self.tx
+            .send(Cmd::DispatchStr(
+                name.to_string(),
+                cx,
+                op.to_string(),
+                args.to_string(),
+                rtx,
+            ))
+            .map_err(|_| "driver thread gone".to_string())?;
+        rrx.recv().map_err(|_| "driver dropped".to_string())?
+    }
+
+    fn call_dispatch_bytes(
+        &self,
+        name: &str,
+        cx: u64,
+        op: &str,
+        args: &[u8],
+    ) -> Result<DispatchAnswer, String> {
+        let (rtx, rrx) = mpsc::sync_channel(1);
+        self.tx
+            .send(Cmd::DispatchBytes(
+                name.to_string(),
+                cx,
+                op.to_string(),
+                args.to_vec(),
+                rtx,
+            ))
+            .map_err(|_| "driver thread gone".to_string())?;
+        rrx.recv().map_err(|_| "driver dropped".to_string())?
     }
 }
 
@@ -149,6 +211,182 @@ fn boot() -> (RpcClient, tokio::runtime::Runtime) {
                 Cmd::Token(rtx) => {
                     let _ = rtx.send(app.rut_start_answer());
                 }
+                // The dispatch lanes — the old fixture has no dispatch
+                // entries, the probe never routes here.
+                Cmd::DispatchStr(..) | Cmd::DispatchBytes(..) => unreachable!(),
+            }
+        }
+    });
+    ready_rx.recv().expect("driver thread booted");
+    let tokio_rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    // The old-style fixture: no boot identity (0) — the bind-table lane
+    // cannot be addressed and the probe falls straight to the bus.
+    (
+        RpcClient::new(bus, Arc::new(TestDriver { tx }), 0),
+        tokio_rt,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// The bind-table lane (phase 3): the same storage contract, bound through
+// the `rpc::bind` rows + served through the `rpc`/`rpc_bin` dispatch
+// entries. The transport under `JsStorageBackend` is identical — only the
+// lane changes (the emp-class version of this fixture lives in
+// ease-plugins-check's emp_rpc.rs).
+// ---------------------------------------------------------------------------
+
+const STORE_RUT_V2: &str = r#"
+use rpc_host::rpc::{ bind, handler };
+use json::{ JsonReader };
+
+let PAYLOAD_B64: str = "__B64__";
+let SIZE: u64 = __SIZE__;
+
+// the dispatch entries (declared once per backend) — two-line forwards
+// over the rows, the `emp::Rpc` shape without the SDK
+entry fn rpc(cx: opaque, op: str, args: str) -> ?str {
+    let b = handler(cx, op);
+    if (b == nil) {
+        return nil;
+    }
+    let f = opaque::downcast<fn(str) -> ?str>(b);
+    return f(args);
+}
+
+// the plain fns (each decodes its OWN args with the json lib)
+fn op_list(args: str) -> ?str {
+    let dir = read_str_field(args, "dir");
+    return f"[{{\"name\":\"song.flac\",\"path\":\"{dir}/song.flac\",\"size\":{SIZE},\"isDir\":false,\"createdAt\":1700000000000,\"modifiedAt\":1700000001000}}]";
+}
+
+fn op_get(args: str) -> ?str {
+    let _ = read_str_field(args, "path");
+    return f"{{\"sid\":7,\"meta\":{{\"totalLength\":{SIZE},\"name\":\"song.flac\",\"contentType\":\"audio/flac\",\"dataOffset\":0}}}}";
+}
+
+fn op_chunk(args: str) -> ?str {
+    let _ = read_i64_field(args, "sid");
+    let _ = read_i64_field(args, "offset");
+    return f"{{\"data\":\"{PAYLOAD_B64}\",\"eof\":true}}";
+}
+
+fn op_release(args: str) -> ?str {
+    let _ = read_i64_field(args, "sid");
+    return "true";
+}
+
+// the json-field decoders (the `json` std lib)
+fn read_str_field(args: str, want: str) -> str {
+    let r = JsonReader::of(args);
+    let out: str = "";
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (k == want) {
+            out = r.read_str();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    return out;
+}
+
+fn read_i64_field(args: str, want: str) -> i64 {
+    let r = JsonReader::of(args);
+    let out: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (k == want) {
+            out = r.read_i64();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    return out;
+}
+
+entry fn start(cx: opaque) {
+    let _ = cx;
+    bind(cx, "storage:list", opaque(fn (args: str) -> ?str { return op_list(args); }));
+    bind(cx, "storage:get", opaque(fn (args: str) -> ?str { return op_get(args); }));
+    bind(cx, "storage:get-chunk", opaque(fn (args: str) -> ?str { return op_chunk(args); }));
+    bind(cx, "storage:release", opaque(fn (args: str) -> ?str { return op_release(args); }));
+}
+"#;
+
+/// Boot the bind-table fixture (stamped with a fixed identity; loaded
+/// through the phase-1 cx lane).
+fn boot_v2() -> (RpcClient, tokio::runtime::Runtime) {
+    const BOOT_CX: u64 = 4040;
+    let bus = RpcBus::new();
+    let (tx, rx) = mpsc::channel::<Cmd>();
+    let (ready_tx, ready_rx) = mpsc::channel::<()>();
+    let bus_for_plugin = Some(bus.clone());
+    let fixture = STORE_RUT_V2
+        .replace("__B64__", PAYLOAD_B64)
+        .replace("__SIZE__", &PAYLOAD.len().to_string());
+    std::thread::spawn(move || {
+        let app = TurTestApp::new_with_extra_plugins(
+            400.0,
+            400.0,
+            vec![
+                Box::new(TurRpcBusPlugin::new(bus_for_plugin)),
+                // The standalone bind rows + the identity stamp.
+                Box::new(TurRpcBindPlugin::with_identity(BOOT_CX)),
+            ],
+        )
+        .expect("harness app");
+        app.load_rut_module_cx(&fixture, BOOT_CX)
+            .expect("fixture loads");
+        ready_tx.send(()).expect("test still waiting");
+        for cmd in rx {
+            match cmd {
+                Cmd::CallStr(name, cx, rtx) => {
+                    let _ = rtx.send(
+                        app.call_rut_entry_cx_str(&name, cx).map_err(|e| e.to_string()),
+                    );
+                }
+                Cmd::Call(name, cx, rtx) => {
+                    let _ = rtx.send(
+                        app.call_rut_entry_cx(&name, cx)
+                            .map(|_| ())
+                            .map_err(|e| e.to_string()),
+                    );
+                }
+                Cmd::DispatchStr(name, cx, op, args, rtx) => {
+                    let _ = rtx.send(
+                        app.call_rut_entry_cx_str_str(&name, cx, &op, &args)
+                            .map(|a| match a {
+                                tur_engine::RutEntryAnswer::Nil => DispatchAnswer::Nil,
+                                tur_engine::RutEntryAnswer::Str(s) => DispatchAnswer::Str(s),
+                                tur_engine::RutEntryAnswer::Bytes(b) => DispatchAnswer::Bytes(b),
+                                other => panic!("unexpected dispatch answer: {other:?}"),
+                            })
+                            .map_err(|e| e.to_string()),
+                    );
+                }
+                Cmd::DispatchBytes(name, cx, op, args, rtx) => {
+                    let _ = rtx.send(
+                        app.call_rut_entry_cx_str_bytes(&name, cx, &op, &args)
+                            .map(|a| match a {
+                                tur_engine::RutEntryAnswer::Nil => DispatchAnswer::Nil,
+                                tur_engine::RutEntryAnswer::Str(s) => DispatchAnswer::Str(s),
+                                tur_engine::RutEntryAnswer::Bytes(b) => DispatchAnswer::Bytes(b),
+                                other => panic!("unexpected dispatch answer: {other:?}"),
+                            })
+                            .map_err(|e| e.to_string()),
+                    );
+                }
+                Cmd::Token(rtx) => {
+                    let _ = rtx.send(app.rut_start_answer());
+                }
             }
         }
     });
@@ -159,9 +397,42 @@ fn boot() -> (RpcClient, tokio::runtime::Runtime) {
         .build()
         .expect("tokio runtime");
     (
-        RpcClient::new(bus, Arc::new(TestDriver { tx })),
+        RpcClient::new(bus, Arc::new(TestDriver { tx }), BOOT_CX),
         tokio_rt,
     )
+}
+
+#[test]
+fn list_roundtrips_over_the_bind_table_lane() {
+    let (client, tokio_rt) = boot_v2();
+    let backend = JsStorageBackend::new(
+        client,
+        "com.ease.stub2",
+        "stub2:test",
+        tokio_rt.handle().clone(),
+    );
+    let entries = tokio_rt.block_on(backend.list("/music".into())).expect("list");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "song.flac");
+    assert_eq!(entries[0].size, Some(PAYLOAD.len()));
+    assert!(!entries[0].is_dir);
+}
+
+#[test]
+fn get_pulls_chunks_over_the_bind_table_lane() {
+    let (client, tokio_rt) = boot_v2();
+    let backend = JsStorageBackend::new(
+        client,
+        "com.ease.stub2",
+        "stub2:test",
+        tokio_rt.handle().clone(),
+    );
+    // The v2 opener answers dataOffset: 0 — the prefix-drop path too.
+    let file = tokio_rt
+        .block_on(backend.get("/music/song.flac".into(), 6))
+        .expect("get");
+    let bytes = tokio_rt.block_on(file.bytes()).expect("bytes");
+    assert_eq!(bytes.as_ref(), b"world!", "prefix bytes must be dropped");
 }
 
 #[test]

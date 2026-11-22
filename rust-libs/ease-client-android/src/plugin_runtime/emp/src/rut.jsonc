@@ -11,8 +11,9 @@
   //
   // Utilities (crypto / xml / net / time) are NOT here — they are the
   // standard 3rd-party libs (`plugins/3rd/`); `emp` deps stay
-  // `["emp_host"]`. The Rpc class lands with the phase-3 dispatch
-  // redesign.
+  // `["emp_host"]`. The Rpc class carries the phase-3 bind-table
+  // dispatch (`rpc.bind` / `bind_bin` / `subscribe` / `dispatch` /
+  // `dispatch_bin` / `call`).
   "name": "emp",
   "deps": {
     "emp_host": {

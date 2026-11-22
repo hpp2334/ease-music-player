@@ -12,6 +12,9 @@ tur-engine = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c
 # `host`/`when` reserved, parser merged into rut-ast, std-v18).
 rut-core = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
 rut-vm = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+# The host-row decls (`bind_rows_decl`) + the offered pkg mounts
+# (`bind_rows_ext`) — same rev as rut-core/rut-vm.
+rut-driver = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
 tokio = { version = "1", features = ["sync"] }
 bytes = "1"
 serde = { version = "1", features = ["derive"] }

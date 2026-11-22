@@ -353,6 +353,9 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
                     crate::plugin_runtime::PluginInstance(instance_opt.clone()),
                 );
                 cx.define::<crate::plugin_runtime::emp::PluginHandle>(plugin_handle);
+                // The rpc rows' identity (view pages call their backend
+                // through `Rpc.call`): the SAME minted id the boot passes.
+                cx.define::<ease_tur_rpc::RpcIdentity>(ease_tur_rpc::RpcIdentity(start_cx));
             })
         },
         base_color,

@@ -108,6 +108,56 @@ impl ease_tur_rpc::RutDriver for AndroidDriver {
         })
         .unwrap_or(0)
     }
+
+    fn call_dispatch_str(
+        &self,
+        name: &str,
+        cx: u64,
+        op: &str,
+        args: &str,
+    ) -> Result<ease_tur_rpc::DispatchAnswer, String> {
+        // `with_app` takes a `'static` closure — own every borrowed capture.
+        let (name, op, args) = (name.to_string(), op.to_string(), args.to_string());
+        tur_android::ops::with_app(self.handle, move |app| {
+            futures::executor::block_on(app.call_rut_entry_cx_str_str(&name, cx, &op, &args))
+        })
+        .ok_or_else(|| format!("instance {self:?} gone"))?
+        .map_err(|e| e.to_string())
+        .map(dispatch_answer)
+    }
+
+    fn call_dispatch_bytes(
+        &self,
+        name: &str,
+        cx: u64,
+        op: &str,
+        args: &[u8],
+    ) -> Result<ease_tur_rpc::DispatchAnswer, String> {
+        let (name, op) = (name.to_string(), op.to_string());
+        let args = args.to_vec();
+        tur_android::ops::with_app(self.handle, move |app| {
+            futures::executor::block_on(app.call_rut_entry_cx_str_bytes(&name, cx, &op, &args))
+        })
+        .ok_or_else(|| format!("instance {self:?} gone"))?
+        .map_err(|e| e.to_string())
+        .map(dispatch_answer)
+    }
+}
+
+/// The engine's nil-flattened answer onto the dispatch answer (the
+/// `?str` / `?bytes` entry returns; u64/f64/opaque answers never occur on
+/// the dispatch entries).
+#[cfg(target_os = "android")]
+fn dispatch_answer(a: tur_engine::RutEntryAnswer) -> ease_tur_rpc::DispatchAnswer {
+    match a {
+        tur_engine::RutEntryAnswer::Nil => ease_tur_rpc::DispatchAnswer::Nil,
+        tur_engine::RutEntryAnswer::Str(s) => ease_tur_rpc::DispatchAnswer::Str(s),
+        tur_engine::RutEntryAnswer::Bytes(b) => ease_tur_rpc::DispatchAnswer::Bytes(b),
+        other => {
+            tracing::warn!("dispatch entry answered {other:?} — treating as nil");
+            ease_tur_rpc::DispatchAnswer::Nil
+        }
+    }
 }
 
 impl PluginEngineHost for TurEngineHost {
@@ -230,6 +280,11 @@ impl PluginEngineHost for TurEngineHost {
                             cx.define::<crate::plugin_runtime::emp::PluginHandle>(
                                 plugin_handle,
                             );
+                            // The rpc rows' identity: the SAME minted id the
+                            // `RpcClient` dispatches with (see `extract_rpc`).
+                            cx.define::<ease_tur_rpc::RpcIdentity>(ease_tur_rpc::RpcIdentity(
+                                start_cx,
+                            ));
                         })
                     },
                     // Never attached to a surface — the base color is moot.
@@ -275,9 +330,10 @@ impl PluginEngineHost for TurEngineHost {
     fn load_headless_module(&self, instance_handle: i64, source_handle: i64) {
         #[cfg(target_os = "android")]
         {
-            // The minted boot identity (one shot — popped here; a load
-            // that never ran leaves it for close to drop).
-            let start_cx = self.cxs.lock().unwrap().remove(&instance_handle);
+            // The minted boot identity — KEPT (not popped): `extract_rpc`
+            // needs the same id to address the bind-table dispatch lane
+            // (the phase-5 identity rail). `close_headless` drops it.
+            let start_cx = self.cxs.lock().unwrap().get(&instance_handle).copied();
             crate::plugin_runtime::load::load_module_source(
                 self.runtime_handle,
                 instance_handle,
@@ -292,28 +348,36 @@ impl PluginEngineHost for TurEngineHost {
     }
 
     /// Pair the instance's bus with an [`AndroidDriver`] into an
-    /// [`RpcClient`]. Blocking round-trips resolve the start token — FIFO
-    /// behind the spawn + load posts, so the module has booted and its
-    /// `start()` registrations are in by the time this runs.
+    /// [`RpcClient`]. The boot identity comes from the minted handle the
+    /// host already holds (the phase-5 identity rail — NOT the start
+    /// answer: a new-style backend's `start(cx)` answers nothing). The
+    /// capability probe (bind-table entries vs the stash bus) records its
+    /// verdict here, eagerly, so dispatch never pays the probe cost; the
+    /// boot gate then accepts either contract's proof — the dispatch
+    /// entries, or the old `start() -> opaque` answer token. FIFO behind
+    /// the spawn + load posts, so the module has booted.
     fn extract_rpc(&self, instance_handle: i64) -> Option<ease_tur_rpc::RpcClient> {
         #[cfg(target_os = "android")]
         {
             let bus = self.buses.lock().unwrap().get(&instance_handle).cloned();
-            let Some(bus) = bus else {
+            let start_cx = self.cxs.lock().unwrap().get(&instance_handle).copied();
+            let (Some(bus), Some(start_cx)) = (bus, start_cx) else {
                 tracing::error!(
-                    "extract_rpc: instance {instance_handle} has no RPC bus — not spawned here?"
+                    "extract_rpc: instance {instance_handle} has no RPC bus / boot identity \
+                     — not spawned here?"
                 );
                 return None;
             };
             let driver: Arc<dyn ease_tur_rpc::RutDriver> = Arc::new(AndroidDriver {
                 handle: instance_handle,
             });
-            let client = RpcClient::new(bus, driver);
+            let client = RpcClient::new(bus, driver, start_cx);
+            let entries = client.has_dispatch_entries();
             let token = client.bus_token();
-            if token == 0 {
+            if token == 0 && !entries {
                 tracing::error!(
-                    "extract_rpc: instance {instance_handle} has no start token — \
-                     the backend module failed to boot"
+                    "extract_rpc: instance {instance_handle} has no boot proof — \
+                     no dispatch entries and no start token (the module failed to boot)"
                 );
                 return None;
             }

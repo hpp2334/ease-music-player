@@ -25,6 +25,7 @@ use emp_host::db::{
 };
 use emp_host::library::{ covers, playlists };
 use emp_host::oauth::{ begin, new };
+use emp_host::rpc::{ bind, call, handler };
 use emp_host::secret::{ get, put, remove };
 use emp_host::themes::{ color, is_dark };
 
@@ -202,6 +203,92 @@ impl Context {
     // `plugin_storage_id` = edit mode (read once at start)
     pub fn storage_id(self) -> ?str {
         return storage_id(self.h);
+    }
+}
+
+// ---- Rpc — the bind-table dispatch (the phase-3 contract) -------------
+//
+// One dispatch entry per lane serves ALL ops; the handlers are plain fns
+// bound at start. `bind` seals the handler into an opaque box and files it
+// in the host-side per-instance table (the `emp_host::rpc` row); the
+// dispatch entries (`entry fn rpc` / `entry fn rpc_bin`, declared ONCE per
+// backend) fetch the box back through the `cx` handle and invoke it.
+//
+//   entry fn start(cx: opaque) {
+//       const db = Db(cx);
+//       const rpc = Rpc(cx);
+//       rpc.bind("storage:list", fn (args: str) -> ?str { return storage_list(db, args); });
+//   }
+//
+//   entry fn rpc(cx: opaque, op: str, args: str) -> ?str {
+//       const rpc = Rpc(cx);
+//       return rpc.dispatch(op, args);
+//   }
+//
+//   // only backends with binary ops need the twin lane
+//   entry fn rpc_bin(cx: opaque, op: str, args: bytes) -> ?bytes {
+//       const rpc = Rpc(cx);
+//       return rpc.dispatch_bin(op, args);
+//   }
+//
+// `args` is RAW — the handler decodes its own args (`json` lib for str
+// ops); the answer is the raw payload: `nil` = "not mine" (the lyric
+// dispatch's fall-through), an error propagates as a rut TRAP whose
+// message keeps the `UNAUTHORIZED` / `TIMEOUT` prefix law. The host
+// builds the `{"ok":…}` envelope from the value/trap — no envelope code
+// in rut anywhere.
+
+pub class Rpc {
+    h: opaque;
+}
+
+impl Rpc {
+    [constructor] pub fn new(h: opaque) -> Self {
+        return Self { h };
+    }
+
+    // bind a str op: the handler decodes its OWN args and answers the raw
+    // payload (`?str`; nil = "not mine")
+    pub fn bind(self, op: str, f: fn(str) -> ?str) -> nil {
+        bind(self.h, op, opaque(f));
+    }
+
+    // the binary twin: raw bytes args, raw bytes payload (no base64)
+    pub fn bind_bin(self, op: str, f: fn(bytes) -> ?bytes) -> nil {
+        bind(self.h, f"bin:{op}", opaque(f));
+    }
+
+    // join an event fan-out — the host dispatches it as `event:<type>`
+    // (the answer, if any, is ignored: events are fire-and-forget)
+    pub fn subscribe(self, ty: str, f: fn(str) -> ?str) -> nil {
+        bind(self.h, f"event:{ty}", opaque(f));
+    }
+
+    // the str dispatch entry's body: fetch the sealed handler and invoke
+    // it (nil when nothing is bound — the "not mine" / unsubscribed arm)
+    pub fn dispatch(self, op: str, args: str) -> ?str {
+        let b = handler(self.h, op);
+        if (b == nil) {
+            return nil;
+        }
+        let f = opaque::downcast<fn(str) -> ?str>(b);
+        return f(args);
+    }
+
+    // the binary dispatch entry's body
+    pub fn dispatch_bin(self, op: str, args: bytes) -> ?bytes {
+        let b = handler(self.h, f"bin:{op}");
+        if (b == nil) {
+            return nil;
+        }
+        let f = opaque::downcast<fn(bytes) -> ?bytes>(b);
+        return f(args);
+    }
+
+    // view → own backend: the envelope str passes through
+    // (`{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`)
+    pub fn call(self, op: str, args_json: str) -> str {
+        return call(self.h, op, args_json);
     }
 }
 

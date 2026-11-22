@@ -1130,6 +1130,8 @@ dependencies = [
  "ease-client-android",
  "ease-client-backend",
  "ease-client-tokio",
+ "ease-js-storage",
+ "ease-remote-storage",
  "ease-tur-rpc",
  "futures",
  "serde_json",
@@ -1164,6 +1166,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "rut-core",
+ "rut-driver",
  "rut-vm",
  "serde",
  "serde_json",
