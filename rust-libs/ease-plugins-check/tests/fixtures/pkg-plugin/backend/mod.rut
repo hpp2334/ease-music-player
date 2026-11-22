@@ -1,0 +1,14 @@
+// The pkg-tree fixture's root module (`backend/mod.rut` — phase 4a):
+// `mod props;` mounts props.rut beside this file, and the boot proves
+// the mount by consuming the child's fn. Scanned + booted by
+// tests/pkg_tree.rs through the same `read_entry_source` lane the
+// plugin scan uses.
+mod props;
+
+struct Ctx {
+    label: str,
+}
+
+entry fn start() -> opaque {
+    return opaque(Ctx { label: props::greeting() });
+}

@@ -43,6 +43,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::error::{BError, BResult};
+use crate::services::plugin_pkg::{read_entry_source, EntrySource};
 
 // ============================================================================
 // Constants
@@ -82,7 +83,10 @@ pub fn plugin_api_supported(v: Option<i64>) -> bool {
 }
 
 const MAX_ENTRIES: usize = 200;
-const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
+/// The installed-zip total-size budget — also the pkg-tree walk's read
+/// budget (a scanned entrypoint never reads past what an install could
+/// have carried; see `plugin_pkg`).
+pub(crate) const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
 
 /// Cap for contribution icons read during the scan (base64 into the
 /// `plugin.list` payload — keep small).
@@ -179,6 +183,15 @@ pub trait PluginEngineHost: Send + Sync {
     /// `ModuleSourceRegistry` and return its opaque handle. `0` on
     /// failure (never silent — implementors log loudly).
     fn register_source(&self, src: String) -> i64;
+
+    /// Register a FILE SET module source (a pkg-tree entrypoint: the
+    /// `mod.rut` root text plus its declared `mod` children, mod path →
+    /// child text) on the bound runtime's shared `ModuleSourceRegistry`
+    /// and return its opaque handle. The set loads whole through the
+    /// engine's multi-file rail — same handle-based contract as
+    /// [`PluginEngineHost::register_source`], the shape is the only
+    /// difference. `0` on failure (never silent).
+    fn register_source_files(&self, root: String, mods: BTreeMap<String, String>) -> i64;
 
     /// Read one bundled APK asset (e.g. `plugin-bundles/<id>.zip`).
     /// `None` when unreadable / no asset manager bound.
@@ -469,7 +482,10 @@ fn valid_plugin_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
-fn unsafe_entry_name(name: &str) -> bool {
+/// Zip-entry name law: absolute paths, `..` anywhere and backslashes
+/// are refused before any file read (`plugin_pkg` applies it to
+/// entrypoint references; icon loading applies it to icon names).
+pub(crate) fn unsafe_entry_name(name: &str) -> bool {
     name.starts_with('/') || name.contains("..") || name.contains('\\')
 }
 
@@ -1020,10 +1036,14 @@ fn scan_manifests_blocking(root: &Path) -> Vec<(PathBuf, ManifestRaw)> {
 // Module-source registration (tur #198 handle-based loading)
 // ============================================================================
 
-/// Read one module file and register it on the bound engine host. Failures
-/// are logged with the full path and also collected into the scan's
-/// `warnings` so they surface beyond the logs (the `plugin.list` payload
-/// carries them).
+/// Read one entrypoint (the manifest's `backend` / `view` value) and
+/// register it on the bound engine host — a single `.rut` file rides
+/// [`PluginEngineHost::register_source`], a pkg-tree directory (the
+/// `mod.rut` + `mod NAME;` walk, see [`crate::services::plugin_pkg`])
+/// rides [`PluginEngineHost::register_source_files`]. Failures are
+/// logged with the full path and also collected into the scan's
+/// `warnings` so they surface beyond the logs (the `plugin.list`
+/// payload carries them).
 fn read_registered(
     root: &Path,
     plugin_id: &str,
@@ -1031,33 +1051,31 @@ fn read_registered(
     host: Option<&std::sync::Arc<dyn PluginEngineHost>>,
     warnings: &mut Vec<String>,
 ) -> i64 {
-    let path = root.join(plugin_id).join(file);
-    match std::fs::read_to_string(&path) {
-        Ok(src) => {
-            let handle = match host {
-                Some(h) => h.register_source(src),
-                None => {
-                    tracing::error!(
-                        "read_registered: no engine host bound — bindPluginRuntime not \
-                         called (or already unbound); source NOT registered"
-                    );
-                    0
-                }
-            };
-            if handle == 0 {
-                warnings.push(format!(
-                    "{plugin_id}: module source {file} not registered (see logs)"
-                ));
-            }
-            handle
-        }
+    let Some(h) = host else {
+        tracing::error!(
+            "read_registered: no engine host bound — bindPluginRuntime not \
+             called (or already unbound); source NOT registered"
+        );
+        warnings.push(format!(
+            "{plugin_id}: module source {file} not registered (see logs)"
+        ));
+        return 0;
+    };
+    let handle = match read_entry_source(&root.join(plugin_id), file) {
+        Ok(EntrySource::Single(src)) => h.register_source(src),
+        Ok(EntrySource::FileSet { root, mods }) => h.register_source_files(root, mods),
         Err(e) => {
-            let msg = format!("{plugin_id}: read module {file} failed: {e}");
-            tracing::error!("plugin scan: {msg} (path {path:?})");
-            warnings.push(msg);
-            0
+            tracing::error!("plugin scan: {plugin_id}: {e}");
+            warnings.push(format!("{plugin_id}: {e}"));
+            return 0;
         }
+    };
+    if handle == 0 {
+        warnings.push(format!(
+            "{plugin_id}: module source {file} not registered (see logs)"
+        ));
     }
+    handle
 }
 
 /// Map one contribution list to wire shape, registering view module sources
@@ -2918,6 +2936,17 @@ mod tests {
     struct RecordingHost {
         id: i64,
         registered: std::sync::Mutex<Vec<String>>,
+        registered_files: std::sync::Mutex<Vec<(String, BTreeMap<String, String>)>>,
+    }
+
+    impl RecordingHost {
+        fn new(id: i64) -> Self {
+            RecordingHost {
+                id,
+                registered: Default::default(),
+                registered_files: Default::default(),
+            }
+        }
     }
 
     impl PluginEngineHost for RecordingHost {
@@ -2928,6 +2957,12 @@ mod tests {
         fn register_source(&self, src: String) -> i64 {
             let mut w = self.registered.lock().unwrap();
             w.push(src);
+            (self.id * 100 + w.len() as i64) as i64
+        }
+
+        fn register_source_files(&self, root: String, mods: BTreeMap<String, String>) -> i64 {
+            let mut w = self.registered_files.lock().unwrap();
+            w.push((root, mods));
             (self.id * 100 + w.len() as i64) as i64
         }
 
@@ -2962,19 +2997,13 @@ mod tests {
         assert!(shared.engine_host().is_none());
 
         // Attach then detach with the right id.
-        shared.attach_engine_host(std::sync::Arc::new(RecordingHost {
-            id: 7,
-            registered: Default::default(),
-        }));
+        shared.attach_engine_host(std::sync::Arc::new(RecordingHost::new(7)));
         assert_eq!(shared.engine_host().unwrap().id(), 7);
         assert!(shared.detach_engine_host(7).is_some());
         assert!(shared.engine_host().is_none());
 
         // Stale teardown: 7 was destroyed without unbind, 8 is now bound.
-        shared.attach_engine_host(std::sync::Arc::new(RecordingHost {
-            id: 8,
-            registered: Default::default(),
-        }));
+        shared.attach_engine_host(std::sync::Arc::new(RecordingHost::new(8)));
         assert!(shared.detach_engine_host(7).is_none());
         assert_eq!(
             shared.engine_host().unwrap().id(),
@@ -3004,10 +3033,7 @@ mod tests {
             .init(app_document_dir.clone())
             .await
             .unwrap();
-        let host = std::sync::Arc::new(RecordingHost {
-            id: 42,
-            registered: Default::default(),
-        });
+        let host = std::sync::Arc::new(RecordingHost::new(42));
         cx.plugin_manager().attach_engine_host(host.clone());
         let out = scan(&cx, &app_document_dir).await.unwrap();
         assert!(out.warnings.is_empty());
@@ -3022,6 +3048,80 @@ mod tests {
         assert_ne!(info.backend_source_handle, 0);
         // backend.rut + view.rut both went through the host.
         assert_eq!(host.registered.lock().unwrap().len(), 2);
+    }
+
+    /// A pkg-tree plugin — the manifest's `backend`/`view` naming a
+    /// DIRECTORY whose `mod.rut` roots the tree — registers as a FILE SET
+    /// through the engine host (root + declared mod children, non-zero
+    /// handles), while a broken tree (both child spellings present —
+    /// rut's ambiguity law) surfaces as a scan warning and a zero
+    /// handle, never silence.
+    #[tokio::test]
+    async fn scan_registers_pkg_tree_entrypoints_as_file_sets() {
+        let (guard, root) = temp_root();
+        let app_document_dir = guard.path().to_str().unwrap().to_string();
+        // A well-formed pkg-tree plugin: backend and view both dir-form.
+        install_zip_bytes_blocking(
+            &root,
+            make_zip(&[
+                (
+                    "manifest.json",
+                    r#"{"id":"com.ease.pkg","name":"Pkg","version":"1.0.0","apiVersion":2,
+                        "backend":"backend",
+                        "contributions":{"dashboard":[{"id":"main","title":"Main","view":"view"}]}}"#,
+                ),
+                ("backend/mod.rut", "mod props;\nentry fn start() {}"),
+                ("backend/props.rut", "pub fn x() {}"),
+                ("view/mod.rut", "entry fn start() {}"),
+            ]),
+        )
+        .unwrap();
+        // An ambiguous tree: `props` exists under BOTH spellings.
+        install_zip_bytes_blocking(
+            &root,
+            make_zip(&[
+                (
+                    "manifest.json",
+                    r#"{"id":"com.ease.amb","name":"Amb","version":"1.0.0","apiVersion":2,
+                        "backend":"backend2"}"#,
+                ),
+                ("backend2/mod.rut", "mod props;\nentry fn start() {}"),
+                ("backend2/props.rut", "pub fn a() {}"),
+                ("backend2/props/mod.rut", "pub fn b() {}"),
+            ]),
+        )
+        .unwrap();
+
+        let cx = crate::ctx::BackendContext::new();
+        cx.database_server()
+            .init(app_document_dir.clone())
+            .await
+            .unwrap();
+        let host = std::sync::Arc::new(RecordingHost::new(42));
+        cx.plugin_manager().attach_engine_host(host.clone());
+        let out = scan(&cx, &app_document_dir).await.unwrap();
+
+        let pkg = out.plugins.iter().find(|p| p.id == "com.ease.pkg").unwrap();
+        assert_ne!(pkg.backend_source_handle, 0);
+        assert_ne!(pkg.dashboard[0].source_handle, 0);
+        // backend (root + 1 mod child) + view (root only) rode the
+        // file-set lane; nothing rode the single-source lane.
+        let files = host.registered_files.lock().unwrap();
+        assert_eq!(files.len(), 2, "{files:?}");
+        assert_eq!(files[0].0, "mod props;\nentry fn start() {}");
+        assert_eq!(files[0].1.get("props").map(String::as_str), Some("pub fn x() {}"));
+        assert_eq!(files[1].0, "entry fn start() {}");
+        assert!(files[1].1.is_empty());
+        assert!(host.registered.lock().unwrap().is_empty());
+
+        // The ambiguous entrypoint: zero handle + a loud warning.
+        let amb = out.plugins.iter().find(|p| p.id == "com.ease.amb").unwrap();
+        assert_eq!(amb.backend_source_handle, 0);
+        assert!(
+            out.warnings.iter().any(|w| w.contains("com.ease.amb") && w.contains("ambiguous")),
+            "ambiguity must not be silent: {:?}",
+            out.warnings
+        );
     }
 
     /// An installed-but-API-incompatible plugin (a pre-versioning install
@@ -3061,10 +3161,7 @@ mod tests {
             .init(app_document_dir.clone())
             .await
             .unwrap();
-        let host = std::sync::Arc::new(RecordingHost {
-            id: 7,
-            registered: Default::default(),
-        });
+        let host = std::sync::Arc::new(RecordingHost::new(7));
         cx.plugin_manager().attach_engine_host(host.clone());
         let out = scan(&cx, &app_document_dir).await.unwrap();
 

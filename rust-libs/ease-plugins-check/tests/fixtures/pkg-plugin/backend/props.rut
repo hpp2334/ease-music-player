@@ -1,0 +1,5 @@
+// The fixture's pkg-tree child, mounted by the root's `mod props;`
+// (the single-file child spelling).
+pub fn greeting() -> str {
+    return "props ok";
+}

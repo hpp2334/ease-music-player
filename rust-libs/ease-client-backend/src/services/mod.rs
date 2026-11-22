@@ -3,6 +3,7 @@ pub mod lyrics;
 pub mod music;
 pub mod playlist;
 pub mod plugin_manager;
+pub mod plugin_pkg;
 pub mod preference;
 pub mod storage;
 

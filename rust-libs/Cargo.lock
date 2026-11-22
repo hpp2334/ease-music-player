@@ -1042,6 +1042,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "reqwest 0.12.28",
+ "rut-driver",
  "sea-orm",
  "serde",
  "serde_bytes",

@@ -4,13 +4,14 @@
 //! opaque tur runtime handle (the binding's identity — what
 //! `detach_engine_host` compare-and-sets against) with the raw
 //! `*mut AAssetManager` stashed from the Kotlin `AssetManager` object. The
-//! backend's plugin scan calls [`PluginEngineHost::register_source`] to put
-//! module rut sources on the runtime's shared registry, and
-//! `plugin.bootstrap` calls [`PluginEngineHost::read_bundled_asset`] to read
-//! the bundled plugin zips natively — their bytes never cross the JNI
-//! boundary.
+//! backend's plugin scan calls [`PluginEngineHost::register_source`] /
+//! [`PluginEngineHost::register_source_files`] to put module rut sources
+//! (single files / pkg-tree file sets) on the runtime's shared registry,
+//! and `plugin.bootstrap` calls [`PluginEngineHost::read_bundled_asset`]
+//! to read the bundled plugin zips natively — their bytes never cross the
+//! JNI boundary.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use ease_client_backend::services::plugin_manager::PluginEngineHost;
@@ -198,6 +199,54 @@ impl PluginEngineHost for TurEngineHost {
         #[cfg(not(target_os = "android"))]
         {
             let _ = src;
+            0
+        }
+    }
+
+    /// Register a FILE SET module source (a pkg-tree entrypoint) on the
+    /// bound runtime's shared `ModuleSourceRegistry` — the phase-1
+    /// `register_files` lane. The set's handle loads whole through the
+    /// engine's multi-file rail (the plain load op dispatches
+    /// `ModuleSourceEntry::Files` to `load_rut_module_files`, cx
+    /// threaded). `0` on failure — loudly, never silently.
+    fn register_source_files(&self, root: String, mods: BTreeMap<String, String>) -> i64 {
+        if self.runtime_handle == 0 {
+            tracing::error!(
+                "register_module_files: no tur runtime bound — bindPluginRuntime not called \
+                 / already unbound; returning 0"
+            );
+            return 0;
+        }
+        let mods: BTreeMap<std::sync::Arc<str>, std::sync::Arc<str>> = mods
+            .into_iter()
+            .map(|(path, text)| {
+                (
+                    std::sync::Arc::from(path.as_str()),
+                    std::sync::Arc::from(text.as_str()),
+                )
+            })
+            .collect();
+        #[cfg(target_os = "android")]
+        {
+            match tur_android::ops::with_runtime(self.runtime_handle, |rt| {
+                rt.module_sources.register_files(root, mods) as i64
+            }) {
+                Some(handle) => handle,
+                None => {
+                    tracing::error!(
+                        "register_module_files: runtime handle {} not found — stale binding? \
+                         returning 0",
+                        self.runtime_handle
+                    );
+                    0
+                }
+            }
+        }
+        // Non-Android host build (the android crate still type-checks there):
+        // there is never a live runtime to register against.
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (root, mods);
             0
         }
     }

@@ -1,11 +1,15 @@
 //! Compile + boot validation for the shipped rut plugin sources.
 //!
 //! Every plugin under `plugins/<id>/` must compile and boot on the host
-//! harness: `backend.rut` loads with the FULL app plugin set
+//! harness: the `backend` entrypoint loads with the FULL app plugin set
 //! (`EaseMusicPlugin` included — its rows register, though Android-only
 //! upcalls are unreachable and must not fire at boot) and every
-//! contribution `view.rut` loads into a fresh instance (views never call
-//! rows at boot — they build UI in `start`).
+//! contribution `view` loads into a fresh instance (views never call
+//! rows at boot — they build UI in `start`). Entrypoints resolve through
+//! the scan's own lane ([`ease_client_backend::services::plugin_pkg`]),
+//! so single-file sources and pkg-tree directories (`mod.rut` +
+//! `mod NAME;` children) validate identically to how the device scan
+//! registers them.
 //!
 //! This is the plugin toolchain: there is no rspack/pnpm build anymore —
 //! the engine compiles the sources, and this suite is what `pnpm test`
@@ -19,8 +23,10 @@ mod plugin_checks {
 
     use ease_client_android::plugin_runtime::EaseMusicPlugin;
     use ease_client_backend::ctx::BackendContext;
+    use ease_client_backend::services::plugin_pkg::{read_entry_source, EntrySource};
     use ease_tur_rpc::TurRpcBusPlugin;
     use tur_engine::core::plugin::Plugin;
+    use tur_engine::core::rut_runtime::RutModuleFiles;
     use tur_integration_tests::TurTestApp;
 
     fn plugins_root() -> PathBuf {
@@ -46,13 +52,56 @@ mod plugin_checks {
         ]
     }
 
-    /// Load `source` into a fresh harness instance; panic with the compile
-    /// diagnostics on failure (rut compile errors name the row + line).
-    fn assert_loads(source: &str, what: &str) {
+    /// Load one resolved entrypoint into a fresh harness instance; panic
+    /// with the compile diagnostics on failure (rut compile errors name
+    /// the row + line). A single-file source rides the single rail, a
+    /// pkg-tree file set the engine's multi-file rail — the exact two
+    /// shapes a scan can register (`assert_loads_source`'s caller picks
+    /// via the shared `read_entry_source` lane, so the check exercises
+    /// the same resolution law the device scan runs).
+    fn assert_loads_source(source: EntrySource, what: &str) {
         let mut app = TurTestApp::new_with_extra_plugins(400.0, 400.0, app_plugins())
             .expect("harness app");
-        if let Err(e) = app.load_rut_module(source) {
+        let result = match source {
+            EntrySource::Single(src) => app.load_rut_module(&src),
+            EntrySource::FileSet { root, mods } => app.load_rut_module_files(RutModuleFiles {
+                root: std::sync::Arc::from(root.as_str()),
+                mods: mods
+                    .into_iter()
+                    .map(|(path, text)| {
+                        (
+                            std::sync::Arc::from(path.as_str()),
+                            std::sync::Arc::from(text.as_str()),
+                        )
+                    })
+                    .collect(),
+            }),
+        };
+        if let Err(e) = result {
             panic!("{what} failed to compile/boot: {e}");
+        }
+    }
+
+    /// Load one entrypoint reference (a manifest `backend` / `view`
+    /// value — single file OR pkg-tree directory).
+    fn assert_loads(dir: &Path, entry: &str, what: &str) {
+        let source = read_entry_source(dir, entry)
+            .unwrap_or_else(|e| panic!("{what}: entrypoint unreadable: {e}"));
+        assert_loads_source(source, what);
+    }
+
+    /// Every text file of one entrypoint (the root, then the declared
+    /// mod children) — the contract-op probes read the whole set, since
+    /// a pkg-tree backend may register its ops from a child file.
+    fn entry_texts(dir: &Path, entry: &str) -> Vec<String> {
+        match read_entry_source(dir, entry) {
+            Ok(EntrySource::Single(src)) => vec![src],
+            Ok(EntrySource::FileSet { root, mods }) => {
+                let mut out = vec![root];
+                out.extend(mods.into_values());
+                out
+            }
+            Err(e) => panic!("{entry}: entrypoint unreadable: {e}"),
         }
     }
 
@@ -80,9 +129,7 @@ mod plugin_checks {
             assert_eq!(api, 2, "{id}: manifest apiVersion must be 2 (the rut epoch)");
 
             if let Some(backend) = manifest["backend"].as_str() {
-                let src = std::fs::read_to_string(dir.join(backend))
-                    .unwrap_or_else(|e| panic!("{id}: backend source {backend} unreadable: {e}"));
-                assert_loads(&src, &format!("{id}/{backend}"));
+                assert_loads(&dir, backend, &format!("{id}/{backend}"));
                 checked += 1;
             }
             let views: Vec<&str> = ["storages", "dashboard"]
@@ -92,9 +139,7 @@ mod plugin_checks {
                 .filter_map(|c| c["view"].as_str())
                 .collect();
             for view in views {
-                let src = std::fs::read_to_string(dir.join(view))
-                    .unwrap_or_else(|e| panic!("{id}: view source {view} unreadable: {e}"));
-                assert_loads(&src, &format!("{id}/{view}"));
+                assert_loads(&dir, view, &format!("{id}/{view}"));
                 checked += 1;
             }
         }
@@ -119,7 +164,7 @@ mod plugin_checks {
             if !has_storages {
                 continue;
             }
-            let src = std::fs::read_to_string(dir.join(backend)).expect("backend readable");
+            let texts = entry_texts(&dir, backend);
             for op in [
                 "storage:list",
                 "storage:get",
@@ -127,7 +172,7 @@ mod plugin_checks {
                 "storage:release",
             ] {
                 assert!(
-                    src.contains(&format!("\"{op}\"")),
+                    texts.iter().any(|t| t.contains(&format!("\"{op}\""))),
                     "{id}: storage backend must register the contract op `{op}`"
                 );
             }
@@ -150,9 +195,9 @@ mod plugin_checks {
             if !has_parsers {
                 continue;
             }
-            let src = std::fs::read_to_string(dir.join(backend)).expect("backend readable");
+            let texts = entry_texts(&dir, backend);
             assert!(
-                src.contains("\"lyric:parse\""),
+                texts.iter().any(|t| t.contains("\"lyric:parse\"")),
                 "{id}: lyric parser backend must register `lyric:parse`"
             );
         }

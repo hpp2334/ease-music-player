@@ -61,5 +61,12 @@ sha2 = "0.10"
 md-5 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
+# Plugin pkg-tree entrypoints (`services/plugin_pkg.rs`): the `mod NAME;`
+# mount walk runs on rut-driver's own law (`mount_mod_children`) — the same
+# code the engine's load-time `mount_rows` validation uses, so the scan-side
+# resolution and the engine-side check cannot drift. Same rev the rpc crate
+# and the android crate pin.
+rut-driver = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+
 [dev-dependencies]
 tempfile = "3"
