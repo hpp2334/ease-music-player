@@ -67,13 +67,14 @@ pub const BUNDLED_PLUGINS: &[&str] = &["com.ease.webdav", "com.ease.lyricformats
 /// Bump `MAX` when the host grows backwards-compatible surface (older
 /// plugins keep working); bump both when the contract breaks (old
 /// plugins are refused — exactly the incompatible-install gate).
-/// API level 2 = the rut epoch: entry files are rut sources
-/// (`backend.rut` / `view.rut`), the host surface is the typed `ease`
-/// rows, and the RPC bus is the entry-fn convention (see `ease-tur-rpc`).
-/// Level 1 (JS plugins) is unsupported — such zips install-fail and
-/// installed folders badge incompatible, never loading.
-pub const PLUGIN_API_MIN: i64 = 2;
-pub const PLUGIN_API_MAX: i64 = 2;
+/// API level 3 = the emp epoch: pkg-tree entrypoints (`backend/mod.rut`
+/// trees), the host surface is the typed `ease` rows, and the RPC bus is
+/// the emp bind-table contract (see `ease-tur-rpc`). Levels 1 (JS
+/// plugins) and 2 (the single-file rut epoch) are unsupported — such
+/// zips install-fail and installed folders badge incompatible, never
+/// loading.
+pub const PLUGIN_API_MIN: i64 = 3;
+pub const PLUGIN_API_MAX: i64 = 3;
 
 /// Is a declared plugin API level within the engine's supported range?
 /// A missing declaration (`None`) is **not** supported — manifests must
@@ -2242,7 +2243,7 @@ mod tests {
 
     fn manifest_json(id: &str, version: &str) -> String {
         format!(
-            r#"{{"id":"{id}","name":"{id}","version":"{version}","apiVersion":2,"backend":"backend.rut",
+            r#"{{"id":"{id}","name":"{id}","version":"{version}","apiVersion":3,"backend":"backend.rut",
                 "contributions":{{"dashboard":[{{"id":"main","title":"Main","view":"view.rut"}}]}}}}"#
         )
     }
@@ -2381,12 +2382,14 @@ mod tests {
 
     #[test]
     fn plugin_api_range() {
-        assert_eq!((PLUGIN_API_MIN, PLUGIN_API_MAX), (2, 2));
-        assert!(plugin_api_supported(Some(2)));
-        // Outside the range — including the whole JS epoch (level 1)…
+        assert_eq!((PLUGIN_API_MIN, PLUGIN_API_MAX), (3, 3));
+        assert!(plugin_api_supported(Some(3)));
+        // Outside the range — including the retired epochs (level 1 = JS,
+        // level 2 = the single-file rut epoch)…
         assert!(!plugin_api_supported(Some(0)));
         assert!(!plugin_api_supported(Some(1)));
-        assert!(!plugin_api_supported(Some(3)));
+        assert!(!plugin_api_supported(Some(2)));
+        assert!(!plugin_api_supported(Some(4)));
         // …and a missing declaration is never supported (manifests must
         // declare the level they target).
         assert!(!plugin_api_supported(None));
@@ -2416,9 +2419,10 @@ mod tests {
             // Above the engine range.
             (
                 "high",
-                r#"{"id":"com.ease.t","version":"1.0.0","apiVersion":3}"#,
+                r#"{"id":"com.ease.t","version":"1.0.0","apiVersion":4}"#,
             ),
-            // The retired JS epoch (level 1) is out of range too.
+            // The retired epochs (1 = JS, 2 = the single-file rut epoch)
+            // are out of range too.
             (
                 "js-era",
                 r#"{"id":"com.ease.t","version":"1.0.0","apiVersion":1}"#,
@@ -2478,14 +2482,14 @@ mod tests {
     fn registry_parse_and_stamp() {
         let body = r#"{"plugins":[
             {"id":"com.ease.a","name":"A","version":"1.0.0","zip":"zips/a.zip","sha256":"00","size":10,
-             "icon":"icons/com.ease.a.png","apiVersion":2},
+             "icon":"icons/com.ease.a.png","apiVersion":3},
             {"id":"com.ease.b","version":"2.0.0"}
         ]}"#;
         let mut entries = parse_registry(body).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, LocalizedString::plain("A".into()));
         assert_eq!(entries[1].name, LocalizedString::plain("com.ease.b".into()));
-        assert_eq!(entries[0].api_version, Some(2));
+        assert_eq!(entries[0].api_version, Some(3));
         assert!(entries[1].api_version.is_none());
         assert_eq!(
             entries[0].icon.as_deref(),
@@ -2499,7 +2503,7 @@ mod tests {
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json.get("icon").is_none());
         assert!(json.get("iconData").is_none());
-        assert_eq!(json.get("apiVersion").and_then(|v| v.as_i64()), Some(2));
+        assert_eq!(json.get("apiVersion").and_then(|v| v.as_i64()), Some(3));
 
         let (_guard, root) = temp_root();
         install_zip_bytes_blocking(
@@ -2510,22 +2514,25 @@ mod tests {
         entries = stamp_entries(entries, &root);
         assert_eq!(entries[0].installed_version.as_deref(), Some("0.9.0"));
         assert!(entries[0].update_available);
-        assert!(!entries[0].incompatible, "apiVersion 2 is in range");
+        assert!(!entries[0].incompatible, "apiVersion 3 is in range");
         assert!(entries[1].installed_version.is_none());
         assert!(!entries[1].update_available);
         // No declared apiVersion → stamped incompatible (Kotlin greys the
         // row out instead of downloading a zip the gate would reject).
         assert!(entries[1].incompatible);
 
-        // Out-of-range declarations stamp incompatible too (level 3 is
-        // newer than this engine; level 1 is the unsupported JS epoch).
+        // Out-of-range declarations stamp incompatible too (level 4 is
+        // newer than this engine; levels 1 (JS) and 2 (the single-file
+        // rut epoch) are retired).
         let body = r#"{"plugins":[
-            {"id":"com.ease.c","version":"1.0.0","apiVersion":3},
-            {"id":"com.ease.d","version":"1.0.0","apiVersion":1}
+            {"id":"com.ease.c","version":"1.0.0","apiVersion":4},
+            {"id":"com.ease.d","version":"1.0.0","apiVersion":1},
+            {"id":"com.ease.e","version":"1.0.0","apiVersion":2}
         ]}"#;
         let stamped = stamp_entries(parse_registry(body).unwrap(), &root);
         assert!(stamped[0].incompatible);
         assert!(stamped[1].incompatible);
+        assert!(stamped[2].incompatible);
     }
 
     #[test]
@@ -2751,7 +2758,7 @@ mod tests {
             make_zip(&[
                 (
                     "manifest.json",
-                    r#"{"id":"com.ease.test","name":"Test","version":"1.0.0","apiVersion":2,
+                    r#"{"id":"com.ease.test","name":"Test","version":"1.0.0","apiVersion":3,
                         "contributions":{"lyricParsers":[
                             {"id":"lrc","extensions":["lrc"]},
                             {"id":"subtitle","extensions":["srt","vtt"]}]}}"#,
@@ -3044,7 +3051,7 @@ mod tests {
             .find(|p| p.id == "com.ease.test")
             .unwrap();
         assert!(info.api_compatible);
-        assert_eq!(info.api_version, Some(2));
+        assert_eq!(info.api_version, Some(3));
         assert_ne!(info.backend_source_handle, 0);
         // backend.rut + view.rut both went through the host.
         assert_eq!(host.registered.lock().unwrap().len(), 2);
@@ -3066,7 +3073,7 @@ mod tests {
             make_zip(&[
                 (
                     "manifest.json",
-                    r#"{"id":"com.ease.pkg","name":"Pkg","version":"1.0.0","apiVersion":2,
+                    r#"{"id":"com.ease.pkg","name":"Pkg","version":"1.0.0","apiVersion":3,
                         "backend":"backend",
                         "contributions":{"dashboard":[{"id":"main","title":"Main","view":"view"}]}}"#,
                 ),
@@ -3082,7 +3089,7 @@ mod tests {
             make_zip(&[
                 (
                     "manifest.json",
-                    r#"{"id":"com.ease.amb","name":"Amb","version":"1.0.0","apiVersion":2,
+                    r#"{"id":"com.ease.amb","name":"Amb","version":"1.0.0","apiVersion":3,
                         "backend":"backend2"}"#,
                 ),
                 ("backend2/mod.rut", "mod props;\nentry fn start() {}"),

@@ -1,8 +1,9 @@
 //! Regression gate for the host→plugin event payload contract: dispatch a
 //! `music:play` event shaped EXACTLY as `PluginEvent.MusicPlay.toJsonElement()`
 //! produces (note `musicId` rides as a JSON **number** — `MusicId.value:
-//! Long`) into the real playcount backend, over an initialized database,
-//! and require the play row to land in the plugin KV.
+//! Long`) into the real playcount backend, through the host's own lane
+//! (`RpcClient.emit_event` → the bind-table's `event:music:play` key), over
+//! an initialized database, and require the play row to land in the plugin KV.
 //!
 //! This is the hole the first migration fell through: the handler decoded
 //! `musicId` with a string reader, which fails sticky on a number token —
@@ -10,18 +11,22 @@
 //! whole suite stayed green.
 //!
 //! Harness: the harness app lives on its own thread (it is `!Send`) and is
-//! stamped with the `PluginId` instance-data slot — `ease.db` rows are
-//! plugin-scoped, and without the stamp every scoped row traps. SQLx calls
-//! (db init + asserts) run inside the tokio test.
+//! stamped with the minted `PluginHandle` (+ its `RpcIdentity` view) — the
+//! emp services' identity — and loaded through the cx lane with that same
+//! id. `ease.db` rows are plugin-scoped, and without the stamp every scoped
+//! row traps. SQLx calls (db init + asserts) run inside the tokio test.
 
 #[cfg(test)]
 mod playcount_event {
-    use ease_client_android::plugin_runtime::{EaseMusicPlugin, PluginId};
+    use ease_client_android::plugin_runtime::emp::PluginHandle;
+    use ease_client_android::plugin_runtime::{EaseMusicPlugin, PluginId, PluginInstance};
     use ease_client_backend::ctx::BackendContext;
-    use ease_client_backend::repositories::secret::SecretStore;
-    use ease_tur_rpc::{RpcBus, TurRpcBusPlugin};
+    use ease_client_backend::services::plugin_pkg::{read_entry_source, EntrySource};
+    use ease_tur_rpc::{DispatchAnswer, RpcBus, RpcClient, RutDriver, TurRpcBusPlugin};
+    use std::path::Path;
     use std::sync::mpsc;
     use std::sync::Arc;
+    use tur_engine::core::rut_runtime::RutModuleFiles;
     use tur_engine::core::scheduler::WorkerPoolHandle;
     use tur_engine::TurRuntime;
     use tur_engine::TurStdPlugin;
@@ -29,19 +34,108 @@ mod playcount_event {
     use tur_native::NativeFontLoader;
 
     enum Cmd {
-        /// Stash is done test-side (`RpcBus::stash_request`); this drives
-        /// the named export with the context token and answers the reply.
-        CallStr(String, u64, mpsc::SyncSender<Result<String, String>>),
+        DispatchStr(
+            String,
+            u64,
+            String,
+            String,
+            mpsc::SyncSender<Result<DispatchAnswer, String>>,
+        ),
+        DispatchBytes(
+            String,
+            u64,
+            String,
+            Vec<u8>,
+            mpsc::SyncSender<Result<DispatchAnswer, String>>,
+        ),
         Token(mpsc::SyncSender<u64>),
     }
 
-    /// The app side: build the runtime + a headless, PluginId-stamped
-    /// instance, load the backend, then serve entry-call commands.
+    struct TestDriver {
+        tx: mpsc::Sender<Cmd>,
+    }
+
+    impl RutDriver for TestDriver {
+        fn call_entry_str(&self, _name: &str, _cx: u64) -> Result<String, String> {
+            Err("the playcount backend serves no stash-bus entries".to_string())
+        }
+
+        fn call_entry(&self, _name: &str, _cx: u64) -> Result<(), String> {
+            Err("the playcount backend serves no stash-bus entries".to_string())
+        }
+
+        fn start_token(&self) -> u64 {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            self.tx.send(Cmd::Token(rtx)).ok();
+            rrx.recv().unwrap_or(0)
+        }
+
+        fn call_dispatch_str(
+            &self,
+            name: &str,
+            cx: u64,
+            op: &str,
+            args: &str,
+        ) -> Result<DispatchAnswer, String> {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            self.tx
+                .send(Cmd::DispatchStr(
+                    name.to_string(),
+                    cx,
+                    op.to_string(),
+                    args.to_string(),
+                    rtx,
+                ))
+                .map_err(|_| "driver thread gone".to_string())?;
+            rrx.recv().map_err(|_| "driver dropped".to_string())?
+        }
+
+        fn call_dispatch_bytes(
+            &self,
+            name: &str,
+            cx: u64,
+            op: &str,
+            args: &[u8],
+        ) -> Result<DispatchAnswer, String> {
+            let (rtx, rrx) = mpsc::sync_channel(1);
+            self.tx
+                .send(Cmd::DispatchBytes(
+                    name.to_string(),
+                    cx,
+                    op.to_string(),
+                    args.to_vec(),
+                    rtx,
+                ))
+                .map_err(|_| "driver thread gone".to_string())?;
+            rrx.recv().map_err(|_| "driver dropped".to_string())?
+        }
+    }
+
+    fn dispatch_answer(a: tur_engine::RutEntryAnswer) -> DispatchAnswer {
+        match a {
+            tur_engine::RutEntryAnswer::Nil => DispatchAnswer::Nil,
+            tur_engine::RutEntryAnswer::Str(s) => DispatchAnswer::Str(s),
+            tur_engine::RutEntryAnswer::Bytes(b) => DispatchAnswer::Bytes(b),
+            other => panic!("unexpected dispatch answer: {other:?}"),
+        }
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    /// The app side: build the runtime + a headless, PluginHandle-stamped
+    /// instance, load the backend through the cx lane, then serve
+    /// dispatch-entry commands.
     fn spawn_app(
         cx: BackendContext,
         bus: std::sync::Arc<RpcBus>,
-        source: String,
-        ready_tx: mpsc::Sender<()>,
+        source: EntrySource,
+        ready_tx: mpsc::Sender<(u64, ())>,
         rx: mpsc::Receiver<Cmd>,
     ) {
         std::thread::spawn(move || {
@@ -58,24 +152,66 @@ mod playcount_event {
                 .plugin(EaseMusicPlugin::new(cx))
                 .build()
                 .expect("runtime build");
+            let handle = PluginHandle::mint(
+                PluginId::new("com.ease.playcount"),
+                PluginInstance(None),
+            );
+            let boot_cx = handle.id();
             let (app, _looper) = runtime
                 .app_builder()
                 .worker_pool(pool)
-                .instance_data(|icx| {
-                    icx.define::<PluginId>(PluginId::new("com.ease.playcount"));
+                .instance_data(move |icx| {
+                    icx.define::<PluginHandle>(handle);
+                    icx.define::<ease_tur_rpc::RpcIdentity>(ease_tur_rpc::RpcIdentity(boot_cx));
                 })
                 .build_headless((0.0, 0.0))
                 .expect("headless app build");
-            futures::executor::block_on(app.load_rut_module(source.as_str()))
-                .expect("playcount backend loads");
-            ready_tx.send(()).expect("test still waiting");
+            // A single file rides the single rail, a pkg tree the
+            // engine's multi-file rail — the two shapes the scan can
+            // register (parity with the lib harness's
+            // `assert_loads_source`), both through the cx lane (the
+            // bind-table contract's `start(cx)` identity).
+            let loaded = match source {
+                EntrySource::Single(src) => {
+                    futures::executor::block_on(app.load_rut_module_cx(src.as_str(), boot_cx))
+                }
+                EntrySource::FileSet { root, mods } => futures::executor::block_on(
+                    app.load_rut_module_files_cx(
+                        RutModuleFiles {
+                            root: Arc::from(root.as_str()),
+                            mods: mods
+                                .into_iter()
+                                .map(|(path, text)| {
+                                    (
+                                        std::sync::Arc::from(path.as_str()),
+                                        std::sync::Arc::from(text.as_str()),
+                                    )
+                                })
+                                .collect(),
+                        },
+                        boot_cx,
+                    ),
+                ),
+            };
+            loaded.expect("playcount backend loads");
+            ready_tx.send((boot_cx, ())).expect("test still waiting");
             for cmd in rx {
                 match cmd {
-                    Cmd::CallStr(name, cx, rtx) => {
+                    Cmd::DispatchStr(name, cx, op, args, rtx) => {
                         let _ = rtx.send(
                             futures::executor::block_on(
-                                app.call_rut_entry_cx_str(&name, cx),
+                                app.call_rut_entry_cx_str_str(&name, cx, &op, &args),
                             )
+                            .map(dispatch_answer)
+                            .map_err(|e| e.to_string()),
+                        );
+                    }
+                    Cmd::DispatchBytes(name, cx, op, args, rtx) => {
+                        let _ = rtx.send(
+                            futures::executor::block_on(
+                                app.call_rut_entry_cx_str_bytes(&name, cx, &op, &args),
+                            )
+                            .map(dispatch_answer)
                             .map_err(|e| e.to_string()),
                         );
                     }
@@ -90,10 +226,10 @@ mod playcount_event {
     /// The harness booted: an initialized database (all sqlx work rides
     /// the SHARED ease runtime — the very runtime the `ease.db` rows
     /// block_on from the worker lanes; a pool created under a foreign
-    /// runtime times out on acquire) plus a live app thread.
+    /// runtime times out on acquire) plus a live app thread, with the
+    /// host client over the bind-table dispatch entry.
     fn boot() -> (
-        Arc<RpcBus>,
-        mpsc::Sender<Cmd>,
+        RpcClient,
         Arc<ease_client_backend::repositories::core::DatabaseServer>,
         std::path::PathBuf,
     ) {
@@ -113,39 +249,38 @@ mod playcount_event {
             .block_on(db.init(db_dir.to_string_lossy().to_string()))
             .expect("db init");
 
-        let source = std::fs::read_to_string(concat!(
+        // The entrypoint resolves through the manifest's `backend`
+        // spelling via the scan's own lane (`read_entry_source`) — the
+        // migrated plugin is a pkg tree; no flat `backend.rut` exists.
+        let dir = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../plugins/com.ease.playcount/backend.rut"
-        ))
-        .expect("playcount backend.rut readable");
+            "/../../plugins/com.ease.playcount"
+        ));
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("manifest.json")).expect("manifest.json readable"),
+        )
+        .expect("manifest.json parses");
+        let backend = manifest["backend"].as_str().expect("manifest backend field");
+        let source = read_entry_source(dir, backend).expect("playcount backend entrypoint readable");
 
         let bus = RpcBus::new();
         let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
-        let (ready_tx, ready_rx) = mpsc::channel::<()>();
+        let (ready_tx, ready_rx) = mpsc::channel::<(u64, ())>();
         spawn_app(cx, bus.clone(), source, ready_tx, cmd_rx);
-        ready_rx.recv().expect("driver thread booted");
-        (bus, cmd_tx, db, db_dir)
+        let (boot_cx, ()) = ready_rx.recv().expect("driver thread booted");
+        (
+            RpcClient::new(bus, Arc::new(TestDriver { tx: cmd_tx }), boot_cx),
+            db,
+            db_dir,
+        )
     }
 
-    /// One `music:play` dispatch, exactly as `RpcClient::emit_event` does
-    /// it: stash `{"type","payload"}` then fire the subscribed export.
-    /// Asserts the ok envelope.
-    fn fire_play(bus: &RpcBus, cmd_tx: &mpsc::Sender<Cmd>, payload: &str) {
-        let (token_tx, token_rx) = mpsc::sync_channel(1);
-        cmd_tx.send(Cmd::Token(token_tx)).ok();
-        let token = token_rx.recv().expect("token");
-        assert_ne!(token, 0, "the backend must boot (start -> opaque)");
-
-        bus.stash_request(format!("{{\"type\":\"music:play\",\"payload\":{payload}}}"));
-        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        cmd_tx
-            .send(Cmd::CallStr("op_on_music_play".into(), token, reply_tx))
-            .expect("driver alive");
-        let reply = reply_rx.recv().expect("reply");
-        assert!(
-            reply.as_deref().is_ok_and(|r| r.contains("\"ok\":true")),
-            "the event handler must accept the host payload — got: {reply:?}"
-        );
+    /// One `music:play` dispatch, exactly as the host emits it:
+    /// `RpcClient::emit_event` → the bind-table's `event:music:play` key.
+    fn fire_play(client: &RpcClient, payload: &str) {
+        let payload: serde_json::Value =
+            serde_json::from_str(payload).expect("payload json parses");
+        runtime().block_on(client.emit_event("music:play", payload));
     }
 
     /// Every row in the plugin's `plays:` keys, as `(key, row)`.
@@ -190,9 +325,9 @@ mod playcount_event {
 
     #[test]
     fn playcount_records_the_real_host_event_payload() {
-        let (bus, cmd_tx, db, db_dir) = boot();
+        let (client, db, db_dir) = boot();
 
-        fire_play(&bus, &cmd_tx, MUSIC_PLAY_PAYLOAD);
+        fire_play(&client, MUSIC_PLAY_PAYLOAD);
 
         // The play row must land in the plugin-scoped KV.
         let rows = all_play_rows(&db);
@@ -215,7 +350,7 @@ mod playcount_event {
     /// surfaces under "Today" a day late, forever.
     #[test]
     fn legacy_local_day_rows_are_rekeyed_to_utc() {
-        let (bus, cmd_tx, db, db_dir) = boot();
+        let (client, db, db_dir) = boot();
         let ease_rt = ease_client_tokio::tokio_runtime();
         let pid = "com.ease.playcount";
 
@@ -246,8 +381,7 @@ mod playcount_event {
 
         // Any play event triggers the once-per-install repair pass.
         fire_play(
-            &bus,
-            &cmd_tx,
+            &client,
             &format!(
                 "{{\"musicId\":42,\"title\":\"Now\",\"ts\":{}}}",
                 today * 86_400_000 + 21 * 3_600_000

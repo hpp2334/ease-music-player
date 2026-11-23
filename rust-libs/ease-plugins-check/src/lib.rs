@@ -21,13 +21,18 @@
 mod plugin_checks {
     use std::path::{Path, PathBuf};
 
-    use ease_client_android::plugin_runtime::EaseMusicPlugin;
+    use ease_client_android::plugin_runtime::emp::PluginHandle;
+    use ease_client_android::plugin_runtime::{EaseMusicPlugin, PluginId, PluginInstance};
     use ease_client_backend::ctx::BackendContext;
     use ease_client_backend::services::plugin_pkg::{read_entry_source, EntrySource};
     use ease_tur_rpc::TurRpcBusPlugin;
+    use std::sync::Arc;
     use tur_engine::core::plugin::Plugin;
     use tur_engine::core::rut_runtime::RutModuleFiles;
-    use tur_integration_tests::TurTestApp;
+    use tur_engine::core::scheduler::WorkerPoolHandle;
+    use tur_engine::{TurRuntime, TurStdPlugin};
+    use tur_integration_tests::{MutexFixedClock, TestSchedulerDriver};
+    use tur_native::NativeFontLoader;
 
     fn plugins_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -42,49 +47,85 @@ mod plugin_checks {
         serde_json::from_str(&raw).expect("manifest.json parses")
     }
 
-    /// The app plugin set, host-buildable: the bus rows + the full `ease`
-    /// surface (bound to an uncontexted backend — rows that need DB/JNI
-    /// never run at boot).
-    fn app_plugins() -> Vec<Box<dyn Plugin>> {
-        vec![
-            Box::new(TurRpcBusPlugin::new(None)),
-            Box::new(EaseMusicPlugin::new(BackendContext::new())),
-        ]
-    }
-
     /// Load one resolved entrypoint into a fresh harness instance; panic
     /// with the compile diagnostics on failure (rut compile errors name
-    /// the row + line). A single-file source rides the single rail, a
-    /// pkg-tree file set the engine's multi-file rail — the exact two
-    /// shapes a scan can register (`assert_loads_source`'s caller picks
-    /// via the shared `read_entry_source` lane, so the check exercises
-    /// the same resolution law the device scan runs).
-    fn assert_loads_source(source: EntrySource, what: &str) {
-        let mut app = TurTestApp::new_with_extra_plugins(400.0, 400.0, app_plugins())
-            .expect("harness app");
-        let result = match source {
-            EntrySource::Single(src) => app.load_rut_module(&src),
-            EntrySource::FileSet { root, mods } => app.load_rut_module_files(RutModuleFiles {
-                root: std::sync::Arc::from(root.as_str()),
-                mods: mods
-                    .into_iter()
-                    .map(|(path, text)| {
-                        (
-                            std::sync::Arc::from(path.as_str()),
-                            std::sync::Arc::from(text.as_str()),
-                        )
-                    })
-                    .collect(),
-            }),
-        };
-        if let Err(e) = result {
-            panic!("{what} failed to compile/boot: {e}");
-        }
+    /// the row + line). A single file rides the single rail, a pkg-tree
+    /// file set the engine's multi-file rail — the exact two shapes a
+    /// scan can register (the caller picks via the shared
+    /// `read_entry_source` lane, so the check exercises the same
+    /// resolution law the device scan runs).
+    ///
+    /// The instance is built in the production headless shape (the same
+    /// recipe the device's `spawn_headless` runs and the sibling
+    /// integration tests mirror): stamped with a minted `PluginHandle`
+    /// (+ its `RpcIdentity` view) and loaded through the cx lane with
+    /// that id. The migrated plugins' `entry fn start(cx)` refuses to
+    /// boot without it — the emp services' decode law verifies the
+    /// sealed handle against the instance's own stamp, and `TurTestApp`
+    /// has no instance-data hook, so the raw builder it is.
+    fn assert_loads_source(source: EntrySource, what: String) {
+        let cx = BackendContext::new();
+        std::thread::spawn(move || {
+            let driver = TestSchedulerDriver::new();
+            let pool = WorkerPoolHandle::new("test", 2);
+            let runtime = TurRuntime::builder()
+                .worker_spawner(driver.worker_spawner())
+                .host_loop(driver.host_loop())
+                .font_loader(Arc::new(NativeFontLoader::new()))
+                .clock(Arc::new(MutexFixedClock::new(0)))
+                .worker_pool(pool.clone())
+                .plugin(TurStdPlugin)
+                .plugin(TurRpcBusPlugin::new(None))
+                .plugin(EaseMusicPlugin::new(cx))
+                .build()
+                .expect("runtime build");
+            let handle = PluginHandle::mint(
+                PluginId::new("com.ease.harness"),
+                PluginInstance(None),
+            );
+            let boot_cx = handle.id();
+            let (app, _looper) = runtime
+                .app_builder()
+                .worker_pool(pool)
+                .instance_data(move |icx| {
+                    icx.define::<PluginHandle>(handle);
+                    icx.define::<ease_tur_rpc::RpcIdentity>(ease_tur_rpc::RpcIdentity(boot_cx));
+                })
+                .build_headless((400.0, 400.0))
+                .expect("headless app build");
+            let loaded = match source {
+                EntrySource::Single(src) => {
+                    futures::executor::block_on(app.load_rut_module_cx(src.as_str(), boot_cx))
+                }
+                EntrySource::FileSet { root, mods } => futures::executor::block_on(
+                    app.load_rut_module_files_cx(
+                        RutModuleFiles {
+                            root: Arc::from(root.as_str()),
+                            mods: mods
+                                .into_iter()
+                                .map(|(path, text)| {
+                                    (
+                                        std::sync::Arc::from(path.as_str()),
+                                        std::sync::Arc::from(text.as_str()),
+                                    )
+                                })
+                                .collect(),
+                        },
+                        boot_cx,
+                    ),
+                ),
+            };
+            if let Err(e) = loaded {
+                panic!("{what} failed to compile/boot: {e}");
+            }
+        })
+        .join()
+        .unwrap_or_else(|e| std::panic::resume_unwind(e));
     }
 
     /// Load one entrypoint reference (a manifest `backend` / `view`
     /// value — single file OR pkg-tree directory).
-    fn assert_loads(dir: &Path, entry: &str, what: &str) {
+    fn assert_loads(dir: &Path, entry: &str, what: String) {
         let source = read_entry_source(dir, entry)
             .unwrap_or_else(|e| panic!("{what}: entrypoint unreadable: {e}"));
         assert_loads_source(source, what);
@@ -126,10 +167,10 @@ mod plugin_checks {
             let manifest = manifest_of(&dir);
             let id = manifest["id"].as_str().expect("manifest id").to_string();
             let api = manifest["apiVersion"].as_i64().unwrap_or(0);
-            assert_eq!(api, 2, "{id}: manifest apiVersion must be 2 (the rut epoch)");
+            assert_eq!(api, 3, "{id}: manifest apiVersion must be 3 (the emp epoch)");
 
             if let Some(backend) = manifest["backend"].as_str() {
-                assert_loads(&dir, backend, &format!("{id}/{backend}"));
+                assert_loads(&dir, backend, format!("{id}/{backend}"));
                 checked += 1;
             }
             let views: Vec<&str> = ["storages", "dashboard"]
@@ -139,7 +180,7 @@ mod plugin_checks {
                 .filter_map(|c| c["view"].as_str())
                 .collect();
             for view in views {
-                assert_loads(&dir, view, &format!("{id}/{view}"));
+                assert_loads(&dir, view, format!("{id}/{view}"));
                 checked += 1;
             }
         }
