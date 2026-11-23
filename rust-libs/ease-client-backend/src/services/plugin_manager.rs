@@ -194,6 +194,17 @@ pub trait PluginEngineHost: Send + Sync {
     /// difference. `0` on failure (never silent).
     fn register_source_files(&self, root: String, mods: BTreeMap<String, String>) -> i64;
 
+    /// Register a packed SOURCE ZIP (a dist-pointer entrypoint: `rut
+    /// pack --mode source` bytes — `rut.jsonc` + `src/**` + the embedded
+    /// `deps/` closure) on the bound runtime's shared
+    /// `ModuleSourceRegistry` and return its opaque handle. The archive
+    /// unpacks ONCE, implementor-side (memory) — the bytes never cross
+    /// an embedder boundary as text; the engine's pkg-zip rail mounts
+    /// the package tree (root + groups) over the offered set per load.
+    /// `0` on failure (never silent — an invalid archive is a loud
+    /// log + warning).
+    fn register_pkg_zip(&self, bytes: Vec<u8>) -> i64;
+
     /// Read one bundled APK asset (e.g. `plugin-bundles/<id>.zip`).
     /// `None` when unreadable / no asset manager bound.
     fn read_bundled_asset(&self, path: &str) -> Option<Vec<u8>>;
@@ -1040,11 +1051,13 @@ fn scan_manifests_blocking(root: &Path) -> Vec<(PathBuf, ManifestRaw)> {
 /// Read one entrypoint (the manifest's `backend` / `view` value) and
 /// register it on the bound engine host — a single `.rut` file rides
 /// [`PluginEngineHost::register_source`], a pkg-tree directory (the
-/// `mod.rut` + `mod NAME;` walk, see [`crate::services::plugin_pkg`])
-/// rides [`PluginEngineHost::register_source_files`]. Failures are
-/// logged with the full path and also collected into the scan's
-/// `warnings` so they surface beyond the logs (the `plugin.list`
-/// payload carries them).
+/// `src/mod.rut` — or legacy `mod.rut` — + `mod NAME;` walk, see
+/// [`crate::services::plugin_pkg`]) rides
+/// [`PluginEngineHost::register_source_files`], and a dist pointer
+/// (`backend.zip` — the packed source zip under `dist/`) rides
+/// [`PluginEngineHost::register_pkg_zip`]. Failures are logged with the
+/// full path and also collected into the scan's `warnings` so they
+/// surface beyond the logs (the `plugin.list` payload carries them).
 fn read_registered(
     root: &Path,
     plugin_id: &str,
@@ -1065,6 +1078,7 @@ fn read_registered(
     let handle = match read_entry_source(&root.join(plugin_id), file) {
         Ok(EntrySource::Single(src)) => h.register_source(src),
         Ok(EntrySource::FileSet { root, mods }) => h.register_source_files(root, mods),
+        Ok(EntrySource::PkgZip(bytes)) => h.register_pkg_zip(bytes),
         Err(e) => {
             tracing::error!("plugin scan: {plugin_id}: {e}");
             warnings.push(format!("{plugin_id}: {e}"));
@@ -2944,6 +2958,7 @@ mod tests {
         id: i64,
         registered: std::sync::Mutex<Vec<String>>,
         registered_files: std::sync::Mutex<Vec<(String, BTreeMap<String, String>)>>,
+        registered_zips: std::sync::Mutex<Vec<Vec<u8>>>,
     }
 
     impl RecordingHost {
@@ -2952,6 +2967,7 @@ mod tests {
                 id,
                 registered: Default::default(),
                 registered_files: Default::default(),
+                registered_zips: Default::default(),
             }
         }
     }
@@ -2970,6 +2986,12 @@ mod tests {
         fn register_source_files(&self, root: String, mods: BTreeMap<String, String>) -> i64 {
             let mut w = self.registered_files.lock().unwrap();
             w.push((root, mods));
+            (self.id * 100 + w.len() as i64) as i64
+        }
+
+        fn register_pkg_zip(&self, bytes: Vec<u8>) -> i64 {
+            let mut w = self.registered_zips.lock().unwrap();
+            w.push(bytes);
             (self.id * 100 + w.len() as i64) as i64
         }
 
@@ -3129,6 +3151,68 @@ mod tests {
             "ambiguity must not be silent: {:?}",
             out.warnings
         );
+    }
+
+    /// A dist-pointer manifest (`"backend": "backend.zip"`) rides the
+    /// pkg-zip lane when the packed artifact is installed under
+    /// `dist/`, and falls back to the source tree when it is not (the
+    /// dev-checkout shape) — no silent blank in either direction.
+    #[tokio::test]
+    async fn scan_registers_dist_pointers_through_the_pkg_zip_lane() {
+        let (guard, root) = temp_root();
+        // Installed WITH the artifact: written straight into the tree
+        // (the registry zip's `dist/backend.zip` lands there via the
+        // normal extract).
+        let with_artifact = root.join("com.ease.dist");
+        std::fs::create_dir_all(with_artifact.join("dist")).unwrap();
+        std::fs::write(
+            with_artifact.join("manifest.json"),
+            r#"{"id":"com.ease.dist","name":"Dist","version":"1.0.0","apiVersion":3,
+                "backend":"backend.zip"}"#,
+        )
+        .unwrap();
+        std::fs::write(with_artifact.join("dist/backend.zip"), b"PKfake-packed-archive").unwrap();
+        // Installed WITHOUT the artifact: the fallback tree.
+        let without = root.join("com.ease.distfb");
+        std::fs::create_dir_all(without.join("backend/src")).unwrap();
+        std::fs::write(
+            without.join("manifest.json"),
+            r#"{"id":"com.ease.distfb","name":"DistFb","version":"1.0.0","apiVersion":3,
+                "backend":"backend.zip"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            without.join("backend/rut.jsonc"),
+            "{ \"name\": \"backend\" }",
+        )
+        .unwrap();
+        std::fs::write(without.join("backend/src/mod.rut"), "entry fn start() {}").unwrap();
+
+        let app_document_dir = guard.path().to_str().unwrap().to_string();
+        let cx = crate::ctx::BackendContext::new();
+        cx.database_server()
+            .init(app_document_dir.clone())
+            .await
+            .unwrap();
+        let host = std::sync::Arc::new(RecordingHost::new(7));
+        cx.plugin_manager().attach_engine_host(host.clone());
+        let out = scan(&cx, &app_document_dir).await.unwrap();
+
+        let dist = out.plugins.iter().find(|p| p.id == "com.ease.dist").unwrap();
+        assert_ne!(dist.backend_source_handle, 0);
+        let zips = host.registered_zips.lock().unwrap();
+        assert_eq!(zips.len(), 1, "the artifact rode the pkg-zip lane");
+        assert_eq!(&*zips[0], b"PKfake-packed-archive");
+
+        let fallback = out
+            .plugins
+            .iter()
+            .find(|p| p.id == "com.ease.distfb")
+            .unwrap();
+        assert_ne!(fallback.backend_source_handle, 0);
+        let files = host.registered_files.lock().unwrap();
+        assert_eq!(files.len(), 1, "the fallback rode the file-set lane");
+        assert_eq!(files[0].0, "entry fn start() {}");
     }
 
     /// An installed-but-API-incompatible plugin (a pre-versioning install

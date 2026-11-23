@@ -4,17 +4,18 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileS
 import path from "node:path";
 import { ROOT } from "./base";
 
-// Package rut plugin sources into the committed registry:
+// Package rut plugin builds into the committed registry:
 //
-//   plugins/registry/zips/<id>-<version>.zip   (manifest.json + rut sources + icons)
+//   plugins/registry/zips/<id>-<version>.zip   (manifest.json + dist/*.zip + icons)
 //   plugins/registry/plugins.json              (index: id/name/version/zip/sha256/size/apiVersion)
 //
-// Plugins are raw rut sources since the apiVersion 2 epoch — there is no
-// build step (no rspack/pnpm/bundlers; the engine compiles the sources).
-// The sources ship in the epoch-3 LAYOUT (pkg trees): `manifest.json`,
-// every `.rut` file at ANY depth (`backend/mod.rut` + children, `view/…` —
-// the zip preserves relative paths so the installed folder matches the
-// source tree), and every manifest-referenced icon.
+// Plugins are rut pkgs since the apiVersion 3 epoch. The registry zip
+// carries the PACKED artifacts (phase 6): `ease-plugin-packer` (run by
+// `pnpm build:plugins` before this script) packs each entrypoint pkg
+// (`backend/`, `view/` — rut.jsonc + src/ trees) into `dist/<entry>.zip`
+// source-zip artifacts via rut's source-mode pack; this script zips
+// `manifest.json + dist/*.zip + icons` — the registry zip preserves
+// relative paths so the installed folder matches the source tree.
 //
 // `--bundle <id[,id…]>` (repeatable) additionally copies those zips into
 // the APK assets (`android/app/src/main/assets/plugin-bundles/<id>.zip`)
@@ -88,20 +89,17 @@ function collectIconFiles(node: unknown, out: Set<string> = new Set()): Set<stri
   return out;
 }
 
-/** Walk `dir` recursively and collect every regular file whose path
- *  (POSIX, relative to the plugin root) passes `keep` — the pkg-tree
- *  source collector (a plugin's `backend/mod.rut` tree and `view/` trees
- *  live in subdirectories; the zip carries the relative paths so the
- *  installed folder matches the source tree). `dist/` is the staging dir
- *  this script itself writes — never collected. */
-function collectFiles(dir: string, keep: (rel: string) => boolean, out: string[] = [], prefix = ""): string[] {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      if (entry.name === "dist") continue;
-      collectFiles(path.join(dir, entry.name), keep, out, rel);
-    } else if (entry.isFile() && keep(rel)) {
-      out.push(rel);
+/** Every manifest entrypoint reference (`backend` + contribution `view`
+ *  values) — the dist artifact names the packer produced. */
+function collectEntryNames(manifest: {
+  backend?: unknown;
+  contributions?: Record<string, { view?: unknown }[] | undefined>;
+}): string[] {
+  const out: string[] = [];
+  if (typeof manifest.backend === "string" && manifest.backend) out.push(manifest.backend);
+  for (const kind of ["storages", "dashboard"] as const) {
+    for (const c of manifest.contributions?.[kind] ?? []) {
+      if (typeof c.view === "string" && c.view) out.push(c.view);
     }
   }
   return out;
@@ -131,44 +129,34 @@ function packagePlugin(pluginDir: string): RegistryEntry {
     );
   }
 
-  // Stage the zip contents: manifest + every `.rut` source at any depth
-  // (pkg trees — `backend/`, `view/`) + every manifest-referenced icon.
-  // Entry points named by the manifest (`backend` / contribution `view`)
-  // must resolve — a single file, or a pkg tree rooted at its directory's
-  // `mod.rut` — a missing entry is a packaging error (the runtime would
-  // load a blank view / no backend).
-  const staging = path.join(pluginDir, "dist");
-  execSync(`rm -rf "${staging}" && mkdir -p "${staging}"`);
+  // Stage the zip contents: manifest + the PACKED entrypoint artifacts
+  // (`dist/<entry>.zip` — written by `ease-plugin-packer`, which
+  // `pnpm build:plugins` runs before this script) + every
+  // manifest-referenced icon. A missing artifact is a packaging error —
+  // the runtime would load a blank view / no backend.
+  const distDir = path.join(pluginDir, "dist");
+  const staging = path.join(distDir, ".stage");
+  execSync(`rm -rf "${staging}" && mkdir -p "${staging}/dist"`);
   copyFileSync(manifestPath, path.join(staging, "manifest.json"));
 
-  const sources = collectFiles(
-    pluginDir,
-    (rel) => rel.endsWith(".rut"),
-  ).sort();
-  if (sources.length === 0) {
-    throw new Error(`no .rut sources found — port the plugin to rut: ${pluginDir}`);
+  const entryNames = collectEntryNames(manifest);
+  if (entryNames.length === 0) {
+    throw new Error(`manifest names no entrypoints: ${manifestPath}`);
   }
-  for (const src of sources) {
-    const dest = path.join(staging, src);
-    mkdirSync(path.dirname(dest), { recursive: true });
-    copyFileSync(path.join(pluginDir, src), dest);
-  }
-
-  const entryFiles = [
-    ...(typeof manifest.backend === "string" && manifest.backend ? [manifest.backend] : []),
-    ...(manifest.contributions?.storages ?? []).map((c: { view?: string }) => c.view),
-    ...(manifest.contributions?.dashboard ?? []).map((c: { view?: string }) => c.view),
-  ];
-  for (const f of entryFiles) {
-    if (typeof f !== "string" || !f) continue;
-    // A directory entry is a pkg tree — its `mod.rut` must have been staged.
-    const direct = path.join(staging, f);
-    const modRut = path.join(staging, f, "mod.rut");
-    if (!existsSync(direct) && !existsSync(modRut)) {
+  for (const entry of entryNames.sort()) {
+    if (!entry.endsWith(".zip")) {
       throw new Error(
-        `manifest entry not found among the .rut sources (file or <dir>/mod.rut): ${f} (${pluginDir})`,
+        `manifest entry "${entry}" is not a dist pointer — name the packed artifact (e.g. backend.zip): ${manifestPath}`,
       );
     }
+    const artifact = path.join(distDir, entry);
+    if (!existsSync(artifact)) {
+      throw new Error(
+        `packed artifact not found: ${artifact} — run the packer first (pnpm build:plugins)`,
+      );
+    }
+    copyFileSync(artifact, path.join(staging, "dist", entry));
+    console.log(`artifact: dist/${entry} -> staging`);
   }
 
   for (const icon of collectIconFiles(manifest)) {
@@ -182,10 +170,9 @@ function packagePlugin(pluginDir: string): RegistryEntry {
 
   mkdirSync(ZIPS_DIR, { recursive: true });
   const zipPath = path.join(ZIPS_DIR, `${id}-${version}.zip`);
-  // Zip the staged contents (manifest + icons at zip root, the rut trees
-  // under their relative paths), stored-only (-X drops extra attrs; -0
-  // keeps installs fast on-device — rut sources are small). Recreated
-  // from scratch each run.
+  // Zip the staged contents (manifest + icons at zip root, the packed
+  // artifacts under `dist/`), stored-only (-X drops extra attrs; -0
+  // keeps installs fast on-device). Recreated from scratch each run.
   execSync(`rm -f "${zipPath}" && zip -rX -0 "${zipPath}" .`, { cwd: staging, stdio: "inherit" });
 
   // `name` / `description` may be localized (`{ "en-US": …, "zh-CN": … }`) —

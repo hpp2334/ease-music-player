@@ -222,6 +222,52 @@ impl PluginEngineHost for TurEngineHost {
         }
     }
 
+    /// Register a packed SOURCE ZIP (a dist-pointer entrypoint) on the
+    /// bound runtime's shared `ModuleSourceRegistry` — the phase-6
+    /// pkg-zip lane. The archive unpacks ONCE, here (the placement
+    /// grammar validates at this door); its handle loads whole through
+    /// the engine's pkg-zip rail (the plain load op dispatches
+    /// `ModuleSourceEntry::PkgZip`, cx threaded). An invalid archive is
+    /// a loud log + `0` — never a silent blank.
+    fn register_pkg_zip(&self, bytes: Vec<u8>) -> i64 {
+        if self.runtime_handle == 0 {
+            tracing::error!(
+                "register_pkg_zip: no tur runtime bound — bindPluginRuntime not called \
+                 / already unbound; returning 0"
+            );
+            return 0;
+        }
+        #[cfg(target_os = "android")]
+        {
+            match tur_android::ops::with_runtime(self.runtime_handle, |rt| {
+                rt.module_sources
+                    .register_pkg_zip(bytes)
+                    .map(|h| h as i64)
+            }) {
+                Some(Ok(handle)) => handle,
+                Some(Err(e)) => {
+                    tracing::error!("register_pkg_zip: invalid archive: {e}");
+                    0
+                }
+                None => {
+                    tracing::error!(
+                        "register_pkg_zip: runtime handle {} not found — stale binding? \
+                         returning 0",
+                        self.runtime_handle
+                    );
+                    0
+                }
+            }
+        }
+        // Non-Android host build (the android crate still type-checks there):
+        // there is never a live runtime to register against.
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = bytes;
+            0
+        }
+    }
+
     fn read_bundled_asset(&self, path: &str) -> Option<Vec<u8>> {
         #[cfg(target_os = "android")]
         {

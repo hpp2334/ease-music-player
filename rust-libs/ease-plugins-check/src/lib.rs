@@ -6,14 +6,19 @@
 //! upcalls are unreachable and must not fire at boot) and every
 //! contribution `view` loads into a fresh instance (views never call
 //! rows at boot — they build UI in `start`). Entrypoints resolve through
-//! the scan's own lane ([`ease_client_backend::services::plugin_pkg`]),
-//! so single-file sources and pkg-tree directories (`mod.rut` +
-//! `mod NAME;` children) validate identically to how the device scan
-//! registers them.
+//! the scan's own lane ([`ease_client_backend::services::plugin_pkg`]):
+//! a dist pointer (`backend.zip`) loads from its PACKED artifact through
+//! the engine's pkg-zip rail — the shipped bytes, end to end — when the
+//! artifact is present (after `pnpm build:plugins`), falling back to the
+//! source tree in dev (single file / pkg-tree directories, the
+//! `src/`-shell grammar or the legacy layout), so single-file sources,
+//! pkg trees, and packed zips validate identically to how the device
+//! scan registers them. The bind-table greps below keep reading the
+//! SOURCE trees.
 //!
-//! This is the plugin toolchain: there is no rspack/pnpm build anymore —
-//! the engine compiles the sources, and this suite is what `pnpm test`
-//! runs to catch a broken plugin before it ever reaches a device.
+//! This is the plugin toolchain: the packer (`ease-plugin-packer`) +
+//! this suite are what `pnpm test` / `pnpm build:plugins` run to catch a
+//! broken plugin before it ever reaches a device.
 
 // This crate is a pure test harness — all logic lives behind cfg(test) so
 // the (empty) lib target builds without the dev-dependencies.
@@ -50,10 +55,10 @@ mod plugin_checks {
     /// Load one resolved entrypoint into a fresh harness instance; panic
     /// with the compile diagnostics on failure (rut compile errors name
     /// the row + line). A single file rides the single rail, a pkg-tree
-    /// file set the engine's multi-file rail — the exact two shapes a
-    /// scan can register (the caller picks via the shared
-    /// `read_entry_source` lane, so the check exercises the same
-    /// resolution law the device scan runs).
+    /// file set the engine's multi-file rail, a packed dist zip the
+    /// pkg-zip rail — the exact three shapes a scan can register (the
+    /// caller picks via the shared `read_entry_source` lane, so the
+    /// check exercises the same resolution law the device scan runs).
     ///
     /// The instance is built in the production headless shape (the same
     /// recipe the device's `spawn_headless` runs and the sibling
@@ -116,6 +121,9 @@ mod plugin_checks {
                         boot_cx,
                     ),
                 ),
+                EntrySource::PkgZip(bytes) => {
+                    futures::executor::block_on(app.load_rut_module_pkgzip_cx(bytes, boot_cx))
+                }
             };
             if let Err(e) = loaded {
                 panic!("{what} failed to compile/boot: {e}");
@@ -126,25 +134,33 @@ mod plugin_checks {
     }
 
     /// Load one entrypoint reference (a manifest `backend` / `view`
-    /// value — single file OR pkg-tree directory).
+    /// value — dist pointer, single file OR pkg-tree directory).
     fn assert_loads(dir: &Path, entry: &str, what: String) {
         let source = read_entry_source(dir, entry)
             .unwrap_or_else(|e| panic!("{what}: entrypoint unreadable: {e}"));
         assert_loads_source(source, what);
     }
 
-    /// Every text file of one entrypoint (the root, then the declared
-    /// mod children) — the contract-op probes read the whole set, since
-    /// a pkg-tree backend may register its ops from a child file.
+    /// Every text file of one entrypoint's SOURCE tree (the root, then
+    /// the declared mod children) — the contract-op probes read the
+    /// source trees (the greps' own law: they keep working against the
+    /// sources even when a packed artifact shadows the load lane). A
+    /// pkg-tree backend may register its ops from a child file.
     fn entry_texts(dir: &Path, entry: &str) -> Vec<String> {
-        match read_entry_source(dir, entry) {
+        // dist pointers load from dist/, but the greps read sources:
+        // resolve the same stem the packer packed.
+        let stem = entry.strip_suffix(".zip").unwrap_or(entry);
+        match read_entry_source(dir, stem) {
             Ok(EntrySource::Single(src)) => vec![src],
             Ok(EntrySource::FileSet { root, mods }) => {
                 let mut out = vec![root];
                 out.extend(mods.into_values());
                 out
             }
-            Err(e) => panic!("{entry}: entrypoint unreadable: {e}"),
+            Ok(EntrySource::PkgZip(_)) => {
+                panic!("{stem}: the source tree must not resolve to a dist artifact")
+            }
+            Err(e) => panic!("{stem}: entrypoint unreadable: {e}"),
         }
     }
 

@@ -1,17 +1,29 @@
-//! Plugin entrypoint sources — the single-file vs pkg-tree resolution
-//! (phase 4a of the plugin-epoch plan).
+//! Plugin entrypoint sources — single file, pkg tree, or **packed dist
+//! artifact** (phase 6 of the plugin-epoch plan).
 //!
 //! A manifest's `backend` field and each contribution's `view` field name
-//! either a single `.rut` file (the legacy shape — un-migrated plugins
-//! keep working unchanged) or a directory carrying `mod.rut` as the
-//! pkg-tree root. For a directory the scan reads `mod.rut` and walks its
-//! `mod NAME;` declarations to the sibling files — `NAME/mod.rut`
-//! (directory form) first, `NAME.rut` (single-file form) second, both
-//! present is the loud ambiguity — and the entrypoint registers as a
-//! FILE SET (the engine's multi-file module carrier, `RutModuleFiles`
-//! tur-side).
+//! one of three things:
 //!
-//! The walk itself runs on rut-driver's own
+//! - a **single `.rut` file** (the legacy shape — un-migrated plugins keep
+//!   working unchanged),
+//! - a **pkg tree**: a directory whose root module is `src/mod.rut` (the
+//!   rut pkg grammar — `rut.jsonc` + the `src/` shell, the shape
+//!   `plugins/3rd/*` and every phase-6 plugin ships) or, as the dev
+//!   fallback for pre-phase-6 trees, `mod.rut` directly beside the
+//!   declaring directory; the scan walks its `mod NAME;` declarations to
+//!   the sibling files — `NAME/mod.rut` (directory form) first,
+//!   `NAME.rut` (single-file form) second, both present is the loud
+//!   ambiguity — and the entrypoint registers as a FILE SET (the engine's
+//!   multi-file module carrier, `RutModuleFiles` tur-side), or
+//! - a **dist pointer** (`"backend": "backend.zip"` — the preferred
+//!   spelling): the packed SOURCE ZIP under `dist/` (`rut pack --mode
+//!   source`: `rut.jsonc` + `src/**` + the embedded `deps/` closure)
+//!   registers whole through the engine's pkg-zip rail. When the
+//!   artifact is absent (a dev checkout without `dist/`), the reference
+//!   falls back to the pkg tree of the same stem (`backend.zip` →
+//!   `backend/`) — build the artifacts with `pnpm build:plugins`.
+//!
+//! The pkg-tree walk itself runs on rut-driver's own
 //! [`rut_driver::mods::mount_mod_children`] — the exact code the engine's
 //! load-time `mount_rows` validation uses — with the filesystem lookups
 //! injected here, so scan-side resolution and engine-side validation
@@ -20,18 +32,9 @@
 //! PARSE mounts with no children (rut's loader law) — the compile is the
 //! loud half, at load.
 //!
-//! Accepted manifest spellings (all resolve through [`read_entry_source`]):
-//!
-//! - `"backend": "backend.rut"` — the legacy single file.
-//! - `"backend": "backend"` — the directory form (contains
-//!   `backend/mod.rut`).
-//! - `"backend": "backend/mod.rut"` — naming the module file directly
-//!   resolves the tree rooted at its parent directory (same set as the
-//!   bare directory spelling).
-//!
-//! `mod NAME;` children mount under both spellings (`NAME/mod.rut` dir
-//! form first, `NAME.rut` single-file form; both present = the loud
-//! ambiguity, exactly rut's on-disk loader law).
+//! The dist-zip bytes cross no embedder boundary as text (the same law
+//! as single sources and file sets — the whole archive rides the
+//! opaque-handle lane).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,8 +44,15 @@ use rut_driver::Mode;
 
 use crate::services::plugin_manager::{unsafe_entry_name, MAX_TOTAL_BYTES};
 
-/// The on-disk module file name of a pkg-tree root (`backend/mod.rut`).
+/// The on-disk module file name of a pkg-tree root (`backend/mod.rut` —
+/// the legacy spelling; the rut pkg grammar's root lives under the
+/// `src/` shell).
 pub const MOD_RUT: &str = "mod.rut";
+
+/// The plugin subfolder the packed dist artifacts live in
+/// (`<plugin>/dist/backend.zip` — written by `ease-plugin-packer`,
+/// gitignored).
+pub const DIST_DIR: &str = "dist";
 
 /// One resolved entrypoint source: what the scan hands to the engine
 /// host for registration.
@@ -57,6 +67,11 @@ pub enum EntrySource {
         root: String,
         mods: BTreeMap<String, String>,
     },
+    /// A packed SOURCE ZIP (the dist pointer): the archive's bytes,
+    /// registered whole through the engine's pkg-zip rail (`rut.jsonc` +
+    /// `src/**` + the embedded `deps/` closure — unpacked engine-side,
+    /// never crossing an embedder boundary as text).
+    PkgZip(Vec<u8>),
 }
 
 /// Resolve + read one entrypoint reference (the manifest's `backend` /
@@ -66,9 +81,42 @@ pub fn read_entry_source(plugin_dir: &Path, entry: &str) -> Result<EntrySource, 
     if unsafe_entry_name(entry) {
         return Err(format!("unsafe entrypoint name '{entry}'"));
     }
+    // The dist pointer: the packed artifact wins when present (D8 —
+    // manifests PREFER dist pointers), the source tree is the fallback.
+    if let Some(stem) = entry.strip_suffix(".zip") {
+        let artifact = plugin_dir.join(DIST_DIR).join(entry);
+        if artifact.is_file() {
+            let bytes = std::fs::read(&artifact)
+                .map_err(|e| format!("read {}: {e}", artifact.display()))?;
+            let total = bytes.len() as u64;
+            if total > MAX_TOTAL_BYTES {
+                return Err(format!(
+                    "dist artifact exceeds {MAX_TOTAL_BYTES} bytes: {}",
+                    artifact.display()
+                ));
+            }
+            return Ok(EntrySource::PkgZip(bytes));
+        }
+        // No artifact (a dev checkout before the packer ran): the pkg
+        // tree of the same stem is the fallback; an error names BOTH
+        // doors.
+        return resolve_source_spelling(plugin_dir, stem).map_err(|e| {
+            format!(
+                "dist artifact {} not found, and the source-tree fallback failed: {e}",
+                artifact.display()
+            )
+        });
+    }
+    resolve_source_spelling(plugin_dir, entry)
+}
+
+/// The source-tree spellings (single file / pkg tree), relative to the
+/// plugin dir.
+fn resolve_source_spelling(plugin_dir: &Path, entry: &str) -> Result<EntrySource, String> {
     let direct = plugin_dir.join(entry);
-    // A directory (or a path naming `…/mod.rut` directly) is the pkg-tree
-    // form; the tree is rooted at the directory carrying the module file.
+    // A directory (or a path naming a module root directly) is the
+    // pkg-tree form; the tree is rooted at the directory carrying the
+    // module file.
     let tree_root: Option<PathBuf> = if direct.is_dir() {
         Some(direct.clone())
     } else if direct.is_file() && direct.file_name().and_then(|n| n.to_str()) == Some(MOD_RUT) {
@@ -77,11 +125,30 @@ pub fn read_entry_source(plugin_dir: &Path, entry: &str) -> Result<EntrySource, 
         None
     };
     match tree_root {
-        Some(dir) => walk_pkg_tree(&dir),
+        Some(dir) => resolve_pkg_dir(&dir),
         None => std::fs::read_to_string(&direct)
             .map(EntrySource::Single)
             .map_err(|e| format!("read {entry}: {e}")),
     }
+}
+
+/// Resolve a pkg-tree DIRECTORY to its root module: the rut pkg
+/// grammar's `src/mod.rut` first (the phase-6 shape — `rut.jsonc` +
+/// `src/` shell), the phase-5 legacy `mod.rut` beside the directory
+/// second (pre-phase-6 installed trees keep loading).
+fn resolve_pkg_dir(dir: &Path) -> Result<EntrySource, String> {
+    let src_root = dir.join("src").join(MOD_RUT);
+    if src_root.is_file() {
+        return walk_pkg_tree(&dir.join("src"));
+    }
+    if dir.join(MOD_RUT).is_file() {
+        return walk_pkg_tree(dir);
+    }
+    Err(format!(
+        "{}: no pkg tree here — expected src/{MOD_RUT} (the rut pkg grammar) or \
+         {MOD_RUT} (the legacy layout)",
+        dir.display()
+    ))
 }
 
 /// Read a directory's `mod.rut` + its declared mod tree (the
@@ -398,5 +465,86 @@ mod tests {
             panic!("file set expected");
         };
         assert!(mods.is_empty(), "a non-parsing root mounts no children");
+    }
+
+    /// The rut pkg grammar's `src/` shell: `backend/rut.jsonc` +
+    /// `backend/src/mod.rut` + children under `src/` resolve to the same
+    /// file set the phase-5 legacy layout produced.
+    #[test]
+    fn src_shell_resolves_the_pkg_tree() {
+        let guard = TempDir::new();
+        let dir = guard.path();
+        std::fs::create_dir_all(dir.join("backend/src")).unwrap();
+        std::fs::write(dir.join("backend/rut.jsonc"), "{ \"name\": \"backend\" }").unwrap();
+        std::fs::write(
+            dir.join("backend/src/mod.rut"),
+            "mod props;\nentry fn start() {}",
+        )
+        .unwrap();
+        std::fs::write(dir.join("backend/src/props.rut"), "pub fn x() {}").unwrap();
+
+        let src = read_entry_source(dir, "backend").unwrap();
+        let EntrySource::FileSet { root, mods } = src else {
+            panic!("file set expected");
+        };
+        assert_eq!(root, "mod props;\nentry fn start() {}");
+        assert_eq!(mods["props"], "pub fn x() {}");
+    }
+
+    /// The legacy phase-5 layout (`backend/mod.rut`, no `src/` shell)
+    /// still resolves — pre-phase-6 installed trees keep loading.
+    #[test]
+    fn legacy_layout_still_resolves() {
+        let guard = TempDir::new();
+        let dir = guard.path();
+        std::fs::create_dir_all(dir.join("backend")).unwrap();
+        std::fs::write(dir.join("backend/mod.rut"), "entry fn start() {}").unwrap();
+        assert!(matches!(
+            read_entry_source(dir, "backend").unwrap(),
+            EntrySource::FileSet { .. }
+        ));
+    }
+
+    /// A directory with neither `src/mod.rut` nor `mod.rut` is the loud
+    /// error naming both doors.
+    #[test]
+    fn pkg_dir_without_a_root_refuses() {
+        let guard = TempDir::new();
+        let dir = guard.path();
+        std::fs::create_dir_all(dir.join("backend")).unwrap();
+        let err = read_entry_source(dir, "backend").unwrap_err();
+        assert!(err.contains("src/mod.rut"), "{err}");
+    }
+
+    /// The dist pointer (`"backend": "backend.zip"`): the packed
+    /// artifact under `dist/` registers as [`EntrySource::PkgZip`] — the
+    /// archive's bytes, whole.
+    #[test]
+    fn dist_pointer_reads_the_packed_zip() {
+        let guard = TempDir::new();
+        let dir = guard.path();
+        std::fs::create_dir_all(dir.join("dist")).unwrap();
+        std::fs::write(dir.join("dist/backend.zip"), b"PKFakeArchiveBytes").unwrap();
+        let src = read_entry_source(dir, "backend.zip").unwrap();
+        assert_eq!(src, EntrySource::PkgZip(b"PKFakeArchiveBytes".to_vec()));
+    }
+
+    /// A missing dist artifact falls back to the pkg tree of the same
+    /// stem (the dev checkout before the packer ran); an error names
+    /// both doors.
+    #[test]
+    fn missing_dist_artifact_falls_back_to_the_source_tree() {
+        let guard = TempDir::new();
+        let dir = guard.path();
+        std::fs::create_dir_all(dir.join("backend/src")).unwrap();
+        std::fs::write(dir.join("backend/src/mod.rut"), "entry fn start() {}").unwrap();
+        let src = read_entry_source(dir, "backend.zip").unwrap();
+        assert!(matches!(src, EntrySource::FileSet { .. }));
+
+        // neither door: the error names the artifact first
+        let guard2 = TempDir::new();
+        let err = read_entry_source(guard2.path(), "backend.zip").unwrap_err();
+        assert!(err.contains("dist artifact"), "{err}");
+        assert!(err.contains("fallback"), "{err}");
     }
 }

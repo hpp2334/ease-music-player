@@ -1,0 +1,16 @@
+{
+  // the plugin's headless service pkg — the manifest's "backend": "backend.zip" artifact packs from this tree.
+  // Phase-6 pkg grammar (rut.jsonc + the src/ shell — the
+  // plugins/3rd/* shape): the root module is src/mod.rut.
+  // deps = the PATH deps only (embedded into the packed zip
+  // under deps/); the session deps (emp, json, tur_kit, the
+  // host pkgs) resolve against the engine's offered set at
+  // device compile and are deliberately not declared.
+  "name": "backend",
+  "deps": {
+    "crypto": { "path": "../../3rd/crypto" },
+    "net": { "path": "../../3rd/net" },
+    "time": { "path": "../../3rd/time" },
+    "xml": { "path": "../../3rd/xml" }
+  }
+}

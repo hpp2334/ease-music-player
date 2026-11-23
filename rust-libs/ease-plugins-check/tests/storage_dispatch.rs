@@ -194,6 +194,9 @@ mod storage_dispatch {
                         boot_cx,
                     ),
                 ),
+                EntrySource::PkgZip(bytes) => {
+                    futures::executor::block_on(app.load_rut_module_pkgzip_cx(bytes, boot_cx))
+                }
             };
             loaded.expect("backend loads");
             ready_tx.send(boot_cx).expect("test still waiting");

@@ -34,7 +34,7 @@ fn app_plugins() -> Vec<Box<dyn Plugin>> {
 
 /// Boot one resolved entrypoint; panic with the compile diagnostics on
 /// failure. Single file = the single rail, file set = the engine's
-/// multi-file rail.
+/// multi-file rail, packed zip = the pkg-zip rail.
 fn assert_boots(source: EntrySource, what: &str) {
     let app =
         TurTestApp::new_with_extra_plugins(400.0, 400.0, app_plugins()).expect("harness app");
@@ -52,6 +52,7 @@ fn assert_boots(source: EntrySource, what: &str) {
                 })
                 .collect(),
         }),
+        EntrySource::PkgZip(bytes) => app.load_rut_module_pkgzip(bytes),
     };
     if let Err(e) = result {
         panic!("{what} failed to compile/boot: {e}");

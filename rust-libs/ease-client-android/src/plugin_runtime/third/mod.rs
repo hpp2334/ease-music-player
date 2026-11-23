@@ -7,12 +7,15 @@
 //!
 //! ONE SOURCE OF TRUTH: this module `include_str!`s the `plugins/3rd`
 //! sources (the lib bodies, the manifests, the host decl surfaces) —
-//! the same bytes a `rut pack` closure would embed — and offers them
-//! into the compile session, so `use xml::to_json`... resolves by name
-//! on device exactly as `use emp::Db` does. The row DECLS are the
-//! `.d.rut` files; the BODIES live here (`crypto` / `xml` / `net` /
-//! `time`), and the boot's `verify_against` traps any drift between
-//! the two.
+//! the exact bytes the phase-6 packer embeds into every plugin's
+//! `dist/*.zip` closure — and offers them into the compile session, so
+//! `use xml::to_json`... resolves by name on device exactly as
+//! `use emp::Db` does. A pkg-zip load mounts the archive's embedded
+//! copies too, but the offered set mounts FIRST (first-mount-wins), so
+//! the session's mounts answer — embedded duplicates ride inert (and
+//! byte-identical). The row DECLS are the `.d.rut` files; the BODIES
+//! live here (`crypto` / `xml` / `net` / `time`), and the boot's
+//! `verify_against` traps any drift between the two.
 //!
 //! Installer shape ([`install`], a `RutPkgExt` pushed by `EaseMusicPlugin`
 //! beside `emp::install`): the offered mounts push in BOTH phases (the

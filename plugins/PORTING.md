@@ -1,34 +1,79 @@
 # Plugin porting guide — the emp epoch (apiVersion 3)
 
-Plugins are **rut sources** (since apiVersion 2) laid out as **pkg trees**
-and served through the **`emp` SDK** (apiVersion 3). There is no JS, no
-npm, no rspack — the engine compiles the sources; `pnpm test` (the
-`ease-plugins-check` suite) compile+boot-checks every plugin host-side.
-apiVersion 2 (single-file rut sources, `tur_host::ease.*` rows, the
-stash-bus RPC) is RETIRED — the engine refuses installs outside its
-`PLUGIN_API_MIN..MAX` range (currently `3..=3`), and the bundled
+Plugins are **rut pkgs** (since apiVersion 2, the pkg-tree shape since
+phase 6: `rut.jsonc` + the `src/` shell) served through the **`emp` SDK**
+(apiVersion 3), packed into **dist artifacts** (`ease-plugin-packer` →
+`dist/backend.zip`, `dist/view.zip` — source-mode rut zips) and shipped
+inside the registry zips. There is no JS, no npm, no rspack — the engine
+compiles the sources; `pnpm test` (the `ease-plugins-check` suite)
+compile+boot-checks every entrypoint **from its packed dist artifact**
+when present (the shipped bytes, end to end), falling back to the source
+tree in dev. apiVersion 2 (single-file rut sources, `tur_host::ease.*`
+rows, the stash-bus RPC) is RETIRED — the engine refuses installs outside
+its `PLUGIN_API_MIN..MAX` range (currently `3..=3`), and the bundled
 bootstrap re-installs the shipped ids from their apiVersion-3 zips.
 
-## Layout (pkg trees)
+## Layout (rut pkgs + dist artifacts)
 
 ```text
 plugins/com.ease.webdav/
   manifest.json
   icon.png                 # optional plugin-level icon (≤128 KiB raster)
-  backend/                 # the headless service ("backend": "backend")
-    mod.rut                # the pkg-tree ROOT — declares `mod NAME;` children
-    auth.rut  dav.rut  ops.rut  …
-  view/                    # per-contribution views ("view": "view")
-    mod.rut
-    form.rut  actions.rut
+  backend/                 # the headless service ("backend": "backend.zip")
+    rut.jsonc              # the pkg manifest — deps = the PATH deps only
+    src/
+      mod.rut              # the pkg ROOT module — declares `mod NAME;` children
+      auth.rut  dav.rut  ops.rut  …
+  view/                    # per-contribution views ("view": "view.zip")
+    rut.jsonc
+    src/
+      mod.rut
+      form.rut  actions.rut
+  dist/                    # BUILD OUTPUT (gitignored) — the packer's zips
+    backend.zip  view.zip
 ```
 
-A manifest entry names either a single `.rut` file (still loads — the
-legacy spelling) or a **directory carrying `mod.rut`**. The scan walks the
-`mod NAME;` declarations to the sibling files (`NAME/mod.rut` dir form
-first, `NAME.rut` single-file form second; both present = the loud
-ambiguity) and registers the whole set as one file set. Per-file use
-binding: EVERY file writes every import it calls.
+The pkg grammar is rut's own (`plugins/3rd/*` is the reference shape):
+the root module is `src/mod.rut`, `mod NAME;` in it mounts
+`src/NAME/mod.rut` (dir form) or `src/NAME.rut` (single-file form) beside
+the declaring file — recursively, both spellings, both present = the loud
+ambiguity. A `.rut` outside `src/` refuses at the pack door.
+
+### Manifest entries: dist pointers, source fallback (D8)
+
+The manifest PREFERs **dist pointers**: `"backend": "backend.zip"`,
+contribution `"view": "view.zip"` — the packed artifact under `dist/`
+loads through the engine's pkg-zip rail (unpacked + compiled per
+instance load, the embedded `deps/` closure riding along). The
+source-tree spelling (`"backend": "backend"`) stays fully supported: a
+dist pointer whose artifact is MISSING falls back to the pkg tree of the
+same stem (`backend.zip` → `backend/`) — dev checkouts without `dist/`
+and legacy single-file/pkg spellings keep loading.
+
+### Deps in `rut.jsonc`: path deps only; the session supplies the rest
+
+`rut.jsonc`'s `deps` table declares ONLY the **path deps** — the 3rd
+libs the entrypoint uses, each embedded into the packed zip under
+`deps/` by the packer:
+
+```jsonc
+{
+  "name": "backend",
+  "deps": {
+    "crypto": { "path": "../../3rd/crypto" },
+    "net":    { "path": "../../3rd/net" }
+  }
+}
+```
+
+The **session deps** — `emp`, `json`, `pouch`, `strbuild`, `tur_kit`,
+`tur_host` (and every `*_host` decl pkg) — are deliberately NOT
+declared: they resolve against the engine's offered set at device
+compile through the pkg-zip lane's ambient-nameability law (the same law
+every module load runs). rut's grammar has no "satisfied by the session"
+descriptor — `rut pack` embeds every row it walks — so declaring them
+would embed the SDK into every plugin zip; the grammar-shaped answer is
+declare-what-embeds, let-the-session-supply-the-rest.
 
 ## Manifest (v3)
 
@@ -37,20 +82,22 @@ binding: EVERY file writes every import it calls.
   "id": "com.ease.webdav",
   "name": { "en-US": "WebDAV", "zh-CN": "WebDAV" },
   "author": "ease",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "apiVersion": 3,
-  "backend": "backend",
+  "backend": "backend.zip",
   "events": ["music:play"],
   "contributions": {
-    "storages":  [{ "id": "webdav", "title": "…", "desc": "…", "view": "view" }],
-    "dashboard": [{ "id": "main", "title": "…", "view": "view" }],
+    "storages":  [{ "id": "webdav", "title": "…", "desc": "…", "view": "view.zip" }],
+    "dashboard": [{ "id": "main", "title": "…", "view": "view.zip" }],
     "lyricParsers": [{ "id": "lrc", "title": "…", "extensions": ["lrc"] }]
   }
 }
 ```
 
 `apiVersion` is REQUIRED — an integer, and the packaging epoch gate
-(`scripts/package-plugin.ts`) fails any build whose level ≠ 3.
+(`scripts/package-plugin.ts`) fails any build whose level ≠ 3. Entry
+values name **dist artifacts** (`.zip`) or — as the fallback — source
+spellings.
 
 ## The emp SDK (constructor-injected handle)
 
@@ -88,7 +135,7 @@ Boot law: constructors only STORE the handle — constructing services at
 ## The RPC contract (bind table — the only contract)
 
 A backend serves ALL ops through **one dispatch entry per lane**,
-declared once in the root `mod.rut`, plus `rpc.bind` per op at `start`.
+declared once in the root module (`src/mod.rut`), plus `rpc.bind` per op at `start`.
 Handlers are plain fns closing over the service handles; **args are RAW
 — the handler decodes its own args** (`json` lib for str ops):
 
@@ -169,7 +216,18 @@ size cap (≤2 MiB for lyrics) and the timeout (10 s).
 ## The 3rd-party libs (utilities)
 
 The identity-free utilities left the SDK — they are standard rut pkgs
-imported by name:
+imported by name and declared as PATH deps in the entrypoint's
+`rut.jsonc` (the packer embeds the closure into the dist zip):
+
+```jsonc
+// backend/rut.jsonc — only the libs this entrypoint uses
+"deps": {
+  "crypto": { "path": "../../3rd/crypto" },
+  "net":    { "path": "../../3rd/net" },
+  "time":   { "path": "../../3rd/time" },
+  "xml":    { "path": "../../3rd/xml" }
+}
+```
 
 ```rut
 use crypto::{ random_uuid, md5_hex, md5_base64, base64_encode, base64_decode, sha256_hex, hmac_sha256_hex, random_bytes };
@@ -243,7 +301,7 @@ Rust-family syntax. The corpus (`tur-upstream rut/cases/`, esp.
 
 ## Views (tur_kit — the fluent law)
 
-`view/mod.rut` builds UI in `start` and mounts it. Construction is the
+`view/src/mod.rut` builds UI in `start` and mounts it. Construction is the
 class call form, chained; `.build()` is the only terminal; handlers are
 sealed mutations; reactive props take one method over `Readable<T>`;
 statics wrap `sv(v)`.
@@ -290,13 +348,21 @@ a status source. Long journeys: `launch_future(...)` + `await` — but
 
 ## House rules
 
-- apiVersion **3**, versions bumped per plugin.
+- apiVersion **3**, versions bumped per plugin (an installed copy heals
+  to a newer bundled zip via the bootstrap's outdated check — bump
+  whenever the packed bytes change).
 - Validate: `cd rust-libs && cargo nextest run -p ease-plugins-check`
-  (compile+boot for every entrypoint through the scan's own pkg-tree
-  lane; bind-table greps for the contract ops; the bytes-lane E2E).
-- Package: `pnpm build:plugins` (stamps the registry zips + index —
-  fails any build whose manifest apiVersion ≠ 3).
+  (compile+boot for every entrypoint — from its PACKED dist artifact
+  when present, else the source tree; bind-table greps against the
+  source trees; the bytes-lane E2E).
+- Package: `pnpm build:plugins` — runs the packer
+  (`rust-libs/ease-plugin-packer`, the `rut pack --mode source` lane →
+  `dist/<entry>.zip`) then `scripts/package-plugin.ts` (stamps the
+  registry zips + index — fails any build whose manifest apiVersion ≠ 3
+  or whose dist artifact is missing).
 - Boot law: `start` must not call Android-only rows (`Theme`,
   `OAuth.begin`) or touch the network — construct services, bind the
   ops, return nothing.
-- The plugin dir ships ONLY: `manifest.json`, the rut trees, icons.
+- The plugin dir ships: `manifest.json`, the rut pkg trees
+  (`rut.jsonc` + `src/`), icons. `dist/` is build output (gitignored) —
+  the registry zips + `plugins.json` are the committed artifacts.

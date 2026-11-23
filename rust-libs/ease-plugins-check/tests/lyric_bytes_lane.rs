@@ -154,6 +154,9 @@ mod lyric_bytes_lane {
                         boot_cx,
                     ),
                 ),
+                EntrySource::PkgZip(bytes) => {
+                    futures::executor::block_on(app.load_rut_module_pkgzip_cx(bytes, boot_cx))
+                }
             };
             loaded.expect("lyricformats backend loads");
             ready_tx.send(boot_cx).expect("test still waiting");

@@ -25,15 +25,17 @@ import android.content.Context
 object EasePluginBridge {
     /**
      * Build the shared tur runtime with the Ease plugin set
-     * (TurStdPlugin + TurAnimationPlugin + TurRpcBusPlugin + EaseMusicPlugin)
+     * (TurStdPlugin + TurAnimationPlugin + TurRpcBindPlugin + EaseMusicPlugin)
      * and return its opaque native handle. The two capped plugin worker
      * pools (`ease-plugin-backend` / `ease-plugin-view`, 2 lane threads
      * each) are allocated Rust-side here — there is no Kotlin pools
      * handle anymore.
      *
      * [backendHandle] binds the engine (and every instance spawned from it)
-     * to one backend instance — the `ease:*` rows resolve their
-     * DB/KV/RPC services through it. An unknown handle fails the call
+     * to one backend instance — the `emp_host` rows resolve their
+     * identity against the [backendHandle]-bound backend context (the
+     * `emp` SDK services construct from the minted plugin handle at
+     * load). An unknown handle fails the call
      * (returns `0L` + a Rust-side error log). Returns `0L` on failure (the
      * native side also throws).
      */

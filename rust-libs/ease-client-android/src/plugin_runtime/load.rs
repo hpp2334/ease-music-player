@@ -38,9 +38,11 @@ pub(crate) fn load_module_source(
             return;
         };
         let posted = tur_android::ops::with_app(instance_handle, move |app| {
-            // Multi-file rut modules first (the file-set registry lane), then
-            // the plain single-source lane — the same dispatch
-            // `tur_android::ops::load_module` does, with the cx threaded.
+            // The registry dispatch, cx threaded: a FILE SET (the
+            // file-set registry lane), then the shared module-source
+            // registry (single source / file set / packed pkg zip — the
+            // engine's `load_rut_module_source` dispatches by shape).
+            // The same dispatch `tur_android::ops::load_module` does.
             if let Some(f) = files.get(source_handle as u64) {
                 tracing::info!(
                     "loadModule: file set @ handle {source_handle} (root {} bytes, {} mod children, start cx {start_cx:?})",
@@ -58,11 +60,16 @@ pub(crate) fn load_module_source(
                 return;
             }
             tracing::info!(
-                "loadModule: source handle {source_handle} ({} bytes, start cx {start_cx:?})",
+                "loadModule: source handle {source_handle} ({:?}, start cx {start_cx:?})",
                 match sources.get(source_handle as u64) {
-                    Some(tur_engine::ModuleSourceEntry::Files(files)) => files.root.len(),
-                    Some(tur_engine::ModuleSourceEntry::Source(s)) => s.len(),
-                    None => 0,
+                    Some(tur_engine::ModuleSourceEntry::Files(files)) => {
+                        format!("file set, root {} bytes", files.root.len())
+                    }
+                    Some(tur_engine::ModuleSourceEntry::PkgZip(zip)) => {
+                        format!("pkg zip, {} entries, {} bytes", zip.entries.len(), zip.total_len())
+                    }
+                    Some(tur_engine::ModuleSourceEntry::Source(s)) => format!("{} bytes", s.len()),
+                    None => "unknown handle".to_string(),
                 }
             );
             let result = match start_cx {
