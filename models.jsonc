@@ -1,9 +1,11 @@
 // Model references (providerID/modelID) — main = Z.AI Coding Plan.
 // One pair, no peak window: complex = orchestrator/workers/reviews,
 // balance = watch subagents + the monitor session.
+// (glm-5.4 has no -flash variant on the plan yet — balance stays 5.3-flash
+// until one appears; re-point it when it does.)
 {
   "main": {
-    "complex": "zai-coding-plan/glm-5.3",
+    "complex": "zai-coding-plan/glm-5.4",
     "balance": "zai-coding-plan/glm-5.3-flash"
   }
 }
