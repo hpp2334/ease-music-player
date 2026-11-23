@@ -1,0 +1,118 @@
+// parse.rut — the `lyric:parse` op: the bound handler decodes its OWN
+// args (raw str — the op owns its schema), base64-decodes the content
+// (`crypto::b64_decode`, the 3rd lib) and hands the UTF-8 text to the
+// parser chosen by `parserId` (the manifest's two ids; the file-name
+// extension is the fallback key for an unknown id, the old dispatch's
+// own key). The answer is the RAW payload (`{lines, metadata}`, built
+// in result.rut) or nil = "not mine"; a malformed request is the
+// plugin's own failure — a trap the host's envelope turns into the
+// error arm (logged, next parser tried), exactly like the thrown
+// decode error did in the JS backend.
+
+use crypto::{ b64_decode };
+use json::{ JsonReader };
+use lrc::{ parse_lrc };
+use result::{ LyricResult, write_result };
+use srt::{ parse_srt };
+use text::{ file_ext_lower, split_lines, strip_bom };
+use tur_host::clipboard::{ decode_utf8 };
+use vtt::{ parse_vtt };
+
+// The args fields this op reads; unknown keys (`pluginId`, `size`) are
+// skipped, never a failure.
+struct Req {
+    parser_id: str,
+    file_name: str,
+    content_base64: str,
+}
+
+pub fn lyric_parse(args: str) -> ?str {
+    let req = decode_request(args);
+    if (req == nil) {
+        panic("lyric:parse: malformed request");
+    }
+    let r: Req = req;
+    let bytes = b64_decode(r.content_base64);
+    let text = decode_utf8(bytes);
+    let parsed: ?LyricResult = dispatch_parser(r.parser_id, r.file_name, text);
+    if (parsed == nil) {
+        // Unknown parser/extension or no usable content — "not mine",
+        // the nil answer the host falls through on.
+        return nil;
+    }
+    let res: LyricResult = parsed;
+    return write_result(res);
+}
+
+// Pick the lexer: the manifest's parserId first ("lrc" / "subtitle"),
+// the file-name extension as the fallback key (the old dispatch's key,
+// kept for an unrecognized id).
+fn dispatch_parser(parser_id: str, file_name: str, text: str) -> ?LyricResult {
+    if (parser_id == "lrc") {
+        return parse_lrc(text);
+    }
+    if (parser_id == "subtitle") {
+        return dispatch_subtitle(file_name, text);
+    }
+    let ext = file_ext_lower(file_name);
+    if (ext == "lrc") {
+        return parse_lrc(text);
+    }
+    if (ext == "srt" || ext == "vtt") {
+        return dispatch_subtitle(file_name, text);
+    }
+    return nil;
+}
+
+// The subtitle family (manifest id "subtitle", extensions srt + vtt):
+// by extension, and for an extension-less name the WEBVTT header sniff
+// (the old single walk's own classification).
+fn dispatch_subtitle(file_name: str, text: str) -> ?LyricResult {
+    let ext = file_ext_lower(file_name);
+    if (ext == "srt") {
+        return parse_srt(text);
+    }
+    if (ext == "vtt") {
+        return parse_vtt(text);
+    }
+    if (has_vtt_header(text)) {
+        return parse_vtt(text);
+    }
+    return parse_srt(text);
+}
+
+fn has_vtt_header(text: str) -> bool {
+    let rows = split_lines(strip_bom(text));
+    if (rows.len == 0) {
+        return false;
+    }
+    let r0: str = rows[0];
+    return r0.starts_with(0, "WEBVTT");
+}
+
+// Decode the raw args object — only the fields this op reads; unknown
+// keys are skipped, never a failure. Nil on any malformed shape.
+fn decode_request(args: str) -> ?Req {
+    let r = JsonReader::of(args);
+    let parser_id = "";
+    let file_name = "";
+    let content = "";
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) { return nil; }
+        if (k == "parserId") {
+            parser_id = r.read_str();
+        } else if (k == "fileName") {
+            file_name = r.read_str();
+        } else if (k == "contentBase64") {
+            content = r.read_str();
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) { return nil; }
+    }
+    r.end_object();
+    if (r.failed()) { return nil; }
+    return Req { parser_id: parser_id, file_name: file_name, content_base64: content };
+}

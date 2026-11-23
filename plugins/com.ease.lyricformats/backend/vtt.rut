@@ -1,0 +1,19 @@
+// vtt.rut — the WebVTT lexer face: the `WEBVTT` header sniff selects
+// the shared cue walk's (cue.rut) WebVTT entry law — the header-block
+// skip and the NOTE/STYLE/REGION block skip. A .vtt file WITHOUT the
+// header keeps parsing as a loose cue walk (the old merged walk's own
+// classification), never a hard reject.
+
+use cue::{ build_result, collect_cues };
+use result::{ LyricResult };
+use text::{ split_lines, strip_bom };
+
+pub fn parse_vtt(text: str) -> ?LyricResult {
+    let rows = split_lines(strip_bom(text));
+    let is_vtt = false;
+    if (rows.len > 0) {
+        let r0: str = rows[0];
+        is_vtt = r0.starts_with(0, "WEBVTT");
+    }
+    return build_result(collect_cues(rows, is_vtt));
+}

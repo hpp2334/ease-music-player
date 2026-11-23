@@ -1,0 +1,188 @@
+// text.rut — the lexer toolkit's char/text half (regex-free by
+// design — character scanning only). Shared by every sibling lexer;
+// everything the cross-module callers need is `pub`.
+
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+
+// ASCII whitespace only (space \t \n \r \v \f) — the JS `.trim()`'s
+// set minus the exotic Unicode codepoints; lyric files in the wild
+// don't lead with U+3000.
+fn is_ws(c: i32) -> bool {
+    return c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D || c == 0x0B || c == 0x0C;
+}
+
+pub fn trim(s: str) -> str {
+    let n = s.len();
+    let a: i32 = 0;
+    while (a < n && is_ws(s.code_at(a) as i32)) {
+        a += 1;
+    }
+    let b: i32 = n;
+    while (b > a && is_ws(s.code_at(b - 1) as i32)) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+pub fn trim_start(s: str) -> str {
+    let n = s.len();
+    let a: i32 = 0;
+    while (a < n && is_ws(s.code_at(a) as i32)) {
+        a += 1;
+    }
+    return s.slice(a, n);
+}
+
+// First index of one codepoint at/after `from`, -1 when absent.
+pub fn index_of(s: str, c: i32, from: i32) -> i32 {
+    let n = s.len();
+    let k = from;
+    while (k < n) {
+        if (s.code_at(k) as i32 == c) {
+            return k;
+        }
+        k += 1;
+    }
+    return -1;
+}
+
+// Last index of one codepoint, -1 when absent.
+pub fn last_index_of(s: str, c: i32) -> i32 {
+    let k = s.len() - 1;
+    while (k >= 0) {
+        if (s.code_at(k) as i32 == c) {
+            return k;
+        }
+        k -= 1;
+    }
+    return -1;
+}
+
+// First index of substring `needle` at/after `from`, -1 when absent.
+pub fn index_of_str(s: str, needle: str, from: i32) -> i32 {
+    let n = s.len();
+    let m = needle.len();
+    if (m == 0) { return from; }
+    let k = from;
+    while (k + m <= n) {
+        if (s.starts_with(k, needle)) {
+            return k;
+        }
+        k += 1;
+    }
+    return -1;
+}
+
+// All `needle` occurrences -> `repl` (the JS `split(needle).join(repl)`).
+pub fn replace_all(s: str, needle: str, repl: str) -> str {
+    let n = s.len();
+    let m = needle.len();
+    if (m == 0) { return s; }
+    let b = StringBuilder::with_cap(n);
+    let i: i32 = 0;
+    while (i < n) {
+        if (i + m <= n && s.starts_with(i, needle)) {
+            b.append(repl);
+            i += m;
+        } else {
+            b.append(s.slice(i, i + 1));
+            i += 1;
+        }
+    }
+    return b.build();
+}
+
+// ASCII-only case mapping — extensions and the VTT block keywords are
+// ASCII by definition (and the JS code compared them ASCII-sensitively
+// through `toUpperCase` on already-ASCII text).
+fn ascii_lower(s: str) -> str {
+    let b = StringBuilder::with_cap(s.len());
+    let n = s.len();
+    let i: i32 = 0;
+    while (i < n) {
+        let c = s.code_at(i) as i32;
+        if (c >= 0x41 && c <= 0x5A) {
+            b.append_code((c + 0x20) as u32);
+        } else {
+            b.append(s.slice(i, i + 1));
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+pub fn ascii_upper(s: str) -> str {
+    let b = StringBuilder::with_cap(s.len());
+    let n = s.len();
+    let i: i32 = 0;
+    while (i < n) {
+        let c = s.code_at(i) as i32;
+        if (c >= 0x61 && c <= 0x7A) {
+            b.append_code((c - 0x20) as u32);
+        } else {
+            b.append(s.slice(i, i + 1));
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+// Split on `\n`, `\r\n` or a lone `\r` (every line terminator in the
+// wild) — the JS `split("\n")`-then-`split("\r")` shape, empties kept.
+// QUIRK carried from the JS backend: a `\r\n` pair yields a phantom
+// empty line between the two real ones ("a\r\nb" -> a, "", b). The LRC
+// parser skips empty lines, so CRLF LRC files parse unchanged — but an
+// SRT/VTT file with CRLF endings gets its blank-line block separators
+// doubled and fails to produce cues (nil, "not mine"), exactly as the
+// old backend did.
+pub fn split_lines(text: str) -> Vec<str> {
+    let out = Vec<str>::new();
+    let n = text.len();
+    let chunk_start: i32 = 0;
+    let i: i32 = 0;
+    while (i <= n) {
+        if (i == n || text.code_at(i) as i32 == 0x0A) {
+            // one JS split("\n") chunk — carve it on \r, empties kept
+            let chunk = text.slice(chunk_start, i);
+            let m = chunk.len();
+            let piece_start: i32 = 0;
+            let j: i32 = 0;
+            while (j <= m) {
+                if (j == m || chunk.code_at(j) as i32 == 0x0D) {
+                    out.push(chunk.slice(piece_start, j));
+                    piece_start = j + 1;
+                }
+                j += 1;
+            }
+            chunk_start = i + 1;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Drop a leading UTF-8 BOM — it would poison LRC's first-line tags and
+// defeat the `WEBVTT` header sniffing.
+pub fn strip_bom(text: str) -> str {
+    if (text.len() > 0 && text.code_at(0) as i32 == 0xFEFF) {
+        return text.slice(1, text.len());
+    }
+    return text;
+}
+
+// The lowercased extension of a file name (after the last `.`, basename
+// after the last `/`), or "" for extensionless names / a trailing dot —
+// mirrors the host's `file_extension`.
+pub fn file_ext_lower(name: str) -> str {
+    let base = name;
+    let slash = last_index_of(name, 0x2F);
+    if (slash >= 0) {
+        base = name.slice(slash + 1, name.len());
+    }
+    let dot = last_index_of(base, 0x2E);
+    if (dot < 0) {
+        return "";
+    }
+    return ascii_lower(base.slice(dot + 1, base.len()));
+}
