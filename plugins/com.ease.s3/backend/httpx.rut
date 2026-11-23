@@ -1,0 +1,275 @@
+// backend/httpx.rut — the HTTP core over the 3rd-party `net` lib's
+// blocking one-shot (`net::fetch`, entry-fn-safe: the drive runs on the
+// shared tokio runtime, never the worker lane) + the error mapping.
+//
+// The reply envelope is `{"status","statusText","headers","body"<base64>,
+// "error"}`; the base64 body decodes through `crypto::b64_decode`.
+// ListObjectsV2 / error-document XML decode through `xml::parse`.
+//
+// Error contract: transport `timeout`-ish messages get the host's TIMEOUT
+// prefix; 401/403 carry UNAUTHORIZED; S3 `<Error>` documents surface their
+// Code (`NoSuchKey`, `RequestTimeTooSkewed`, ...). The trap messages keep
+// the prefixes — the host reads the head for its typed UI states.
+
+use config::{ opt_str_or, read_opt_str };
+use crypto::{ b64_decode };
+use json::{ JsonReader };
+use net::{ fetch };
+use pouch::{ Vec };
+use sigv4::{ build_signed_request };
+use strutil::{ ci_eq, contains_ci, trim };
+use tur_host::clipboard::{ decode_utf8 };
+use xml::{ parse };
+
+/// The settled `net::fetch` reply (transport failures ride `failed`/`err`).
+struct SyncResp {
+    failed: bool,
+    err: str,
+    status: u64,
+    status_text: str,
+    body_b64: str,
+    content_range: ?str,
+    content_type: ?str,
+    content_length: ?str,
+}
+
+/// An S3 `<Error>` document's Code/Message.
+struct S3Error {
+    code: str,
+    message: str,
+}
+
+/// Transport failures: `timeout`-ish messages get the host's TIMEOUT prefix,
+/// everything else passes through (the TS markedError).
+fn marked_transport_error(msg: str) -> str {
+    if (contains_ci(msg, "timeout") || contains_ci(msg, "timed out")) {
+        return f"TIMEOUT: {msg}";
+    }
+    return msg;
+}
+
+/// One blocking GET. The reply envelope is `{"status","statusText",
+/// "headers","body"<base64>,"error"}`; headers arrive as `{name: value}`
+/// with lowercased names (the three this plugin reads are captured).
+pub fn sync_get(opts: str) -> SyncResp {
+    let reply = fetch(opts);
+    let r = JsonReader::of(reply);
+    r.begin_object();
+    let status: u64 = 0;
+    let status_text = "";
+    let body_b64 = "";
+    let err = "";
+    let content_range: ?str = nil;
+    let content_type: ?str = nil;
+    let content_length: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "status") {
+            status = r.read_i64() as u64;
+        } else if (k == "statusText") {
+            status_text = opt_str_or(read_opt_str(r), "");
+        } else if (k == "body") {
+            body_b64 = opt_str_or(read_opt_str(r), "");
+        } else if (k == "error") {
+            err = opt_str_or(read_opt_str(r), "");
+        } else if (k == "headers") {
+            r.begin_object();
+            while (r.more()) {
+                let name = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (ci_eq(name, "content-range")) {
+                    content_range = read_opt_str(r);
+                } else if (ci_eq(name, "content-type")) {
+                    content_type = read_opt_str(r);
+                } else if (ci_eq(name, "content-length")) {
+                    content_length = read_opt_str(r);
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (r.failed()) {
+        return SyncResp {
+            failed: true,
+            err: "s3: malformed net reply",
+            status: 0,
+            status_text: "",
+            body_b64: "",
+            content_range: nil,
+            content_type: nil,
+            content_length: nil,
+        };
+    }
+    if (err != "") {
+        return SyncResp {
+            failed: true,
+            err: marked_transport_error(err),
+            status: 0,
+            status_text: "",
+            body_b64: "",
+            content_range: nil,
+            content_type: nil,
+            content_length: nil,
+        };
+    }
+    return SyncResp {
+        failed: false,
+        err: "",
+        status: status,
+        status_text: status_text,
+        body_b64: body_b64,
+        content_range: content_range,
+        content_type: content_type,
+        content_length: content_length,
+    };
+}
+
+/// Parse an S3 `<Error>` XML body (operation failures) for its Code/Message
+/// — gives diagnostics like `NoSuchKey` / `RequestTimeTooSkewed` instead of
+/// a bare status. Nil when the body isn't an S3 error document.
+fn parse_s3_error(body_b64: str) -> ?S3Error {
+    let bytes = b64_decode(body_b64);
+    let tree = parse(bytes);
+    if (tree == nil) {
+        return nil;
+    }
+    let t: str = tree;
+    let r = JsonReader::of(t);
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return nil;
+                }
+                if (ci_eq(tag, "error")) {
+                    return error_el(r);
+                }
+                r.skip_value();
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    return nil;
+}
+
+/// One `<Error>` el: `{code, message}` — nil when the Code el is missing.
+fn error_el(r: JsonReader) -> ?S3Error {
+    let code: ?str = nil;
+    let message: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return nil;
+                }
+                if (ci_eq(tag, "code")) {
+                    code = error_text_el(r);
+                } else if (ci_eq(tag, "message")) {
+                    message = error_text_el(r);
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed() || code == nil) {
+        return nil;
+    }
+    let c: str = code;
+    return S3Error { code: c, message: opt_str_or(message, "") };
+}
+
+/// The `text` member of one error el (nil when absent) — the error
+/// document's own walker (listing.rut keeps its separate `el_text`; rut's
+/// module set spells a flat fn namespace, so same-named privates collide).
+fn error_text_el(r: JsonReader) -> ?str {
+    let found: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "text") {
+            let v = r.read_str();
+            if (r.failed()) {
+                return nil;
+            }
+            found = v;
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return found;
+}
+
+/// The TS markedError over an HTTP failure: 401/403 carry the host's
+/// UNAUTHORIZED prefix; the S3 error document's Code/Message (else the
+/// status text) ride the message.
+pub fn http_error_text(status: u64, status_text: str, body_b64: str) -> str {
+    let code = "";
+    let message = trim(status_text);
+    let parsed = parse_s3_error(body_b64);
+    if (parsed != nil) {
+        let p: S3Error = parsed;
+        code = p.code;
+        message = p.message;
+    }
+    if (status == 401 || status == 403) {
+        return f"UNAUTHORIZED: HTTP {status} {code}: {message}";
+    }
+    return f"HTTP {status} {code}: {message}";
+}
+
+/// Signed bodyless GET returning the full body as text (list / test).
+/// `(nil, marked error)` on any failure. All credentials as primitives —
+/// the config document never crosses a module edge.
+pub fn s3_get_text(endpoint: str, region: str, bucket: str, access_key_id: str, secret_key: str, key: str, qk: Vec<str>, qv: Vec<str>) -> (?str, str) {
+    let signed = build_signed_request(endpoint, region, bucket, access_key_id, secret_key, key, qk, qv, "");
+    if (signed == nil) {
+        return (nil, "s3: invalid endpoint");
+    }
+    let opts: str = signed;
+    let resp = sync_get(opts);
+    if (resp.failed) {
+        return (nil, resp.err);
+    }
+    if (resp.status >= 400) {
+        return (nil, http_error_text(resp.status, resp.status_text, resp.body_b64));
+    }
+    let body = b64_decode(resp.body_b64);
+    return (decode_utf8(body), "");
+}

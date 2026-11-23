@@ -1,0 +1,283 @@
+// backend/config.rut — the per-instance config document (the
+// `storage:<instance>` KV entry in this plugin's `Db`) + the secret access
+// key in `Secret`. The document keeps the exact key names the apiVersion 1
+// TS wrote (`accessKeyId` / `secretId`), so legacy configs stay readable.
+//
+// The emp service handles ride IN as parameters (`db: Db`, `secret:
+// Secret`) — rut has no module globals on the new contract, so every
+// consumer passes the handles it captured at `start`.
+//
+// Everything crossing a module edge is primitives + this module's own
+// `Config` value (fields are always readable cross-module); callers never
+// spell the type name — construction and persistence go through
+// `make_config` / `persist`, absence handling through `require_config` /
+// `override_or_stored` / `secret_id_of`.
+
+use emp::{ Db, Secret };
+use json::{ JsonReader, JsonWriter };
+
+let DEFAULT_REGION: str = "us-east-1";
+
+/// Per-instance config (the `storage:<id>` KV document; `secret_id` 0 =
+/// none).
+pub struct Config {
+    alias: str,
+    endpoint: str,
+    region: str,
+    bucket: str,
+    access_key_id: str,
+    secret_id: i64,
+}
+
+pub fn default_region() -> str {
+    return DEFAULT_REGION;
+}
+
+pub fn kv_key(instance: str) -> str {
+    return f"storage:{instance}";
+}
+
+// ---------------------------------------------------------------------------
+// The optional-string reads (shared by every op decoder)
+// ---------------------------------------------------------------------------
+
+/// The optional-string read: `null` → nil, a string → some, anything else
+/// (or a truncated body) → nil.
+pub fn read_opt_str(r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+pub fn opt_str_or(v: ?str, fallback: str) -> str {
+    if (v == nil) {
+        return fallback;
+    }
+    let s: str = v;
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// Decode / encode the persisted document
+// ---------------------------------------------------------------------------
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?Config {
+    let r = JsonReader::of(doc);
+    r.begin_object();
+    let alias: ?str = nil;
+    let endpoint: ?str = nil;
+    let region: ?str = nil;
+    let bucket: ?str = nil;
+    let access_key_id: ?str = nil;
+    let secret_id: i64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> { alias = read_opt_str(r); },
+            "endpoint" -> { endpoint = read_opt_str(r); },
+            "region" -> { region = read_opt_str(r); },
+            "bucket" -> { bucket = read_opt_str(r); },
+            "accessKeyId" -> { access_key_id = read_opt_str(r); },
+            "secretId" -> {
+                if (!r.try_null()) {
+                    secret_id = r.read_i64();
+                }
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return Config {
+        alias: opt_str_or(alias, ""),
+        endpoint: opt_str_or(endpoint, ""),
+        region: opt_str_or(region, DEFAULT_REGION),
+        bucket: opt_str_or(bucket, ""),
+        access_key_id: opt_str_or(access_key_id, ""),
+        secret_id: secret_id,
+    };
+}
+
+/// The persisted config document (the TS `configToJson` — the exact key
+/// names keep legacy configs readable).
+fn config_json(conf: Config) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("alias");
+    w.write_str(conf.alias);
+    w.key("endpoint");
+    w.write_str(conf.endpoint);
+    w.key("region");
+    w.write_str(conf.region);
+    w.key("bucket");
+    w.write_str(conf.bucket);
+    w.key("accessKeyId");
+    w.write_str(conf.access_key_id);
+    w.key("secretId");
+    if (conf.secret_id != 0) {
+        w.write_i64(conf.secret_id);
+    } else {
+        w.write_raw("null");
+    }
+    w.end_object();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// The cross-module surface (primitives in, Config values inferred out)
+// ---------------------------------------------------------------------------
+
+/// Load an instance's config (defaults applied) or trap. The ops use this
+/// for the contract ops, where a missing/corrupt config is the op's error
+/// arm — the panic message keeps the old `err_env` text (the host's
+/// envelope error arm).
+pub fn require_config(db: Db, instance: str) -> Config {
+    let raw = db.get(kv_key(instance));
+    if (raw == nil) {
+        panic(f"s3: no config for instance {instance}");
+    }
+    let doc: str = raw;
+    let cfg = decode_config(doc);
+    if (cfg == nil) {
+        panic(f"s3: no config for instance {instance}");
+    }
+    let c: Config = cfg;
+    if (c.alias == "") {
+        c.alias = instance;
+    }
+    if (c.region == "") {
+        c.region = DEFAULT_REGION;
+    }
+    return c;
+}
+
+/// The stored instance's secret id (0 = none / no stored instance). The
+/// update branch of `s3:connect` keeps the stored secret unless the form
+/// supplies a new one.
+pub fn secret_id_of(db: Db, instance: str) -> i64 {
+    let raw = db.get(kv_key(instance));
+    if (raw == nil) {
+        return 0;
+    }
+    let doc: str = raw;
+    let cfg = decode_config(doc);
+    if (cfg == nil) {
+        return 0;
+    }
+    let c: Config = cfg;
+    return c.secret_id;
+}
+
+/// The `s3:test` stored-instance fallback (the TS testCredentials): the
+/// form's explicit endpoint/bucket/access key win; blanks keep the stored
+/// values; the region defaults; the secret key is the stored one. Answers
+/// `(endpoint, region, bucket, access_key_id, secret_key)`.
+pub fn override_or_stored(db: Db, secret: Secret, instance: str, form_endpoint: str, form_bucket: str, form_ak: str) -> (str, str, str, str, str) {
+    let conf = require_config(db, instance);
+    let endpoint = conf.endpoint;
+    if (form_endpoint != "") {
+        endpoint = form_endpoint;
+    }
+    let bucket = conf.bucket;
+    if (form_bucket != "") {
+        bucket = form_bucket;
+    }
+    let ak = conf.access_key_id;
+    if (form_ak != "") {
+        ak = form_ak;
+    }
+    return (endpoint, conf.region, bucket, ak, secret_key_of(secret, conf));
+}
+
+/// The cached secret access key (the KV document carries only the secret
+/// id); "" when the instance has none.
+pub fn secret_key_of(secret: Secret, conf: Config) -> str {
+    if (conf.secret_id == 0) {
+        return "";
+    }
+    let v = secret.get(conf.secret_id);
+    if (v == nil) {
+        return "";
+    }
+    let s: str = v;
+    return s;
+}
+
+/// Build a config value (construction stays in the owning module —
+/// callers pass primitives).
+pub fn make_config(alias: str, endpoint: str, region: str, bucket: str, access_key_id: str, secret_id: i64) -> Config {
+    return Config {
+        alias: alias,
+        endpoint: endpoint,
+        region: region,
+        bucket: bucket,
+        access_key_id: access_key_id,
+        secret_id: secret_id,
+    };
+}
+
+/// Persist an instance's config document.
+pub fn persist(db: Db, instance: str, conf: Config) {
+    db.set(kv_key(instance), config_json(conf));
+}
+
+/// Remove an instance's config + secret key; answers the endpoint the
+/// parked sessions were opened against ("" when none) so the caller can
+/// free them.
+pub fn drop_instance(db: Db, secret: Secret, instance: str) -> str {
+    let raw = db.get(kv_key(instance));
+    let endpoint = "";
+    if (raw != nil) {
+        let doc: str = raw;
+        let cfg = decode_config(doc);
+        if (cfg != nil) {
+            let c: Config = cfg;
+            if (c.secret_id != 0) {
+                secret.remove(c.secret_id);
+            }
+            endpoint = c.endpoint;
+        }
+    }
+    db.delete(kv_key(instance));
+    return endpoint;
+}
+
+/// Bucket naming: 2–63 chars, alphanumeric edges, `.`/`_`/`-` inside (the
+/// TS BUCKET_RE — lowercase-strict AWS rules relaxed to allow uppercase for
+/// permissive MinIO setups; the server rejects what it doesn't like).
+pub fn bucket_ok(bucket: str) -> bool {
+    let n = bucket.len();
+    if (n < 2 || n > 63) {
+        return false;
+    }
+    if (!is_alnum(bucket.code_at(0)) || !is_alnum(bucket.code_at(n - 1))) {
+        return false;
+    }
+    let i = 1;
+    while (i < n - 1) {
+        let c = bucket.code_at(i);
+        if (!is_alnum(c) && c != 46 && c != 95 && c != 45) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn is_alnum(c: u32) -> bool {
+    return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57);
+}

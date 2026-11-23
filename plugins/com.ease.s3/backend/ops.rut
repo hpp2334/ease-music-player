@@ -1,0 +1,376 @@
+// backend/ops.rut — the op handlers the bind table serves. Each is a
+// PLAIN fn (bound at start by the root's `rpc.bind` closures): RAW str
+// args in (the handler decodes its own JSON), the RAW payload out — the
+// host builds the `{"ok":…}` envelope from the value/trap, so there is no
+// envelope code here anymore. Failures panic; the trap message keeps the
+// `UNAUTHORIZED` / `TIMEOUT` prefix law where the failure is one.
+//
+// Contract ops (the host scope): storage:list / storage:get /
+// storage:get-chunk / storage:release / storage:removeInstance. Plugin
+// view ops: s3:test / s3:connect (reached through `Rpc.call` from the
+// view; the envelope the view parses is host-built).
+
+use config::{ bucket_ok, default_region, drop_instance, make_config, opt_str_or, override_or_stored, persist, read_opt_str, require_config, secret_id_of, secret_key_of };
+use crypto::{ uuid4 };
+use emp::{ Context, Db, Secret };
+use endpoint::{ normalize_endpoint };
+use httpx::{ s3_get_text };
+use json::{ JsonReader, JsonWriter };
+use listing::{ list_impl };
+use pouch::{ Vec };
+use strutil::{ starts_with_ci, trim };
+use streaming::{ chunk_impl, free_instance_sessions, open_impl, release_impl };
+
+// ---------------------------------------------------------------------------
+// storage:list
+// ---------------------------------------------------------------------------
+
+pub fn storage_list(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let dir: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("s3: bad storage:list request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "dir" -> { dir = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("s3: bad storage:list request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil || dir == nil) {
+        panic("s3: storage:list needs storageId + dir");
+    }
+    let sid: str = storage_id;
+    let d: str = dir;
+    let conf = require_config(db, sid);
+    let out = list_impl(conf.endpoint, conf.region, conf.bucket, conf.access_key_id, secret_key_of(secret, conf), d);
+    let o = out.0;
+    if (o == nil) {
+        panic(out.1);
+    }
+    let res: str = o;
+    return res;
+}
+
+// ---------------------------------------------------------------------------
+// storage:get (the opener)
+// ---------------------------------------------------------------------------
+
+pub fn storage_get(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let path: ?str = nil;
+    let offset: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("s3: bad storage:get request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "path" -> { path = read_opt_str(r); },
+            "offset" -> { offset = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("s3: bad storage:get request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil || path == nil) {
+        panic("s3: storage:get needs storageId + path + offset");
+    }
+    let sid: str = storage_id;
+    let pth: str = path;
+    let conf = require_config(db, sid);
+    return open_impl(db, conf.endpoint, conf.region, conf.bucket, conf.access_key_id, secret_key_of(secret, conf), pth, offset);
+}
+
+// ---------------------------------------------------------------------------
+// storage:get-chunk / storage:release
+// ---------------------------------------------------------------------------
+
+pub fn storage_get_chunk(db: Db, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let sid: u64 = 0;
+    let offset: u64 = 0;
+    let len: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("s3: bad storage:get-chunk request");
+        }
+        when (k) {
+            "sid" -> { sid = r.read_i64() as u64; },
+            "offset" -> { offset = r.read_i64() as u64; },
+            "len" -> { len = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("s3: bad storage:get-chunk request");
+        }
+    }
+    r.end_object();
+    if (sid == 0 || len == 0) {
+        panic("s3: storage:get-chunk needs sid + offset + len");
+    }
+    return chunk_impl(db, sid, offset, len);
+}
+
+pub fn storage_release(db: Db, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let sid: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("s3: bad storage:release request");
+        }
+        when (k) {
+            "sid" -> { sid = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("s3: bad storage:release request");
+        }
+    }
+    r.end_object();
+    release_impl(db, sid);
+    return "true";
+}
+
+// ---------------------------------------------------------------------------
+// storage:removeInstance (the host trash button)
+// ---------------------------------------------------------------------------
+
+/// Drop the instance's config (kv) + secret key, free any session parked
+/// on its endpoint, ask the host to delete the storage row, and reload the
+/// dashboard.
+pub fn storage_remove_instance(db: Db, secret: Secret, context: Context, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("s3: bad storage:removeInstance request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("s3: bad storage:removeInstance request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil) {
+        panic("s3: storage:removeInstance needs storageId");
+    }
+    let sid: str = storage_id;
+    let endpoint = drop_instance(db, secret, sid);
+    free_instance_sessions(db, endpoint);
+    // Complete the disconnect on the host side: drop the storage row, then
+    // reload so the dashboard + edit page reflect the removal.
+    context.remove_storage(sid);
+    context.notify_change();
+    return "{}";
+}
+
+// ---------------------------------------------------------------------------
+// s3:test (the view's 测试 button)
+// ---------------------------------------------------------------------------
+
+/// Explicit values win; on edit a blank secret falls back to the stored one
+/// (the TS testCredentials). Answers `(endpoint, region, bucket,
+/// access_key_id, secret_key)`.
+fn resolve_test(db: Db, secret: Secret, sid: ?str, endpoint: str, region: str, bucket: str, access_key_id: str, secret_key: str) -> (str, str, str, str, str) {
+    let e = trim(endpoint);
+    let b = trim(bucket);
+    let a = trim(access_key_id);
+    if (secret_key != "" || sid == nil) {
+        let rg = trim(region);
+        if (rg == "") {
+            rg = default_region();
+        }
+        return (e, rg, b, a, secret_key);
+    }
+    let s: str = sid;
+    return override_or_stored(db, secret, s, e, b, a);
+}
+
+/// One-key list validates endpoint + bucket + keys + signature + clock skew
+/// in a single round trip. SUCCESS / UNAUTHORIZED / TIMEOUT / OTHER_ERROR.
+fn test_impl(db: Db, secret: Secret, sid: ?str, endpoint: str, region: str, bucket: str, access_key_id: str, secret_key: str) -> str {
+    let r = resolve_test(db, secret, sid, endpoint, region, bucket, access_key_id, secret_key);
+    let qk = Vec<str>::new();
+    let qv = Vec<str>::new();
+    qk.push("list-type");
+    qv.push("2");
+    qk.push("max-keys");
+    qv.push("1");
+    let out = s3_get_text(r.0, r.1, r.2, r.3, r.4, "", qk, qv);
+    if (out.0 != nil) {
+        return "SUCCESS";
+    }
+    let err: str = out.1;
+    if (starts_with_ci(err, 0, "UNAUTHORIZED")) {
+        return "UNAUTHORIZED";
+    }
+    if (starts_with_ci(err, 0, "TIMEOUT")) {
+        return "TIMEOUT";
+    }
+    return "OTHER_ERROR";
+}
+
+pub fn s3_test(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let endpoint = "";
+    let region = "";
+    let bucket = "";
+    let access_key_id = "";
+    let secret_key = "";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("s3: bad s3:test request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "endpoint" -> { endpoint = opt_str_or(read_opt_str(r), ""); },
+            "region" -> { region = opt_str_or(read_opt_str(r), ""); },
+            "bucket" -> { bucket = opt_str_or(read_opt_str(r), ""); },
+            "accessKeyId" -> { access_key_id = opt_str_or(read_opt_str(r), ""); },
+            "secretAccessKey" -> { secret_key = opt_str_or(read_opt_str(r), ""); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("s3: bad s3:test request");
+        }
+    }
+    r.end_object();
+    let outcome = test_impl(db, secret, storage_id, endpoint, region, bucket, access_key_id, secret_key);
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("result");
+    w.write_str(outcome);
+    w.end_object();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// s3:connect (the view's 连接/保存 button)
+// ---------------------------------------------------------------------------
+
+/// Create or update an S3 instance (the TS connectImpl). On create persist
+/// the config + secret key and mint `s3:<uuid>` — the VIEW registers the
+/// host storage row with the minted id (the rut split leaves host
+/// registration + notify to the view, which owns the form outcome). On
+/// update rewrite the kv; a blank secret keeps the stored secret. Answers
+/// the reply document `{storageId, created}`.
+fn connect_impl(db: Db, secret: Secret, sid: ?str, endpoint: str, region: str, bucket: str, alias: str, access_key_id: str, secret_key: str) -> str {
+    let e = trim(endpoint);
+    let rg = trim(region);
+    if (rg == "") {
+        rg = default_region();
+    }
+    let b = trim(bucket);
+    let al = trim(alias);
+    if (al == "") {
+        al = "S3";
+    }
+    let a = trim(access_key_id);
+
+    // validate before persisting anything
+    if (normalize_endpoint(e) == nil) {
+        panic("s3: invalid endpoint");
+    }
+    if (!bucket_ok(b)) {
+        panic("s3: invalid bucket name (2-63 chars, letters/digits/./-/_)");
+    }
+    if (a == "") {
+        panic("s3: access key id cannot be empty");
+    }
+
+    if (sid != nil) {
+        // Update: keep the existing secret unless a new one is given.
+        let s: str = sid;
+        let existing_id = secret_id_of(db, s);
+        let secret_id = existing_id;
+        if (secret_key != "") {
+            secret_id = secret.put(secret_key);
+            if (existing_id != 0) {
+                secret.remove(existing_id);
+            }
+        }
+        let conf = make_config(al, e, rg, b, a, secret_id);
+        persist(db, s, conf);
+        return connect_json(s, false);
+    }
+
+    // Create: the secret key is required.
+    if (secret_key == "") {
+        panic("s3: secret access key cannot be empty");
+    }
+    let instance = f"s3:{uuid4()}";
+    let secret_id = secret.put(secret_key);
+    let conf = make_config(al, e, rg, b, a, secret_id);
+    persist(db, instance, conf);
+    return connect_json(instance, true);
+}
+
+fn connect_json(storage_id: str, created: bool) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("storageId");
+    w.write_str(storage_id);
+    w.key("created");
+    w.write_bool(created);
+    w.end_object();
+    return w.finish();
+}
+
+pub fn s3_connect(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let endpoint = "";
+    let region = "";
+    let bucket = "";
+    let alias = "";
+    let access_key_id = "";
+    let secret_key = "";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("s3: bad s3:connect request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "endpoint" -> { endpoint = opt_str_or(read_opt_str(r), ""); },
+            "region" -> { region = opt_str_or(read_opt_str(r), ""); },
+            "bucket" -> { bucket = opt_str_or(read_opt_str(r), ""); },
+            "alias" -> { alias = opt_str_or(read_opt_str(r), ""); },
+            "accessKeyId" -> { access_key_id = opt_str_or(read_opt_str(r), ""); },
+            "secretAccessKey" -> { secret_key = opt_str_or(read_opt_str(r), ""); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("s3: bad s3:connect request");
+        }
+    }
+    r.end_object();
+    return connect_impl(db, secret, storage_id, endpoint, region, bucket, alias, access_key_id, secret_key);
+}

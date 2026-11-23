@@ -1,0 +1,591 @@
+// backend/listing.rut — ListObjectsV2 with a `/` delimiter (the
+// listing.ts port over `xml::parse`), following continuation tokens (100
+// pages x 1000 keys cap). The walk accumulates rows into parallel
+// (sort key, entry JSON) columns, sorts dirs-first then by path, dedupes,
+// and renders the entry array JSON the host contract expects.
+
+use endpoint::{ dir_to_prefix, s3_decode };
+use httpx::{ s3_get_text };
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+use strutil::{ ci_eq, ends_with, find_last, is_digits, last_segment, lower, str_less, str_to_i64, trim };
+
+/// Safety cap: 100 pages x 1000 keys = 100k entries per directory.
+let MAX_LIST_PAGES: i32 = 100;
+
+/// The listing walk's accumulator: the requested prefix (for the dir's own
+/// marker skip), collected rows as parallel (sort key, entry JSON) strings,
+/// and the page cursor for the pagination loop.
+struct ListCx {
+    prefix: str,
+    keys: Vec<str>,
+    jsons: Vec<str>,
+    found_root: bool,
+    truncated: bool,
+    token_raw: str,
+}
+
+// ---------------------------------------------------------------------------
+// Dates (the S3 LastModified shape)
+// ---------------------------------------------------------------------------
+
+/// RFC 3339 UTC (`2024-01-02T10:00:00Z`, fractional seconds tolerated) →
+/// unix ms; 0 on anything else (the TS parseIsoDate).
+fn parse_iso_date(s: str) -> u64 {
+    let n = s.len();
+    if (n < 20) {
+        return 0;
+    }
+    if (s.code_at(4) != 45 || s.code_at(7) != 45) {
+        return 0;
+    }
+    let y = iso_num(s, 0, 4);
+    let mo = iso_num(s, 5, 2);
+    let d = iso_num(s, 8, 2);
+    if (s.code_at(10) != 84 && s.code_at(10) != 32) {
+        return 0;
+    }
+    let h = iso_num(s, 11, 2);
+    let mi = iso_num(s, 14, 2);
+    let sec = iso_num(s, 17, 2);
+    if (y < 0 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || mi < 0 || sec < 0) {
+        return 0;
+    }
+    let days = days_from_civil(y, mo, d);
+    return (days * 86400i64 + h * 3600i64 + mi * 60i64 + sec) as u64 * 1000u64;
+}
+
+fn iso_num(s: str, at: i32, n: i32) -> i64 {
+    let acc: i64 = 0;
+    let i = at;
+    while (i < at + n) {
+        let c = s.code_at(i);
+        if (c < 48 || c > 57) {
+            return -1;
+        }
+        acc = acc * 10i64 + (c as i64 - 48i64);
+        i += 1;
+    }
+    return acc;
+}
+
+/// Howard Hinnant's `days_from_civil`.
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let yy = y;
+    if (m <= 2) {
+        yy = y - 1;
+    }
+    let era = floordiv(yy, 400);
+    let yoe = yy - era * 400;
+    let mp = if (m > 2) { m - 3 } else { m + 9 };
+    let doy = (153i64 * mp + 2i64) / 5i64 + d - 1i64;
+    let doe = yoe * 365i64 + yoe / 4i64 - yoe / 100i64 + doy;
+    return era * 146097i64 + doe - 719468i64;
+}
+
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) {
+        return q - 1;
+    }
+    return q;
+}
+
+// ---------------------------------------------------------------------------
+// ListObjectsV2 response walk
+// ---------------------------------------------------------------------------
+
+/// The `text` member of one el (nil when absent).
+fn el_text(r: JsonReader) -> ?str {
+    let found: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "text") {
+            let v = r.read_str();
+            if (r.failed()) {
+                return nil;
+            }
+            found = v;
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return found;
+}
+
+/// Walk the decoded tree: 0 = ok, 1 = unparsable, 2 = no ListBucketResult
+/// root (a silent `[]` once hid a runtime gap as an "empty directory" —
+/// a missing root stays an error, like the TS threw).
+fn walk_list_tree(tree: str, cx: ListCx) -> i32 {
+    let r = JsonReader::of(tree);
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (k == "children") {
+            let rc = walk_root_children(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    if (!cx.found_root) {
+        return 2;
+    }
+    return 0;
+}
+
+fn walk_root_children(r: JsonReader, cx: ListCx) -> i32 {
+    r.begin_object();
+    while (r.more()) {
+        let tag = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (ci_eq(tag, "listbucketresult")) {
+            let rc = each_lbr(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One el or an array of els (single-element pages take the same path).
+fn each_lbr(r: JsonReader, cx: ListCx) -> i32 {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            let rc = walk_lbr_el(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        }
+        r.end_array();
+    } else {
+        return walk_lbr_el(r, cx);
+    }
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One ListBucketResult el: Contents / CommonPrefixes / IsTruncated /
+/// NextContinuationToken (the truncated flag and the token are collected
+/// independently — document order doesn't matter).
+fn walk_lbr_el(r: JsonReader, cx: ListCx) -> i32 {
+    cx.found_root = true;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return 1;
+                }
+                if (ci_eq(tag, "contents")) {
+                    let rc = each_contents(r, cx);
+                    if (rc != 0) {
+                        return rc;
+                    }
+                } else if (ci_eq(tag, "commonprefixes")) {
+                    let rc = each_prefixes(r, cx);
+                    if (rc != 0) {
+                        return rc;
+                    }
+                } else if (ci_eq(tag, "istruncated")) {
+                    let t = el_text(r);
+                    if (t != nil) {
+                        let s: str = t;
+                        cx.truncated = lower(trim(s)) == "true";
+                    }
+                } else if (ci_eq(tag, "nextcontinuationtoken")) {
+                    let t = el_text(r);
+                    if (t != nil) {
+                        let s: str = t;
+                        cx.token_raw = s;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+            if (r.failed()) {
+                return 1;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+fn each_contents(r: JsonReader, cx: ListCx) -> i32 {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            let rc = walk_contents_el(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        }
+        r.end_array();
+    } else {
+        return walk_contents_el(r, cx);
+    }
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One Contents el: Key (decoded — AWS URL-encodes, MinIO doesn't; a
+/// tolerant decode keeps the input verbatim on failure), Size, LastModified.
+fn walk_contents_el(r: JsonReader, cx: ListCx) -> i32 {
+    let key: ?str = nil;
+    let size: ?str = nil;
+    let lastmod: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return 1;
+                }
+                if (ci_eq(tag, "key")) {
+                    key = el_text(r);
+                } else if (ci_eq(tag, "size")) {
+                    size = el_text(r);
+                } else if (ci_eq(tag, "lastmodified")) {
+                    lastmod = el_text(r);
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+            if (r.failed()) {
+                return 1;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    if (key != nil) {
+        let kk: str = key;
+        push_file_row(cx, kk, size, lastmod);
+    }
+    return 0;
+}
+
+fn each_prefixes(r: JsonReader, cx: ListCx) -> i32 {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            let rc = walk_cp_el(r, cx);
+            if (rc != 0) {
+                return rc;
+            }
+        }
+        r.end_array();
+    } else {
+        return walk_cp_el(r, cx);
+    }
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One CommonPrefixes el: the inner Prefix el is what repeats in practice;
+/// the single-el form is accepted too.
+fn walk_cp_el(r: JsonReader, cx: ListCx) -> i32 {
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 1;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return 1;
+                }
+                if (ci_eq(tag, "prefix")) {
+                    let rc = each_prefix_text(r, cx);
+                    if (rc != 0) {
+                        return rc;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+            if (r.failed()) {
+                return 1;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+fn each_prefix_text(r: JsonReader, cx: ListCx) -> i32 {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            let t = el_text(r);
+            if (t != nil) {
+                let s: str = t;
+                push_dir_row(cx, s);
+            }
+        }
+        r.end_array();
+    } else {
+        let t = el_text(r);
+        if (t != nil) {
+            let s: str = t;
+            push_dir_row(cx, s);
+        }
+    }
+    if (r.failed()) {
+        return 1;
+    }
+    return 0;
+}
+
+/// One file row (the TS pageToEntries file half): the key is decoded (AWS
+/// URL-encodes keys, MinIO returns them raw — the decoded form is the
+/// canonical key the plugin re-encodes for `storage:get`); folder-marker
+/// keys are elided; the path is "/" + key.
+fn push_file_row(cx: ListCx, key_text: str, size: ?str, lastmod: ?str) {
+    let key = s3_decode(key_text);
+    if (key == "") {
+        return;
+    }
+    if (key == cx.prefix) {
+        return; // the listed dir's own marker
+    }
+    if (ends_with(key, "/")) {
+        return; // nested folder markers, not files
+    }
+    let path = f"/{key}";
+    let name = last_segment(key);
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("name");
+    w.write_str(name);
+    w.key("path");
+    w.write_str(path);
+    if (size != nil) {
+        let s: str = size;
+        let t = trim(s);
+        if (is_digits(t)) {
+            w.key("size");
+            w.write_i64(str_to_i64(t));
+        }
+    }
+    w.key("isDir");
+    w.write_bool(false);
+    // S3 has no creation time; LastModified is the only timestamp.
+    if (lastmod != nil) {
+        let lm: str = lastmod;
+        let ms = parse_iso_date(lm);
+        if (ms > 0) {
+            w.key("modifiedAt");
+            w.write_i64(ms as i64);
+        }
+    }
+    w.end_object();
+    cx.keys.push(f"f{path}");
+    cx.jsons.push(w.finish());
+}
+
+/// One directory row (the CommonPrefixes half): the trailing slash trims;
+/// the queried prefix itself never re-lists.
+fn push_dir_row(cx: ListCx, prefix_text: str) {
+    let trimmed = s3_decode(prefix_text);
+    if (ends_with(trimmed, "/")) {
+        trimmed = trimmed.slice(0, trimmed.len() - 1);
+    }
+    if (trimmed == "") {
+        return;
+    }
+    let own = "";
+    if (cx.prefix.len() > 0) {
+        own = cx.prefix.slice(0, cx.prefix.len() - 1);
+    }
+    if (trimmed == own) {
+        return;
+    }
+    let path = f"/{trimmed}";
+    let name = last_segment(trimmed);
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("name");
+    w.write_str(name);
+    w.key("path");
+    w.write_str(path);
+    w.key("isDir");
+    w.write_bool(true);
+    w.end_object();
+    cx.keys.push(f"d{path}");
+    cx.jsons.push(w.finish());
+}
+
+/// Sort (dirs first via the key's d/f flag, then by path — matching the TS
+/// comparator), drop adjacent duplicates (S3 pages are disjoint and keys
+/// unique; the dedupe only guards degenerate servers), join the JSON rows.
+fn render_entries(cx: ListCx) -> str {
+    sort_rows(cx.keys, cx.jsons);
+    let out = StringBuilder::with_cap(256);
+    out.append("[");
+    let first = true;
+    let prev = "";
+    let have_prev = false;
+    let i = 0;
+    while (i < cx.keys.len) {
+        let k = cx.keys[i];
+        if (!have_prev || k != prev) {
+            if (!first) {
+                out.append(",");
+            }
+            first = false;
+            out.append(cx.jsons[i]);
+            prev = k;
+            have_prev = true;
+        }
+        i += 1;
+    }
+    out.append("]");
+    return out.build();
+}
+
+fn sort_rows(keys: Vec<str>, jsons: Vec<str>) {
+    let n = keys.len;
+    let i = 1;
+    while (i < n) {
+        let kk = keys[i];
+        let kj = jsons[i];
+        let j = i - 1;
+        while (j >= 0 && str_less(kk, keys[j])) {
+            keys[j + 1] = keys[j];
+            jsons[j + 1] = jsons[j];
+            j -= 1;
+        }
+        keys[j + 1] = kk;
+        jsons[j + 1] = kj;
+        i += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// the list walk
+// ---------------------------------------------------------------------------
+
+/// ListObjectsV2 with a `/` delimiter, following continuation tokens (100
+/// pages x 1000 keys cap). `(nil, err)` on failure (err carries the marked
+/// prefix), the entry array JSON otherwise. Credentials ride as primitives
+/// (the config document never crosses a module edge).
+pub fn list_impl(endpoint: str, region: str, bucket: str, access_key_id: str, secret_key: str, dir: str) -> (?str, str) {
+    let prefix = dir_to_prefix(dir);
+    let cx = ListCx {
+        prefix: prefix,
+        keys: Vec<str>::new(),
+        jsons: Vec<str>::new(),
+        found_root: false,
+        truncated: false,
+        token_raw: "",
+    };
+    let token = "";
+    let pages: i32 = 0;
+    while (true) {
+        let qk = Vec<str>::new();
+        let qv = Vec<str>::new();
+        qk.push("list-type");
+        qv.push("2");
+        qk.push("delimiter");
+        qv.push("/");
+        qk.push("max-keys");
+        qv.push("1000");
+        qk.push("prefix");
+        qv.push(prefix);
+        if (token != "") {
+            qk.push("continuation-token");
+            qv.push(token);
+        }
+        let out = s3_get_text(endpoint, region, bucket, access_key_id, secret_key, "", qk, qv);
+        let o = out.0;
+        if (o == nil) {
+            return (nil, out.1);
+        }
+        let body: str = o;
+        let rc = walk_list_tree(body, cx);
+        if (rc == 1) {
+            return (nil, "s3: unparsable ListObjectsV2 response");
+        }
+        if (rc == 2) {
+            return (nil, "s3: ListObjectsV2 response has no ListBucketResult root");
+        }
+        pages += 1;
+        let next = "";
+        if (cx.truncated) {
+            next = cx.token_raw;
+        }
+        if (next == "" || pages >= MAX_LIST_PAGES) {
+            break;
+        }
+        token = next;
+    }
+    return (render_entries(cx), "");
+}

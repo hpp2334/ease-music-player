@@ -1,0 +1,87 @@
+// S3 / S3-compatible storage provider — the rut port of the apiVersion 1 TS
+// backend (`src/backend.ts` + `sigv4.ts` + `s3path.ts` + `listing.ts`).
+// A headless backend serving the storage contract ops over the bind-table
+// RPC lane, plus the plugin-private view ops (`s3:test` / `s3:connect`).
+//
+// Layout (the phase-4b pkg tree): this file is the ROOT — `entry fn
+// start(cx)` constructs the emp services FROM the boot handle and binds
+// every op; the dispatch entry is the two-line forward over
+// `Rpc.dispatch`. The implementation mounts as siblings:
+//
+//   strutil   — pure string scans (casing, trims, ordering, hex)
+//   endpoint  — SigV4 URI encode/decode + endpoint normalization
+//   config    — the per-instance KV document + the secret key
+//   sigv4     — canonical request / string-to-sign / signing key
+//   httpx     — `net::fetch` core + the error mapping (prefix law)
+//   listing   — ListObjectsV2 walk + pagination
+//   streaming — chunked-pull sessions (the pool rides the KV)
+//   ops       — the bound handlers (raw args in, raw payload out)
+//
+// Multi-instance: each configured endpoint+bucket is one *instance* named
+// `s3:<uuid>` (the storage row's `plugin_storage_id`). Per-instance config
+// lives in `Db` (this plugin's KV) under `storage:<instance>` = JSON
+// `{ alias, endpoint, region, bucket, accessKeyId, secretId }` (the exact
+// key names the TS wrote — legacy configs stay readable); the secret
+// access key lives in `Secret` under that `secretId` (scope
+// `plugin:com.ease.s3`). Identity rides the op payload (`storageId`);
+// multiple instances multiplex by it exactly as the TS did.
+//
+// Addressing is always path-style (`<endpoint>/<bucket>/<key>`), which every
+// S3 flavor accepts (AWS, R2, MinIO, B2, ...).
+//
+// Error contract: handlers TRAP with messages prefixed `UNAUTHORIZED` /
+// `TIMEOUT` — the host maps those heads to typed errors; S3 `<Error>`
+// documents surface their Code (`NoSuchKey`, `RequestTimeTooSkewed`, ...).
+//
+// Auth is static keys (access key id + secret access key) — there is no
+// OAuth flow on this provider, so `OAuth` is never constructed here.
+
+use emp::{ Context, Db, Rpc, Secret };
+
+mod config;
+mod endpoint;
+mod httpx;
+mod listing;
+mod ops;
+mod sigv4;
+mod streaming;
+mod strutil;
+
+// The boot: construct the services FROM the handle and bind every op —
+// nothing else (no host-row calls, no network; the new contract's start
+// answers nothing).
+entry fn start(cx: opaque) {
+    const db = Db(cx);
+    const secret = Secret(cx);
+    const context = Context(cx);
+    const rpc = Rpc(cx);
+    rpc.bind("storage:list", fn (args: str) -> ?str {
+        return ops::storage_list(db, secret, args);
+    });
+    rpc.bind("storage:get", fn (args: str) -> ?str {
+        return ops::storage_get(db, secret, args);
+    });
+    rpc.bind("storage:get-chunk", fn (args: str) -> ?str {
+        return ops::storage_get_chunk(db, args);
+    });
+    rpc.bind("storage:release", fn (args: str) -> ?str {
+        return ops::storage_release(db, args);
+    });
+    rpc.bind("storage:removeInstance", fn (args: str) -> ?str {
+        return ops::storage_remove_instance(db, secret, context, args);
+    });
+    rpc.bind("s3:test", fn (args: str) -> ?str {
+        return ops::s3_test(db, secret, args);
+    });
+    rpc.bind("s3:connect", fn (args: str) -> ?str {
+        return ops::s3_connect(db, secret, args);
+    });
+}
+
+// The str dispatch entry (declared once per backend) — a two-line forward
+// over the bind table. This backend serves no binary ops, so there is no
+// `rpc_bin` twin.
+entry fn rpc(cx: opaque, op: str, args: str) -> ?str {
+    const rpc = Rpc(cx);
+    return rpc.dispatch(op, args);
+}
