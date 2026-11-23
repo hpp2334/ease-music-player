@@ -1,0 +1,64 @@
+// backend/timeiso.rut — RFC 3339 timestamps → unix ms (the listing's
+// createdAt / modifiedAt; the TS `parseIsoDate`).
+
+/// RFC 3339 UTC (`2016-03-21T20:01:37Z`, fractional seconds tolerated) →
+/// unix ms; 0 on anything else.
+pub fn parse_iso_date(s: str) -> u64 {
+    let n = s.len();
+    if (n < 20) {
+        return 0;
+    }
+    if (s.code_at(4) != 45 || s.code_at(7) != 45) {
+        return 0;
+    }
+    let y = iso_num(s, 0, 4);
+    let mo = iso_num(s, 5, 2);
+    let d = iso_num(s, 8, 2);
+    if (s.code_at(10) != 84 && s.code_at(10) != 32) {
+        return 0;
+    }
+    let h = iso_num(s, 11, 2);
+    let mi = iso_num(s, 14, 2);
+    let sec = iso_num(s, 17, 2);
+    if (y < 0 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || mi < 0 || sec < 0) {
+        return 0;
+    }
+    let days = days_from_civil(y, mo, d);
+    return (days * 86400i64 + h * 3600i64 + mi * 60i64 + sec) as u64 * 1000u64;
+}
+
+fn iso_num(s: str, at: i32, n: i32) -> i64 {
+    let acc: i64 = 0;
+    let i = at;
+    while (i < at + n) {
+        let c = s.code_at(i);
+        if (c < 48 || c > 57) {
+            return -1;
+        }
+        acc = acc * 10i64 + (c as i64 - 48i64);
+        i += 1;
+    }
+    return acc;
+}
+
+/// Howard Hinnant's `days_from_civil` (the host time rows use the same).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let yy = y;
+    if (m <= 2) {
+        yy = y - 1;
+    }
+    let era = floordiv(yy, 400);
+    let yoe = yy - era * 400;
+    let mp = if (m > 2) { m - 3 } else { m + 9 };
+    let doy = (153i64 * mp + 2i64) / 5i64 + d - 1i64;
+    let doe = yoe * 365i64 + yoe / 4i64 - yoe / 100i64 + doy;
+    return era * 146097i64 + doe - 719468i64;
+}
+
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) {
+        return q - 1;
+    }
+    return q;
+}

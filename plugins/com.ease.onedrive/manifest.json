@@ -1,7 +1,7 @@
 {
   "id": "com.ease.onedrive",
   "name": { "en-US": "OneDrive", "zh-CN": "OneDrive" },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "apiVersion": 2,
   "description": {
     "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless rut plugin.",
@@ -9,7 +9,7 @@
   },
   "author": "ease",
   "icon": "icon.png",
-  "backend": "backend.rut",
+  "backend": "backend",
   "events": [],
   "contributions": {
     "storages": [
@@ -20,7 +20,7 @@
           "en-US": "Connect to your personal OneDrive",
           "zh-CN": "连接你的个人 OneDrive"
         },
-        "view": "view.rut"
+        "view": "view"
       }
     ]
   }

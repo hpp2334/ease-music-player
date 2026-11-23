@@ -1,0 +1,232 @@
+// backend/strutil.rut — the pure string helpers (no URL/regex runtime —
+// plain scans) shared across the split files: case-insensitive matching,
+// the path sort ordering, the last segment, the percent-encoding pair
+// (`form_component_encode` for the token endpoint's form fields,
+// `encode_graph_path` for the `root:{path}:` addressing segment), and the
+// JSON optional-string readers every op decoder uses.
+
+use json::{ JsonReader };
+use strbuild::{ StringBuilder };
+
+// ---------------------------------------------------------------------------
+// case-insensitive scans
+// ---------------------------------------------------------------------------
+
+fn lower_code(c: u32) -> u32 {
+    if (c >= 65 && c <= 90) {
+        return c + 32;
+    }
+    return c;
+}
+
+fn starts_with_ci(s: str, at: i32, prefix: str) -> bool {
+    let n = prefix.len();
+    if (at < 0 || s.len() < at + n) {
+        return false;
+    }
+    let i = 0;
+    while (i < n) {
+        if (lower_code(s.code_at(at + i)) != lower_code(prefix.code_at(i))) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+/// Substring hunt, case-insensitive (the transport-error classifier).
+pub fn contains_ci(hay: str, needle: str) -> bool {
+    let n = hay.len();
+    let m = needle.len();
+    if (m == 0) {
+        return true;
+    }
+    let i = 0;
+    while (i + m <= n) {
+        if (starts_with_ci(hay, i, needle)) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// ordering + path pieces
+// ---------------------------------------------------------------------------
+
+/// Codepoint-wise ordering (the listing's path sort).
+pub fn str_less(a: str, b: str) -> bool {
+    let n = a.len();
+    let m = b.len();
+    let i = 0;
+    while (i < n && i < m) {
+        let ca = a.code_at(i);
+        let cb = b.code_at(i);
+        if (ca != cb) {
+            return ca < cb;
+        }
+        i += 1;
+    }
+    return n < m;
+}
+
+pub fn ends_with(s: str, suffix: str) -> bool {
+    let n = s.len();
+    let m = suffix.len();
+    if (m == 0) {
+        return true;
+    }
+    if (n < m) {
+        return false;
+    }
+    return s.slice(n - m, n) == suffix;
+}
+
+/// The last `/`-separated segment (the TS `path.split("/").pop()`).
+pub fn last_segment(path: str) -> str {
+    let n = path.len();
+    let last = -1;
+    let i = 0;
+    while (i < n) {
+        if (path.code_at(i) == 47) {
+            last = i;
+        }
+        i += 1;
+    }
+    if (last == -1) {
+        return path;
+    }
+    return path.slice(last + 1, n);
+}
+
+/// First index of one codepoint at/after `from`, -1 when absent.
+pub fn find_from(s: str, from: i32, c: u32) -> i32 {
+    let n = s.len();
+    let i = from;
+    while (i < n) {
+        if (s.code_at(i) == c) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// percent-encoding
+// ---------------------------------------------------------------------------
+
+fn hex_digit_val(c: u32) -> i32 {
+    if (c >= 48 && c <= 57) {
+        return c as i32 - 48;
+    }
+    if (c >= 97 && c <= 102) {
+        return c as i32 - 87;
+    }
+    if (c >= 65 && c <= 70) {
+        return c as i32 - 55;
+    }
+    return -1;
+}
+
+fn byte_hex(b: u64) -> str {
+    let hex = "0123456789ABCDEF";
+    let hi = (b / 16) as i32;
+    let lo = (b % 16) as i32;
+    return f"{hex.slice(hi, hi + 1)}{hex.slice(lo, lo + 1)}";
+}
+
+/// UTF-8 percent-escape one codepoint (uppercase hex, like
+/// `encodeURIComponent`).
+fn append_percent_utf8(b: StringBuilder, c: u32) {
+    if (c < 0x80) {
+        b.append(f"%{byte_hex(c as u64)}");
+    } else if (c < 0x800) {
+        b.append(f"%{byte_hex((c >> 6) as u64 | 192)}");
+        b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+    } else if (c < 0x10000) {
+        b.append(f"%{byte_hex((c >> 12) as u64 | 224)}");
+        b.append(f"%{byte_hex(((c >> 6) & 63) as u64 | 128)}");
+        b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+    } else {
+        b.append(f"%{byte_hex((c >> 18) as u64 | 240)}");
+        b.append(f"%{byte_hex(((c >> 12) & 63) as u64 | 128)}");
+        b.append(f"%{byte_hex(((c >> 6) & 63) as u64 | 128)}");
+        b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+    }
+}
+
+/// `encodeURIComponent`'s exact keep-set (`A-Za-z0-9-_.!~*'()`), everything
+/// else UTF-8 percent-escaped — the token endpoint's form fields.
+pub fn form_component_encode(s: str) -> str {
+    let n = s.len();
+    let b = StringBuilder::with_cap(n * 3 + 1);
+    let i = 0;
+    while (i < n) {
+        let c = s.code_at(i);
+        let keep = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+            || c == 45 || c == 46 || c == 95 || c == 126 || c == 33 || c == 39
+            || c == 40 || c == 41 || c == 42;
+        if (keep) {
+            b.append(s.slice(i, i + 1));
+        } else {
+            append_percent_utf8(b, c);
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+/// Percent-encode a Graph drive path for the `root:{path}:` addressing
+/// segment: the RFC 3986 `pchar` set rides through (`/` included — the
+/// segment separator), an existing `%XX` escape rides verbatim, everything
+/// else escapes (the Graph docs' `estimate%s.docx -> estimate%25s.docx`
+/// rule; the TS sent paths raw, which broke on `#` / space).
+pub fn encode_graph_path(p: str) -> str {
+    let n = p.len();
+    let b = StringBuilder::with_cap(n * 3 + 1);
+    let i = 0;
+    while (i < n) {
+        let c = p.code_at(i);
+        let keep = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+            || c == 45 || c == 46 || c == 95 || c == 126 || c == 33 || c == 36
+            || c == 38 || c == 39 || c == 40 || c == 41 || c == 42 || c == 43
+            || c == 44 || c == 59 || c == 61 || c == 58 || c == 64 || c == 47;
+        if (keep) {
+            b.append(p.slice(i, i + 1));
+        } else if (c == 37 && i + 2 < n && hex_digit_val(p.code_at(i + 1)) >= 0 && hex_digit_val(p.code_at(i + 2)) >= 0) {
+            b.append(p.slice(i, i + 3));
+            i += 2;
+        } else {
+            append_percent_utf8(b, c);
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+// ---------------------------------------------------------------------------
+// the JSON optional-string readers (shared by every decoder)
+// ---------------------------------------------------------------------------
+
+/// The optional-string read: `null` → nil, a string → some, anything else
+/// (or a truncated body) → the reader's sticky error.
+pub fn read_opt_str(r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+pub fn opt_str_or(v: ?str, fallback: str) -> str {
+    if (v == nil) {
+        return fallback;
+    }
+    let s: str = v;
+    return s;
+}

@@ -1,0 +1,333 @@
+// backend/ops.rut — the op handlers the bind table serves. Each is a
+// PLAIN fn (bound at start by the root's `rpc.bind` closures): RAW str
+// args in (the handler decodes its own JSON), the RAW payload out — the
+// host builds the `{"ok":…}` envelope from the value/trap, so there is no
+// envelope code here anymore. Failures panic; the trap message keeps the
+// `UNAUTHORIZED` / `TIMEOUT` prefix law where the failure is one.
+//
+// Contract ops (the host scope): storage:list / storage:get /
+// storage:get-chunk / storage:release / storage:removeInstance /
+// oauth:url / oauth:exchange. Plugin view op: onedrive:connect (reached
+// through `Rpc.call` from the view; the envelope the view parses is
+// host-built).
+
+use config::{ drop_instance, kv_key, take_pending };
+use crypto::{ uuid4 };
+use emp::{ Context, Db, OAuth, Secret };
+use json::{ JsonReader, JsonWriter };
+use listing::{ list_impl };
+use streaming::{ chunk_impl, open_impl, release_impl };
+use strutil::{ opt_str_or, read_opt_str };
+use tokens::{ authorize_url, cache_drop, cache_put, redeem_token };
+
+// ---------------------------------------------------------------------------
+// storage:list
+// ---------------------------------------------------------------------------
+
+pub fn storage_list(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let dir: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("onedrive: bad storage:list request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "dir" -> { dir = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("onedrive: bad storage:list request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil || dir == nil) {
+        panic("onedrive: storage:list needs storageId + dir");
+    }
+    let sid: str = storage_id;
+    let d: str = dir;
+    return list_impl(db, secret, sid, d);
+}
+
+// ---------------------------------------------------------------------------
+// storage:get (the opener)
+// ---------------------------------------------------------------------------
+
+pub fn storage_get(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let path: ?str = nil;
+    let offset: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("onedrive: bad storage:get request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "path" -> { path = read_opt_str(r); },
+            "offset" -> { offset = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("onedrive: bad storage:get request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil || path == nil) {
+        panic("onedrive: storage:get needs storageId + path + offset");
+    }
+    let sid: str = storage_id;
+    let pth: str = path;
+    return open_impl(db, secret, sid, pth, offset);
+}
+
+// ---------------------------------------------------------------------------
+// storage:get-chunk
+// ---------------------------------------------------------------------------
+
+pub fn storage_get_chunk(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let sid: u64 = 0;
+    let offset: u64 = 0;
+    let len: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("onedrive: bad storage:get-chunk request");
+        }
+        when (k) {
+            "sid" -> { sid = r.read_i64() as u64; },
+            "offset" -> { offset = r.read_i64() as u64; },
+            "len" -> { len = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("onedrive: bad storage:get-chunk request");
+        }
+    }
+    r.end_object();
+    if (sid == 0 || len == 0) {
+        panic("onedrive: storage:get-chunk needs sid + offset + len");
+    }
+    return chunk_impl(db, secret, sid, offset, len);
+}
+
+// ---------------------------------------------------------------------------
+// storage:release
+// ---------------------------------------------------------------------------
+
+pub fn storage_release(db: Db, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let sid: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("onedrive: bad storage:release request");
+        }
+        when (k) {
+            "sid" -> { sid = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("onedrive: bad storage:release request");
+        }
+    }
+    r.end_object();
+    release_impl(db, sid);
+    let w = JsonWriter::new();
+    w.write_bool(true);
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// storage:removeInstance (the host trash button)
+// ---------------------------------------------------------------------------
+
+pub fn storage_remove_instance(db: Db, secret: Secret, context: Context, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("onedrive: bad storage:removeInstance request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("onedrive: bad storage:removeInstance request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil) {
+        panic("onedrive: storage:removeInstance needs storageId");
+    }
+    let sid: str = storage_id;
+    drop_instance(db, secret, sid);
+    cache_drop(db, sid);
+    // ask the host to delete the storage row, then reload the dashboard
+    context.remove_storage(sid);
+    context.notify_change();
+    return "{}";
+}
+
+// ---------------------------------------------------------------------------
+// oauth:url
+// ---------------------------------------------------------------------------
+
+pub fn oauth_url(args: str) -> ?str {
+    // the host's (pluginId, oauthId) pair rides the args; the authorize
+    // URL is flow-independent, so every field is skipped
+    let r = JsonReader::of(args);
+    r.begin_object();
+    while (r.more()) {
+        r.next_key();
+        if (r.failed()) {
+            panic("onedrive: bad oauth:url request");
+        }
+        r.skip_value();
+    }
+    r.end_object();
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("url");
+    w.write_str(authorize_url());
+    w.end_object();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// oauth:exchange
+// ---------------------------------------------------------------------------
+
+pub fn oauth_exchange(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let oauth_id: ?str = nil;
+    let code: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("onedrive: bad oauth:exchange request");
+        }
+        when (k) {
+            "oauthId" -> { oauth_id = read_opt_str(r); },
+            "code" -> { code = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("onedrive: bad oauth:exchange request");
+        }
+    }
+    r.end_object();
+    if (oauth_id == nil || code == nil) {
+        panic("onedrive: oauth:exchange needs oauthId + code");
+    }
+    let oid: str = oauth_id;
+    let cd: str = code;
+    let instance = exchange_impl(db, secret, cd, oid);
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("storageId");
+    w.write_str(instance);
+    w.end_object();
+    return w.finish();
+}
+
+/// Exchange an authorization code for tokens, mint a new `onedrive:<uuid>`
+/// storage instance, persist its config + refresh token, prime the token
+/// cache, and answer its id. The user-facing alias comes from the flow's
+/// pending slot — never from the host.
+fn exchange_impl(db: Db, secret: Secret, code: str, oauth_id: str) -> str {
+    let got = redeem_token("authorization_code", "code", code);
+    let access = got.0;
+    let refresh = got.1;
+    if (access == nil || refresh == nil) {
+        let e: str = got.2;
+        panic(e);
+    }
+    let a: str = access;
+    let rf: str = refresh;
+    let instance = f"onedrive:{uuid4()}";
+    let secret_id = secret.put(rf);
+    let alias = "OneDrive";
+    let pend = take_pending(db, oauth_id);
+    if (pend != nil) {
+        let p: str = pend;
+        if (p != "") {
+            alias = p;
+        }
+    }
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("alias");
+    w.write_str(alias);
+    w.key("secretId");
+    w.write_i64(secret_id);
+    w.end_object();
+    db.set(kv_key(instance), w.finish());
+    cache_put(db, instance, a);
+    return instance;
+}
+
+// ---------------------------------------------------------------------------
+// onedrive:connect (the view's 连接 button)
+// ---------------------------------------------------------------------------
+
+pub fn onedrive_connect(oauth: OAuth, db: Db, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let alias: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("onedrive: bad onedrive:connect request");
+        }
+        when (k) {
+            "alias" -> { alias = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("onedrive: bad onedrive:connect request");
+        }
+    }
+    r.end_object();
+    let _ = connect_flow_impl(oauth, db, opt_str_or(alias, ""));
+    let w = JsonWriter::new();
+    w.key("fired");
+    w.write_bool(true);
+    w.key("error");
+    w.write_str("");
+    w.end_object();
+    return w.finish();
+}
+
+/// Mint the flow id (`OAuth.mint`), stash the alias in the pending slot
+/// the `oauth:exchange` handler consumes, and fire the browser flow
+/// (`OAuth.begin`). Business data never crosses the host. Answers
+/// `(fired, error)` — fired is always true (the TS shape; the view keeps
+/// its failure branch for future-proofing).
+fn connect_flow_impl(oauth: OAuth, db: Db, alias: str) -> (bool, str) {
+    let oauth_id = oauth.mint();
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("alias");
+    if (alias != "") {
+        w.write_str(alias);
+    } else {
+        w.write_raw("null");
+    }
+    w.end_object();
+    db.set(f"oauth:{oauth_id}", w.finish());
+    oauth.begin(oauth_id);
+    return (true, "");
+}

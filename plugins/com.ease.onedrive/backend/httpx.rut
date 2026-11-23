@@ -1,0 +1,136 @@
+// backend/httpx.rut — the HTTP core over the 3rd-party `net` lib's
+// blocking one-shot (`net::fetch`, entry-fn-safe: the drive runs on the
+// shared tokio runtime, never the worker lane). There is no awaited
+// journey and no spin-wait here.
+//
+// The reply envelope is JSON `{"status","statusText","headers","body"
+// <base64>,"error"}`; the body decodes through `crypto::b64_decode`.
+// Transport failures: `timeout`-ish messages get the host's TIMEOUT
+// prefix, everything else passes through.
+
+use crypto::{ b64_decode };
+use json::{ JsonReader, JsonWriter };
+use net::{ fetch };
+use pouch::{ Vec, freeze_bytes };
+use strutil::{ contains_ci };
+
+/// One settled HTTP exchange (or the marked failure).
+pub struct GraphResp {
+    failed: bool,
+    err: str,
+    status: u64,
+    status_text: str,
+    body: bytes,
+}
+
+fn empty_bytes() -> bytes {
+    let v = Vec<u8>::new();
+    return freeze_bytes(v);
+}
+
+/// The marked failure value (callers answer it unchanged — the ops trap
+/// with `err`, whose head carries the prefix law).
+pub fn failed_resp(msg: str) -> GraphResp {
+    return GraphResp { failed: true, err: msg, status: 0, status_text: "", body: empty_bytes() };
+}
+
+/// Transport failures: `timeout`-ish messages get the host's TIMEOUT prefix,
+/// everything else passes through.
+fn marked_transport_error(msg: str) -> str {
+    if (contains_ci(msg, "timeout") || contains_ci(msg, "timed out")) {
+        return f"TIMEOUT: {msg}";
+    }
+    return msg;
+}
+
+/// The `net::fetch` opts document (`{"url","method","headers","body"}` —
+/// bodies ride `{"text": …}`; a body implies the OAuth form content type).
+pub fn graph_opts(url: str, method: str, auth: ?str, range: ?str, body_text: ?str) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("url");
+    w.write_str(url);
+    w.key("method");
+    w.write_str(method);
+    w.key("headers");
+    w.begin_object();
+    if (auth != nil) {
+        let a: str = auth;
+        w.key("Authorization");
+        w.write_str(a);
+    }
+    if (range != nil) {
+        let rg: str = range;
+        w.key("Range");
+        w.write_str(rg);
+    }
+    if (body_text != nil) {
+        w.key("Content-Type");
+        w.write_str("application/x-www-form-urlencoded");
+    }
+    w.end_object();
+    if (body_text != nil) {
+        let bt: str = body_text;
+        w.key("body");
+        w.begin_object();
+        w.key("text");
+        w.write_str(bt);
+        w.end_object();
+    }
+    w.end_object();
+    return w.finish();
+}
+
+/// One blocking exchange: send, decode the reply envelope, base64-decode
+/// the body. `failed` covers transport errors (the reply's `error` field).
+pub fn http_send(opts: str) -> GraphResp {
+    let reply = fetch(opts);
+    let r = JsonReader::of(reply);
+    r.begin_object();
+    let status: u64 = 0;
+    let status_text = "";
+    let body_b64 = "";
+    let err = "";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return failed_resp("onedrive: unparsable net reply");
+        }
+        when (k) {
+            "status" -> { status = r.read_i64() as u64; },
+            "statusText" -> {
+                let v = r.read_str();
+                if (r.failed()) { return failed_resp("onedrive: unparsable net reply"); }
+                status_text = v;
+            },
+            "body" -> {
+                let v = r.read_str();
+                if (r.failed()) { return failed_resp("onedrive: unparsable net reply"); }
+                body_b64 = v;
+            },
+            "error" -> {
+                let v = r.read_str();
+                if (r.failed()) { return failed_resp("onedrive: unparsable net reply"); }
+                err = v;
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return failed_resp("onedrive: unparsable net reply");
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return failed_resp("onedrive: unparsable net reply");
+    }
+    if (err != "") {
+        return failed_resp(marked_transport_error(err));
+    }
+    return GraphResp {
+        failed: false,
+        err: "",
+        status: status,
+        status_text: status_text,
+        body: b64_decode(body_b64),
+    };
+}
