@@ -27,35 +27,53 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kutedev.easemusicplayer.R
 import com.kutedev.easemusicplayer.components.EaseCheckbox
+import com.kutedev.easemusicplayer.components.EaseContextMenu
+import com.kutedev.easemusicplayer.components.EaseContextMenuItem
 import com.kutedev.easemusicplayer.components.EaseIconButton
 import com.kutedev.easemusicplayer.components.EaseIconButtonSize
 import com.kutedev.easemusicplayer.components.EaseIconButtonType
+import com.kutedev.easemusicplayer.components.EaseTextButton
+import com.kutedev.easemusicplayer.components.EaseTextButtonSize
+import com.kutedev.easemusicplayer.components.EaseTextButtonType
+import com.kutedev.easemusicplayer.viewmodels.ImportSort
+import com.kutedev.easemusicplayer.viewmodels.ImportSortDir
+import com.kutedev.easemusicplayer.viewmodels.ImportSortField
 import com.kutedev.easemusicplayer.viewmodels.ImportVM
-import com.kutedev.easemusicplayer.viewmodels.StoragesVM
 import com.kutedev.easemusicplayer.viewmodels.VImportStorageEntry
 import com.kutedev.easemusicplayer.viewmodels.entryTyp
 import com.kutedev.easemusicplayer.core.LocalNavController
-import uniffi.ease_client_backend.CurrentStorageStateType
-import uniffi.ease_client_backend.StorageEntry
-import uniffi.ease_client_backend.StorageEntryType
+import com.kutedev.easemusicplayer.singleton.types.CurrentStorageStateType
+import com.kutedev.easemusicplayer.singleton.types.StorageEntry
+import com.kutedev.easemusicplayer.singleton.types.StorageEntryType
 
 @Composable
 private fun ImportEntriesSkeleton() {
@@ -194,7 +212,8 @@ private fun ImportEntries(
 ) {
     val navController = LocalNavController.current
     val splitPaths by importVM.splitPaths.collectAsState()
-    val entries by importVM.entries.collectAsState()
+    val displayEntries by importVM.displayEntries.collectAsState()
+    val searchQuery by importVM.searchQuery.collectAsState()
     val selectedCount by importVM.selectedCount.collectAsState()
     val allowTypes by importVM.allowTypes.collectAsState()
     val selected by importVM.selected.collectAsState()
@@ -258,22 +277,37 @@ private fun ImportEntries(
                     )
                 }
             }
-            LazyColumn(
-                modifier = Modifier
-                    .padding(28.dp, 0.dp)
-            ) {
-                items(entries) {
-                    ImportEntry(
-                        entry = it,
-                        checked = selected.contains(it.path),
-                        allowTypes = allowTypes,
-                        onClickEntry = { entry ->
-                            importVM.clickEntry(entry)
-                        },
+            if (displayEntries.isEmpty() && searchQuery.isNotBlank()) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(0.dp, 80.dp)
+                ) {
+                    Text(
+                        text = stringResource(id = R.string.import_search_empty),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                item {
-                    Box(modifier = Modifier.height(12.dp))
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .padding(28.dp, 0.dp)
+                ) {
+                    items(displayEntries) {
+                        ImportEntry(
+                            entry = it,
+                            checked = selected.contains(it.path),
+                            allowTypes = allowTypes,
+                            onClickEntry = { entry ->
+                                importVM.clickEntry(entry)
+                            },
+                        )
+                    }
+                    item {
+                        Box(modifier = Modifier.height(12.dp))
+                    }
                 }
             }
         }
@@ -300,22 +334,43 @@ private fun ImportEntries(
 
 @Composable
 private fun ImportStorages(
-    storagesVM: StoragesVM = hiltViewModel(),
     importVM: ImportVM = hiltViewModel()
 ) {
-    val storageItems by storagesVM.storages.collectAsState()
+    val storageItems by importVM.storages.collectAsState()
+    val disabledStorageIds by importVM.disabledStorageIds.collectAsState()
     val selectedStorageId by importVM.selectedStorageId.collectAsState()
+
+    val storageRowScroll = rememberScrollState()
+    val density = LocalDensity.current
+    // Bring the selected card into view — notably on entry, when the
+    // restored last-import storage sits past the first screenful of
+    // cards (the picker otherwise still starts scrolled to the left).
+    LaunchedEffect(selectedStorageId, storageItems) {
+        val index = storageItems.indexOfFirst { it.id == selectedStorageId }
+        if (index <= 0) {
+            return@LaunchedEffect
+        }
+        withFrameNanos { } // let the row's first layout pass settle
+        if (storageRowScroll.maxValue == 0) {
+            return@LaunchedEffect // everything fits, nothing to scroll
+        }
+        // Card stride = width (142dp) + row spacing (12dp).
+        val stride = with(density) { (142.dp + 12.dp).toPx() }
+        val target = (index * stride).toInt().coerceIn(0, storageRowScroll.maxValue)
+        storageRowScroll.animateScrollTo(target)
+    }
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier
             .padding(28.dp, 0.dp)
-            .horizontalScroll(rememberScrollState())
+            .horizontalScroll(storageRowScroll)
     ) {
         for (_item in storageItems) {
             val item = VImportStorageEntry(_item)
+            val disabled = disabledStorageIds.contains(item.id)
 
-            val selected = selectedStorageId == item.id
+            val selected = !disabled && selectedStorageId == item.id
 
             val bgColor = if (selected) {
                 MaterialTheme.colorScheme.primary
@@ -330,8 +385,13 @@ private fun ImportStorages(
 
             Box(
                 modifier = Modifier
+                    .alpha(if (disabled) {
+                        0.4F
+                    } else {
+                        1F
+                    })
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable {
+                    .clickable(enabled = !disabled) {
                         importVM.selectStorage(item.id)
                     }
                     .background(bgColor)
@@ -465,15 +525,163 @@ private fun ImportMusicsError(
 }
 
 @Composable
+private fun ImportSortOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable {
+                onClick()
+            }
+            .padding(8.dp, 10.dp)
+    ) {
+        Text(
+            text = if (selected) "● " else "○ ",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = label,
+            fontSize = 14.sp,
+        )
+    }
+}
+
+@Composable
+private fun ImportSortDialog(
+    current: ImportSort,
+    onSelect: (field: ImportSortField, dir: ImportSortDir) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(20.dp, 16.dp),
+        ) {
+            Text(
+                text = stringResource(id = R.string.import_sort_title),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Box(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(id = R.string.import_sort_by_field),
+                fontSize = 10.sp,
+                letterSpacing = 1.sp,
+            )
+            for (field in ImportSortField.entries) {
+                val label = when (field) {
+                    ImportSortField.NAME -> stringResource(id = R.string.import_sort_field_name)
+                    ImportSortField.CREATED -> stringResource(id = R.string.import_sort_field_created)
+                    ImportSortField.MODIFIED -> stringResource(id = R.string.import_sort_field_modified)
+                }
+                ImportSortOption(
+                    label = label,
+                    selected = current.field == field,
+                    onClick = {
+                        onSelect(field, current.dir)
+                    }
+                )
+            }
+            Text(
+                text = stringResource(id = R.string.import_sort_by_dir),
+                fontSize = 10.sp,
+                letterSpacing = 1.sp,
+            )
+            for (dir in ImportSortDir.entries) {
+                val label = when (dir) {
+                    ImportSortDir.ASC -> stringResource(id = R.string.import_sort_dir_asc)
+                    ImportSortDir.DESC -> stringResource(id = R.string.import_sort_dir_desc)
+                }
+                ImportSortOption(
+                    label = label,
+                    selected = current.dir == dir,
+                    onClick = {
+                        onSelect(current.field, dir)
+                    }
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier
+                    .fillMaxWidth()
+            ) {
+                EaseTextButton(
+                    text = stringResource(id = R.string.import_sort_button_ok),
+                    type = EaseTextButtonType.Primary,
+                    size = EaseTextButtonSize.Medium,
+                    onClick = onDismiss
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportSearchBar(
+    importVM: ImportVM = hiltViewModel()
+) {
+    val searchQuery by importVM.searchQuery.collectAsState()
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .padding(13.dp, 13.dp)
+            .fillMaxWidth()
+    ) {
+        EaseIconButton(
+            sizeType = EaseIconButtonSize.Medium,
+            buttonType = EaseIconButtonType.Default,
+            painter = painterResource(id = R.drawable.icon_close),
+            onClick = {
+                importVM.closeSearch()
+            }
+        )
+        TextField(
+            value = searchQuery,
+            onValueChange = { value ->
+                importVM.setSearchQuery(value)
+            },
+            placeholder = {
+                Text(
+                    text = stringResource(id = R.string.import_search_hint),
+                    fontSize = 14.sp,
+                )
+            },
+            singleLine = true,
+            modifier = Modifier
+                .weight(1.0F)
+                .focusRequester(focusRequester)
+        )
+    }
+}
+
+@Composable
 fun ImportMusicsPage(
-    importVM: ImportVM = hiltViewModel(),
-    storagesVM: StoragesVM = hiltViewModel()
+    importVM: ImportVM = hiltViewModel()
 ) {
     val navController = LocalNavController.current
     val selectedCount by importVM.selectedCount.collectAsState()
     val canUndo by importVM.canUndo.collectAsState()
-    val disabledToggleAll by importVM.disabledToggleAll.collectAsState()
     val loadState by importVM.loadState.collectAsState()
+    val sort by importVM.sort.collectAsState()
+    val searchOpen by importVM.searchOpen.collectAsState()
+
+    var moreMenuOpen by remember { mutableStateOf(false) }
+    var sortDialogOpen by remember { mutableStateOf(false) }
 
     val titleText = when (selectedCount) {
         0 -> stringResource(id = R.string.import_musics_title_default)
@@ -491,46 +699,87 @@ fun ImportMusicsPage(
     BackHandler(enabled = canUndo) {
         doUndo()
     }
+    BackHandler(enabled = searchOpen) {
+        importVM.closeSearch()
+    }
     Column(
         modifier = Modifier
             .background(MaterialTheme.colorScheme.surface)
             .fillMaxSize()
     ) {
-        Row(
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .padding(13.dp, 13.dp)
-                .fillMaxWidth()
-        ) {
+        if (searchOpen) {
+            ImportSearchBar()
+        } else {
             Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(13.dp, 13.dp)
+                    .fillMaxWidth()
             ) {
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Medium,
-                    buttonType = EaseIconButtonType.Default,
-                    painter = painterResource(id = R.drawable.icon_back),
-                    onClick = {
-                        doUndo()
-                    }
-                )
-                Text(
-                    text = titleText
-                )
-            }
-            Row {
-                EaseIconButton(
-                    sizeType = EaseIconButtonSize.Medium,
-                    buttonType = EaseIconButtonType.Default,
-                    painter = painterResource(id = R.drawable.icon_toggle_all),
-                    disabled = disabledToggleAll,
-                    onClick = {
-                        importVM.toggleAll()
-                    }
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    EaseIconButton(
+                        sizeType = EaseIconButtonSize.Medium,
+                        buttonType = EaseIconButtonType.Default,
+                        painter = painterResource(id = R.drawable.icon_back),
+                        onClick = {
+                            doUndo()
+                        }
+                    )
+                    Text(
+                        text = titleText
+                    )
+                }
+                Box {
+                    EaseIconButton(
+                        sizeType = EaseIconButtonSize.Medium,
+                        buttonType = EaseIconButtonType.Default,
+                        painter = painterResource(id = R.drawable.icon_vertialcal_more),
+                        onClick = {
+                            moreMenuOpen = true
+                        }
+                    )
+                    EaseContextMenu(
+                        expanded = moreMenuOpen,
+                        onDismissRequest = { moreMenuOpen = false },
+                        items = listOf(
+                            EaseContextMenuItem(
+                                stringId = R.string.import_menu_toggle_all,
+                                onClick = {
+                                    importVM.toggleAll()
+                                }
+                            ),
+                            EaseContextMenuItem(
+                                stringId = R.string.import_menu_sort,
+                                onClick = {
+                                    sortDialogOpen = true
+                                }
+                            ),
+                            EaseContextMenuItem(
+                                stringId = R.string.import_menu_search,
+                                onClick = {
+                                    importVM.openSearch()
+                                }
+                            ),
+                        )
+                    )
+                }
             }
         }
         ImportStorages()
+        if (sortDialogOpen) {
+            ImportSortDialog(
+                current = sort,
+                onSelect = { field, dir ->
+                    importVM.setSort(field, dir)
+                },
+                onDismiss = {
+                    sortDialogOpen = false
+                },
+            )
+        }
         when (loadState) {
             CurrentStorageStateType.LOADING -> ImportEntriesSkeleton()
             CurrentStorageStateType.TIMEOUT,

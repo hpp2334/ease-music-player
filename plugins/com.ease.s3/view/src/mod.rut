@@ -1,0 +1,233 @@
+// S3 storage view — the tur_kit connect/edit form (the apiVersion 1 TS
+// view's `src/view.ts` port), shown in the add-storage page (create mode)
+// and when editing an existing S3 storage (edit mode).
+//
+// Layout (the phase-4b pkg tree): this file is the ROOT — `entry fn
+// start(cx)` constructs the emp services FROM the boot handle, wires the
+// reactive state, and assembles the tree. The siblings:
+//
+//   form    — the visual pieces (fields, buttons, status line, palette)
+//   actions — validation, edit-mode hydration, arg builders, reply parsers
+//
+// Mode comes from `context.storage_id()` (read once at `start`: nil =
+// create, a `plugin_storage_id` = edit). Edit-mode hydration (alias /
+// endpoint / region / bucket / access key from the plugin's `storage:<id>`
+// kv document) runs at MOUNT, not at boot — identity-bound rows must never
+// fire during `start`. The region field seeds the `us-east-1` default in
+// both modes (the TS initialRegion).
+//
+// The Connect button calls the plugin backend (`s3:connect` via
+// `Rpc.call`, a blocking round-trip inside the mutation): the backend
+// persists the config + secret and answers `{storageId, created}` (the
+// `{"ok":…}` envelope is built host-side from the handler's value/trap).
+// On create the VIEW registers the host storage row (`context
+// .create_storage` — its upcall pops this page); on update it notifies the
+// host so the dashboard shows the new alias. Removal stays with the host's
+// top-bar trash icon (`storage:removeInstance` on the backend).
+//
+// No `themes` — theme colors are an Android-only row and views must boot
+// headless (the check harness); the palette is static slate + indigo
+// (view/form.rut).
+
+use emp::{ Context, Db, Rpc };
+use tur_kit::control_flow::lifecycle::{ Lifecycle };
+use tur_kit::flags::{ CrossAlign, MainAlign, MainAxisSize };
+use tur_kit::gesture::pointer::{ MountEvent };
+use tur_kit::handles::{ mount, text_ctrl, undo_ctrl };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::layout::flex::{ Column, Row };
+use tur_kit::reactive::{ DeriveCtx, MutationCtx, Readable, Source, derive, mutate, source, sv };
+
+mod actions;
+mod form;
+
+entry fn start(cx: opaque) -> u64 {
+    const context = Context(cx);
+    const db = Db(cx);
+    const rpc = Rpc(cx);
+
+    // Mode: nil = create (no storage row yet), a real id = edit. Read once —
+    // the value never changes for the instance lifetime.
+    let sid = context.storage_id();
+    let sid_seed = "";
+    if (sid != nil) {
+        sid_seed = sid;
+    }
+    let storage_src: Source<str> = source<str>(sid_seed);
+
+    let ctrl_alias = text_ctrl();
+    let ctrl_endpoint = text_ctrl();
+    let ctrl_region = text_ctrl();
+    let ctrl_bucket = text_ctrl();
+    let ctrl_access = text_ctrl();
+    // Never replaced — a blank secret means "keep the stored one".
+    let ctrl_secret = text_ctrl();
+    let undo_alias = undo_ctrl();
+    let undo_endpoint = undo_ctrl();
+    let undo_region = undo_ctrl();
+    let undo_bucket = undo_ctrl();
+    let undo_access = undo_ctrl();
+    let undo_secret = undo_ctrl();
+
+    let status_text = source<str>("");
+    let status_is_error = source<bool>(false);
+
+    let status_visible: Readable<bool> = derive(fn (ctx: DeriveCtx) -> bool {
+        return ctx.get<str>(status_text) != "";
+    });
+    let save_label: Readable<str> = derive(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<str>(storage_src) != "") {
+            return "保存";
+        }
+        return "连接";
+    });
+    let secret_hint: Readable<str> = derive(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<str>(storage_src) != "") {
+            return "留空保持不变";
+        }
+        return "";
+    });
+
+    // Edit-mode hydration: at MOUNT (never at boot), seed the region default
+    // and — in edit mode — read the kv config and prefill the controllers.
+    let b_hydrate = mutate(fn (ctx: MutationCtx, _e: MountEvent) {
+        ctrl_region.set_text("us-east-1");
+        let sid = context.storage_id();
+        if (sid == nil) {
+            return;
+        }
+        let s: str = sid;
+        actions::hydrate_fields(db, s, ctrl_alias, ctrl_endpoint, ctrl_region, ctrl_bucket, ctrl_access);
+    });
+
+    let b_test = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let is_edit = ctx.get<str>(storage_src) != "";
+        let endpoint = actions::trim(ctrl_endpoint.text());
+        let region = actions::trim_or(ctrl_region.text(), "us-east-1");
+        let bucket = actions::trim(ctrl_bucket.text());
+        let alias = actions::trim(ctrl_alias.text());
+        let access_key_id = actions::trim(ctrl_access.text());
+        let secret_key = ctrl_secret.text();
+        let invalid = actions::validate(endpoint, alias, bucket, access_key_id, secret_key, is_edit);
+        if (invalid != "") {
+            ctx.set<str>(status_text, invalid);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<str>(status_text, "测试中...");
+        ctx.set<bool>(status_is_error, false);
+        let reply = rpc.call("s3:test", actions::test_args(actions::sid_opt(ctx.get<str>(storage_src)), endpoint, region, bucket, access_key_id, secret_key));
+        let r = actions::parse_test_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, f"测试错误：{r.message}");
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<bool>(status_is_error, true);
+        if (r.outcome == "SUCCESS") {
+            ctx.set<str>(status_text, "测试成功");
+            ctx.set<bool>(status_is_error, false);
+        } else if (r.outcome == "UNAUTHORIZED") {
+            ctx.set<str>(status_text, "测试错误：认证或签名错误");
+        } else if (r.outcome == "TIMEOUT") {
+            ctx.set<str>(status_text, "测试错误：超时");
+        } else {
+            ctx.set<str>(status_text, "测试错误：其他错误");
+        }
+    });
+
+    let b_save = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let is_edit = ctx.get<str>(storage_src) != "";
+        let endpoint = actions::trim(ctrl_endpoint.text());
+        let region = actions::trim_or(ctrl_region.text(), "us-east-1");
+        let bucket = actions::trim(ctrl_bucket.text());
+        let alias = actions::trim(ctrl_alias.text());
+        let access_key_id = actions::trim(ctrl_access.text());
+        let secret_key = ctrl_secret.text();
+        let invalid = actions::validate(endpoint, alias, bucket, access_key_id, secret_key, is_edit);
+        if (invalid != "") {
+            ctx.set<str>(status_text, invalid);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<str>(status_text, "");
+        ctx.set<bool>(status_is_error, false);
+        let reply = rpc.call("s3:connect", actions::connect_args(actions::sid_opt(ctx.get<str>(storage_src)), endpoint, region, bucket, alias, access_key_id, secret_key));
+        let r = actions::parse_connect_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, r.message);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        if (r.created) {
+            // register the host storage row — the upcall pops this page
+            if (r.storage_id != "") {
+                context.create_storage(r.storage_id);
+            }
+            ctx.set<str>(status_text, "");
+        } else {
+            // the backend rewrote the kv; the dashboard reflects the alias
+            context.notify_change();
+            ctx.set<str>(status_text, "已保存");
+            ctx.set<bool>(status_is_error, false);
+        }
+    });
+
+    // Gaps stay small: the host embeds this view in a fixed-height TurView
+    // with no scrolling — six fields + buttons must fit.
+    let form = Column()
+        .cross_alignment(CrossAlign::Stretch)
+        .main_axis_size(MainAxisSize::Min)
+        .query_key("s3-form")
+        .child(form::field_label("名称 (别名)"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(form::text_field(ctrl_alias, undo_alias, sv("S3"), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(form::field_label("端点地址 (Endpoint)"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(form::text_field(ctrl_endpoint, undo_endpoint, sv("https://s3.amazonaws.com"), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(form::field_label("区域 (Region)"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(form::text_field(ctrl_region, undo_region, sv("us-east-1"), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(form::field_label("存储桶 (Bucket)"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(form::text_field(ctrl_bucket, undo_bucket, sv("music"), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(form::field_label("Access Key ID"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(form::text_field(ctrl_access, undo_access, sv(""), false))
+        .child(SizedBox(0.0, 7.0).build())
+        .child(form::field_label("Secret Access Key"))
+        .child(SizedBox(0.0, 2.0).build())
+        .child(form::text_field(ctrl_secret, undo_secret, secret_hint, true))
+        .child(SizedBox(0.0, 8.0).build())
+        .child(
+            Row()
+                .main_alignment(MainAlign::Start)
+                .cross_alignment(CrossAlign::Center)
+                .main_axis_size(MainAxisSize::Min)
+                .child(form::ghost_button("s3-test", "测试", b_test))
+                .child(SizedBox(12.0, 0.0).build())
+                .child(form::primary_button("s3-save", save_label, b_save))
+                .build(),
+        )
+        .child(SizedBox(0.0, 8.0).build())
+        .child(form::status_area(status_text, status_visible, status_is_error))
+        .build();
+
+    // mount runs the hydration mutation before the first frame paints
+    let root = Lifecycle()
+        .on_mount(b_hydrate)
+        .child(
+            Container()
+                .color(sv(form::card_color()))
+                .padding(4.0)
+                .child(form)
+                .build(),
+        )
+        .build();
+    mount(root);
+    return 0;
+}

@@ -1,0 +1,447 @@
+// backend/props.rut — the PROPFIND multistatus decode (the `xml::parse`
+// JSON tree walk — case-insensitive LOCAL-NAME matches, `D:multistatus` /
+// `d:response` / bare tags alike) and the row mapping: every `<D:response>`
+// becomes one sortable listing row (`d|` / `f|` prefix + path + JSON) in
+// the walk's `ListCx`. The date parses ride `time::parse` (RFC 1123) with
+// the RFC 3339 fallback in pure rut.
+
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strutil::{ ends_with, is_digits, starts_with_ci, str_to_i64, trim };
+use time::{ parse };
+use url::{ href_to_path, last_segment, url_decode };
+
+/// The prop fields merged across a response's propstat blocks. A struct so
+/// the walk's by-value params (mutable by default) write through to the
+/// caller's cell.
+pub struct PropAcc {
+    display: ?str,
+    is_dir: bool,
+    size: i64,
+    created: u64,
+    modified: u64,
+}
+
+/// The listing walk's context: the instance address + the requested dir
+/// (self-row skip) and the collected rows. Rows carry a sort prefix
+/// (`d|<path>|` / `f|<path>|`) ahead of their encoded JSON object — the
+/// sort is a plain str ordering (dirs first, then by path, the previous
+/// Rust ordering), and the tail is the final JSON. (A `Vec` of user
+/// structs does not verify on this pin — rows ride as strings.)
+pub struct ListCx {
+    addr: str,
+    dir_trimmed: str,
+    rows: Vec<str>,
+}
+
+/// The rows' field separator (never occurs in percent-encoded paths).
+fn sep() -> str {
+    return str::from_code(1);
+}
+
+/// Case-insensitive LOCAL-NAME match: `D:multistatus`, `d:response` and
+/// bare `response` all match `response` (the TS `removeNSPrefix` shape).
+fn tag_is(tag: str, local: str) -> bool {
+    let n = tag.len();
+    let start = 0;
+    let i = 0;
+    while (i < n) {
+        if (tag.code_at(i) == 58) {
+            start = i + 1;
+        }
+        i += 1;
+    }
+    return starts_with_ci(tag, start, local) && n - start == local.len();
+}
+
+/// Walk the decoded tree: fill `out` with every `<D:response>`. The cursor
+/// idiom is the github-viewer reader loop — `begin_object` / `next_key` /
+/// `skip_value`; a child value is one el or an array of els (the array lane
+/// rides the `rest()` look-ahead).
+pub fn walk_multistatus(tree: str, out: ListCx) -> bool {
+    let r = JsonReader::of(tree);
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return false;
+        }
+        if (k == "children") {
+            walk_root_children(r, out);
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    return !r.failed();
+}
+
+/// The root el's `children` object: `{tag: el | [el…]}`.
+fn walk_root_children(r: JsonReader, out: ListCx) {
+    r.begin_object();
+    while (r.more()) {
+        let tag = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (tag_is(tag, "multistatus")) {
+            each_multistatus(r, out);
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+}
+
+fn each_multistatus(r: JsonReader, out: ListCx) {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            walk_ms_el(r, out);
+        }
+        r.end_array();
+    } else {
+        walk_ms_el(r, out);
+    }
+}
+
+/// One `multistatus` el: iterate its responses.
+fn walk_ms_el(r: JsonReader, out: ListCx) {
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (k == "children") {
+            walk_ms_children(r, out);
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+}
+
+fn walk_ms_children(r: JsonReader, out: ListCx) {
+    r.begin_object();
+    while (r.more()) {
+        let tag = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (tag_is(tag, "response")) {
+            each_response(r, out);
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+}
+
+fn each_response(r: JsonReader, out: ListCx) {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            walk_response_el(r, out);
+        }
+        r.end_array();
+    } else {
+        walk_response_el(r, out);
+    }
+}
+
+/// One `response` el: `href` + every `propstat`'s `prop` merged (the TS
+/// whole-block scan).
+fn walk_response_el(r: JsonReader, out: ListCx) {
+    let href: ?str = nil;
+    let acc = PropAcc { display: nil, is_dir: false, size: -1, created: 0, modified: 0 };
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return;
+                }
+                if (tag_is(tag, "href")) {
+                    href = el_text(r);
+                } else if (tag_is(tag, "propstat")) {
+                    each_propstat(r, acc);
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed() || href == nil) {
+        return;
+    }
+    let h: str = href;
+    push_entry(out, trim(h), acc.display, acc.is_dir, acc.size, acc.created, acc.modified);
+}
+
+fn each_propstat(r: JsonReader, acc: PropAcc) {
+    if (r.rest().starts_with(0, "[")) {
+        r.begin_array();
+        while (r.more()) {
+            walk_propstat_el(r, acc);
+        }
+        r.end_array();
+    } else {
+        walk_propstat_el(r, acc);
+    }
+}
+
+fn walk_propstat_el(r: JsonReader, acc: PropAcc) {
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return;
+                }
+                if (tag_is(tag, "prop")) {
+                    walk_prop(r, acc);
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+}
+
+/// The `prop` el: resourcetype / getcontentlength / getlastmodified /
+/// creationdate / displayname (case-insensitive — servers vary prop-name
+/// casing even though RFC 4918 defines them lowercase).
+fn walk_prop(r: JsonReader, acc: PropAcc) {
+    r.begin_object();
+    while (r.more()) {
+        let tag = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (tag_is(tag, "resourcetype")) {
+            if (has_collection_child(r)) {
+                acc.is_dir = true;
+            }
+        } else if (tag_is(tag, "getcontentlength")) {
+            let v = el_text(r);
+            if (v != nil) {
+                let s: str = v;
+                let t = trim(s);
+                if (is_digits(t)) {
+                    acc.size = str_to_i64(t);
+                }
+            }
+        } else if (tag_is(tag, "getlastmodified")) {
+            let v = el_text(r);
+            if (v != nil) {
+                let s: str = v;
+                // RFC 1123 on most servers; some emit RFC 3339 — try both
+                let ms = parse(s);
+                if (ms == 0) {
+                    acc.modified = parse_iso_date(s);
+                } else {
+                    acc.modified = ms;
+                }
+            }
+        } else if (tag_is(tag, "creationdate")) {
+            let v = el_text(r);
+            if (v != nil) {
+                let s: str = v;
+                acc.created = parse_iso_date(s);
+            }
+        } else if (tag_is(tag, "displayname")) {
+            acc.display = el_text(r);
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+}
+
+/// Does this el's children contain a `collection` child (any ns)?
+fn has_collection_child(r: JsonReader) -> bool {
+    let found = false;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return false;
+        }
+        if (k == "children") {
+            r.begin_object();
+            while (r.more()) {
+                let tag = r.next_key();
+                if (r.failed()) {
+                    return false;
+                }
+                if (tag_is(tag, "collection")) {
+                    found = true;
+                }
+                r.skip_value();
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    return found;
+}
+
+/// The `text` member of one el (nil when absent).
+fn el_text(r: JsonReader) -> ?str {
+    let found: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "text") {
+            let v = r.read_str();
+            if (r.failed()) {
+                return nil;
+            }
+            found = v;
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return found;
+}
+
+/// RFC 3339 UTC (`2024-01-02T10:00:00Z`, fractional seconds tolerated) →
+/// unix ms; 0 on anything else (the TS `parseIsoDate`).
+fn parse_iso_date(s: str) -> u64 {
+    let n = s.len();
+    if (n < 20) {
+        return 0;
+    }
+    if (s.code_at(4) != 45 || s.code_at(7) != 45) {
+        return 0;
+    }
+    let y = iso_num(s, 0, 4);
+    let mo = iso_num(s, 5, 2);
+    let d = iso_num(s, 8, 2);
+    if (s.code_at(10) != 84 && s.code_at(10) != 32) {
+        return 0;
+    }
+    let h = iso_num(s, 11, 2);
+    let mi = iso_num(s, 14, 2);
+    let sec = iso_num(s, 17, 2);
+    if (y < 0 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || mi < 0 || sec < 0) {
+        return 0;
+    }
+    let days = days_from_civil(y, mo, d);
+    return (days * 86400i64 + h * 3600i64 + mi * 60i64 + sec) as u64 * 1000u64;
+}
+
+fn iso_num(s: str, at: i32, n: i32) -> i64 {
+    let acc: i64 = 0;
+    let i = at;
+    while (i < at + n) {
+        let c = s.code_at(i);
+        if (c < 48 || c > 57) {
+            return -1;
+        }
+        acc = acc * 10i64 + (c as i64 - 48i64);
+        i += 1;
+    }
+    return acc;
+}
+
+/// Howard Hinnant's `days_from_civil` (the host time rows use the same).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let yy = y;
+    if (m <= 2) {
+        yy = y - 1;
+    }
+    let era = floordiv(yy, 400);
+    let yoe = yy - era * 400;
+    let mp = if (m > 2) { m - 3 } else { m + 9 };
+    let doy = (153i64 * mp + 2i64) / 5i64 + d - 1i64;
+    let doe = yoe * 365i64 + yoe / 4i64 - yoe / 100i64 + doy;
+    return era * 146097i64 + doe - 719468i64;
+}
+
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) {
+        return q - 1;
+    }
+    return q;
+}
+
+/// Convert one PROPFIND response to the sortable row (skipping the dir
+/// itself + the root, deriving the name from the href when the server
+/// omitted displayname).
+pub fn push_entry(cx: ListCx, href: str, display: ?str, is_dir: bool, size: i64, created: u64, modified: u64) {
+    let path = href_to_path(cx.addr, href);
+    if (path == "/" || path == "") {
+        return;
+    }
+    if (ends_with(path, "/")) {
+        path = path.slice(0, path.len() - 1);
+    }
+    if (path == cx.dir_trimmed) {
+        return;
+    }
+    let name = "";
+    if (display != nil) {
+        name = url_decode(display);
+    }
+    if (name == "") {
+        name = url_decode(last_segment(path));
+    }
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("name");
+    w.write_str(name);
+    w.key("path");
+    w.write_str(path);
+    if (size >= 0) {
+        w.key("size");
+        w.write_i64(size);
+    }
+    w.key("isDir");
+    w.write_bool(is_dir);
+    if (created > 0) {
+        w.key("createdAt");
+        w.write_i64(created as i64);
+    }
+    if (modified > 0) {
+        w.key("modifiedAt");
+        w.write_i64(modified as i64);
+    }
+    w.end_object();
+    let flag = "f";
+    if (is_dir) {
+        flag = "d";
+    }
+    cx.rows.push(f"{flag}{sep()}{path}{sep()}{w.finish()}");
+}

@@ -1,0 +1,12 @@
+{
+  // time — the `Date` replacement lib: unix-ms now (host clock), the
+  // RFC-1123 / x-amz-date FORMATTERS (pure rut — integer math and str
+  // building, no host row), and HTTP date parsing (host — the three
+  // RFC forms' scanner). Identity-free.
+  "name": "time",
+  "deps": {
+    "time_host": {
+      "path": "../time_host"
+    }
+  }
+}

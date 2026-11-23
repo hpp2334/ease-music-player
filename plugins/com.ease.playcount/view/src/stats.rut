@@ -1,0 +1,560 @@
+// stats.rut — the refresh: a synchronous scan of the range's day keys,
+// the JS-epoch aggregation ported line-for-line (dedupe is the KV's job —
+// first occurrence already won — so this side just counts), then rank
+// count-desc and covers for the top of the list. Run inside the calling
+// mutation's ctx (the TS `refresh$` shape).
+//
+// Rows are plain per-build views over the item JSON: `Each` rebuilds
+// every mounted row when the entries atom changes, so static per-build
+// styling is always fresh (the TS's in-place derive reskin achieves the
+// same through a different mechanism). The padded-count prefix makes the
+// rank a plain str ordering; rows carry the range's max count (`top`) so
+// every bar rescales off the same top (the TS `maxCount$` derive, folded
+// into the row JSON).
+//
+// Play rows store the stringified id and `Library.playlists()` returns
+// the same form, so plain string membership is exact. A playlist deleted
+// between page opens degrades to no filtering.
+//
+// Day keys live here too (private twins of backend/days.rut — the
+// backend and view are separate module trees and don't share fns; UTC
+// days, exactly what the backend's appender buckets by — keep in sync).
+
+use emp::{ Db, Library };
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+use time::{ now };
+use tur_kit::handles::{ MapHandle, list_new, value_item, value_len };
+use tur_kit::reactive::{ MutationCtx };
+
+/// How many top entries get covers (the batch decodes synchronously on the
+/// view's lane — keep it modest; the host caps at 64).
+let COVER_BATCH: u64 = 24;
+
+/// The title placeholder for rows whose every play predates the title
+/// field (the TS fallback, upgraded when any row provides a real title).
+let UNKNOWN_TITLE: str = "(unknown)";
+
+/// The refresh: scan the range's day keys through the `Db` handle,
+/// aggregate under the membership filter, rank, fetch covers through the
+/// `Library` handle, publish. Called from the root's mutations with the
+/// services constructed at start.
+pub fn refresh_now(ctx: MutationCtx, s: state::State, db: Db, lib: Library) {
+    ctx.set<bool>(s.loading, true);
+
+    // The range's day keys, newest first ("Last N days" includes today).
+    let days = ranges::range_days_of(ctx.get<str>(s.sel_range));
+    let keys = Vec<str>::new();
+    let d: i64 = 0;
+    while (d < days) {
+        keys.push(day_key_offset(d));
+        d += 1;
+    }
+    let grouped = db.get_all_multi(json_str_array(keys));
+
+    // Membership filter: `nil` = count every row; otherwise only rows whose
+    // musicId belongs to the selected playlist.
+    let sel = ctx.get<str>(s.sel_playlist);
+    let allowed: ?Vec<str> = nil;
+    if (sel != ranges::PLAYLIST_ALL) {
+        allowed = roster::roster_music_ids(ctx.get<opaque>(s.roster), sel);
+    }
+
+    let agg = Agg { ids: Vec<str>::new(), titles: Vec<str>::new(), counts: Vec<i64>::new() };
+    aggregate(grouped, allowed, agg);
+
+    // Rank count-desc. The padded-count prefix makes the rank a plain str
+    // ordering (ascending — the publisher below walks it backwards).
+    let n: i32 = agg.ids.len;
+    let top: i64 = 0;
+    let k: i32 = 0;
+    while (k < n) {
+        if (agg.counts[k] > top) {
+            top = agg.counts[k];
+        }
+        k += 1;
+    }
+    let rows = Vec<str>::new();
+    k = 0;
+    while (k < n) {
+        let b = StringBuilder::with_cap(128);
+        b.append(pad10(agg.counts[k]));
+        b.append(str::from_code(1));
+        b.append(entry_row_json(agg.ids[k], agg.titles[k], agg.counts[k], top));
+        rows.push(b.build());
+        k += 1;
+    }
+    sort_rows(rows);
+
+    // Covers for the top of the list (newest rank first). Only ids not
+    // cached yet are requested — a cover registers at most once per page
+    // open, and failures just leave the fallback disc.
+    let want = Vec<str>::new();
+    let picked: u64 = 0;
+    let i = n;
+    while (i > 0 && picked < COVER_BATCH) {
+        i -= 1;
+        let id = agg.ids[i];
+        if (is_digits(id) && s.covers.get(id) == "") {
+            want.push(id);
+            picked += 1;
+        }
+    }
+    if (want.len > 0) {
+        fill_covers(s.covers, lib.covers(json_str_array(want)));
+    }
+
+    // Publish count-desc (strip the padded prefix).
+    let fresh = list_new();
+    let j = rows.len;
+    while (j > 0) {
+        j -= 1;
+        let row = rows[j];
+        let cut = find_from(row, 0, 1);
+        fresh.push(row.slice(cut + 1, row.len()));
+    }
+    ctx.set<opaque>(s.entries, fresh.raw());
+    ctx.set<bool>(s.loading, false);
+}
+
+/// The `{"musicId","title","count","top"}` row the ranked list renders
+/// from.
+fn entry_row_json(music_id: str, title: str, count: i64, top: i64) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("musicId");
+    w.write_str(music_id);
+    w.key("title");
+    w.write_str(title);
+    w.key("count");
+    w.write_i64(count);
+    w.key("top");
+    w.write_i64(top);
+    w.end_object();
+    return w.finish();
+}
+
+/// The aggregation accumulator (the TS Map keyed by musicId, as parallel
+/// index-aligned vectors — rut has no map in play here).
+struct Agg {
+    ids: Vec<str>;
+    titles: Vec<str>;
+    counts: Vec<i64>;
+}
+
+/// The `get_all_multi` walk: `[{key, values:[row,…]}, …]` — every
+/// stored play row counted (subject to the membership filter). Corrupt
+/// rows are skipped, never fatal (the TS's defensive parse).
+fn aggregate(grouped: str, allowed: ?Vec<str>, agg: Agg) {
+    let r = JsonReader::of(grouped);
+    r.begin_array();
+    while (r.more()) {
+        r.begin_object();
+        while (r.more()) {
+            let k = r.next_key();
+            if (r.failed()) {
+                return;
+            }
+            if (k == "values") {
+                r.begin_array();
+                while (r.more()) {
+                    let raw = r.read_str();
+                    if (r.failed()) {
+                        return;
+                    }
+                    bump(agg, raw, allowed);
+                }
+                r.end_array();
+            } else {
+                r.skip_value();
+            }
+        }
+        r.end_object();
+    }
+    r.end_array();
+}
+
+/// One stored play row (`{musicId, title, ts}`) → +1 for its musicId.
+fn bump(agg: Agg, raw: str, allowed: ?Vec<str>) {
+    let r = JsonReader::of(raw);
+    let music_id = "";
+    let title = UNKNOWN_TITLE;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (k == "musicId") {
+            // TS-era rows carry the raw NUMBER (`JSON.stringify`ed host
+            // payload); normalize both spellings to the stringified id.
+            let v = id_str(r);
+            if (r.failed()) {
+                return;
+            }
+            if (v != nil) {
+                music_id = v;
+            }
+        } else if (k == "title") {
+            let v = opt_str(r);
+            if (r.failed()) {
+                return;
+            }
+            if (v != nil) {
+                title = v;
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed() || music_id == "") {
+        return;
+    }
+    if (allowed != nil) {
+        let list: Vec<str> = allowed;
+        if (!vec_contains(list, music_id)) {
+            return;
+        }
+    }
+    let n: i32 = agg.ids.len;
+    let i: i32 = 0;
+    while (i < n) {
+        if (agg.ids[i] == music_id) {
+            agg.counts[i] = agg.counts[i] + 1;
+            // Older rows (written before the title field existed) fall back
+            // to the placeholder; prefer a real title if any row for this
+            // music provides one.
+            if (agg.titles[i] == UNKNOWN_TITLE && title != UNKNOWN_TITLE) {
+                agg.titles[i] = title;
+            }
+            return;
+        }
+        i += 1;
+    }
+    agg.ids.push(music_id);
+    agg.titles.push(title);
+    agg.counts.push(1);
+}
+
+/// Register the fetched covers into the instance memo. The answer is
+/// `[{"musicId":"…","id":n|null}]` (id = the engine image resource; null =
+/// no cover / undecodable — the rows keep the fallback art). The map is
+/// written BEFORE the entries source is set, so the row rebuild that
+/// reads it always sees the fresh ids; the memo is never cleared (tur
+/// image resources have no free API — a range switch never re-registers).
+fn fill_covers(covers_map: MapHandle, answer: str) {
+    let r = JsonReader::of(answer);
+    r.begin_array();
+    while (r.more()) {
+        let music_id = "";
+        let id: i64 = 0;
+        r.begin_object();
+        while (r.more()) {
+            let k = r.next_key();
+            if (r.failed()) {
+                return;
+            }
+            if (k == "musicId") {
+                music_id = id_str(r);
+                if (r.failed()) {
+                    return;
+                }
+            } else if (k == "id") {
+                if (!r.try_null()) {
+                    id = r.read_i64();
+                }
+            } else {
+                r.skip_value();
+            }
+        }
+        r.end_object();
+        if (r.failed()) {
+            return;
+        }
+        if (music_id != "") {
+            covers_map.set(music_id, f"{id}");
+        }
+    }
+    r.end_array();
+}
+
+// ---------------------------------------------------------------------------
+// The entry rows (decoded by rows.rut's builders and the root's total)
+// ---------------------------------------------------------------------------
+
+/// One decoded entry row.
+pub struct EntryV {
+    music_id: str;
+    title: str;
+    count: i64;
+    top: i64;
+}
+
+pub fn decode_entry(item: str) -> ?EntryV {
+    let r = JsonReader::of(item);
+    let music_id = "";
+    let title = "";
+    let count: i64 = 0;
+    let top: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "musicId") {
+            music_id = id_str(r);
+            if (r.failed()) {
+                return nil;
+            }
+        } else if (k == "title") {
+            title = r.read_str();
+        } else if (k == "count") {
+            count = r.read_i64();
+        } else if (k == "top") {
+            top = r.read_i64();
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return EntryV { music_id: music_id, title: title, count: count, top: top };
+}
+
+/// The header's headline number (the TS `total$` derive).
+pub fn entries_total(entries: opaque) -> i64 {
+    let n = value_len(entries);
+    let sum: i64 = 0;
+    let i: u64 = 0;
+    while (i < n) {
+        let e = decode_entry(value_item(entries, i));
+        if (e != nil) {
+            let ent: EntryV = e;
+            sum += ent.count;
+        }
+        i += 1;
+    }
+    return sum;
+}
+
+// ---------------------------------------------------------------------------
+// Rank ordering helpers
+// ---------------------------------------------------------------------------
+
+/// Count, zero-padded to 10 digits — makes the count-desc rank a plain str
+/// ordering (ascending; the publisher walks it backwards). Division from
+/// the right, then the fixed-width reversal (the webdav nc_hex pattern).
+fn pad10(v: i64) -> str {
+    let digits = "0123456789";
+    let b = StringBuilder::with_cap(10);
+    let rest = v;
+    let n: i64 = 0;
+    while (n < 10) {
+        let d = rest % 10;
+        rest = rest / 10;
+        let di: i32 = d as i32;
+        b.append(digits.slice(di, di + 1));
+        n += 1;
+    }
+    return reverse_str(b.build());
+}
+
+fn reverse_str(s: str) -> str {
+    let n = s.len();
+    let b = StringBuilder::with_cap(n);
+    let i: i32 = n;
+    while (i > 0) {
+        b.append(s.slice(i - 1, i));
+        i -= 1;
+    }
+    return b.build();
+}
+
+/// Codepoint-wise ordering (the padded prefix does the counting).
+fn str_less(a: str, b: str) -> bool {
+    let n = a.len();
+    let m = b.len();
+    let i = 0;
+    while (i < n && i < m) {
+        let ca = a.code_at(i);
+        let cb = b.code_at(i);
+        if (ca != cb) {
+            return ca < cb;
+        }
+        i += 1;
+    }
+    return n < m;
+}
+
+/// Insertion sort ascending (the day's distinct tracks are a modest list).
+fn sort_rows(rows: Vec<str>) {
+    let n: i32 = rows.len;
+    let i: i32 = 1;
+    while (i < n) {
+        let key = rows[i];
+        let j = i - 1;
+        while (j >= 0 && str_less(key, rows[j])) {
+            rows[j + 1] = rows[j];
+            j -= 1;
+        }
+        rows[j + 1] = key;
+        i += 1;
+    }
+}
+
+fn is_digits(s: str) -> bool {
+    let n = s.len();
+    if (n == 0) {
+        return false;
+    }
+    let i = 0;
+    while (i < n) {
+        let c = s.code_at(i);
+        if (c < 48 || c > 57) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn find_from(s: str, from: i32, c: u32) -> i32 {
+    let n = s.len();
+    let i = from;
+    while (i < n) {
+        if (s.code_at(i) == c) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+/// `needle in items` over a string vector.
+fn vec_contains(items: Vec<str>, needle: str) -> bool {
+    for (let s of items) {
+        if (s == needle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The optional-string read: `null` → nil, a string → some, anything else
+/// → the reader's sticky error.
+fn opt_str(r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+/// Stored play rows carry `musicId` as a NUMBER (the TS `JSON.stringify`ed
+/// the raw host payload) while roster ids are strings — accept both and
+/// normalize to the string. (Keep in sync with backend/plays.rut's
+/// `id_str`.)
+fn id_str(r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let rest = r.rest();
+    let i = 0;
+    let c: u32 = 0;
+    while (i < rest.len()) {
+        c = rest.code_at(i);
+        if (c != 32 && c != 10 && c != 13 && c != 9) {
+            break;
+        }
+        i += 1;
+    }
+    if (c == 34) {
+        let v = r.read_str();
+        if (r.failed()) {
+            return nil;
+        }
+        return v;
+    }
+    let n = r.read_i64();
+    if (r.failed()) {
+        return nil;
+    }
+    return f"{n}";
+}
+
+/// `["a","b"]` — the covers request / scan keys JSON (kept in sync with
+/// backend/repair.rut's twin — module boundaries don't share fns).
+fn json_str_array(items: Vec<str>) -> str {
+    let w = JsonWriter::new();
+    w.begin_array();
+    for (let s of items) {
+        w.write_str(s);
+    }
+    w.end_array();
+    return w.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Day keys — the view tree's private twins of backend/days.rut (separate
+// module trees don't share fns). UTC days, exactly what the backend's
+// appender buckets by.
+// ---------------------------------------------------------------------------
+
+/// The day key `offset` days before now (0 = today).
+fn day_key_offset(offset: i64) -> str {
+    let now = now() as i64;
+    let days = floordiv(now, 86400000i64) - offset;
+    let ymd = civil_from_days(days);
+    let y = ymd.0;
+    let mo = ymd.1;
+    let d = ymd.2;
+    return f"plays:{y}-{pad2(mo)}-{pad2(d)}";
+}
+
+fn pad2(n: i64) -> str {
+    if (n < 10i64) {
+        return f"0{n}";
+    }
+    return f"{n}";
+}
+
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) {
+        return q - 1;
+    }
+    return q;
+}
+
+/// Howard Hinnant's `civil_from_days` — days since the epoch to (y, m, d).
+/// (The literal suffixes are the kit's i64-arithmetic spelling.)
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z2 = z + 719468i64;
+    let era = floordiv(z2, 146097i64);
+    let doe = z2 - era * 146097i64;
+    let yoe = (doe - doe / 1460i64 + doe / 36524i64 - doe / 146096i64) / 365i64;
+    let y = yoe + era * 400i64;
+    let doy = doe - (365i64 * yoe + yoe / 4i64 - yoe / 100i64);
+    let mp = (5i64 * doy + 2i64) / 153i64;
+    let d = doy - (153i64 * mp + 2i64) / 5i64 + 1i64;
+    let m = mp + 3i64;
+    if (mp >= 10i64) {
+        m = mp - 9i64;
+    }
+    let yy = y;
+    if (m <= 2) {
+        yy = y + 1i64;
+    }
+    return (yy, m, d);
+}

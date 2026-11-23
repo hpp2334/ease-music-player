@@ -1,0 +1,52 @@
+// crypto/src/mod.rut — the standard hash/entropy utility lib. A thin
+// face over the `crypto_host` rows (OS entropy, UUID v4, MD5, Base64,
+// SHA-256, HMAC-SHA-256): every fn is ONE forwarded host call, no
+// buffering, no re-hashing. Identity-free — nothing here resolves a
+// plugin.
+//
+// The wrapper names are the lib's API (documented, stable): rut has no
+// `use … as` rename, so a wrapper cannot carry its row's own name —
+// the row names stay host-internal.
+
+use crypto_host::{ base64_decode, base64_encode, hmac_sha256_hex, md5_base64, md5_hex, random_bytes, random_uuid, sha256_hex };
+
+// OS-entropy octets, capped at 1 MiB by the host row.
+pub fn rand_bytes(n: u64) -> bytes {
+    return random_bytes(n);
+}
+
+// a random UUID v4 (hyphenated, lowercase)
+pub fn uuid4() -> str {
+    return random_uuid();
+}
+
+// MD5 hex (WebDAV auth)
+pub fn md5(data: bytes) -> str {
+    return md5_hex(data);
+}
+
+// MD5 base64 (the HTTP Digest response shape)
+pub fn md5_b64(data: bytes) -> str {
+    return md5_base64(data);
+}
+
+// standard base64 (padded, RFC 4648)
+pub fn b64_encode(data: bytes) -> str {
+    return base64_encode(data);
+}
+
+// strict standard base64 decode — invalid input traps Invalid at the
+// host row
+pub fn b64_decode(s: str) -> bytes {
+    return base64_decode(s);
+}
+
+// SHA-256 hex (S3 SigV4)
+pub fn sha256(data: bytes) -> str {
+    return sha256_hex(data);
+}
+
+// HMAC-SHA-256 hex (S3 SigV4 signing key)
+pub fn hmac_sha256(key: bytes, data: bytes) -> str {
+    return hmac_sha256_hex(key, data);
+}

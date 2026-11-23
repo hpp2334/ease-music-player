@@ -1,0 +1,125 @@
+// timetags.rut — the shared timestamp reader for all three formats:
+// one `[hh:]mm:ss[,.]frac` reader (LRC tags, SRT/VTT cue timings ride
+// the same law) plus the first-token scan the cue timings need.
+// Named `timetags` (not `time`) so the mod edge never collides with
+// the offered `time` util pkg.
+
+use text::{ index_of, last_index_of, trim, trim_start };
+
+fn is_digits(s: str) -> bool {
+    let n = s.len();
+    if (n == 0) { return false; }
+    let i: i32 = 0;
+    while (i < n) {
+        let c = s.code_at(i) as i32;
+        if (c < 0x30 || c > 0x39) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// A run of ASCII digits as its numeric value (the JS `Number(s)` of a
+// digit-only string).
+fn digits_value(s: str) -> i64 {
+    let v: i64 = 0;
+    let n = s.len();
+    let i: i32 = 0;
+    while (i < n) {
+        v = v * 10 + (s.code_at(i) as i32 - 0x30) as i64;
+        i += 1;
+    }
+    return v;
+}
+
+// Parse one `[hh:]mm:ss[,.]frac` timestamp into whole milliseconds.
+// Accepts the SRT comma and the VTT/LRC dot, 2 or 3 fields, and scales
+// the fraction by its digit count (".5" = ".50" = ".500" = 500 ms,
+// longer runs truncate). Returns nil when not well-formed — callers
+// use that both to reject and to classify (`parse_lrc` distinguishes
+// time tags from info tags this way).
+pub fn parse_timestamp(s: str) -> ?i64 {
+    let t = trim(s);
+    let n = t.len();
+    let colons: i32 = 0;
+    let i: i32 = 0;
+    while (i < n) {
+        if (t.code_at(i) as i32 == 0x3A) {
+            colons += 1;
+        }
+        i += 1;
+    }
+    if (colons < 1 || colons > 2) {
+        return nil;
+    }
+    let last_colon = last_index_of(t, 0x3A);
+    let head = t.slice(0, last_colon);      // [hh?,] mm
+    let tail = t.slice(last_colon + 1, n);  // ss[,.]frac
+    let comma = last_index_of(tail, 0x2C);
+    let dot = last_index_of(tail, 0x2E);
+    let sep = comma;
+    if (dot > sep) {
+        sep = dot;
+    }
+    if (sep < 0) {
+        return nil;
+    }
+    let sec = tail.slice(0, sep);
+    let frac = tail.slice(sep + 1, tail.len());
+    if (!is_digits(sec) || !is_digits(frac)) {
+        return nil;
+    }
+    let mm_part = head;
+    let hh_part: ?str = nil;
+    let hcolon = last_index_of(head, 0x3A);
+    if (hcolon >= 0) {
+        hh_part = head.slice(0, hcolon);
+        mm_part = head.slice(hcolon + 1, head.len());
+    }
+    if (!is_digits(mm_part)) {
+        return nil;
+    }
+    if (hh_part != nil) {
+        let h: str = hh_part;
+        if (!is_digits(h)) {
+            return nil;
+        }
+    }
+    // JS `slice` clamps the end bound, rut's traps — clamp by hand
+    // (".5" / ".50" / ".500" scale by digit count).
+    let frac_len = frac.len();
+    let f = frac.slice(0, if (frac_len < 3) { frac_len } else { 3 });
+    let fl = f.len();
+    let ms: i64 = digits_value(sec) * 1000;
+    if (fl == 1) {
+        ms += digits_value(f) * 100;
+    } else if (fl == 2) {
+        ms += digits_value(f) * 10;
+    } else {
+        ms += digits_value(f);
+    }
+    ms += digits_value(mm_part) * 60000;
+    if (hh_part != nil) {
+        let h: str = hh_part;
+        ms += digits_value(h) * 3600000;
+    }
+    return ms;
+}
+
+// First whitespace-delimited token — the cue-end timestamp; VTT cue
+// settings (`align:start line:90%`) and SRT legacy coordinates follow.
+pub fn first_token(s: str) -> str {
+    let t = trim_start(s);
+    let n = t.len();
+    let end = n;
+    let sp = index_of(t, 0x20, 0);
+    if (sp >= 0 && sp < end) {
+        end = sp;
+    }
+    let tab = index_of(t, 0x09, 0);
+    if (tab >= 0 && tab < end) {
+        end = tab;
+    }
+    return t.slice(0, end);
+}

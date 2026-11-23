@@ -1,0 +1,253 @@
+// WebDAV storage view — the tur_kit connect/edit form (the apiVersion 1 TS
+// view's `src/view.ts` port), shown in the add-storage page (create mode)
+// and when editing an existing WebDAV storage (edit mode). This file is
+// the ROOT of the phase-4b pkg tree: `entry fn start(cx)` constructs the
+// emp services FROM the boot handle, wires the reactive state, and
+// assembles the tree. The siblings:
+//
+//   form    — the visual pieces (fields, toggle, buttons, status, palette)
+//   actions — validation, edit-mode hydration, arg builders, reply parsers
+//
+// Mode comes from `context.storage_id()` (read once at `start`: nil =
+// create, a `plugin_storage_id` = edit). Edit-mode hydration (alias / addr
+// / username / anonymous from the plugin's `storage:<id>` kv document)
+// runs at MOUNT, not at boot — identity-bound rows must never fire during
+// `start`.
+//
+// The Connect button calls the plugin backend (`webdav:connect` via
+// `Rpc.call`, a blocking round-trip inside the mutation): the backend
+// persists the config + secret and answers `{storageId, created}` (the
+// `{"ok":…}` envelope is built host-side from the handler's value/trap).
+// On create the VIEW registers the host storage row (`context
+// .create_storage` — its upcall pops this page); on update it notifies
+// the host so the dashboard shows the new alias. Removal stays with the
+// host's top-bar trash icon (`storage:removeInstance` on the backend).
+
+use emp::{ Context, Db, Rpc };
+use tur_kit::control_flow::control::{ Condition };
+use tur_kit::control_flow::lifecycle::{ Lifecycle };
+use tur_kit::flags::{ CrossAlign, MainAlign, MainAxisSize };
+use tur_kit::gesture::pointer::{ MountEvent };
+use tur_kit::handles::{ mount, text_ctrl, undo_ctrl };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::layout::flex::{ Column, Row };
+use tur_kit::reactive::{ DeriveCtx, MutationCtx, Readable, Source, derive, mutate, source, sv };
+
+mod actions;
+mod form;
+
+entry fn start(cx: opaque) -> u64 {
+    const context = Context(cx);
+    const db = Db(cx);
+    const rpc = Rpc(cx);
+
+    // Mode: nil = create (no storage row yet), a real id = edit. Read once —
+    // the value never changes for the instance lifetime.
+    let sid = context.storage_id();
+    let sid_seed = "";
+    if (sid != nil) {
+        sid_seed = sid;
+    }
+    let storage_src: Source<str> = source<str>(sid_seed);
+
+    let ctrl_alias = text_ctrl();
+    let ctrl_addr = text_ctrl();
+    let ctrl_username = text_ctrl();
+    // Never replaced — a blank password means "keep the stored one".
+    let ctrl_password = text_ctrl();
+    let undo_alias = undo_ctrl();
+    let undo_addr = undo_ctrl();
+    let undo_username = undo_ctrl();
+    let undo_password = undo_ctrl();
+
+    let anonymous = source<bool>(false);
+    let status_text = source<str>("");
+    let status_is_error = source<bool>(false);
+
+    let show_creds: Readable<bool> = derive(fn (ctx: DeriveCtx) -> bool {
+        return !ctx.get<bool>(anonymous);
+    });
+    let status_visible: Readable<bool> = derive(fn (ctx: DeriveCtx) -> bool {
+        return ctx.get<str>(status_text) != "";
+    });
+    let save_label: Readable<str> = derive(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<str>(storage_src) != "") {
+            return "保存";
+        }
+        return "连接";
+    });
+    let check_fill: Readable<u64> = derive(fn (ctx: DeriveCtx) -> u64 {
+        if (ctx.get<bool>(anonymous)) {
+            return form::PRIMARY;
+        }
+        return form::CARD;
+    });
+    let password_hint: Readable<str> = derive(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<str>(storage_src) != "") {
+            return "留空保持不变";
+        }
+        return "";
+    });
+
+    // Edit-mode hydration: at MOUNT (never at boot), read the kv config and
+    // prefill the controllers. A corrupt/missing document starts blank.
+    let b_hydrate = mutate(fn (ctx: MutationCtx, _e: MountEvent) {
+        let sid = context.storage_id();
+        if (sid == nil) {
+            return;
+        }
+        let s: str = sid;
+        let cfg = actions::stored_config(db, s);
+        if (cfg == nil) {
+            return;
+        }
+        let c: actions::StoredConfig = cfg;
+        ctrl_alias.set_text(c.alias);
+        ctrl_addr.set_text(c.addr);
+        ctrl_username.set_text(c.username);
+        ctx.set<bool>(anonymous, c.is_anonymous);
+    });
+
+    let b_anon = mutate(fn (ctx: MutationCtx, _e: nil) {
+        ctx.set<bool>(anonymous, !ctx.get<bool>(anonymous));
+        ctx.set<str>(status_text, "");
+    });
+
+    let b_test = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let is_anon = ctx.get<bool>(anonymous);
+        let addr = actions::trim(ctrl_addr.text());
+        let alias = actions::trim(ctrl_alias.text());
+        let username = "";
+        let password = "";
+        if (!is_anon) {
+            username = actions::trim(ctrl_username.text());
+            password = ctrl_password.text();
+        }
+        let invalid = actions::validate(addr, alias, is_anon, username, password, ctx.get<str>(storage_src) != "");
+        if (invalid != "") {
+            ctx.set<str>(status_text, invalid);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<str>(status_text, "测试中...");
+        ctx.set<bool>(status_is_error, false);
+        let reply = rpc.call("webdav:test", actions::test_args(actions::sid_opt(ctx.get<str>(storage_src)), addr, username, password, is_anon));
+        let r = actions::parse_test_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, f"测试错误：{r.message}");
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<bool>(status_is_error, true);
+        if (r.outcome == "SUCCESS") {
+            ctx.set<str>(status_text, "测试成功");
+            ctx.set<bool>(status_is_error, false);
+        } else if (r.outcome == "UNAUTHORIZED") {
+            ctx.set<str>(status_text, "测试错误：认证错误");
+        } else if (r.outcome == "TIMEOUT") {
+            ctx.set<str>(status_text, "测试错误：超时");
+        } else {
+            ctx.set<str>(status_text, "测试错误：其他错误");
+        }
+    });
+
+    let b_save = mutate(fn (ctx: MutationCtx, _e: nil) {
+        let is_anon = ctx.get<bool>(anonymous);
+        let addr = actions::trim(ctrl_addr.text());
+        let alias = actions::trim(ctrl_alias.text());
+        let username = "";
+        let password = "";
+        if (!is_anon) {
+            username = actions::trim(ctrl_username.text());
+            password = ctrl_password.text();
+        }
+        let invalid = actions::validate(addr, alias, is_anon, username, password, ctx.get<str>(storage_src) != "");
+        if (invalid != "") {
+            ctx.set<str>(status_text, invalid);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        ctx.set<str>(status_text, "");
+        ctx.set<bool>(status_is_error, false);
+        let reply = rpc.call("webdav:connect", actions::connect_args(actions::sid_opt(ctx.get<str>(storage_src)), addr, alias, username, password, is_anon));
+        let r = actions::parse_connect_reply(reply);
+        if (!r.ok) {
+            ctx.set<str>(status_text, r.message);
+            ctx.set<bool>(status_is_error, true);
+            return;
+        }
+        if (r.created) {
+            // register the host storage row — the upcall pops this page
+            if (r.storage_id != "") {
+                context.create_storage(r.storage_id);
+            }
+            ctx.set<str>(status_text, "");
+        } else {
+            // the backend rewrote the kv; the dashboard reflects the alias
+            context.notify_change();
+            ctx.set<str>(status_text, "已保存");
+            ctx.set<bool>(status_is_error, false);
+        }
+    });
+
+    let form_view = Column()
+        .cross_alignment(CrossAlign::Stretch)
+        .main_axis_size(MainAxisSize::Min)
+        .query_key("webdav-form")
+        .child(form::field_label("服务器名称 (别名)"))
+        .child(SizedBox(0.0, 6.0).build())
+        .child(form::text_field(ctrl_alias, undo_alias, sv("WebDAV"), false))
+        .child(SizedBox(0.0, 16.0).build())
+        .child(form::field_label("服务器地址"))
+        .child(SizedBox(0.0, 6.0).build())
+        .child(form::text_field(ctrl_addr, undo_addr, sv("https://example.com/dav"), false))
+        .child(SizedBox(0.0, 16.0).build())
+        .child(form::anonymous_toggle(anonymous, check_fill, b_anon))
+        .child(SizedBox(0.0, 16.0).build())
+        .child(
+            Condition(show_creds)
+                .then(
+                    Column()
+                        .cross_alignment(CrossAlign::Stretch)
+                        .main_axis_size(MainAxisSize::Min)
+                        .child(form::field_label("用户名"))
+                        .child(SizedBox(0.0, 6.0).build())
+                        .child(form::text_field(ctrl_username, undo_username, sv(""), false))
+                        .child(SizedBox(0.0, 16.0).build())
+                        .child(form::field_label("密码"))
+                        .child(SizedBox(0.0, 6.0).build())
+                        .child(form::text_field(ctrl_password, undo_password, password_hint, true))
+                        .child(SizedBox(0.0, 16.0).build())
+                        .build(),
+                )
+                .else_branch(SizedBox(0.0, 0.0).build())
+                .build(),
+        )
+        .child(
+            Row()
+                .main_alignment(MainAlign::Start)
+                .cross_alignment(CrossAlign::Center)
+                .main_axis_size(MainAxisSize::Min)
+                .child(form::ghost_button("webdav-test", "测试", b_test))
+                .child(SizedBox(12.0, 0.0).build())
+                .child(form::primary_button("webdav-save", save_label, b_save))
+                .build(),
+        )
+        .child(SizedBox(0.0, 10.0).build())
+        .child(form::status_area(status_text, status_visible, status_is_error))
+        .build();
+
+    // mount runs the hydration mutation before the first frame paints
+    let root = Lifecycle()
+        .on_mount(b_hydrate)
+        .child(
+            Container()
+                .color(sv(form::CARD))
+                .padding(4.0)
+                .child(form_view)
+                .build(),
+        )
+        .build();
+    mount(root);
+    return 0;
+}

@@ -1,0 +1,88 @@
+{
+  "plugins": [
+    {
+      "id": "com.ease.lyricformats",
+      "name": {
+        "en-US": "Lyric Formats",
+        "zh-CN": "歌词格式"
+      },
+      "version": "0.6.1",
+      "description": {
+        "en-US": "Lyric file parsers for LRC, SRT and WebVTT. The app's lyric pane is powered entirely by this plugin — there is no built-in parser.",
+        "zh-CN": "LRC、SRT、WebVTT 歌词文件解析器。应用的歌词显示完全由本插件驱动，应用内没有内置解析器。"
+      },
+      "zip": "zips/com.ease.lyricformats-0.6.1.zip",
+      "sha256": "5ba6949d9f1692eb695a4b0d7c9db5250c4947ff3c8c6e230fd062d9f3f63f4d",
+      "size": 38503,
+      "apiVersion": 3
+    },
+    {
+      "id": "com.ease.onedrive",
+      "name": {
+        "en-US": "OneDrive",
+        "zh-CN": "OneDrive"
+      },
+      "version": "0.4.1",
+      "description": {
+        "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless rut plugin.",
+        "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
+      },
+      "zip": "zips/com.ease.onedrive-0.4.1.zip",
+      "sha256": "23986c4cda606e1b8f899cd09c8a6bb04d423717696862747630d314d716b126",
+      "size": 95216,
+      "icon": "icons/com.ease.onedrive.png",
+      "apiVersion": 3
+    },
+    {
+      "id": "com.ease.playcount",
+      "name": {
+        "en-US": "Play Counts",
+        "zh-CN": "播放计数"
+      },
+      "version": "0.4.1",
+      "description": {
+        "en-US": "Counts how many times each music has been played, filterable by time period (Today through Last Year) and by playlist membership.",
+        "zh-CN": "统计每首歌的播放次数，支持按时间段（今天到最近一年）和按播放列表成员过滤。"
+      },
+      "zip": "zips/com.ease.playcount-0.4.1.zip",
+      "sha256": "2693f35c0eed4fec310a53668fd7e2d8b8bfd5d58f23ebe6f81e6bec467f9980",
+      "size": 88474,
+      "icon": "icons/com.ease.playcount.png",
+      "apiVersion": 3
+    },
+    {
+      "id": "com.ease.s3",
+      "name": {
+        "en-US": "S3",
+        "zh-CN": "S3"
+      },
+      "version": "0.5.1",
+      "apiVersion": 3,
+      "description": {
+        "en-US": "Amazon S3 / S3-compatible object storage provider (ListObjectsV2 directory listing + SigV4 signed byte-range download; works with AWS S3, Cloudflare R2, MinIO, B2, ...) implemented as a headless rut plugin.",
+        "zh-CN": "S3 / 兼容 S3 的对象存储插件（ListObjectsV2 目录列表 + SigV4 签名区间下载；支持 AWS S3、Cloudflare R2、MinIO、B2 等）。"
+      },
+      "zip": "zips/com.ease.s3-0.5.1.zip",
+      "sha256": "1390fd16acde76b823f65e0851c42b9db9ef1e19debb99bf1437b785440c0594",
+      "size": 136873,
+      "icon": "icons/com.ease.s3.png"
+    },
+    {
+      "id": "com.ease.webdav",
+      "name": {
+        "en-US": "WebDAV",
+        "zh-CN": "WebDAV"
+      },
+      "version": "0.4.1",
+      "description": {
+        "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless rut plugin.",
+        "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
+      },
+      "zip": "zips/com.ease.webdav-0.4.1.zip",
+      "sha256": "e49f4fa09f7e9e3f9d1467e6f257505b5f993ea99e355db01fbdd910b72d2939",
+      "size": 126323,
+      "icon": "icons/com.ease.webdav.png",
+      "apiVersion": 3
+    }
+  ]
+}

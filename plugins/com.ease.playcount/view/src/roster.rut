@@ -1,0 +1,163 @@
+// roster.rut — the host playlist roster + the two filter menus' option
+// lists. `Library.playlists()` seeds the roster at MOUNT (never at boot —
+// the compile/boot check harness loads views headless with no database,
+// so host rows must not fire in `start`; on device the mount mutation
+// runs before the first frame paints).
+
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use tur_kit::handles::{ ListHandle, list_new, value_item, value_len };
+
+/// One decoded playlist row (the reader sits at the object's start — both
+/// the roster array walk and the single-row decodes land here).
+pub struct PlaylistV {
+    id: str;
+    title: str;
+    music_ids: Vec<str>;
+}
+
+fn decode_playlist(r: JsonReader) -> ?PlaylistV {
+    let id = "";
+    let title = "";
+    let ids = Vec<str>::new();
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "id") {
+            id = r.read_str();
+        } else if (k == "title") {
+            title = r.read_str();
+        } else if (k == "musicIds") {
+            r.begin_array();
+            while (r.more()) {
+                let v = r.read_str();
+                if (r.failed()) {
+                    return nil;
+                }
+                ids.push(v);
+            }
+            r.end_array();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return PlaylistV { id: id, title: title, music_ids: ids };
+}
+
+/// `Library.playlists()` → the roster rows (re-encoded one JSON row per
+/// playlist so `value_item` reads them back singly).
+pub fn parse_roster(raw: str) -> ListHandle {
+    let out = list_new();
+    let r = JsonReader::of(raw);
+    r.begin_array();
+    while (r.more()) {
+        let p = decode_playlist(r);
+        if (p == nil) {
+            break;
+        }
+        let pl: PlaylistV = p;
+        let w = JsonWriter::new();
+        w.begin_object();
+        w.key("id");
+        w.write_str(pl.id);
+        w.key("title");
+        w.write_str(pl.title);
+        w.key("musicIds");
+        w.begin_array();
+        for (let mid of pl.music_ids) {
+            w.write_str(mid);
+        }
+        w.end_array();
+        w.end_object();
+        out.push(w.finish());
+    }
+    r.end_array();
+    return out;
+}
+
+/// The stringified music ids of one roster playlist; nil when the id is
+/// unknown (the caller degrades to no filtering).
+pub fn roster_music_ids(roster: opaque, id: str) -> ?Vec<str> {
+    let n = value_len(roster);
+    let i: u64 = 0;
+    while (i < n) {
+        let r = JsonReader::of(value_item(roster, i));
+        let p = decode_playlist(r);
+        if (p != nil) {
+            let pl: PlaylistV = p;
+            if (pl.id == id) {
+                return pl.music_ids;
+            }
+        }
+        i += 1;
+    }
+    return nil;
+}
+
+pub fn roster_title(roster: opaque, id: str) -> str {
+    let n = value_len(roster);
+    let i: u64 = 0;
+    while (i < n) {
+        let r = JsonReader::of(value_item(roster, i));
+        let p = decode_playlist(r);
+        if (p != nil) {
+            let pl: PlaylistV = p;
+            if (pl.id == id) {
+                return pl.title;
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+/// The range menu's options.
+pub fn range_options() -> ListHandle {
+    let ids = ranges::range_ids();
+    let labels = ranges::range_labels();
+    let out = list_new();
+    let i: i32 = 0;
+    while (i < ranges::RANGE_COUNT) {
+        out.push(option_row_json(ids[i], labels[i]));
+        i += 1;
+    }
+    return out;
+}
+
+/// The playlist menu's options: the "no filtering" head, then the roster.
+pub fn playlist_options(roster: opaque) -> ListHandle {
+    let out = list_new();
+    out.push(option_row_json(ranges::PLAYLIST_ALL, "All Playlists"));
+    let n = value_len(roster);
+    let i: u64 = 0;
+    while (i < n) {
+        let r = JsonReader::of(value_item(roster, i));
+        let p = decode_playlist(r);
+        if (p != nil) {
+            let pl: PlaylistV = p;
+            if (pl.id != "") {
+                out.push(option_row_json(pl.id, pl.title));
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn option_row_json(value: str, label: str) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("value");
+    w.write_str(value);
+    w.key("label");
+    w.write_str(label);
+    w.end_object();
+    return w.finish();
+}

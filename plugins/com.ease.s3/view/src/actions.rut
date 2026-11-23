@@ -1,0 +1,321 @@
+// view/actions.rut — the connect/edit form's action helpers: the field
+// validation (the TS `validate`, same messages), the edit-mode hydration
+// (the stored `storage:<id>` KV document prefilling the controllers), the
+// `s3:test` / `s3:connect` arg builders, and the reply parsers. The
+// replies arrive as the host-built `{"ok":…}` envelope — unchanged shape
+// from the apiVersion 2 view, only now built host-side from the handler's
+// value/trap.
+
+use emp::{ Db };
+use json::{ JsonReader, JsonWriter };
+use tur_kit::handles::{ TextCtrl };
+
+/// The prefilled config (the edit-mode hydration document).
+struct StoredConfig {
+    alias: str,
+    endpoint: str,
+    region: str,
+    bucket: str,
+    access_key_id: str,
+}
+
+struct TestReply {
+    ok: bool,
+    message: str,
+    outcome: str,
+}
+
+struct ConnectReply {
+    ok: bool,
+    message: str,
+    storage_id: str,
+    created: bool,
+}
+
+// ---- the shared field helpers -------------------------------------------
+
+pub fn is_ws(c: u32) -> bool {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}
+
+pub fn trim(s: str) -> str {
+    let n = s.len();
+    let a = 0;
+    while (a < n && is_ws(s.code_at(a))) {
+        a += 1;
+    }
+    let b = n;
+    while (b > a && is_ws(s.code_at(b - 1))) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+/// Trimmed, or the fallback when the result is empty (the region field).
+pub fn trim_or(s: str, fallback: str) -> str {
+    let t = trim(s);
+    if (t == "") {
+        return fallback;
+    }
+    return t;
+}
+
+/// The "" = create spelling of the mode source.
+pub fn sid_opt(sid: str) -> ?str {
+    if (sid == "") {
+        return nil;
+    }
+    return sid;
+}
+
+/// The connect-form validation (the TS `validate`, same messages).
+pub fn validate(endpoint: str, alias: str, bucket: str, access_key_id: str, secret_key: str, is_edit: bool) -> str {
+    if (endpoint == "") {
+        return "端点地址 (Endpoint) 不能为空";
+    }
+    if (alias == "") {
+        return "名称 (别名) 不能为空";
+    }
+    if (bucket == "") {
+        return "存储桶 (Bucket) 不能为空";
+    }
+    if (access_key_id == "") {
+        return "Access Key ID 不能为空";
+    }
+    if (secret_key == "" && !is_edit) {
+        return "Secret Access Key 不能为空";
+    }
+    return "";
+}
+
+// ---- the edit-mode hydration ---------------------------------------------
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?StoredConfig {
+    let r = JsonReader::of(doc);
+    r.begin_object();
+    let alias = "";
+    let endpoint = "";
+    let region = "";
+    let bucket = "";
+    let access_key_id = "";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                alias = v;
+            },
+            "endpoint" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                endpoint = v;
+            },
+            "region" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                region = v;
+            },
+            "bucket" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                bucket = v;
+            },
+            "accessKeyId" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                access_key_id = v;
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return StoredConfig {
+        alias: alias,
+        endpoint: endpoint,
+        region: region,
+        bucket: bucket,
+        access_key_id: access_key_id,
+    };
+}
+
+/// Read the instance's stored config and prefill the controllers. A
+/// corrupt/missing document keeps the caller's seeds. Runs at MOUNT (never
+/// at boot) — identity-bound rows must not fire during `start`; the caller
+/// reads the mode itself (`context.storage_id()`) and skips this when nil.
+pub fn hydrate_fields(db: Db, instance: str, alias: TextCtrl, endpoint: TextCtrl, region: TextCtrl, bucket: TextCtrl, access: TextCtrl) {
+    let raw = db.get(f"storage:{instance}");
+    if (raw == nil) {
+        return;
+    }
+    let doc: str = raw;
+    let cfg = decode_config(doc);
+    if (cfg == nil) {
+        return;
+    }
+    let c: StoredConfig = cfg;
+    alias.set_text(c.alias);
+    endpoint.set_text(c.endpoint);
+    if (c.region != "") {
+        region.set_text(c.region);
+    }
+    bucket.set_text(c.bucket);
+    access.set_text(c.access_key_id);
+}
+
+// ---- the backend calls (arg building + envelope parsing) ------------------
+
+pub fn test_args(storage_id: ?str, endpoint: str, region: str, bucket: str, access_key_id: str, secret_key: str) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    if (storage_id != nil) {
+        let s: str = storage_id;
+        w.key("storageId");
+        w.write_str(s);
+    }
+    w.key("endpoint");
+    w.write_str(endpoint);
+    w.key("region");
+    w.write_str(region);
+    w.key("bucket");
+    w.write_str(bucket);
+    w.key("accessKeyId");
+    w.write_str(access_key_id);
+    w.key("secretAccessKey");
+    w.write_str(secret_key);
+    w.end_object();
+    return w.finish();
+}
+
+pub fn connect_args(storage_id: ?str, endpoint: str, region: str, bucket: str, alias: str, access_key_id: str, secret_key: str) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    if (storage_id != nil) {
+        let s: str = storage_id;
+        w.key("storageId");
+        w.write_str(s);
+    }
+    w.key("endpoint");
+    w.write_str(endpoint);
+    w.key("region");
+    w.write_str(region);
+    w.key("bucket");
+    w.write_str(bucket);
+    w.key("alias");
+    w.write_str(alias);
+    w.key("accessKeyId");
+    w.write_str(access_key_id);
+    w.key("secretAccessKey");
+    w.write_str(secret_key);
+    w.end_object();
+    return w.finish();
+}
+
+/// `{"ok":true,"result":{"result":"SUCCESS"}}` / `{"ok":false,"error":"…"}`.
+pub fn parse_test_reply(reply: str) -> TestReply {
+    let r = JsonReader::of(reply);
+    r.begin_object();
+    let ok = false;
+    let have_ok = false;
+    let message = "";
+    let outcome = "OTHER_ERROR";
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "ok") {
+            ok = r.read_bool();
+            have_ok = true;
+        } else if (k == "error") {
+            let v = r.read_str();
+            if (!r.failed()) {
+                message = v;
+            }
+        } else if (k == "result") {
+            r.begin_object();
+            while (r.more()) {
+                let rk = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (rk == "result") {
+                    let v = r.read_str();
+                    if (!r.failed()) {
+                        outcome = v;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (!have_ok) {
+        return TestReply { ok: false, message: "后台未响应", outcome: "OTHER_ERROR" };
+    }
+    return TestReply { ok: ok, message: message, outcome: outcome };
+}
+
+/// `{"ok":true,"result":{"storageId":"…","created":true}}` / the error shape.
+pub fn parse_connect_reply(reply: str) -> ConnectReply {
+    let r = JsonReader::of(reply);
+    r.begin_object();
+    let ok = false;
+    let have_ok = false;
+    let message = "";
+    let storage_id = "";
+    let created = false;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "ok") {
+            ok = r.read_bool();
+            have_ok = true;
+        } else if (k == "error") {
+            let v = r.read_str();
+            if (!r.failed()) {
+                message = v;
+            }
+        } else if (k == "result") {
+            r.begin_object();
+            while (r.more()) {
+                let rk = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (rk == "storageId") {
+                    let v = r.read_str();
+                    if (!r.failed()) {
+                        storage_id = v;
+                    }
+                } else if (rk == "created") {
+                    created = r.read_bool();
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (!have_ok) {
+        return ConnectReply { ok: false, message: "后台未响应", storage_id: "", created: false };
+    }
+    return ConnectReply { ok: ok, message: message, storage_id: storage_id, created: created };
+}

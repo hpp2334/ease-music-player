@@ -1,0 +1,29 @@
+[package]
+name = "ease-client-migration"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+publish = false
+
+[lib]
+
+[dependencies]
+ease-client-schema = { workspace = true }
+redb = { workspace = true }
+bitcode = { workspace = true }
+postcard = { workspace = true }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+libsqlite3-sys = { workspace = true }
+# Direct dep only for `map_sqlx_sqlite_opts` (journal_mode / busy_timeout
+# configuration in `open_database`); version-unified with sea-orm's sqlx.
+sqlx = { version = "0.8", default-features = false, features = ["sqlite"] }
+async-trait = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

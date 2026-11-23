@@ -1,0 +1,98 @@
+// Lyric Formats — the app's entire lyric parsing as a headless rut
+// backend (apiVersion 3, the emp epoch; a faithful port of the JS
+// epoch's src/backend.ts + src/parsers.ts — there is no built-in parser
+// host-side). One `lyric:parse` host-RPC op serves every
+// `contributions.lyricParsers` entry of this manifest; the host
+// (rust-libs/ease-client-backend services/lyrics) resolves candidate
+// parsers per file extension, ships the content over the RPC BINARY
+// lane, and falls through to the next parser on a `nil` answer, an
+// error trap or a timeout.
+//
+// The binary lane's framing (raw bytes, no base64 anywhere — phase 5):
+//
+//   <JSON header>\n<content bytes>
+//
+// The header is one compact JSON object (`{"parserId":"lrc","fileName":
+// "song.lrc"}` — its string values never contain a literal newline, so
+// the FIRST \n byte ends it); the content is the raw lyric bytes. The
+// handler decodes the whole payload lossily as UTF-8 and splits at the
+// first newline (lyric formats are text; the ≤2 MiB cap is host-owned).
+//
+//   lyric:parse -> { lines: [{ timeMs, durationMs?, text }...],
+//                    metadata? } (raw UTF-8 bytes) | nil
+//
+// `nil` = "not mine / unrecognized content"; a trap = the plugin's own
+// failure. Both fall through host-side (the `{"ok":…}` envelope is
+// built HOST-side from the answer/trap — no envelope code in rut).
+//
+// This file is the pkg-tree root: the emp lifecycle (`start` constructs
+// the SDK services from the boot handle and binds the ops; the dispatch
+// entries are two-line forwards) plus the `mod` edges. The lexers live in
+// the sibling children:
+//
+//   parse.rut    the `lyric:parse` handler — framed args decode (raw,
+//                the op owns its schema), parserId dispatch (extension
+//                fallback)
+//   result.rut   the wire result shapes (`LyricLine` / `LyricResult`)
+//                + the `{lines, metadata}` payload writer + the sort
+//   text.rut     the shared char/text helpers (trim, index_of, line
+//                splitting, BOM, case mapping, extensions)
+//   timetags.rut the shared timestamp reader (`[hh:]mm:ss[,.]frac`)
+//   cue.rut      the subtitle cue machinery (timing lines, cue walk,
+//                markup stripping) shared by the two subtitle lexers
+//   lrc.rut      the LRC lexer (info tags, enhanced-word-tag stripping,
+//                same-time merge)
+//   srt.rut      the SRT lexer face
+//   vtt.rut      the WebVTT lexer face (header sniff + block keywords)
+//
+// Formats (hand-written, regex-free lexers — rut has no regex):
+//   - lrc      LRC (info tags pass through unapplied — `[offset:+500]`
+//              stays a verbatim string; enhanced-LRC word timings
+//              stripped from the text)
+//   - srt/vtt  SRT + WebVTT (cue start times, per-line durationMs from
+//              the cue end)
+//
+// All results are pre-sorted by time; the host clamps, rounds, caps
+// and sorts again (defensive on both sides).
+
+use emp::{ Rpc };
+use tur_host::clipboard::{ encode_utf8 };
+
+mod parse;
+mod result;
+mod text;
+mod timetags;
+mod cue;
+mod lrc;
+mod srt;
+mod vtt;
+
+// The parsers are pure — the JS backend kept no per-session state
+// either, so the boot body is only the bind (the boot law: no
+// Android-only rows, no network — `Rpc(cx)` construction stores the
+// handle, nothing more).
+entry fn start(cx: opaque) {
+    const rpc = Rpc(cx);
+    // the binary lane: the framed payload (header JSON + newline + raw
+    // content bytes) rides raw — the handler decodes its own framing.
+    rpc.bind_bin("lyric:parse", fn (args: bytes) -> ?bytes {
+        return parse::lyric_parse_bin(args);
+    });
+    // the new contract's boot shape: no answer — the identity rode the
+    // cx lane, not a return
+}
+
+// The str dispatch entry — declared once per backend, a two-line forward
+// over the bind table. (This plugin serves no str ops today; the entry
+// exists because the host's capability probe + event dispatch address
+// it, and it keeps the bind-table proof complete.)
+entry fn rpc(cx: opaque, op: str, args: str) -> ?str {
+    const rpc = Rpc(cx);
+    return rpc.dispatch(op, args);
+}
+
+// The binary dispatch entry — the twin forward over the bin keys.
+entry fn rpc_bin(cx: opaque, op: str, args: bytes) -> ?bytes {
+    const rpc = Rpc(cx);
+    return rpc.dispatch_bin(op, args);
+}

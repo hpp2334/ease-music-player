@@ -1,0 +1,160 @@
+// view/actions.rut — the view's non-visual helpers: the edit-mode kv
+// hydration (the `storage:<id>` document in the plugin's `Db`), the
+// connect button's args builder, the host-built reply-envelope parser,
+// and the trim. The struct names stay module-private — callers consume
+// the values (`.alias`, `.ok`, `.fired`) without spelling the types.
+
+use emp::{ Context, Db };
+use json::{ JsonReader, JsonWriter };
+use tur_kit::handles::{ TextCtrl };
+use tur_kit::reactive::{ MutationCtx, Source };
+
+/// Per-instance config (the `storage:<id>` KV document; `secret_id` 0 =
+/// none).
+struct StoredConfig {
+    alias: str,
+    secret_id: i64,
+}
+
+/// Edit-mode hydration: read the kv config and prefill the controller +
+/// the preserved secretId. A corrupt/missing document leaves everything
+/// blank (the alias defaults to the instance name at the backend).
+pub fn hydrate_fields(ctx: MutationCtx, context: Context, db: Db, alias: TextCtrl, existing_secret: Source<i64>) {
+    let sid = context.storage_id();
+    if (sid == nil) {
+        return;
+    }
+    let s: str = sid;
+    let raw = db.get(f"storage:{s}");
+    if (raw == nil) {
+        return;
+    }
+    let doc: str = raw;
+    let cfg = decode_config(doc);
+    if (cfg == nil) {
+        return;
+    }
+    let c: StoredConfig = cfg;
+    alias.set_text(c.alias);
+    ctx.set<i64>(existing_secret, c.secret_id);
+}
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?StoredConfig {
+    let r = JsonReader::of(doc);
+    r.begin_object();
+    let alias = "";
+    let secret_id: i64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> {
+                let v = r.read_str();
+                if (r.failed()) { return nil; }
+                alias = v;
+            },
+            "secretId" -> {
+                if (!r.try_null()) {
+                    secret_id = r.read_i64();
+                }
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return StoredConfig { alias: alias, secret_id: secret_id };
+}
+
+/// The `onedrive:connect` op's args (`{alias}`).
+pub fn connect_args(alias: str) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("alias");
+    w.write_str(alias);
+    w.end_object();
+    return w.finish();
+}
+
+/// The `onedrive:connect` reply: `{"ok":true,"result":{"fired":…,"error":
+/// …}}` / the error shape (the envelope is built HOST-side from the
+/// handler's value/trap — the handler answered the raw `{fired, error}`).
+struct ConnectReply {
+    ok: bool,
+    message: str,
+    fired: bool,
+}
+
+pub fn parse_connect_reply(reply: str) -> ConnectReply {
+    let r = JsonReader::of(reply);
+    r.begin_object();
+    let ok = false;
+    let have_ok = false;
+    let message = "";
+    let fired = false;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        if (k == "ok") {
+            ok = r.read_bool();
+            have_ok = true;
+        } else if (k == "error") {
+            let v = r.read_str();
+            if (!r.failed()) {
+                message = v;
+            }
+        } else if (k == "result") {
+            r.begin_object();
+            while (r.more()) {
+                let rk = r.next_key();
+                if (r.failed()) {
+                    break;
+                }
+                if (rk == "fired") {
+                    fired = r.read_bool();
+                } else if (rk == "error") {
+                    let v = r.read_str();
+                    if (!r.failed()) {
+                        message = v;
+                    }
+                } else {
+                    r.skip_value();
+                }
+            }
+            r.end_object();
+        } else {
+            r.skip_value();
+        }
+    }
+    if (!have_ok) {
+        return ConnectReply { ok: false, message: "后台未响应", fired: false };
+    }
+    return ConnectReply { ok: ok, message: message, fired: fired };
+}
+
+pub fn trim(s: str) -> str {
+    let n = s.len();
+    let a = 0;
+    while (a < n && is_ws(s.code_at(a))) {
+        a += 1;
+    }
+    let b = n;
+    while (b > a && is_ws(s.code_at(b - 1))) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+fn is_ws(c: u32) -> bool {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}

@@ -1,0 +1,94 @@
+// OneDrive storage provider — the emp-SDK port of the apiVersion 2 rut
+// backend (`backend.rut`, itself the port of the apiVersion 1 TS
+// `src/backend.ts`). A headless backend serving the storage contract ops,
+// the OAuth host ops, and the `onedrive:connect` view op (the setup form's
+// connect button) over the bind-table RPC lane.
+//
+// Layout (the phase-4b pkg tree): this file is the ROOT — `entry fn
+// start(cx)` constructs the emp services FROM the boot handle and binds
+// every op to a plain fn (each decodes its OWN raw args); the dispatch
+// entry is the two-line forward over `Rpc.dispatch`. The implementation
+// mounts as siblings:
+//
+//   strutil   — pure string scans + the URL/form encoders
+//   timeiso   — RFC 3339 timestamps → unix ms
+//   httpx     — the `net::fetch` core (reply envelope → GraphResp)
+//   config    — the per-instance KV document + refresh-token persistence
+//   tokens    — auth: the token endpoint, the KV token cache, the
+//               authorized Graph call (the TS `withRetry` shape)
+//   listing   — the driveItem mapping + the @odata.nextLink walk
+//   streaming — the chunked-pull sessions (the pool rides the KV)
+//   ops       — the bound handlers (raw args in, raw payload out)
+//
+// Multi-instance: each configured OneDrive account is one *instance* named
+// `onedrive:<uuid>` (the storage row's `plugin_storage_id`). Per-instance
+// config lives in `Db` (this plugin's KV) under
+// `storage:<instance>` = JSON `{ alias, secretId }` (the exact key names the
+// TS wrote — legacy configs stay readable); the refresh token lives in
+// `Secret` under that `secretId`. Identity rides the op payload
+// (`storageId`); multiple instances multiplex by it exactly as the TS did.
+//
+// Auth: the cached access token rides every Graph request; on a 401 the
+// refresh token is rotated once (`refresh_token` grant, persisted back to
+// the secret store) and the request retried. Error messages prefixed
+// `UNAUTHORIZED` / `TIMEOUT` are mapped by the host to typed errors
+// (`ease-js-storage`) — handlers TRAP with those heads.
+//
+// Boot law: `start` constructs the services (construction only stores the
+// handle) and binds the ops — no Android-only rows, no network, and the
+// new contract's start answers nothing.
+
+use emp::{ Context, Db, OAuth, Rpc, Secret };
+
+mod config;
+mod httpx;
+mod listing;
+mod ops;
+mod streaming;
+mod strutil;
+mod timeiso;
+mod tokens;
+
+// ---- start: construct from the handle, bind every op --------------------
+
+entry fn start(cx: opaque) {
+    const context = Context(cx);
+    const db = Db(cx);
+    const oauth = OAuth(cx);
+    const rpc = Rpc(cx);
+    const secret = Secret(cx);
+    rpc.bind("storage:list", fn (args: str) -> ?str {
+        return ops::storage_list(db, secret, args);
+    });
+    rpc.bind("storage:get", fn (args: str) -> ?str {
+        return ops::storage_get(db, secret, args);
+    });
+    rpc.bind("storage:get-chunk", fn (args: str) -> ?str {
+        return ops::storage_get_chunk(db, secret, args);
+    });
+    rpc.bind("storage:release", fn (args: str) -> ?str {
+        return ops::storage_release(db, args);
+    });
+    rpc.bind("storage:removeInstance", fn (args: str) -> ?str {
+        return ops::storage_remove_instance(db, secret, context, args);
+    });
+    rpc.bind("oauth:url", fn (args: str) -> ?str {
+        return ops::oauth_url(args);
+    });
+    rpc.bind("oauth:exchange", fn (args: str) -> ?str {
+        return ops::oauth_exchange(db, secret, args);
+    });
+    rpc.bind("onedrive:connect", fn (args: str) -> ?str {
+        return ops::onedrive_connect(oauth, db, args);
+    });
+}
+
+// ---- the dispatch entry (declared once per backend) ----------------------
+//
+// This backend serves no binary ops (chunk data rides the str lane
+// base64-encoded), so there is no `rpc_bin` twin.
+
+entry fn rpc(cx: opaque, op: str, args: str) -> ?str {
+    const rpc = Rpc(cx);
+    return rpc.dispatch(op, args);
+}

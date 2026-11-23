@@ -1,0 +1,179 @@
+// backend/sigv4.rut — AWS Signature Version 4 (the sigv4.ts port), over
+// the 3rd-party `crypto` + `time` libs: `crypto::sha256` hashes the
+// canonical request, `crypto::hmac_sha256` rides the signing-key chain
+// (each hex output is decoded back to bytes for the next HMAC round), and
+// `time::amz_date` stamps `x-amz-date`. Every request this plugin signs is
+// a bodyless GET, so the payload hash is the empty-string SHA-256
+// constant; the signed header set is
+// `host[;range];x-amz-content-sha256;x-amz-date`. The canonical URI/query
+// strings are built once and reused byte-for-byte in both the URL and the
+// canonical request (the TS invariant). The `host` header is signed but
+// never sent — the net layer derives it from the URL, so its value is the
+// URL authority after default-port normalization.
+//
+// All inputs are primitives (endpoint/region/bucket/keys as str) — the
+// config document never crosses a module edge; endpoint normalization
+// runs here, once per signed request.
+
+use crypto::{ hmac_sha256, sha256 };
+use endpoint::{ canonical_uri, normalize_endpoint, s3_encode };
+use json::{ JsonWriter };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+use strutil::{ hex_decode, str_less };
+use time::{ amz_date, now };
+use tur_host::clipboard::{ encode_utf8 };
+
+/// SHA-256 of the empty payload — every request this plugin signs is a
+/// bodyless GET.
+let EMPTY_PAYLOAD_SHA256: str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+let ALGORITHM: str = "AWS4-HMAC-SHA256";
+let AMZ_TERMINATOR: str = "aws4_request";
+let S3_SERVICE: str = "s3";
+
+/// Sort the query params by key (then value) in place — insertion sort, the
+/// param sets here are tiny.
+fn sort_query(keys: Vec<str>, vals: Vec<str>) {
+    let n = keys.len;
+    let i = 1;
+    while (i < n) {
+        let kk = keys[i];
+        let kv = vals[i];
+        let j = i - 1;
+        while (j >= 0 && query_less(kk, kv, keys[j], vals[j])) {
+            keys[j + 1] = keys[j];
+            vals[j + 1] = vals[j];
+            j -= 1;
+        }
+        keys[j + 1] = kk;
+        vals[j + 1] = kv;
+        i += 1;
+    }
+}
+
+fn query_less(k1: str, v1: str, k2: str, v2: str) -> bool {
+    if (k1 == k2) {
+        return str_less(v1, v2);
+    }
+    return str_less(k1, k2);
+}
+
+/// Canonical query string: params sorted by key (then value), strictly
+/// encoded, joined `k=v` with `&`. The SAME string doubles as the request
+/// URL's query — servers don't care about order, the signature does.
+fn canonical_query(keys: Vec<str>, vals: Vec<str>) -> str {
+    sort_query(keys, vals);
+    let b = StringBuilder::with_cap(64);
+    let n = keys.len;
+    let i = 0;
+    while (i < n) {
+        if (i > 0) {
+            b.append("&");
+        }
+        b.append(f"{s3_encode(keys[i], false)}={s3_encode(vals[i], false)}");
+        i += 1;
+    }
+    return b.build();
+}
+
+/// SigV4 signing key: the HMAC chain over date / region / service /
+/// terminator (each hex answer decoded back to the raw key bytes).
+fn derive_signing_key(secret_key: str, date_stamp: str, region: str) -> bytes {
+    let k1 = hex_decode(hmac_sha256(encode_utf8(f"AWS4{secret_key}"), encode_utf8(date_stamp)));
+    let k2 = hex_decode(hmac_sha256(k1, encode_utf8(region)));
+    let k3 = hex_decode(hmac_sha256(k2, encode_utf8(S3_SERVICE)));
+    return hex_decode(hmac_sha256(k3, encode_utf8(AMZ_TERMINATOR)));
+}
+
+/// Build the URL + the `net::fetch` opts for one signed bodyless GET.
+/// `range` ("" = not ranged) joins the signed header set AND the wire set;
+/// `host` is signed but never sent (the net layer derives it from the URL).
+/// Nil on a garbage endpoint.
+pub fn build_signed_request(endpoint: str, region_in: str, bucket: str, access_key_id: str, secret_key: str, key: str, qk: Vec<str>, qv: Vec<str>, range: str) -> ?str {
+    let nep = normalize_endpoint(endpoint);
+    if (nep == nil) {
+        return nil;
+    }
+    let ep: endpoint::Endpoint = nep;
+    let uri = canonical_uri(ep, bucket, key);
+    let query = canonical_query(qk, qv);
+    let ms = now();
+    let amz_date_v = amz_date(ms);
+    let date_stamp = amz_date_v.slice(0, 8);
+    let region = region_in;
+    if (region == "") {
+        // defensive default — every caller passes a defaulted region, this
+        // only catches a blank riding a legacy session slot
+        region = "us-east-1";
+    }
+
+    // Canonical headers in sorted (lowercase) name order — the signed set is
+    // exactly host [+ range] + x-amz-content-sha256 + x-amz-date. The
+    // spec's trimall is a no-op here: every value is synthesized clean.
+    let cr = StringBuilder::with_cap(512);
+    cr.append("GET\n");
+    cr.append(uri);
+    cr.append("\n");
+    cr.append(query);
+    cr.append("\n");
+    cr.append(f"host:{ep.host}\n");
+    if (range != "") {
+        cr.append(f"range:{range}\n");
+    }
+    cr.append(f"x-amz-content-sha256:{EMPTY_PAYLOAD_SHA256}\n");
+    cr.append(f"x-amz-date:{amz_date_v}\n");
+    let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+    if (range != "") {
+        signed_headers = "host;range;x-amz-content-sha256;x-amz-date";
+    }
+    cr.append("\n");
+    cr.append(signed_headers);
+    cr.append("\n");
+    cr.append(EMPTY_PAYLOAD_SHA256);
+    let canonical_request = cr.build();
+
+    // String to sign (step 2).
+    let hashed = sha256(encode_utf8(canonical_request));
+    let sts = StringBuilder::with_cap(256);
+    sts.append(ALGORITHM);
+    sts.append("\n");
+    sts.append(amz_date_v);
+    sts.append("\n");
+    sts.append(f"{date_stamp}/{region}/{S3_SERVICE}/{AMZ_TERMINATOR}");
+    sts.append("\n");
+    sts.append(hashed);
+
+    // Steps 3–5: sign and assemble the Authorization header.
+    let signing_key = derive_signing_key(secret_key, date_stamp, region);
+    let signature = hmac_sha256(signing_key, encode_utf8(sts.build()));
+    let authorization = f"{ALGORITHM} Credential={access_key_id}/{date_stamp}/{region}/{S3_SERVICE}/{AMZ_TERMINATOR}, SignedHeaders={signed_headers}, Signature={signature}";
+
+    let url = f"{ep.origin}{uri}";
+    if (query != "") {
+        url = f"{url}?{query}";
+    }
+
+    // Wire headers: signed names are lowercase per the SigV4 spec, but
+    // `Range` goes out in conventional casing.
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("url");
+    w.write_str(url);
+    w.key("method");
+    w.write_str("GET");
+    w.key("headers");
+    w.begin_object();
+    w.key("x-amz-content-sha256");
+    w.write_str(EMPTY_PAYLOAD_SHA256);
+    w.key("x-amz-date");
+    w.write_str(amz_date_v);
+    w.key("Authorization");
+    w.write_str(authorization);
+    if (range != "") {
+        w.key("Range");
+        w.write_str(range);
+    }
+    w.end_object();
+    w.end_object();
+    return w.finish();
+}

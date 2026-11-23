@@ -1,0 +1,102 @@
+// view/form.rut — the setup form's visual pieces + the static palette
+// (0xRRGGBBAA — the kit's packing law). All colors live here; the root
+// consumes the pieces (`field_label` / `alias_field` / `primary_button` /
+// `status_area` / `card_panel`) and never spells a color.
+
+use tur_kit::control_flow::control::{ Condition };
+use tur_kit::flags::{ BorderPosition };
+use tur_kit::gesture::pointer::{ PointerInteract };
+use tur_kit::handles::{ TextCtrl, UndoCtrl, View };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::reactive::{ Mutation, MutationCtx, Readable, sv };
+use tur_kit::text::core::{ Text };
+use tur_kit::text::input::{ Input };
+
+let PRIMARY: u64 = 0x4F46E5FFu64;
+let CARD: u64 = 0xFFFFFFFFu64;
+let TEXT: u64 = 0xFF1E293Bu64;
+let TEXT_MUTED: u64 = 0xFF64748Bu64;
+let DIVIDER: u64 = 0xFFE2E8F0u64;
+let ERROR: u64 = 0xFFDC2626u64;
+
+/// The card surface around the form (the palette stays in this file).
+pub fn card_panel(form: View) -> View {
+    return Container()
+        .color(sv(CARD))
+        .padding(4.0)
+        .child(form)
+        .build();
+}
+
+pub fn field_label(text: str) -> View {
+    return Text()
+        .text(sv(text))
+        .font_size(13.0)
+        .color(TEXT_MUTED)
+        .build();
+}
+
+pub fn alias_field(ctrl: TextCtrl, undo: UndoCtrl) -> View {
+    let input = Input()
+        .controller(ctrl)
+        .undo(undo)
+        .placeholder(sv("OneDrive"))
+        .font_size(15.0)
+        .color(TEXT)
+        .cursor_color(PRIMARY)
+        .width_height(0.0, 22.0)
+        .build();
+    return Container()
+        .color(sv(CARD))
+        .border(DIVIDER, 1.0, BorderPosition::Inside)
+        .radius(sv(12.0f64))
+        .padding(10.0)
+        .child(input)
+        .build();
+}
+
+pub fn primary_button(key: str, label: str, cb: Mutation<nil>) -> View {
+    let face = Container()
+        .radius(sv(24.0f64))
+        .padding(14.0)
+        .color(sv(PRIMARY))
+        .child(
+            Text()
+                .text(sv(label))
+                .font_size(15.0)
+                .color(0xFFFFFFFFu64)
+                .build(),
+        )
+        .build();
+    return PointerInteract()
+        .on_click(cb)
+        .query_key(key)
+        .child(face)
+        .build();
+}
+
+/// The status line: the message rides its source, the tint swaps on
+/// `status_is_error` (Text.color is a static lane).
+pub fn status_area(status_text: Readable<str>, status_visible: Readable<bool>, status_is_error: Readable<bool>) -> View {
+    let err = Text()
+        .text(status_text)
+        .font_size(13.0)
+        .color(ERROR)
+        .query_key("onedrive-status")
+        .build();
+    let muted = Text()
+        .text(status_text)
+        .font_size(13.0)
+        .color(TEXT_MUTED)
+        .query_key("onedrive-status")
+        .build();
+    return Condition(status_visible)
+        .then(
+            Condition(status_is_error)
+                .then(err)
+                .else_branch(muted)
+                .build(),
+        )
+        .else_branch(SizedBox(0.0, 0.0).build())
+        .build();
+}

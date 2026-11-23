@@ -1,0 +1,253 @@
+// backend/listing.rut — storage:list's implementation: the children walk
+// with `@odata.nextLink` paging, the driveItem → entry mapping, and the
+// dirs-first path sort.
+//
+// The listing walk's context: the requested dir (trailing slashes
+// stripped — entry paths build against it) and the collected rows. Rows
+// carry a sort prefix (`d|<path>|` / `f|<path>|` with `\u{1}`
+// separators) ahead of their encoded JSON object — the sort is a plain
+// str ordering (dirs first, then by path, the TS ordering), and the tail
+// is the final JSON. (A `Vec` of user structs does not verify on this
+// pin — rows ride as strings.)
+
+use emp::{ Db, Secret };
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+use strutil::{ encode_graph_path, ends_with, find_from, read_opt_str, str_less };
+use timeiso::{ parse_iso_date };
+use tokens::{ graph_call };
+use tur_host::clipboard::{ decode_utf8 };
+
+// the Graph API base (the same literal as tokens.rut — rut lets don't
+// cross modules)
+let ONEDRIVE_ROOT_API: str = "https://graph.microsoft.com/v1.0/me/drive";
+
+struct ListCx {
+    dir_trimmed: str,
+    rows: Vec<str>,
+}
+
+fn compute_list_url(dir: str) -> str {
+    if (dir == "/" || dir == "") {
+        return f"{ONEDRIVE_ROOT_API}/root/children";
+    }
+    return f"{ONEDRIVE_ROOT_API}/root:{encode_graph_path(dir)}:/children";
+}
+
+/// The listing: the result JSON array (dirs first, then by path), trapping
+/// with the marked error on any failure. Follows `@odata.nextLink` until
+/// exhausted.
+pub fn list_impl(db: Db, secret: Secret, instance: str, dir: str) -> str {
+    let url = compute_list_url(dir);
+    let base = dir;
+    while (ends_with(base, "/")) {
+        base = base.slice(0, base.len() - 1);
+    }
+    let cx = ListCx { dir_trimmed: base, rows: Vec<str>::new() };
+    let more = true;
+    while (more) {
+        let resp = graph_call(db, secret, instance, "GET", url, nil, nil);
+        if (resp.failed) {
+            panic(resp.err);
+        }
+        let text = decode_utf8(resp.body);
+        let page = decode_page(text, cx);
+        if (!page.0) {
+            panic("onedrive: unparsable listing response");
+        }
+        if (page.1 == nil) {
+            more = false;
+        } else {
+            let nx: str = page.1;
+            url = nx;
+        }
+    }
+    return render_entries(cx);
+}
+
+/// Decode one listing page into `cx`; `(ok, nextLink)` — ok false on any
+/// malformed shape.
+fn decode_page(text: str, cx: ListCx) -> (bool, ?str) {
+    let r = JsonReader::of(text);
+    r.begin_object();
+    let next: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return (false, nil);
+        }
+        if (k == "@odata.nextLink") {
+            next = read_opt_str(r);
+            if (r.failed()) {
+                return (false, nil);
+            }
+        } else if (k == "value") {
+            r.begin_array();
+            while (r.more()) {
+                decode_item(r, cx);
+                if (r.failed()) {
+                    return (false, nil);
+                }
+            }
+            r.end_array();
+            if (r.failed()) {
+                return (false, nil);
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return (false, nil);
+    }
+    return (true, next);
+}
+
+/// One driveItem of the `value` array: name + file/folder facet + the two
+/// timestamps. Items with no name or no facet are skipped (the TS pushed
+/// `undefined` names / dropped non-file non-folder items).
+fn decode_item(r: JsonReader, cx: ListCx) {
+    let name: ?str = nil;
+    let is_dir = false;
+    let is_file = false;
+    let size: i64 = -1;
+    let created: u64 = 0;
+    let modified: u64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        when (k) {
+            "name" -> {
+                let v = r.read_str();
+                if (r.failed()) { return; }
+                name = v;
+            },
+            "size" -> { size = r.read_i64(); },
+            "file" -> {
+                if (!r.try_null()) {
+                    is_file = true;
+                    r.skip_value();
+                }
+            },
+            "folder" -> {
+                if (!r.try_null()) {
+                    is_dir = true;
+                    r.skip_value();
+                }
+            },
+            "createdDateTime" -> { created = iso_field(r); },
+            "lastModifiedDateTime" -> { modified = iso_field(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return;
+    }
+    if (name == nil || (!is_file && !is_dir)) {
+        return;
+    }
+    let nm: str = name;
+    push_entry(cx, nm, is_dir, size, created, modified);
+}
+
+/// An RFC 3339 timestamp field: absent/null → 0, else parsed (0 on junk).
+fn iso_field(r: JsonReader) -> u64 {
+    let v = read_opt_str(r);
+    if (r.failed()) {
+        return 0;
+    }
+    if (v == nil) {
+        return 0;
+    }
+    let s: str = v;
+    return parse_iso_date(s);
+}
+
+/// Convert one driveItem to the sortable row (files carry `size`, both
+/// facets carry the timestamps when present).
+fn push_entry(cx: ListCx, name: str, is_dir: bool, size: i64, created: u64, modified: u64) {
+    let path = f"/{name}";
+    if (cx.dir_trimmed != "") {
+        path = f"{cx.dir_trimmed}/{name}";
+    }
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("name");
+    w.write_str(name);
+    w.key("path");
+    w.write_str(path);
+    if (!is_dir && size >= 0) {
+        w.key("size");
+        w.write_i64(size);
+    }
+    w.key("isDir");
+    w.write_bool(is_dir);
+    if (created > 0) {
+        w.key("createdAt");
+        w.write_i64(created as i64);
+    }
+    if (modified > 0) {
+        w.key("modifiedAt");
+        w.write_i64(modified as i64);
+    }
+    w.end_object();
+    let flag = "f";
+    if (is_dir) {
+        flag = "d";
+    }
+    // the \u{1} separators never occur in item names
+    let sep = str::from_code(1);
+    cx.rows.push(f"{flag}{sep}{path}{sep}{w.finish()}");
+}
+
+/// Sort (the prefix does the ordering), strip the prefix, join the JSON
+/// objects into the result array.
+fn render_entries(cx: ListCx) -> str {
+    let rows = cx.rows;
+    sort_rows(rows);
+    let out = StringBuilder::with_cap(256);
+    out.append("[");
+    let first = true;
+    for (let row of rows) {
+        if (!first) {
+            out.append(",");
+        }
+        first = false;
+        out.append(row_json(row));
+    }
+    out.append("]");
+    return out.build();
+}
+
+/// Dirs first, then by path — the row's sort prefix makes this a plain str
+/// ordering (insertion sort; listings are small).
+fn sort_rows(rows: Vec<str>) {
+    let n = rows.len;
+    let i = 1;
+    while (i < n) {
+        let key = rows[i];
+        let j = i - 1;
+        while (j >= 0 && str_less(key, rows[j])) {
+            rows[j + 1] = rows[j];
+            j -= 1;
+        }
+        rows[j + 1] = key;
+        i += 1;
+    }
+}
+
+/// The row's JSON tail (everything past the second `\u{1}` separator).
+fn row_json(row: str) -> str {
+    let sep1 = find_from(row, 0, 1);
+    let sep2 = find_from(row, sep1 + 1, 1);
+    return row.slice(sep2 + 1, row.len());
+}

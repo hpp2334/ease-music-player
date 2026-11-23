@@ -1,0 +1,178 @@
+// emp_rpc_fixture.rut — the phase-3 bind-table contract in its plan shape:
+// `entry fn start(cx)` constructs the SDK services FROM the boot handle,
+// binds the contract ops to plain fns (each decodes its OWN args), and the
+// module declares the two dispatch entries as two-line forwards. Served
+// through `RpcClient`'s bind-table lane (and `JsStorageBackend`'s chunked
+// pull) by `emp_rpc.rs`.
+//
+// The module state rides `Db` — the host-backed KV (the new contract has
+// no start-answer ctx to stash a record in; state lives behind the
+// service handles).
+
+use emp::{ Db, Rpc };
+use json::{ JsonReader, JsonWriter };
+
+// the fixture's one file, as module literals (load-time expressions only)
+let PAYLOAD_B64: str = "aGVsbG8gd29ybGQh";
+let SIZE: u64 = 12;
+
+// ---- start: construct from the handle, bind every op --------------------
+
+entry fn start(cx: opaque) {
+    const db = Db(cx);
+    const rpc = Rpc(cx);
+    rpc.bind("storage:list", fn (args: str) -> ?str {
+        return storage_list(db, args);
+    });
+    rpc.bind("storage:get", fn (args: str) -> ?str {
+        return storage_get(db, args);
+    });
+    rpc.bind("storage:get-chunk", fn (args: str) -> ?str {
+        return storage_get_chunk(db, args);
+    });
+    rpc.bind("storage:release", fn (args: str) -> ?str {
+        return storage_release(db, args);
+    });
+    // the trap law: the panic message keeps its prefix (the host's
+    // envelope error arm reads the head)
+    rpc.bind("fail:unauthorized", fn (args: str) -> ?str {
+        return fail_unauthorized(db, args);
+    });
+    // the binary lane: raw bytes through — the lyric dispatch's shape
+    rpc.bind_bin("lyric:parse", fn (args: bytes) -> ?bytes {
+        return lyric_parse(db, args);
+    });
+    rpc.bind_bin("lyric:parse:other", fn (args: bytes) -> ?bytes {
+        return lyric_not_mine(db, args);
+    });
+    // events ride the same bind table (the host dispatches `event:<type>`)
+    rpc.subscribe("music:play", fn (payload: str) -> ?str {
+        return on_play(db, payload);
+    });
+    // readback for the event proof
+    rpc.bind("test:last-event", fn (args: str) -> ?str {
+        return last_event(db, args);
+    });
+    // the new contract's boot shape: no answer — the identity rode the
+    // cx lane, not the return
+}
+
+// ---- the plain fns -------------------------------------------------------
+
+fn storage_list(db: Db, args: str) -> ?str {
+    let _ = db;
+    let dir = read_str_field(args, "dir");
+    let w = JsonWriter::new();
+    w.write_raw(f"[{{\"name\":\"song.flac\",\"path\":\"{dir}/song.flac\",\"size\":{SIZE},\"isDir\":false}}]");
+    return w.finish();
+}
+
+// the range-ignoring opener: meta without dataOffset (defaults to the
+// requested offset on the host), sid 7 — the session id the chunk op
+// echoes back
+fn storage_get(db: Db, args: str) -> ?str {
+    let _ = db;
+    let _ = read_str_field(args, "path");
+    let w = JsonWriter::new();
+    w.write_raw(f"{{\"sid\":7,\"meta\":{{\"totalLength\":{SIZE},\"name\":\"song.flac\",\"contentType\":\"audio/flac\"}}}}");
+    return w.finish();
+}
+
+fn storage_get_chunk(db: Db, args: str) -> ?str {
+    let _ = db;
+    let sid = read_i64_field(args, "sid");
+    let _ = sid;
+    let w = JsonWriter::new();
+    w.write_raw(f"{{\"data\":\"{PAYLOAD_B64}\",\"eof\":true}}");
+    return w.finish();
+}
+
+fn storage_release(db: Db, args: str) -> ?str {
+    let _ = db;
+    let _ = read_i64_field(args, "sid");
+    return "true";
+}
+
+// the trap rides an `if`-wrapped module fn — a tail `panic(...)` statement
+// is the missing-return parse repro at this rut pin (report material
+// upstream)
+fn fail_unauthorized(db: Db, args: str) -> ?str {
+    let _ = db;
+    if (args != "") {
+        panic("UNAUTHORIZED: token expired");
+    }
+    return nil;
+}
+
+// the binary handler: the raw payload through (no base64 anywhere)
+fn lyric_parse(db: Db, args: bytes) -> ?bytes {
+    let _ = db;
+    if (args.len() == 0) {
+        return nil;
+    }
+    return args;
+}
+
+// nil = "not mine" — the lyric dispatch's fall-through arm
+fn lyric_not_mine(db: Db, args: bytes) -> ?bytes {
+    let _ = db;
+    let _ = args;
+    return nil;
+}
+
+// the event subscriber records the payload through the KV handle
+fn on_play(db: Db, payload: str) -> ?str {
+    db.set("last-event", payload);
+    return nil;
+}
+
+fn last_event(db: Db, args: str) -> ?str {
+    let _ = args;
+    return db.get("last-event");
+}
+
+// ---- the args decoders (raw args — the op owns its schema) ----------------
+
+fn read_str_field(args: str, want: str) -> str {
+    let r = JsonReader::of(args);
+    let out: str = "";
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (k == want) {
+            out = r.read_str();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    return out;
+}
+
+fn read_i64_field(args: str, want: str) -> i64 {
+    let r = JsonReader::of(args);
+    let out: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (k == want) {
+            out = r.read_i64();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    return out;
+}
+
+// ---- the dispatch entries (declared once per backend) ----------------------
+
+entry fn rpc(cx: opaque, op: str, args: str) -> ?str {
+    const rpc = Rpc(cx);
+    return rpc.dispatch(op, args);
+}
+
+entry fn rpc_bin(cx: opaque, op: str, args: bytes) -> ?bytes {
+    const rpc = Rpc(cx);
+    return rpc.dispatch_bin(op, args);
+}

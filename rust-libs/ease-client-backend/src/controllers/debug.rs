@@ -1,23 +1,26 @@
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     error::{BError, BResult},
     infra::logs_dir,
     Backend,
 };
 
-#[derive(uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ListLogFile {
-    name: String,
-    path: String,
+    pub name: String,
+    pub path: String,
 }
 
-#[derive(uniffi::Record)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ListLogFiles {
-    files: Vec<ListLogFile>,
+    pub files: Vec<ListLogFile>,
 }
 
-#[uniffi::export]
 pub fn cts_list_log_files(cx: Arc<Backend>) -> BResult<ListLogFiles> {
     let dir = std::fs::read_dir(logs_dir(&cx.arg.app_document_dir))?;
     let mut files = dir
@@ -36,21 +39,18 @@ pub fn cts_list_log_files(cx: Arc<Backend>) -> BResult<ListLogFiles> {
     Ok(ListLogFiles { files })
 }
 
-#[uniffi::export]
 pub fn cts_trigger_error(_cx: Arc<Backend>) -> BResult<()> {
     Err(BError::CustomError {
         message: "cts_trigger_error".to_string(),
     })
 }
 
-#[uniffi::export]
 pub async fn ct_trigger_error(_cx: Arc<Backend>) -> BResult<()> {
     Err(BError::CustomError {
         message: "ct_trigger_error".to_string(),
     })
 }
 
-#[uniffi::export]
 pub fn cts_trigger_panic(_cx: Arc<Backend>) -> BResult<()> {
     panic!("cts_trigger_panic");
 }

@@ -1,0 +1,90 @@
+// result.rut — the wire result shapes every lexer answers: one timed
+// line, one parser answer, the `{lines, metadata}` payload writer (the
+// RAW reply — the host builds the `{"ok":…}` envelope around it), and
+// the stable time sort.
+
+use json::{ JsonWriter };
+use pouch::{ Vec };
+
+// One result line. `duration_ms` is the optional per-line duration the
+// subtitle format carries (absent for LRC).
+pub struct LyricLine {
+    time_ms: i64,
+    duration_ms: ?i64,
+    text: str,
+}
+
+// One parser answer: the timed lines plus whatever info-tag values
+// mapped (all strings, pass-through — the host keeps `length` /
+// `offset` verbatim, exactly like the old Rust lrc-nom parser did).
+pub struct LyricResult {
+    lines: Vec<LyricLine>,
+    artist: ?str,
+    album: ?str,
+    title: ?str,
+    lyricist: ?str,
+    author: ?str,
+    length: ?str,
+    offset: ?str,
+}
+
+// The raw reply payload `{"lines":[…],"metadata":{…}}` — built over the
+// std writer (its string escaping is exactly RFC 8259; lyric text is
+// arbitrary). The metadata key is omitted when no tag mapped.
+pub fn write_result(res: LyricResult) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("lines");
+    w.begin_array();
+    for (let ln of res.lines) {
+        w.begin_object();
+        w.key("timeMs");
+        w.write_i64(ln.time_ms);
+        if (ln.duration_ms != nil) {
+            let d: i64 = ln.duration_ms;
+            w.key("durationMs");
+            w.write_i64(d);
+        }
+        w.key("text");
+        w.write_str(ln.text);
+        w.end_object();
+    }
+    w.end_array();
+    if (res.artist != nil || res.album != nil || res.title != nil || res.lyricist != nil || res.author != nil || res.length != nil || res.offset != nil) {
+        w.key("metadata");
+        w.begin_object();
+        if (res.artist != nil) { let v: str = res.artist; w.key("artist"); w.write_str(v); }
+        if (res.album != nil) { let v: str = res.album; w.key("album"); w.write_str(v); }
+        if (res.title != nil) { let v: str = res.title; w.key("title"); w.write_str(v); }
+        if (res.lyricist != nil) { let v: str = res.lyricist; w.key("lyricist"); w.write_str(v); }
+        if (res.author != nil) { let v: str = res.author; w.key("author"); w.write_str(v); }
+        if (res.length != nil) { let v: str = res.length; w.key("length"); w.write_str(v); }
+        if (res.offset != nil) { let v: str = res.offset; w.key("offset"); w.write_str(v); }
+        w.end_object();
+    }
+    w.end_object();
+    return w.finish();
+}
+
+// Stable insertion sort by start time — the JS `Array#sort` is stable,
+// and the same-time merge in `parse_lrc` relies on tied entries keeping
+// their file order. Lyric line counts are small; O(n^2) is fine.
+pub fn sort_lines(lines: Vec<LyricLine>) {
+    let n = lines.len;
+    let i: i32 = 1;
+    while (i < n) {
+        let key: LyricLine = lines[i];
+        let j: i32 = i - 1;
+        while (j >= 0) {
+            let cur: LyricLine = lines[j];
+            if (cur.time_ms > key.time_ms) {
+                lines[j + 1] = cur;
+                j -= 1;
+            } else {
+                break;
+            }
+        }
+        lines[j + 1] = key;
+        i += 1;
+    }
+}

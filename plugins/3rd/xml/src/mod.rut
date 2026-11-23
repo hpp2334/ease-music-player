@@ -1,0 +1,14 @@
+// xml/src/mod.rut — the XML→JSON decoder lib. Element shape:
+// `{"attrs…": …, "text": "…", "children": {tag: el | [el, …]}}`.
+// Namespace prefixes stay verbatim (the WebDAV plugins match
+// `D:multistatus` / `d:response` case-insensitively downstream).
+// `nil` = unparseable XML or invalid UTF-8.
+
+use xml_host::to_json;
+
+// decode an XML document (its UTF-8 octets) into the JSON tree string.
+// The wrapper is `parse` (rut has no `use … as` rename — the row's own
+// name stays host-internal).
+pub fn parse(data: bytes) -> ?str {
+    return to_json(data);
+}

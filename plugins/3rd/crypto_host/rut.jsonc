@@ -1,0 +1,10 @@
+{
+  // crypto_host — the Rust-backed half of the crypto lib (OS entropy,
+  // UUID v4, MD5, Base64, SHA-256, HMAC-SHA-256). A pure declaration
+  // surface: the bodies install in the embedder (the ease app's
+  // `plugin_runtime/third`), bound through this pkg scope with the
+  // scope-relative row names. The rows are identity-free — no handle,
+  // no plugin resolution anywhere.
+  "name": "crypto_host",
+  "type": "host"
+}

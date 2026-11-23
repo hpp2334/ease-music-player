@@ -1,0 +1,31 @@
+// net_host/src/mod.d.rut — the net lib's host rows. The bodies live in
+// the embedder (ease `plugin_runtime/third::net`), bound under this
+// scope with these exact names/signatures — the boot verifies the
+// join. `finish` is the ONE async row (the family expands at the
+// mount).
+
+// allocate a request task + start its drive (the drive rides the
+// embedder's async lane, never the calling worker); await via `finish`
+pub host fn request(opts: str) -> opaque;
+
+// await the drive; the body octets (empty on a transport failure)
+pub host async fn finish(task: opaque) -> bytes;
+
+// the blocking one-shot — the settled envelope in ONE call
+// (entry-fn-safe: the drive runs on the shared tokio runtime)
+pub host fn request_sync(opts: str) -> str;
+
+// the settled task's HTTP status (0 = transport failure)
+pub host fn status(task: opaque) -> u64;
+
+// the settled task's status line text
+pub host fn status_text(task: opaque) -> str;
+
+// the settled task's headers, lowercased names (JSON `{name: value}`)
+pub host fn headers(task: opaque) -> str;
+
+// the settled task's body octets (empty on a transport failure)
+pub host fn body(task: opaque) -> bytes;
+
+// the settled task's transport error ("" = none)
+pub host fn error(task: opaque) -> str;

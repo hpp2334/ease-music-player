@@ -1,0 +1,52 @@
+// net/src/mod.rut — the HTTP lib's rut face. `opts` JSON (both lanes):
+// `{ url: str, method?: str (default GET), headers?: {name: value},
+//  body?: {text} | {base64} }`.
+//
+// `fetch` answers the settled envelope in ONE call:
+// `{"status": u64, "statusText": str, "headers": {name: value},
+//   "body": <base64>, "error": str}` — `body` "" with `error` set on a
+// transport failure, status 0 reserved for the same. The `start` lane
+// mints the task opaque; the accessors read it after the drive
+// settles (`start` returns immediately — the drive rides the
+// embedder's async lane, never the calling worker).
+//
+// Wrapper names are the lib's API (rut has no `use … as` rename).
+
+use net_host::{ body, error, headers, request, request_sync, status, status_text };
+
+// the blocking one-shot — THE plugin-op lane (entry-fn-safe)
+pub fn fetch(opts: str) -> str {
+    return request_sync(opts);
+}
+
+// mint a request task and start its drive; read it back through the
+// accessors once settled (`error(t)` answers "" while in flight)
+pub fn start(opts: str) -> opaque {
+    return request(opts);
+}
+
+// the settled task's HTTP status (0 = transport failure)
+pub fn status_code(t: opaque) -> u64 {
+    return status(t);
+}
+
+// the settled task's status line text
+pub fn status_message(t: opaque) -> str {
+    return status_text(t);
+}
+
+// the settled task's headers, lowercased names: `{name: value}`
+pub fn header_map(t: opaque) -> str {
+    return headers(t);
+}
+
+// the settled task's body octets (empty on a transport failure — read
+// `error_of`)
+pub fn body_bytes(t: opaque) -> bytes {
+    return body(t);
+}
+
+// the settled task's transport error ("" = none)
+pub fn error_of(t: opaque) -> str {
+    return error(t);
+}

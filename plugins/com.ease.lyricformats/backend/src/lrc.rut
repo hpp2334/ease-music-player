@@ -1,0 +1,172 @@
+// lrc.rut — the LRC lexer: consecutive leading `[..]` tags per line,
+// timed entries (every leading timestamp tag seeds one entry; a literal
+// `\n` escape becomes a real line break), info tags mapped pass-through
+// (`[offset:+500]` stays a verbatim string), enhanced-LRC word timings
+// stripped, entries sharing a start time merged into one multi-line
+// entry.
+
+use pouch::{ Vec };
+use result::{ LyricLine, LyricResult, sort_lines };
+use strbuild::{ StringBuilder };
+use text::{ index_of, last_index_of, replace_all, split_lines, strip_bom, trim };
+use timetags::{ parse_timestamp };
+
+// Lexer: consecutive `[inner]` groups from the start of a line.
+fn take_leading_tags(line: str) -> (Vec<str>, str) {
+    let tags = Vec<str>::new();
+    let rest = line;
+    while (rest.starts_with(0, "[")) {
+        let close = index_of(rest, 0x5D, 0);
+        if (close < 0) {
+            break; // unclosed bracket — not a tag
+        }
+        tags.push(rest.slice(1, close));
+        rest = rest.slice(close + 1, rest.len());
+    }
+    return (tags, rest);
+}
+
+// Strip enhanced-LRC word timings from line text: the A2 extension
+// `<mm:ss.xx> word` and the Foobar2000 `[mm:ss.xx] word` shape. Bracket
+// groups whose content is not a timestamp pass through verbatim.
+fn strip_word_tags(text: str) -> str {
+    let b = StringBuilder::with_cap(text.len());
+    let n = text.len();
+    let i: i32 = 0;
+    while (i < n) {
+        let c = text.code_at(i) as i32;
+        if (c == 0x3C || c == 0x5B) {
+            let close: i32 = if (c == 0x3C) { 0x3E } else { 0x5D };
+            let end = index_of(text, close, i + 1);
+            if (end > i + 1 && parse_timestamp(text.slice(i + 1, end)) != nil) {
+                i = end + 1;
+                continue;
+            }
+        }
+        b.append(text.slice(i, i + 1));
+        i += 1;
+    }
+    return b.build();
+}
+
+pub fn parse_lrc(text: str) -> ?LyricResult {
+    let artist: ?str = nil;
+    let album: ?str = nil;
+    let title: ?str = nil;
+    let lyricist: ?str = nil;
+    let author: ?str = nil;
+    let length: ?str = nil;
+    let offset: ?str = nil;
+    let lines = Vec<LyricLine>::new();
+    let rows = split_lines(strip_bom(text));
+    for (let raw_line of rows) {
+        let line = trim(raw_line);
+        if (line.len() == 0) {
+            continue;
+        }
+        let (tags, rest) = take_leading_tags(line);
+        if (tags.len == 0) {
+            continue; // untagged line — lenient skip
+        }
+        let first: str = tags[0];
+        if (parse_timestamp(first) != nil) {
+            // Timed line: every leading tag is a timestamp candidate,
+            // each seeding one entry that carries the word-tag-stripped
+            // text. A literal `\n` escape becomes a real line break —
+            // one entry then renders as several stacked lines — and an
+            // entry that is empty after unescaping (escape-only text)
+            // is dropped.
+            let line_text = trim(replace_all(strip_word_tags(rest), "\\n", "\n"));
+            if (line_text.len() == 0) {
+                continue;
+            }
+            for (let tag of tags) {
+                let t: str = tag;
+                let ms = parse_timestamp(t);
+                if (ms != nil) {
+                    let v: i64 = ms;
+                    lines.push(LyricLine { time_ms: v, duration_ms: nil, text: line_text });
+                }
+            }
+            continue;
+        }
+        // Info line: `[key:value]` — the first tag decides, one per line.
+        let colon = index_of(first, 0x3A, 0);
+        if (colon < 0) {
+            continue; // e.g. `[00]` — not valid info either
+        }
+        let key = trim(first.slice(0, colon));
+        let value = trim(first.slice(colon + 1, first.len()));
+        if (key.len() == 0 && value.len() == 0) {
+            continue; // `[:]` comment
+        }
+        // LRC info-tag key -> contract metadata key (`length` / `offset`
+        // pass through verbatim); unrecognized tags are ignored.
+        if (key == "ar") {
+            artist = value;
+        } else if (key == "al") {
+            album = value;
+        } else if (key == "ti") {
+            title = value;
+        } else if (key == "au") {
+            lyricist = value;
+        } else if (key == "by") {
+            author = value;
+        } else if (key == "length") {
+            length = value;
+        } else if (key == "offset") {
+            offset = value;
+        }
+    }
+    if (lines.len == 0) {
+        return nil; // nothing timed parsed — "not mine"
+    }
+    sort_lines(lines);
+    return LyricResult {
+        lines: merge_same_time(lines),
+        artist: artist,
+        album: album,
+        title: title,
+        lyricist: lyricist,
+        author: author,
+        length: length,
+        offset: offset,
+    };
+}
+
+// Merge sorted entries sharing a start time into one multi-line entry —
+// LRC files commonly repeat a time tag for the original line plus its
+// translation, and the lyric pane scrolls/highlights per entry. Text
+// identical to the previous sub-line collapses, so a duplicated tag
+// (`[00:12.00][00:12.00]chorus`, or the same line listed twice) never
+// renders the same line twice.
+fn merge_same_time(lines: Vec<LyricLine>) -> Vec<LyricLine> {
+    let out = Vec<LyricLine>::new();
+    for (let line of lines) {
+        let n = out.len;
+        let merged = false;
+        if (n > 0) {
+            let last: LyricLine = out[n - 1];
+            if (last.time_ms == line.time_ms) {
+                // the previous entry's last sub-line (after the final \n)
+                let brk = last_index_of(last.text, 0x0A);
+                let last_sub = last.text;
+                if (brk >= 0) {
+                    last_sub = last.text.slice(brk + 1, last.text.len());
+                }
+                if (last_sub != line.text) {
+                    out[n - 1] = LyricLine {
+                        time_ms: last.time_ms,
+                        duration_ms: last.duration_ms,
+                        text: f"{last.text}\n{line.text}",
+                    };
+                }
+                merged = true;
+            }
+        }
+        if (!merged) {
+            out.push(LyricLine { time_ms: line.time_ms, duration_ms: line.duration_ms, text: line.text });
+        }
+    }
+    return out;
+}

@@ -1,0 +1,11 @@
+# Build artifacts (also covered by the root **/target rule, but be explicit).
+/target/
+
+# Cargo lockfile — this is a library; downstream apps generate their own.
+# Flip this if cantode ever grows a binary target.
+Cargo.lock
+
+# Real-audio test samples are network-fetched on demand by maintainers; do
+# not commit them to the repo. The tests under tests/real_files.rs skip
+# cleanly when a sample is absent.
+/tests/samples/

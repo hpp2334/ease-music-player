@@ -1,0 +1,61 @@
+// days.rut — the UTC day-key calendar (`plays:YYYY-MM-DD`), the bucket
+// every backend module shares by path and the view tree keeps its own
+// twin of (separate module trees — backend and view — don't share fns;
+// keep view/stats.rut's copy in sync). rut has no timezone row: the TS
+// epoch's device-local buckets are re-keyed to UTC by repair.rut, and
+// everything here is pure integer calendar math.
+
+use time::{ now };
+
+/// The UTC day key a millisecond timestamp falls in.
+pub fn day_key_from_ms(ms: i64) -> str {
+    let days = floordiv(ms, 86400000i64);
+    let ymd = civil_from_days(days);
+    let y = ymd.0;
+    let mo = ymd.1;
+    let d = ymd.2;
+    return f"plays:{y}-{pad2(mo)}-{pad2(d)}";
+}
+
+/// The day key `offset` days before now (0 = today).
+pub fn day_key_offset(offset: i64) -> str {
+    let now = now() as i64;
+    return day_key_from_ms(now - offset * 86400000i64);
+}
+
+fn pad2(n: i64) -> str {
+    if (n < 10i64) {
+        return f"0{n}";
+    }
+    return f"{n}";
+}
+
+fn floordiv(a: i64, b: i64) -> i64 {
+    let q = a / b;
+    if (a % b != 0 && (a < 0) != (b < 0)) {
+        return q - 1;
+    }
+    return q;
+}
+
+/// Howard Hinnant's `civil_from_days` — days since the epoch to (y, m, d).
+/// (The literal suffixes are the kit's i64-arithmetic spelling.)
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z2 = z + 719468i64;
+    let era = floordiv(z2, 146097i64);
+    let doe = z2 - era * 146097i64;
+    let yoe = (doe - doe / 1460i64 + doe / 36524i64 - doe / 146096i64) / 365i64;
+    let y = yoe + era * 400i64;
+    let doy = doe - (365i64 * yoe + yoe / 4i64 - yoe / 100i64);
+    let mp = (5i64 * doy + 2i64) / 153i64;
+    let d = doy - (153i64 * mp + 2i64) / 5i64 + 1i64;
+    let m = mp + 3i64;
+    if (mp >= 10i64) {
+        m = mp - 9i64;
+    }
+    let yy = y;
+    if (m <= 2) {
+        yy = y + 1i64;
+    }
+    return (yy, m, d);
+}

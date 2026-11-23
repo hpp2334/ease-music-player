@@ -1,0 +1,706 @@
+//! The service ops — the per-op WORK behind the `emp_host` rows.
+//!
+//! One body source, one identity law: the phase-2 `emp_host` rows
+//! ([`super::emp`]) forward these helpers with the identity decoded from
+//! the leading handle opaque ([`super::emp::PluginHandle`]). Phase 5
+//! deleted the old `tur_host::ease` row registrations — these helpers are
+//! all that remains of this module, plus the view→backend
+//! [`rpc_call_envelope`] (the `emp_host::rpc::call` row's body) and the
+//! JNI upcalls the ops fire into the Kotlin host statics.
+//!
+//! The namespaces (all `emp:`-prefixed at the row layer):
+//!
+//! - `db` — plugin-scoped KV over [`DatabaseServer`] (JSON in/out for
+//!   the composite ops, `?str` for nullable gets).
+//! - `secret` — plugin-scoped secret store (`SecretScope::Plugin`).
+//! - `oauth` — flow-id mint + the Kotlin OAuth upcall.
+//! - `themes` — the host theme colors (`#RRGGBBAA` strings) + dark.
+//! - `context` — storage-row lifecycle (`notify_change` /
+//!   `create_storage` / `remove_storage`) + the instance's `storage_id`.
+//! - `library` — read-only playlist roster + cover thumbnails as
+//!   engine image resources (pixel bytes never enter the script).
+//! - `rpc` — a view calling its own backend's bus.
+//!
+//! Identity: every scoped op receives the calling plugin's id from the
+//! decoded handle — never from a rut argument.
+//! Blocking: DB round-trips `block_on` the shared tokio runtime (ms-scale,
+//! the old bridges' discipline); storage-lifecycle mutations spawn instead
+//! (they can chain upcalls and must never re-enter the pump).
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+use ease_client_backend::error::BResult;
+use ease_client_backend::repositories::core::DatabaseServer;
+use ease_client_backend::repositories::secret::SecretStore;
+use ease_client_schema::{MusicId, PluginKvEntry, SecretId, SecretScope};
+use rut_vm::TrapKind;
+
+/// OAuth flow-id sequence (host keeps no state — the plugin keys its flow
+/// data by the id in its own KV).
+static OAUTH_FLOW_SEQ: AtomicU64 = AtomicU64::new(1);
+
+fn parse_json<T: serde::de::DeserializeOwned>(s: &str, what: &str) -> Result<T, rut_vm::Trap> {
+    serde_json::from_str(s).map_err(|e| {
+        rut_vm::Trap::new(
+            TrapKind::Invalid,
+            format!("emp:db: {what} is not valid JSON: {e}"),
+        )
+    })
+}
+
+/// Block on the shared tokio runtime. Rows run on a worker lane; the tokio
+/// runtime is a separate driver, so this is the old bridges' exact
+/// discipline (ms-scale round-trips only).
+fn block_on<R>(what: &str, fut: impl std::future::Future<Output = BResult<R>>) -> Result<R, rut_vm::Trap> {
+    ease_client_tokio::tokio_runtime()
+        .block_on(fut)
+        .map_err(|e| {
+            rut_vm::Trap::new(
+                TrapKind::Invalid,
+                format!("emp:db {what} failed: {e:?}"),
+            )
+        })
+}
+
+/// [`block_on`] over a future that is already `Result`-shaped.
+fn block_on_async<R, E: std::fmt::Debug>(
+    what: &str,
+    fut: impl std::future::Future<Output = Result<R, E>>,
+) -> Result<R, rut_vm::Trap> {
+    ease_client_tokio::tokio_runtime()
+        .block_on(fut)
+        .map_err(|e| {
+            rut_vm::Trap::new(
+                TrapKind::Invalid,
+                format!("emp:db {what} failed: {e:?}"),
+            )
+        })
+}
+
+// ---- db ops ---------------------------------------------------------------
+
+pub(crate) fn op_db_single_get(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<Option<String>, rut_vm::Trap> {
+    let key = key.to_string();
+    block_on("single_get", db.plugin_kv_single_get(pid, &key))
+}
+
+pub(crate) fn op_db_single_get_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    let rows = block_on("single_get_multi", db.plugin_kv_single_get_multi(pid, keys))?;
+    Ok(serde_json::to_string(&rows).expect("entry rows serialize"))
+}
+
+pub(crate) fn op_db_single_set(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+    value: &str,
+) -> Result<(), rut_vm::Trap> {
+    block_on("single_set", db.plugin_kv_single_set(pid, key, value))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_single_set_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    entries_json: &str,
+) -> Result<(), rut_vm::Trap> {
+    let entries: Vec<PluginKvEntry> = parse_json(entries_json, "entries")?;
+    block_on("single_set_multi", db.plugin_kv_single_set_multi(pid, entries))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_single_delete(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<(), rut_vm::Trap> {
+    block_on("single_delete", db.plugin_kv_single_delete(pid, key))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_single_delete_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<(), rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    block_on("single_delete_multi", db.plugin_kv_single_delete_multi(pid, keys))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_multi_append(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+    value: &str,
+) -> Result<(), rut_vm::Trap> {
+    block_on("multi_append", db.plugin_kv_multi_append(pid, key, value))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_multi_append_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    entries_json: &str,
+) -> Result<(), rut_vm::Trap> {
+    let entries: Vec<PluginKvEntry> = parse_json(entries_json, "entries")?;
+    block_on("multi_append_multi", db.plugin_kv_multi_append_multi(pid, entries))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_multi_get_all(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<String, rut_vm::Trap> {
+    let values = block_on("multi_get_all", db.plugin_kv_multi_get_all(pid, key))?;
+    Ok(serde_json::to_string(&values).expect("values serialize"))
+}
+
+pub(crate) fn op_db_multi_get_all_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    let rows = block_on("multi_get_all_multi", db.plugin_kv_multi_get_all_multi(pid, keys))?;
+    Ok(serde_json::to_string(&rows).expect("multi rows serialize"))
+}
+
+pub(crate) fn op_db_multi_count(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<u64, rut_vm::Trap> {
+    let n = block_on("multi_count", db.plugin_kv_multi_count(pid, key))?;
+    Ok(n as u64)
+}
+
+pub(crate) fn op_db_multi_count_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    let rows = block_on("multi_count_multi", db.plugin_kv_multi_count_multi(pid, keys))?;
+    Ok(serde_json::to_string(&rows).expect("count rows serialize"))
+}
+
+pub(crate) fn op_db_multi_delete(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    key: &str,
+) -> Result<(), rut_vm::Trap> {
+    block_on("multi_delete", db.plugin_kv_multi_delete(pid, key))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_multi_delete_multi(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    keys_json: &str,
+) -> Result<(), rut_vm::Trap> {
+    let keys: Vec<String> = parse_json(keys_json, "keys")?;
+    block_on("multi_delete_multi", db.plugin_kv_multi_delete_multi(pid, keys))?;
+    Ok(())
+}
+
+pub(crate) fn op_db_list_keys(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    prefix: &str,
+) -> Result<String, rut_vm::Trap> {
+    let rows = block_on("list_keys", db.plugin_kv_list_keys(pid, prefix))?;
+    let out: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|info| {
+            serde_json::json!({ "key": info.key, "kind": info.kind.as_i32() })
+        })
+        .collect();
+    Ok(serde_json::to_string(&out).expect("key infos serialize"))
+}
+
+// ---- secret ops -----------------------------------------------------------
+
+pub(crate) fn op_secret_get(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    id: i64,
+) -> Result<Option<String>, rut_vm::Trap> {
+    let scope = SecretScope::Plugin(ease_client_schema::PluginId::new(pid));
+    block_on("get", db.secret_get(scope, SecretId::wrap(id)))
+}
+
+pub(crate) fn op_secret_put(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    secret: &str,
+) -> Result<i64, rut_vm::Trap> {
+    let scope = SecretScope::Plugin(ease_client_schema::PluginId::new(pid));
+    let secret = secret.to_string();
+    let id = block_on("put", db.secret_put(scope, secret))?;
+    Ok(*id.as_ref())
+}
+
+pub(crate) fn op_secret_remove(
+    db: &Arc<DatabaseServer>,
+    pid: &str,
+    id: i64,
+) -> Result<(), rut_vm::Trap> {
+    let scope = SecretScope::Plugin(ease_client_schema::PluginId::new(pid));
+    block_on("remove", db.secret_remove(scope, SecretId::wrap(id)))
+}
+
+// ---- oauth ops ------------------------------------------------------------
+
+/// Mint the next flow id. The caller gates to plugin-bound instances
+/// (the old rows resolve the instance slot; the emp rows decode the
+/// handle) — the mint itself keeps no state.
+pub(crate) fn op_oauth_new() -> String {
+    let n = OAUTH_FLOW_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("oauth-{n}")
+}
+
+pub(crate) fn op_oauth_begin(pid: &str, oauth_id: &str) -> Result<(), rut_vm::Trap> {
+    let oauth_id = oauth_id.to_string();
+    #[cfg(target_os = "android")]
+    {
+        if let Err(e) = upcall_start_oauth(pid, &oauth_id) {
+            tracing::warn!("emp:oauth.begin({oauth_id}) upcall failed: {e}");
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (pid, oauth_id);
+        tracing::debug!("emp:oauth.begin ignored (non-Android target)");
+    }
+    Ok(())
+}
+
+// ---- theme ops ------------------------------------------------------------
+
+pub(crate) fn op_theme_color(name: &str) -> Result<String, rut_vm::Trap> {
+    let name = name.to_string();
+    #[cfg(target_os = "android")]
+    {
+        theme_upcall_color(&name).map_err(|e| {
+            rut_vm::Trap::new(
+                TrapKind::Invalid,
+                format!("emp:themes.color: host upcall failed: {e}"),
+            )
+        })
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = name;
+        Err(rut_vm::Trap::new(
+            TrapKind::Invalid,
+            "emp:themes.color: theme is only available on Android",
+        ))
+    }
+}
+
+pub(crate) fn op_theme_is_dark() -> Result<bool, rut_vm::Trap> {
+    #[cfg(target_os = "android")]
+    {
+        // Upcall failure degrades to the light default (the old
+        // bridge's `unwrap_or(false)`), never a trap.
+        Ok(theme_upcall_is_dark().unwrap_or(false))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Err(rut_vm::Trap::new(
+            TrapKind::Invalid,
+            "emp:themes.is_dark: theme is only available on Android",
+        ))
+    }
+}
+
+// ---- context ops ----------------------------------------------------------
+
+pub(crate) fn op_context_notify_change(pid: &str, instance: Option<String>) {
+    let instance_str = instance.unwrap_or_default();
+    #[cfg(target_os = "android")]
+    {
+        if let Err(e) = upcall_storage_host(pid, &instance_str, "notifyChange") {
+            tracing::warn!("emp:context.notify_change upcall failed: {e}");
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (pid, instance_str);
+        tracing::debug!("emp:context.notify_change ignored (non-Android target)");
+    }
+}
+
+/// The storage-lifecycle mutations SPAWN (never block_on on the worker):
+/// the DB work chains the Kotlin upcall, so ordering is preserved
+/// without re-entering the pump.
+pub(crate) fn op_context_create_storage(
+    cx: ease_client_backend::ctx::BackendContext,
+    pid: &str,
+    plugin_storage_id: &str,
+) {
+    use ease_client_schema::{PluginId as Pid, PluginStorageId as Psid, StorageHandle};
+
+    let plugin_storage_id = plugin_storage_id.to_string();
+    let pid_str = pid.to_string();
+    let instance = plugin_storage_id.clone();
+
+    ease_client_tokio::tokio_runtime().spawn(async move {
+        let handle = StorageHandle::Plugin {
+            plugin_id: Pid::new(pid_str.clone()),
+            plugin_storage_id: Psid::new(instance.clone()),
+        };
+        let result = cx
+            .database_server()
+            .obtain_storage(&handle)
+            .await
+            .map(|id| {
+                ease_client_backend::services::evict_storage_backend_cache(&cx, id);
+                id
+            });
+        match result {
+            Ok(id) => {
+                tracing::debug!(
+                    "create_storage: registered {instance} as storage {:?}",
+                    id.as_ref()
+                );
+                #[cfg(target_os = "android")]
+                {
+                    if let Err(e) = upcall_storage_host(&pid_str, &instance, "storageCreated") {
+                        tracing::warn!("emp:context.create_storage upcall failed: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("emp:context.create_storage failed for {instance}: {e:?}");
+            }
+        }
+    });
+}
+
+pub(crate) fn op_context_remove_storage(
+    cx: ease_client_backend::ctx::BackendContext,
+    pid: &str,
+    plugin_storage_id: &str,
+) {
+    use ease_client_schema::StorageId;
+
+    let plugin_storage_id = plugin_storage_id.to_string();
+    let pid_str = pid.to_string();
+
+    ease_client_tokio::tokio_runtime().spawn(async move {
+        let rows = cx.database_server().load_all_storage_rows().await?;
+        let id = rows
+            .into_iter()
+            .find(|r| {
+                r.plugin_id.as_deref() == Some(pid_str.as_str())
+                    && r.plugin_storage_id.as_deref() == Some(plugin_storage_id.as_str())
+            })
+            .map(|r| StorageId::wrap(r.id));
+        if let Some(id) = id {
+            ease_client_backend::services::storage::remove_storage(&cx, id).await?;
+        }
+        Ok::<_, ease_client_backend::error::BError>(())
+    });
+}
+
+// ---- library ops ----------------------------------------------------------
+
+/// Thumbnail long edge. Covers render at 44 px in plugin lists; 2× covers
+/// high-density screens while keeping a decoded thumbnail at ~30 KB RGBA
+/// instead of the multi-megabyte full-resolution decode.
+const COVER_THUMB_EDGE: u32 = 88;
+
+/// Per-call batch cap (the caller fetches the visible top of its list).
+const COVER_MAX_BATCH: usize = 64;
+
+/// Decode cover bytes and downscale to a ≤[`COVER_THUMB_EDGE`] thumbnail.
+/// `None` = not decodable here (png/jpeg/webp; HEIC falls through) or not
+/// an image at all.
+fn decode_cover_thumbnail(bytes: &[u8]) -> Option<tur_engine::ImageResource> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let img = if img.width() <= COVER_THUMB_EDGE && img.height() <= COVER_THUMB_EDGE {
+        img
+    } else {
+        img.thumbnail(COVER_THUMB_EDGE, COVER_THUMB_EDGE)
+    };
+    let rgba = img.to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+    tur_engine::ImageResource::from_rgba(rgba.as_raw(), w, h)
+}
+
+pub(crate) fn op_library_playlists(
+    cx: &ease_client_backend::ctx::BackendContext,
+) -> Result<String, rut_vm::Trap> {
+    let db: Arc<DatabaseServer> = cx.database_server().clone();
+    let result: BResult<Vec<serde_json::Value>> = block_on_async("playlists", async move {
+        let playlists = db.load_playlists().await?;
+        let edges = db.load_all_playlist_music_edges().await?;
+
+        let mut grouped: HashMap<i64, Vec<i64>> = HashMap::new();
+        for edge in edges {
+            grouped
+                .entry(*edge.playlist_id.as_ref())
+                .or_default()
+                .push(*edge.music_id.as_ref());
+        }
+
+        let out = playlists
+            .into_iter()
+            .map(|p| {
+                let id = *p.id.as_ref();
+                let music_ids: Vec<String> = grouped
+                    .remove(&id)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect();
+                Ok(serde_json::json!({
+                    "id": id.to_string(),
+                    "title": p.title,
+                    "musicIds": music_ids,
+                }))
+            })
+            .collect::<BResult<Vec<_>>>();
+        Ok::<_, ease_client_backend::error::BError>(out)
+    })?;
+    Ok(serde_json::to_string(&result).expect("playlists serialize"))
+}
+
+/// `covers(musicIdsJson: str) -> str` — `musicIds` is a JSON array of the
+/// stringified music row ids; the answer is `[{"musicId": "...", "id": n | null}]`
+/// where `id` is the registered engine image resource (bytes never enter
+/// the script). `handles` only carries the image registry the thumbnails
+/// register into — identity rides `cx` + the caller's plugin id.
+pub(crate) fn op_library_covers(
+    cx: &ease_client_backend::ctx::BackendContext,
+    handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
+    music_ids_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let db: Arc<DatabaseServer> = cx.database_server().clone();
+
+    let ids: Vec<String> = parse_json(music_ids_json, "musicIds")?;
+    if ids.len() > COVER_MAX_BATCH {
+        tracing::warn!(
+            "emp:library covers: {} ids requested — truncating to {COVER_MAX_BATCH}",
+            ids.len()
+        );
+    }
+    let mut ids: Vec<i64> = ids
+        .into_iter()
+        .take(COVER_MAX_BATCH)
+        .map(|s| s.parse::<i64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| {
+            rut_vm::Trap::new(
+                TrapKind::Invalid,
+                "emp:library covers: musicIds entries must be numeric id strings",
+            )
+        })?;
+
+    let entries = ease_client_tokio::tokio_runtime().block_on(async move {
+        let mut out: Vec<(i64, Option<Vec<u8>>)> = Vec::with_capacity(ids.len());
+        for id in ids.drain(..) {
+            let cover = async {
+                let music = db
+                    .load_music(MusicId::wrap(id))
+                    .await
+                    .ok()
+                    .flatten()?;
+                let blob_id = music.cover?;
+                db.blob().read(blob_id).ok()
+            }
+            .await;
+            out.push((id, cover));
+        }
+        out
+    });
+
+    let mut out: Vec<serde_json::Value> = Vec::with_capacity(entries.len());
+    for (id, bytes) in entries {
+        let resource_id = bytes
+            .as_deref()
+            .and_then(decode_cover_thumbnail)
+            .map(|image| handles.inst.register_image(image).as_u64());
+        out.push(serde_json::json!({
+            "musicId": id.to_string(),
+            "id": resource_id,
+        }));
+    }
+    Ok(serde_json::to_string(&out).expect("covers serialize"))
+}
+
+// ---------------------------------------------------------------------------
+// rpc.call (view → its own backend)
+// ---------------------------------------------------------------------------
+
+/// `call(op, argsJson) -> envelope str` — route a view's call to its
+/// plugin's backend bus (the `emp_host::rpc::call` row's body — the
+/// identity rides the decoded handle). Blocking (control calls are
+/// ms-scale; the view's VM task waits on the backend's host-thread
+/// round-trip). The envelope passes through:
+/// `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`.
+pub(crate) fn rpc_call_envelope(
+    cx: &ease_client_backend::ctx::BackendContext,
+    plugin_id: &str,
+    op: &str,
+    args_json: &str,
+) -> Result<String, rut_vm::Trap> {
+    let args: serde_json::Value = parse_json(args_json, "args")?;
+    let Some(client) = cx.service_rpc_for(plugin_id) else {
+        return Ok(serde_json::to_string(&ease_tur_rpc::err_envelope(
+            "the plugin backend is not running",
+        ))
+        .expect("envelope serializes"));
+    };
+    let op = op.to_string();
+    let reply = ease_client_tokio::tokio_runtime()
+        .block_on(client.call_host(&op, args));
+    match reply {
+        Ok(v) => Ok(serde_json::to_string(&ease_tur_rpc::ok_envelope(v)).expect("envelope serializes")),
+        Err(e) => Ok(serde_json::to_string(&ease_tur_rpc::err_envelope(&e.to_string()))
+            .expect("envelope serializes")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JNI upcalls (the Kotlin host statics)
+// ---------------------------------------------------------------------------
+
+/// Call a `(pluginId, instance) -> void` static on the cached
+/// `EaseStorageHost` class (`notifyChange` / `storageCreated`).
+#[cfg(target_os = "android")]
+fn upcall_storage_host(plugin_id: &str, instance: &str, method: &str) -> Result<(), String> {
+    use jni::objects::{JClass, JValue};
+
+    let raw_vm = ndk_context::android_context().vm() as *mut jni::sys::JavaVM;
+    let vm = unsafe { jni::JavaVM::from_raw(raw_vm) }.map_err(|e| format!("from_raw: {e}"))?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|e| format!("attach: {e}"))?;
+
+    let raw_class =
+        crate::plugin_runtime::host_cache::storage_host_class().ok_or("storage host class not cached")?;
+    // SAFETY: process-lifetime global ref cached at createRuntime.
+    let class = unsafe { JClass::from_raw(raw_class) };
+    let pid_jstr = env
+        .new_string(plugin_id)
+        .map_err(|e| format!("new_string plugin_id: {e}"))?;
+    let inst_jstr = env
+        .new_string(instance)
+        .map_err(|e| format!("new_string instance: {e}"))?;
+    env.call_static_method(
+        class,
+        method,
+        "(Ljava/lang/String;Ljava/lang/String;)V",
+        &[JValue::Object(&pid_jstr), JValue::Object(&inst_jstr)],
+    )
+    .map_err(|e| format!("call_static_method: {e}"))?;
+    Ok(())
+}
+
+/// `EaseOauthHost.startOauth(pluginId, oauthId)`.
+#[cfg(target_os = "android")]
+fn upcall_start_oauth(plugin_id: &str, oauth_id: &str) -> Result<(), String> {
+    use jni::objects::{JClass, JValue};
+
+    let raw_vm = ndk_context::android_context().vm() as *mut jni::sys::JavaVM;
+    let vm = unsafe { jni::JavaVM::from_raw(raw_vm) }.map_err(|e| format!("from_raw: {e}"))?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|e| format!("attach: {e}"))?;
+
+    let raw_class = crate::plugin_runtime::host_cache::oauth_host_class()
+        .ok_or("oauth host class not cached")?;
+    // SAFETY: process-lifetime global ref.
+    let class = unsafe { JClass::from_raw(raw_class) };
+    let plugin_jstr = env
+        .new_string(plugin_id)
+        .map_err(|e| format!("new_string plugin_id: {e}"))?;
+    let oauth_jstr = env
+        .new_string(oauth_id)
+        .map_err(|e| format!("new_string oauth_id: {e}"))?;
+    env.call_static_method(
+        class,
+        "startOauth",
+        "(Ljava/lang/String;Ljava/lang/String;)V",
+        &[JValue::Object(&plugin_jstr), JValue::Object(&oauth_jstr)],
+    )
+    .map_err(|e| format!("call_static_method: {e}"))?;
+    Ok(())
+}
+
+/// `EaseThemesHost.getColor(name) -> String`.
+#[cfg(target_os = "android")]
+fn theme_upcall_color(name: &str) -> Result<String, String> {
+    use jni::objects::{JClass, JValue};
+
+    let raw_vm = ndk_context::android_context().vm() as *mut jni::sys::JavaVM;
+    let vm = unsafe { jni::JavaVM::from_raw(raw_vm) }.map_err(|e| format!("from_raw: {e}"))?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|e| format!("attach: {e}"))?;
+
+    let raw_class = crate::plugin_runtime::host_cache::theme_host_class()
+        .ok_or("theme host class not cached")?;
+    // SAFETY: process-lifetime global ref.
+    let class = unsafe { JClass::from_raw(raw_class) };
+    let name_jstr = env
+        .new_string(name)
+        .map_err(|e| format!("new_string name: {e}"))?;
+    let ret = env
+        .call_static_method(
+            class,
+            "getColor",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&name_jstr)],
+        )
+        .map_err(|e| format!("ret.l: {e}"))?;
+    let obj = ret.l().map_err(|e| format!("ret.l: {e}"))?;
+    // Kotlin answers null for an unknown role. `get_string(null)` would
+    // throw a JVM NPE that jni-rs reports WITHOUT clearing, poisoning the
+    // worker lane's pending-exception state for later upcalls — null-check
+    // and fail with a clean message instead (the old bridge's contract).
+    if obj.is_null() {
+        return Err(format!("unknown color name: {name}"));
+    }
+    let s: String = env
+        .get_string((&obj).into())
+        .map_err(|e| format!("get_string: {e}"))?
+        .into();
+    Ok(s)
+}
+
+/// `EaseThemesHost.isDark() -> boolean`.
+#[cfg(target_os = "android")]
+fn theme_upcall_is_dark() -> Result<bool, String> {
+    use jni::objects::JClass;
+
+    let raw_vm = ndk_context::android_context().vm() as *mut jni::sys::JavaVM;
+    let vm = unsafe { jni::JavaVM::from_raw(raw_vm) }.map_err(|e| format!("from_raw: {e}"))?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|e| format!("attach: {e}"))?;
+
+    let raw_class = crate::plugin_runtime::host_cache::theme_host_class()
+        .ok_or("theme host class not cached")?;
+    // SAFETY: process-lifetime global ref.
+    let class = unsafe { JClass::from_raw(raw_class) };
+    let ret = env
+        .call_static_method(class, "isDark", "()Z", &[])
+        .map_err(|e| format!("ret.z: {e}"))?;
+    Ok(ret.z().map_err(|e| format!("ret.z: {e}"))?)
+}

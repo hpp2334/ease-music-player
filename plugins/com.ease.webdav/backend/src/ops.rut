@@ -1,0 +1,489 @@
+// backend/ops.rut — the op handlers the bind table serves. Each is a
+// PLAIN fn (bound at start by the root's `rpc.bind` closures): RAW str
+// args in (the handler decodes its own JSON), the RAW payload out — the
+// host builds the `{"ok":…}` envelope from the value/trap, so there is no
+// envelope code here anymore. Failures panic; the trap message keeps the
+// `UNAUTHORIZED` / `TIMEOUT` prefix law where the failure is one (the
+// dav/listing/session layers already mark their errors).
+//
+// Contract ops (the host scope): storage:list / storage:get /
+// storage:get-chunk / storage:release / storage:removeInstance. Plugin
+// view ops: webdav:test / webdav:connect (reached through `Rpc.call` from
+// the view; the envelope the view parses is host-built).
+//
+// `pluginId` still rides the host's payloads but the identity now comes
+// from the minted handle — the decoders simply skip it.
+
+use auth::{ drop_challenge };
+use config::{ Config, Creds, config_of, creds_for_session, creds_of, kv_key, load_password, opt_str_or, read_opt_str };
+use crypto::{ uuid4 };
+use dav::{ ReqSpec, dav_request };
+use emp::{ Context, Db, Secret };
+use json::{ JsonReader, JsonWriter };
+use listing::{ list_impl };
+use model::{ Ctx };
+use session::{ Session, chunk_impl, open_impl, release_impl, session_of };
+use strutil::{ starts_with_ci, trim };
+use url::{ AddrParts, build_url, split_addr };
+
+/// `webdav:test` form credentials.
+struct TestArgs {
+    storage_id: ?str,
+    addr: str,
+    username: str,
+    password: str,
+    is_anonymous: bool,
+}
+
+/// `webdav:connect` form fields.
+struct ConnectArgs {
+    storage_id: ?str,
+    addr: str,
+    alias: str,
+    username: str,
+    password: str,
+    is_anonymous: bool,
+}
+
+// ---------------------------------------------------------------------------
+// storage:list
+// ---------------------------------------------------------------------------
+
+pub fn storage_list(db: Db, secret: Secret, c: Ctx, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let dir: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("webdav: bad storage:list request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "dir" -> { dir = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("webdav: bad storage:list request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil || dir == nil) {
+        panic("webdav: storage:list needs storageId + dir");
+    }
+    let sid: str = storage_id;
+    let d: str = dir;
+    let cfg = config_of(db, sid);
+    if (cfg == nil) {
+        panic(f"webdav: no config for instance {sid}");
+    }
+    let conf: Config = cfg;
+    let out = list_impl(creds_of(secret, conf), d, c);
+    let o = out.0;
+    if (o == nil) {
+        panic(out.1);
+    }
+    let res: str = o;
+    return res;
+}
+
+// ---------------------------------------------------------------------------
+// storage:get (the opener)
+// ---------------------------------------------------------------------------
+
+pub fn storage_get(db: Db, secret: Secret, c: Ctx, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let path: ?str = nil;
+    let offset: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("webdav: bad storage:get request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "path" -> { path = read_opt_str(r); },
+            "offset" -> { offset = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("webdav: bad storage:get request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil || path == nil) {
+        panic("webdav: storage:get needs storageId + path + offset");
+    }
+    let sid: str = storage_id;
+    let pth: str = path;
+    let cfg = config_of(db, sid);
+    if (cfg == nil) {
+        panic(f"webdav: no config for instance {sid}");
+    }
+    let conf: Config = cfg;
+    let out = open_impl(creds_of(secret, conf), pth, offset, c);
+    let o = out.0;
+    if (o == nil) {
+        panic(out.1);
+    }
+    let res: str = o;
+    return res;
+}
+
+// ---------------------------------------------------------------------------
+// storage:get-chunk / storage:release (the chunked-pull sessions)
+// ---------------------------------------------------------------------------
+
+pub fn storage_get_chunk(db: Db, secret: Secret, c: Ctx, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let sid: u64 = 0;
+    let offset: u64 = 0;
+    let len: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("webdav: bad storage:get-chunk request");
+        }
+        when (k) {
+            "sid" -> { sid = r.read_i64() as u64; },
+            "offset" -> { offset = r.read_i64() as u64; },
+            "len" -> { len = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("webdav: bad storage:get-chunk request");
+        }
+    }
+    r.end_object();
+    if (sid == 0 || len == 0) {
+        panic("webdav: storage:get-chunk needs sid + offset + len");
+    }
+    let sess = session_of(c, sid);
+    if (sess == nil) {
+        panic("webdav: unknown stream session");
+    }
+    let s: Session = sess;
+    // the chunk re-requests with the auth parked at open time; the server
+    // credentials resolve by the session url's origin (for Digest fallbacks)
+    let creds = creds_for_session(db, secret, s.url);
+    if (creds == nil) {
+        panic("webdav: no config for the session's server");
+    }
+    let cr: Creds = creds;
+    let out = chunk_impl(cr, s, offset, len, c);
+    let o = out.0;
+    if (o == nil) {
+        release_impl(c, sid);
+        panic(out.1);
+    }
+    let res: str = o;
+    return res;
+}
+
+pub fn storage_release(c: Ctx, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let sid: u64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("webdav: bad storage:release request");
+        }
+        when (k) {
+            "sid" -> { sid = r.read_i64() as u64; },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("webdav: bad storage:release request");
+        }
+    }
+    r.end_object();
+    release_impl(c, sid);
+    return "true";
+}
+
+// ---------------------------------------------------------------------------
+// instance lifecycle (the host trash button)
+// ---------------------------------------------------------------------------
+
+/// Remove an instance: drop its config (kv) + password secret, ask the host
+/// to delete the storage row, and reload the dashboard (the host trash
+/// button's `storage:removeInstance`).
+pub fn storage_remove_instance(db: Db, secret: Secret, context: Context, c: Ctx, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("webdav: bad storage:removeInstance request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("webdav: bad storage:removeInstance request");
+        }
+    }
+    r.end_object();
+    if (storage_id == nil) {
+        panic("webdav: storage:removeInstance needs storageId");
+    }
+    let sid: str = storage_id;
+    let existing = config_of(db, sid);
+    if (existing != nil) {
+        let e: Config = existing;
+        if (e.secret_id != 0) {
+            secret.remove(e.secret_id);
+        }
+        drop_challenge(c, e.addr);
+    }
+    db.delete(kv_key(sid));
+    context.remove_storage(sid);
+    context.notify_change();
+    return "{}";
+}
+
+// ---------------------------------------------------------------------------
+// webdav:test (the connect form's probe)
+// ---------------------------------------------------------------------------
+
+pub fn webdav_test(db: Db, secret: Secret, c: Ctx, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let addr = "";
+    let username = "";
+    let password = "";
+    let anon = false;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("webdav: bad webdav:test request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "addr" -> { addr = opt_str_or(read_opt_str(r), ""); },
+            "username" -> { username = opt_str_or(read_opt_str(r), ""); },
+            "password" -> { password = opt_str_or(read_opt_str(r), ""); },
+            "isAnonymous" -> { anon = r.read_bool(); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("webdav: bad webdav:test request");
+        }
+    }
+    r.end_object();
+    let creds = resolve_test_creds(db, secret, TestArgs {
+        storage_id: storage_id,
+        addr: addr,
+        username: username,
+        password: password,
+        is_anonymous: anon,
+    });
+    let outcome = test_impl(creds, c);
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("result");
+    w.write_str(outcome);
+    w.end_object();
+    return w.finish();
+}
+
+/// The `webdav:test` outcome — drives the connect form's status text.
+/// "SUCCESS" | "UNAUTHORIZED" | "TIMEOUT" | "OTHER_ERROR".
+fn test_impl(creds: Creds, c: Ctx) -> str {
+    let url = build_url(creds.addr, "/", true);
+    if (url == nil) {
+        return "OTHER_ERROR";
+    }
+    let u: str = url;
+    let parts = split_addr(creds.addr);
+    if (parts == nil) {
+        return "OTHER_ERROR";
+    }
+    let p: AddrParts = parts;
+    let uri = u.slice(p.origin.len(), u.len());
+    let resp = dav_request(ReqSpec {
+        method: "PROPFIND",
+        url: u,
+        uri: uri,
+        propfind: true,
+        range: nil,
+    }, creds, c);
+    if (!resp.failed) {
+        return "SUCCESS";
+    }
+    if (starts_with_ci(resp.err, 0, "UNAUTHORIZED")) {
+        return "UNAUTHORIZED";
+    }
+    if (starts_with_ci(resp.err, 0, "TIMEOUT")) {
+        return "TIMEOUT";
+    }
+    return "OTHER_ERROR";
+}
+
+/// Explicit values win; on edit a blank password falls back to the stored
+/// one (the TS `testCredentials`).
+fn resolve_test_creds(db: Db, secret: Secret, a: TestArgs) -> Creds {
+    if (a.password != "" || a.storage_id == nil) {
+        return Creds {
+            addr: a.addr,
+            username: a.username,
+            password: a.password,
+            is_anonymous: a.is_anonymous,
+        };
+    }
+    let sid: str = a.storage_id;
+    let cfg = config_of(db, sid);
+    if (cfg == nil) {
+        return Creds {
+            addr: a.addr,
+            username: a.username,
+            password: "",
+            is_anonymous: a.is_anonymous,
+        };
+    }
+    let conf: Config = cfg;
+    let addr = a.addr;
+    if (addr == "") {
+        addr = conf.addr;
+    }
+    let username = a.username;
+    if (username == "") {
+        username = conf.username;
+    }
+    return Creds {
+        addr: addr,
+        username: username,
+        password: load_password(secret, conf),
+        is_anonymous: a.is_anonymous,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// webdav:connect (the form's save)
+// ---------------------------------------------------------------------------
+
+pub fn webdav_connect(db: Db, secret: Secret, args: str) -> ?str {
+    let r = JsonReader::of(args);
+    r.begin_object();
+    let storage_id: ?str = nil;
+    let addr = "";
+    let alias = "";
+    let username = "";
+    let password = "";
+    let anon = false;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            panic("webdav: bad webdav:connect request");
+        }
+        when (k) {
+            "storageId" -> { storage_id = read_opt_str(r); },
+            "addr" -> { addr = opt_str_or(read_opt_str(r), ""); },
+            "alias" -> { alias = opt_str_or(read_opt_str(r), ""); },
+            "username" -> { username = opt_str_or(read_opt_str(r), ""); },
+            "password" -> { password = opt_str_or(read_opt_str(r), ""); },
+            "isAnonymous" -> { anon = r.read_bool(); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            panic("webdav: bad webdav:connect request");
+        }
+    }
+    r.end_object();
+    let out = connect_impl(db, secret, ConnectArgs {
+        storage_id: storage_id,
+        addr: addr,
+        alias: alias,
+        username: username,
+        password: password,
+        is_anonymous: anon,
+    });
+    if (out == nil) {
+        panic("webdav: connect failed (empty address / username / password?)");
+    }
+    let res: str = out;
+    return res;
+}
+
+/// Persist the config + password secret; answers the reply document
+/// `{storageId, created}` (the VIEW registers the host storage row /
+/// notifies the dashboard — the form owns the outcome side). On update a
+/// blank password keeps the stored secret.
+fn connect_impl(db: Db, secret: Secret, args: ConnectArgs) -> ?str {
+    let addr = trim(args.addr);
+    let alias = trim(args.alias);
+    if (alias == "") {
+        alias = "WebDAV";
+    }
+    let username = "";
+    let password = "";
+    if (!args.is_anonymous) {
+        username = trim(args.username);
+        password = args.password;
+    }
+    if (addr == "") {
+        return nil;
+    }
+    if (!args.is_anonymous && username == "") {
+        return nil;
+    }
+    let instance = args.storage_id;
+    let created = false;
+    if (instance == nil) {
+        // create: password required for non-anonymous servers
+        if (!args.is_anonymous && password == "") {
+            return nil;
+        }
+        instance = f"webdav:{uuid4()}";
+        created = true;
+    }
+    let id: str = instance;
+    // update: keep the existing secret unless a new password is given
+    let secret_id: i64 = 0;
+    let existing = config_of(db, id);
+    if (existing != nil) {
+        let e: Config = existing;
+        secret_id = e.secret_id;
+    }
+    if (password != "") {
+        let new_id = secret.put(password);
+        if (secret_id != 0) {
+            secret.remove(secret_id);
+        }
+        secret_id = new_id;
+    }
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("alias");
+    w.write_str(alias);
+    w.key("addr");
+    w.write_str(addr);
+    w.key("username");
+    w.write_str(username);
+    w.key("isAnonymous");
+    w.write_bool(args.is_anonymous);
+    w.key("secretId");
+    if (secret_id != 0) {
+        w.write_i64(secret_id);
+    } else {
+        w.write_raw("null");
+    }
+    w.end_object();
+    db.set(kv_key(id), w.finish());
+    let rw = JsonWriter::new();
+    rw.begin_object();
+    rw.key("storageId");
+    rw.write_str(id);
+    rw.key("created");
+    rw.write_bool(created);
+    rw.end_object();
+    return rw.finish();
+}

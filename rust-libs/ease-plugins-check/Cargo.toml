@@ -1,0 +1,22 @@
+[package]
+name = "ease-plugins-check"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Compile + boot validation for the shipped rut plugin sources (host-side, via TurTestApp)."
+
+[dependencies]
+ease-client-android = { path = "../ease-client-android" }
+ease-client-backend = { path = "../ease-client-backend" }
+ease-client-tokio = { path = "../ease-client-tokio" }
+ease-tur-rpc = { path = "../ease-tur-rpc" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+
+[dev-dependencies]
+tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+ease-js-storage = { path = "../ease-js-storage" }
+ease-remote-storage = { path = "../ease-remote-storage" }
+serde_json = "1"
+futures = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -1,0 +1,13 @@
+// srt.rut — the SRT lexer face: the shared cue walk (cue.rut) with no
+// entry law — SRT has no header and no block keywords; the optional
+// numeric id lines are the walk's own "id line before the timing line"
+// arm.
+
+use cue::{ build_result, collect_cues };
+use result::{ LyricResult };
+use text::{ split_lines, strip_bom };
+
+pub fn parse_srt(text: str) -> ?LyricResult {
+    let rows = split_lines(strip_bom(text));
+    return build_result(collect_cues(rows, false));
+}

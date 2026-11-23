@@ -1,0 +1,594 @@
+//! The Android implementation of the backend's [`PluginEngineHost`] seam.
+//!
+//! One [`TurEngineHost`] exists per `bindPluginRuntime` call: it bundles the
+//! opaque tur runtime handle (the binding's identity — what
+//! `detach_engine_host` compare-and-sets against) with the raw
+//! `*mut AAssetManager` stashed from the Kotlin `AssetManager` object. The
+//! backend's plugin scan calls [`PluginEngineHost::register_source`] /
+//! [`PluginEngineHost::register_source_files`] to put module rut sources
+//! (single files / pkg-tree file sets) on the runtime's shared registry,
+//! and `plugin.bootstrap` calls [`PluginEngineHost::read_bundled_asset`]
+//! to read the bundled plugin zips natively — their bytes never cross the
+//! JNI boundary.
+
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+
+use ease_client_backend::services::plugin_manager::PluginEngineHost;
+
+#[cfg(target_os = "android")]
+use ease_tur_rpc::RpcClient;
+
+/// The host implementation. Constructed by the `bindPluginRuntime` JNI
+/// trampoline ([`crate::plugin_runtime::plugin_jni`]) and attached to the
+/// backend context's plugin-manager shared state; dropped (compare-and-set)
+/// by `unbindPluginRuntime`.
+///
+/// Headless-instance spawn/load/close run on whatever thread the backend's
+/// reload lands on (a tokio worker): the JVM-dependent steps attach that
+/// thread to the JVM via ndk-context for the duration of the call.
+pub(crate) struct TurEngineHost {
+    runtime_handle: i64,
+    asset_manager: usize,
+    /// Per spawned headless instance: the Kotlin `FrameLoop` global ref +
+    /// its `AtomicLong` handle cell (the zeroable pump guard — see
+    /// `FrameLoop.closeInstance`). Dropped when the instance closes.
+    loops: std::sync::Mutex<HashMap<i64, (jni::objects::GlobalRef, jni::objects::GlobalRef)>>,
+    /// Per spawned headless instance: the minted [`PluginHandle`] id —
+    /// `load_headless_module` passes it as the boot's `start_cx` (the
+    /// phase-1 lane) so the module's `entry fn start(cx: opaque)`
+    /// receives its plugin handle, and `extract_rpc` addresses the
+    /// dispatch entries with the same id. Popped on close.
+    cxs: std::sync::Mutex<HashMap<i64, u64>>,
+}
+
+impl TurEngineHost {
+    pub(crate) fn new(runtime_handle: i64, asset_manager: usize) -> Self {
+        Self {
+            runtime_handle,
+            asset_manager,
+            loops: Default::default(),
+            cxs: Default::default(),
+        }
+    }
+}
+
+/// Attach the current (native) thread to the JVM via ndk-context for the
+/// duration of `f`. Works from any thread — the tokio workers the backend
+/// reload runs on, or an already-attached JNI thread.
+#[cfg(target_os = "android")]
+fn with_attached_env<R>(
+    f: impl FnOnce(&mut jni::JNIEnv) -> anyhow::Result<R>,
+) -> anyhow::Result<R> {
+    let ctx = ndk_context::android_context();
+    // SAFETY: the JavaVM pointer registered by `nativeInitAndroidContext`
+    // is valid for the process lifetime.
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm() as *mut _) }?;
+    let mut env = vm.attach_current_thread().map_err(|e| anyhow::anyhow!("{e}"))?;
+    f(&mut env)
+}
+
+/// The [`ease_tur_rpc::RutDriver`] over a live instance handle: every call
+/// is a blocking round-trip onto the instance's tur-host thread (`with_app`
+/// + `block_on` on the async `TurApp` entry rail — the exact pattern tur's
+/// own `loadModule` uses on the host thread). The instance keeps executing
+/// on its worker lane, so the round-trip only queues + waits.
+#[cfg(target_os = "android")]
+#[derive(Debug)]
+struct AndroidDriver {
+    handle: i64,
+}
+
+#[cfg(target_os = "android")]
+impl ease_tur_rpc::RutDriver for AndroidDriver {
+    fn call_dispatch_str(
+        &self,
+        name: &str,
+        cx: u64,
+        op: &str,
+        args: &str,
+    ) -> Result<ease_tur_rpc::DispatchAnswer, String> {
+        // `with_app` takes a `'static` closure — own every borrowed capture.
+        let (name, op, args) = (name.to_string(), op.to_string(), args.to_string());
+        tur_android::ops::with_app(self.handle, move |app| {
+            futures::executor::block_on(app.call_rut_entry_cx_str_str(&name, cx, &op, &args))
+        })
+        .ok_or_else(|| format!("instance {self:?} gone"))?
+        .map_err(|e| e.to_string())
+        .map(dispatch_answer)
+    }
+
+    fn call_dispatch_bytes(
+        &self,
+        name: &str,
+        cx: u64,
+        op: &str,
+        args: &[u8],
+    ) -> Result<ease_tur_rpc::DispatchAnswer, String> {
+        let (name, op) = (name.to_string(), op.to_string());
+        let args = args.to_vec();
+        tur_android::ops::with_app(self.handle, move |app| {
+            futures::executor::block_on(app.call_rut_entry_cx_str_bytes(&name, cx, &op, &args))
+        })
+        .ok_or_else(|| format!("instance {self:?} gone"))?
+        .map_err(|e| e.to_string())
+        .map(dispatch_answer)
+    }
+}
+
+/// The engine's nil-flattened answer onto the dispatch answer (the
+/// `?str` / `?bytes` entry returns; u64/f64/opaque answers never occur on
+/// the dispatch entries).
+#[cfg(target_os = "android")]
+fn dispatch_answer(a: tur_engine::RutEntryAnswer) -> ease_tur_rpc::DispatchAnswer {
+    match a {
+        tur_engine::RutEntryAnswer::Nil => ease_tur_rpc::DispatchAnswer::Nil,
+        tur_engine::RutEntryAnswer::Str(s) => ease_tur_rpc::DispatchAnswer::Str(s),
+        tur_engine::RutEntryAnswer::Bytes(b) => ease_tur_rpc::DispatchAnswer::Bytes(b),
+        other => {
+            tracing::warn!("dispatch entry answered {other:?} — treating as nil");
+            ease_tur_rpc::DispatchAnswer::Nil
+        }
+    }
+}
+
+impl PluginEngineHost for TurEngineHost {
+    fn id(&self) -> i64 {
+        self.runtime_handle
+    }
+
+    /// Register a module rut source on the bound runtime's shared
+    /// `ModuleSourceRegistry` and return its opaque handle. `0` on failure —
+    /// loudly, never silently: a zero handle would leave a plugin
+    /// view/backend permanently blank.
+    fn register_source(&self, src: String) -> i64 {
+        if self.runtime_handle == 0 {
+            tracing::error!(
+                "register_module_source: no tur runtime bound — bindPluginRuntime not called \
+                 / already unbound; returning 0"
+            );
+            return 0;
+        }
+        #[cfg(target_os = "android")]
+        {
+            match tur_android::ops::with_runtime(self.runtime_handle, |rt| {
+                rt.module_sources.register(src) as i64
+            }) {
+                Some(handle) => handle,
+                None => {
+                    tracing::error!(
+                        "register_module_source: runtime handle {} not found — stale binding? \
+                         returning 0",
+                        self.runtime_handle
+                    );
+                    0
+                }
+            }
+        }
+        // Non-Android host build (the android crate still type-checks there):
+        // there is never a live runtime to register against.
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = src;
+            0
+        }
+    }
+
+    /// Register a FILE SET module source (a pkg-tree entrypoint) on the
+    /// bound runtime's shared `ModuleSourceRegistry` — the phase-1
+    /// `register_files` lane. The set's handle loads whole through the
+    /// engine's multi-file rail (the plain load op dispatches
+    /// `ModuleSourceEntry::Files` to `load_rut_module_files`, cx
+    /// threaded). `0` on failure — loudly, never silently.
+    fn register_source_files(&self, root: String, mods: BTreeMap<String, String>) -> i64 {
+        if self.runtime_handle == 0 {
+            tracing::error!(
+                "register_module_files: no tur runtime bound — bindPluginRuntime not called \
+                 / already unbound; returning 0"
+            );
+            return 0;
+        }
+        let mods: BTreeMap<std::sync::Arc<str>, std::sync::Arc<str>> = mods
+            .into_iter()
+            .map(|(path, text)| {
+                (
+                    std::sync::Arc::from(path.as_str()),
+                    std::sync::Arc::from(text.as_str()),
+                )
+            })
+            .collect();
+        #[cfg(target_os = "android")]
+        {
+            match tur_android::ops::with_runtime(self.runtime_handle, |rt| {
+                rt.module_sources.register_files(root, mods) as i64
+            }) {
+                Some(handle) => handle,
+                None => {
+                    tracing::error!(
+                        "register_module_files: runtime handle {} not found — stale binding? \
+                         returning 0",
+                        self.runtime_handle
+                    );
+                    0
+                }
+            }
+        }
+        // Non-Android host build (the android crate still type-checks there):
+        // there is never a live runtime to register against.
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (root, mods);
+            0
+        }
+    }
+
+    /// Register a packed SOURCE ZIP (a dist-pointer entrypoint) on the
+    /// bound runtime's shared `ModuleSourceRegistry` — the phase-6
+    /// pkg-zip lane. The archive unpacks ONCE, here (the placement
+    /// grammar validates at this door); its handle loads whole through
+    /// the engine's pkg-zip rail (the plain load op dispatches
+    /// `ModuleSourceEntry::PkgZip`, cx threaded). An invalid archive is
+    /// a loud log + `0` — never a silent blank.
+    fn register_pkg_zip(&self, bytes: Vec<u8>) -> i64 {
+        if self.runtime_handle == 0 {
+            tracing::error!(
+                "register_pkg_zip: no tur runtime bound — bindPluginRuntime not called \
+                 / already unbound; returning 0"
+            );
+            return 0;
+        }
+        #[cfg(target_os = "android")]
+        {
+            match tur_android::ops::with_runtime(self.runtime_handle, |rt| {
+                rt.module_sources
+                    .register_pkg_zip(bytes)
+                    .map(|h| h as i64)
+            }) {
+                Some(Ok(handle)) => handle,
+                Some(Err(e)) => {
+                    tracing::error!("register_pkg_zip: invalid archive: {e}");
+                    0
+                }
+                None => {
+                    tracing::error!(
+                        "register_pkg_zip: runtime handle {} not found — stale binding? \
+                         returning 0",
+                        self.runtime_handle
+                    );
+                    0
+                }
+            }
+        }
+        // Non-Android host build (the android crate still type-checks there):
+        // there is never a live runtime to register against.
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = bytes;
+            0
+        }
+    }
+
+    fn read_bundled_asset(&self, path: &str) -> Option<Vec<u8>> {
+        #[cfg(target_os = "android")]
+        {
+            read_asset_bytes(self.asset_manager, path)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = path;
+            None
+        }
+    }
+
+    /// Spawn a headless instance from Rust: attach to the JVM, construct
+    /// the Kotlin `FrameLoop` (main-looper-safe by construction), hand it
+    /// to the engine's `create_instance` (which globalizes the ref itself)
+    /// along with the per-instance stamps — [`PluginId`], the backend
+    /// worker pool, and the minted [`emp::PluginHandle`] (+ its
+    /// [`RpcIdentity`] view, the same id the [`RpcClient`] dispatches
+    /// with) — then wire the loop's wake callbacks through a zeroable
+    /// `AtomicLong` cell — the exact `TurInstance` guard semantics, so a
+    /// wake that lands after `close_headless` reads 0 and no-ops instead
+    /// of pumping a freed route.
+    fn spawn_headless(&self, plugin_id: &str) -> anyhow::Result<i64> {
+        #[cfg(target_os = "android")]
+        {
+            use tur_engine::core::render::brush::Color;
+
+            let pid = plugin_id.to_string();
+            let runtime_handle = self.runtime_handle;
+            let loops = &self.loops;
+            let cxs = &self.cxs;
+            let backend_pool =
+                crate::plugin_runtime::plugin_jni::backend_pool_for(runtime_handle);
+            // The host-minted plugin handle: stamped into the instance's
+            // data (the `emp_host` rows' identity) and delivered to the
+            // module's `entry fn start(cx: opaque)` at load (its id is the
+            // sealed boot argument).
+            let plugin_handle = crate::plugin_runtime::emp::PluginHandle::mint(
+                crate::plugin_runtime::PluginId::new(pid.clone()),
+                crate::plugin_runtime::PluginInstance(None),
+            );
+            let start_cx = plugin_handle.id();
+            with_attached_env(move |env| {
+                let class = crate::plugin_runtime::host_cache::frame_loop_class()
+                    .ok_or_else(|| anyhow::anyhow!("FrameLoop class not cached (createRuntime not run)"))?;
+                // SAFETY: the cached raw jclass is a process-lifetime global ref.
+                let class = unsafe { jni::objects::JClass::from_raw(class) };
+                let loop_obj: jni::objects::JObject =
+                    env.new_object(&class, "()V", &[]).map_err(|e| anyhow::anyhow!("FrameLoop ctor: {e}"))?;
+                // Global refs up front: `create_instance` takes the JObject
+                // by value (and globalizes it for the engine's FrameLoopRef);
+                // our own references for the wiring + close statics are these.
+                let loop_global = env
+                    .new_global_ref(&loop_obj)
+                    .map_err(|e| anyhow::anyhow!("global ref (loop): {e}"))?;
+                let instance = tur_android::ops::create_instance(
+                    env,
+                    runtime_handle,
+                    loop_obj,
+                    move |builder| {
+                        let builder = match backend_pool {
+                            Some(ref pool) => builder.worker_pool(pool.clone()),
+                            None => builder,
+                        };
+                        builder.instance_data(move |cx| {
+                            cx.define::<crate::plugin_runtime::PluginId>(
+                                crate::plugin_runtime::PluginId::new(pid.clone()),
+                            );
+                            cx.define::<crate::plugin_runtime::PluginInstance>(
+                                crate::plugin_runtime::PluginInstance(None),
+                            );
+                            cx.define::<crate::plugin_runtime::emp::PluginHandle>(
+                                plugin_handle,
+                            );
+                            // The rpc rows' identity: the SAME minted id the
+                            // `RpcClient` dispatches with (see `extract_rpc`).
+                            cx.define::<ease_tur_rpc::RpcIdentity>(ease_tur_rpc::RpcIdentity(
+                                start_cx,
+                            ));
+                        })
+                    },
+                    // Never attached to a surface — the base color is moot.
+                    Color::WHITE,
+                );
+                if instance == 0 {
+                    anyhow::bail!("create_instance returned 0 (see logcat)");
+                }
+                cxs.lock().unwrap().insert(instance, start_cx);
+                // Guard cell + wake wiring (mirrors TurInstance.init).
+                let cell = env
+                    .new_object(
+                        "java/util/concurrent/atomic/AtomicLong",
+                        "(J)V",
+                        &[jni::objects::JValue::Long(instance)],
+                    )
+                    .map_err(|e| anyhow::anyhow!("AtomicLong ctor: {e}"))?;
+                let cell_global = env
+                    .new_global_ref(&cell)
+                    .map_err(|e| anyhow::anyhow!("global ref (cell): {e}"))?;
+                env.call_static_method(
+                    &class,
+                    "wireToInstance",
+                    "(Lcom/kutedev/easemusicplayer/turintegration/FrameLoop;Ljava/util/concurrent/atomic/AtomicLong;)V",
+                    &[(&*loop_global).into(), (&cell).into()],
+                )
+                .map_err(|e| anyhow::anyhow!("FrameLoop.wireToInstance: {e}"))?;
+                loops
+                    .lock()
+                    .unwrap()
+                    .insert(instance, (loop_global, cell_global));
+                Ok(instance)
+            })
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = plugin_id;
+            anyhow::bail!("headless spawn requires Android")
+        }
+    }
+
+    fn load_headless_module(&self, instance_handle: i64, source_handle: i64) {
+        #[cfg(target_os = "android")]
+        {
+            // The minted boot identity — KEPT (not popped): `extract_rpc`
+            // needs the same id to address the bind-table dispatch lane
+            // (the phase-5 identity rail). `close_headless` drops it.
+            let start_cx = self.cxs.lock().unwrap().get(&instance_handle).copied();
+            crate::plugin_runtime::load::load_module_source(
+                self.runtime_handle,
+                instance_handle,
+                source_handle,
+                start_cx,
+            );
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (instance_handle, source_handle);
+        }
+    }
+
+    /// Pair the instance with an [`AndroidDriver`] into an [`RpcClient`].
+    /// The boot identity comes from the minted handle the host already
+    /// holds (the identity rail — a new-style backend's `start(cx)`
+    /// answers nothing). The capability probe records its verdict here,
+    /// eagerly, and the boot gate REQUIRES the bind-table proof: a module
+    /// exporting neither dispatch entry has no RPC surface (it failed to
+    /// boot, or is not a backend) and extracts no client. FIFO behind
+    /// the spawn + load posts, so the module has booted.
+    fn extract_rpc(&self, instance_handle: i64) -> Option<ease_tur_rpc::RpcClient> {
+        #[cfg(target_os = "android")]
+        {
+            let start_cx = self.cxs.lock().unwrap().get(&instance_handle).copied();
+            let Some(start_cx) = start_cx else {
+                tracing::error!(
+                    "extract_rpc: instance {instance_handle} has no boot identity \
+                     — not spawned here?"
+                );
+                return None;
+            };
+            let driver: Arc<dyn ease_tur_rpc::RutDriver> = Arc::new(AndroidDriver {
+                handle: instance_handle,
+            });
+            let client = RpcClient::new(driver, start_cx);
+            if !client.has_dispatch_entries() {
+                tracing::error!(
+                    "extract_rpc: instance {instance_handle} exports no dispatch entries \
+                     (no `rpc` / `rpc_bin` — the module failed to boot or serves no bind table)"
+                );
+                return None;
+            }
+            Some(client)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = instance_handle;
+            None
+        }
+    }
+
+    fn close_headless(&self, instance_handle: i64) {
+        #[cfg(target_os = "android")]
+        {
+            let globals = self.loops.lock().unwrap().remove(&instance_handle);
+            self.cxs.lock().unwrap().remove(&instance_handle);
+            let _ = with_attached_env(|env| {
+                if let Some((loop_ref, cell_ref)) = globals {
+                    let class = crate::plugin_runtime::host_cache::frame_loop_class()
+                        .ok_or_else(|| anyhow::anyhow!("FrameLoop class not cached"))?;
+                    // SAFETY: process-lifetime global ref.
+                    let class = unsafe { jni::objects::JClass::from_raw(class) };
+                    env.call_static_method(
+                        &class,
+                        "closeInstance",
+                        "(Lcom/kutedev/easemusicplayer/turintegration/FrameLoop;Ljava/util/concurrent/atomic/AtomicLong;)V",
+                        &[(&*loop_ref).into(), (&*cell_ref).into()],
+                    )
+                    .map_err(|e| anyhow::anyhow!("FrameLoop.closeInstance: {e}"))?;
+                }
+                Ok(())
+            });
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = instance_handle;
+        }
+    }
+
+    fn emit_signal(&self, op: u32, payload: &str) {
+        #[cfg(target_os = "android")]
+        {
+            let payload = payload.to_string();
+            let _ = with_attached_env(|env| {
+                let class = crate::plugin_runtime::host_cache::signal_host_class()
+                    .ok_or_else(|| anyhow::anyhow!("EaseSignalHost class not cached"))?;
+                // SAFETY: process-lifetime global ref.
+                let class = unsafe { jni::objects::JClass::from_raw(class) };
+                let jstr = env
+                    .new_string(&payload)
+                    .map_err(|e| anyhow::anyhow!("new_string: {e}"))?;
+                env.call_static_method(
+                    &class,
+                    "onSignal",
+                    "(ILjava/lang/String;)V",
+                    &[jni::objects::JValue::Int(op as i32), (&jstr).into()],
+                )
+                .map_err(|e| anyhow::anyhow!("EaseSignalHost.onSignal: {e}"))?;
+                Ok(())
+            });
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (op, payload);
+        }
+    }
+}
+
+// ============================================================================
+// Minimal NDK asset FFI (libandroid.so) — reading the bundled plugin zip
+// natively so its bytes never cross the JNI boundary. Pattern lifted from
+// tur's compose demo (`createAssetModuleSource`).
+// ============================================================================
+
+#[repr(C)]
+pub struct AAssetManager {
+    _unused: [u8; 0],
+}
+
+#[repr(C)]
+struct AAsset {
+    _unused: [u8; 0],
+}
+
+#[cfg(target_os = "android")]
+#[link(name = "android")]
+unsafe extern "C" {
+    fn AAssetManager_fromJava(
+        env: *mut std::ffi::c_void,
+        asset_manager: *mut std::ffi::c_void,
+    ) -> *mut AAssetManager;
+    fn AAssetManager_open(
+        mgr: *mut AAssetManager,
+        filename: *const std::ffi::c_char,
+        mode: i32,
+    ) -> *mut AAsset;
+    fn AAsset_getLength(asset: *mut AAsset) -> u64;
+    fn AAsset_read(asset: *mut AAsset, buf: *mut std::ffi::c_void, count: usize) -> i32;
+    fn AAsset_close(asset: *mut AAsset);
+}
+
+/// Read an APK asset fully, given the raw `*mut AAssetManager` stashed by
+/// [`crate::plugin_runtime::plugin_jni`]'s `bindPluginRuntime`. Thread-safe
+/// (`AAssetManager_open` is); called from the bridge dispatcher's IO
+/// thread during `plugin.bootstrap`.
+#[cfg(target_os = "android")]
+pub(crate) fn read_asset_bytes(mgr: usize, path: &str) -> Option<Vec<u8>> {
+    let mgr = mgr as *mut AAssetManager;
+    if mgr.is_null() {
+        return None;
+    }
+    let c_path = std::ffi::CString::new(path).ok()?;
+    // 3 == AASSET_MODE_BUFFER: read the whole asset up front.
+    let asset = unsafe { AAssetManager_open(mgr, c_path.as_ptr(), 3) };
+    if asset.is_null() {
+        return None;
+    }
+    let len = unsafe { AAsset_getLength(asset) } as usize;
+    let mut buf = vec![0u8; len];
+    // `AAsset_read` may return short reads — loop until full or EOF.
+    let mut filled = 0usize;
+    while filled < len {
+        let n = unsafe {
+            AAsset_read(
+                asset,
+                buf[filled..].as_mut_ptr() as *mut std::ffi::c_void,
+                len - filled,
+            )
+        };
+        if n <= 0 {
+            break;
+        }
+        filled += n as usize;
+    }
+    unsafe { AAsset_close(asset) };
+    buf.truncate(filled);
+    Some(buf)
+}
+
+/// `AAssetManager_fromJava` — needs a live `JNIEnv` (the raw pointer), so
+/// it is called from the `bindPluginRuntime` JNI trampoline, which has one.
+#[cfg(target_os = "android")]
+#[allow(non_snake_case)]
+pub(crate) unsafe fn aasset_manager_from_java(
+    env: *mut std::ffi::c_void,
+    asset_manager: *mut std::ffi::c_void,
+) -> *mut AAssetManager {
+    unsafe { AAssetManager_fromJava(env, asset_manager) }
+}
+
+/// Convenience for the JNI trampolines: attach the host impl to a backend
+/// context's plugin-manager shared state and kick the first backend reload.
+pub(crate) fn attach(cx: &ease_client_backend::ctx::BackendContext, host: TurEngineHost) {
+    cx.plugin_manager().attach_engine_host(Arc::new(host));
+    ease_client_backend::services::plugin_manager::spawn_reload_backends(cx);
+}

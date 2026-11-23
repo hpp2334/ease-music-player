@@ -1,0 +1,228 @@
+// cue.rut — the subtitle cue machinery the SRT and WebVTT lexers
+// share: the `from --> to` timing line, the cue walk (timing line with
+// an optional id line, text rows to the next blank/arrow line), the
+// inline-markup stripping, and the cues -> wire-result build. The two
+// lexers differ only in their entry law (SRT: none; WebVTT: the header
+// block skip + NOTE/STYLE/REGION blocks), which `collect_cues`'s
+// `is_vtt` flag selects — the header SNIFF itself stays in vtt.rut.
+
+use pouch::{ Vec };
+use result::{ LyricLine, LyricResult, sort_lines };
+use strbuild::{ StringBuilder };
+use text::{ ascii_upper, index_of, index_of_str, replace_all, trim };
+use timetags::{ first_token, parse_timestamp };
+
+// One raw cue: timing plus the un-stripped text rows joined with spaces.
+pub struct Cue {
+    from: i64,
+    to: ?i64,
+    text: str,
+}
+
+// A parsed `from --> to` line; `to` is nil when the end timestamp is
+// unparseable (the duration just drops).
+struct CueTiming {
+    from: i64,
+    to: ?i64,
+}
+
+fn is_arrow_line(line: str) -> bool {
+    return index_of_str(line, "-->", 0) >= 0;
+}
+
+// `from --> to [settings]` -> a CueTiming; a nil return rejects the
+// whole cue.
+fn parse_timing_line(line: str) -> ?CueTiming {
+    let arrow = index_of_str(line, "-->", 0);
+    if (arrow < 0) {
+        return nil;
+    }
+    let from = parse_timestamp(line.slice(0, arrow));
+    if (from == nil) {
+        return nil;
+    }
+    let f: i64 = from;
+    let to = parse_timestamp(first_token(line.slice(arrow + 3, line.len())));
+    return CueTiming { from: f, to: to };
+}
+
+// Strip VTT/SRT inline markup (`<i>`, `<b>`, `<c.className>`, `<v Speaker>`…).
+// A `<` with no closing `>` (e.g. the lyric `love <3`) passes through.
+fn strip_angle_tags(text: str) -> str {
+    let b = StringBuilder::with_cap(text.len());
+    let n = text.len();
+    let i: i32 = 0;
+    while (i < n) {
+        let c = text.code_at(i) as i32;
+        if (c == 0x3C) {
+            let end = index_of(text, 0x3E, i + 1);
+            if (end > i + 1) {
+                i = end + 1;
+                continue;
+            }
+        }
+        b.append(text.slice(i, i + 1));
+        i += 1;
+    }
+    return b.build();
+}
+
+// Collapse whitespace runs to single spaces and trim both ends.
+fn collapse_spaces(text: str) -> str {
+    let b = StringBuilder::with_cap(text.len());
+    let pending = false;
+    let n = text.len();
+    let i: i32 = 0;
+    while (i < n) {
+        let c = text.code_at(i) as i32;
+        if (c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D) {
+            pending = b.len() > 0;
+        } else {
+            if (pending) {
+                b.append(" ");
+                pending = false;
+            }
+            b.append(text.slice(i, i + 1));
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+fn strip_cue_tags(text: str) -> str {
+    // `&nbsp;` -> plain space first, so entity spaces collapse with the rest.
+    return collapse_spaces(strip_angle_tags(replace_all(text, "&nbsp;", " ")));
+}
+
+// `[a, b, c].join(sep)` — one builder, sep between pieces.
+fn join_str(parts: Vec<str>, sep: str) -> str {
+    let b = StringBuilder::with_cap(64);
+    let n = parts.len;
+    let k: i32 = 0;
+    while (k < n) {
+        if (k > 0) {
+            b.append(sep);
+        }
+        let p: str = parts[k];
+        b.append(p);
+        k += 1;
+    }
+    return b.build();
+}
+
+// The cue walk over pre-split rows (`is_vtt` adds the header-block skip
+// and the NOTE/STYLE/REGION block skip — the WebVTT extras).
+pub fn collect_cues(rows: Vec<str>, is_vtt: bool) -> Vec<Cue> {
+    let n_rows = rows.len;
+    let cues = Vec<Cue>::new();
+    let i: i32 = 0;
+    if (is_vtt) {
+        // Skip the header block (`WEBVTT` line + optional metadata lines)
+        // up to the first blank line.
+        while (i < n_rows) {
+            let row: str = rows[i];
+            if (trim(row).len() == 0) {
+                break;
+            }
+            i += 1;
+        }
+    }
+    while (i < n_rows) {
+        let line: str = rows[i];
+        if (trim(line).len() == 0) {
+            i += 1;
+            continue;
+        }
+        if (is_vtt && is_vtt_block_keyword(line)) {
+            i += 1;
+            while (i < n_rows) {
+                let row: str = rows[i];
+                if (trim(row).len() == 0) {
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        // A cue starts at its timing line; an optional id line (SRT index /
+        // VTT identifier) may precede it. Cue text never contains `-->`,
+        // so the arrow is a reliable anchor.
+        let timing: ?CueTiming = nil;
+        if (is_arrow_line(line)) {
+            timing = parse_timing_line(line);
+        } else if (i + 1 < n_rows) {
+            let next: str = rows[i + 1];
+            if (is_arrow_line(next)) {
+                timing = parse_timing_line(next);
+                i += 1;
+            }
+        }
+        if (timing == nil) {
+            i += 1; // resync: scan forward for the next cue
+            continue;
+        }
+        let t: CueTiming = timing;
+        i += 1;
+        let text_rows = Vec<str>::new();
+        while (i < n_rows) {
+            let row: str = rows[i];
+            if (trim(row).len() == 0 || is_arrow_line(row)) {
+                break;
+            }
+            text_rows.push(row);
+            i += 1;
+        }
+        cues.push(Cue { from: t.from, to: t.to, text: join_str(text_rows, " ") });
+    }
+    return cues;
+}
+
+// The WebVTT block keywords (NOTE/STYLE/REGION, bare or to end-of-line).
+fn is_vtt_block_keyword(line: str) -> bool {
+    let t = ascii_upper(trim(line));
+    if (t == "NOTE" || t == "STYLE" || t == "REGION") {
+        return true;
+    }
+    if (t.starts_with(0, "NOTE ") || t.starts_with(0, "STYLE ") || t.starts_with(0, "REGION ")) {
+        return true;
+    }
+    return false;
+}
+
+// Cues -> the wire result: markup stripped, per-line durations from the
+// cue ends, sorted; nil when nothing usable parsed ("not mine").
+pub fn build_result(cues: Vec<Cue>) -> ?LyricResult {
+    let lines = Vec<LyricLine>::new();
+    for (let cue of cues) {
+        let line_text = strip_cue_tags(cue.text);
+        if (line_text.len() == 0) {
+            continue;
+        }
+        let duration: ?i64 = nil;
+        // Cue end -> per-line duration (optional in the contract; the
+        // host currently derives it from the next line's start and
+        // ignores ours, but it is free to send and correct for sparse
+        // subtitles).
+        if (cue.to != nil) {
+            let to: i64 = cue.to;
+            if (to > cue.from) {
+                duration = to - cue.from;
+            }
+        }
+        lines.push(LyricLine { time_ms: cue.from, duration_ms: duration, text: line_text });
+    }
+    if (lines.len == 0) {
+        return nil; // no cues — "not mine"
+    }
+    sort_lines(lines);
+    return LyricResult {
+        lines: lines,
+        artist: nil,
+        album: nil,
+        title: nil,
+        lyricist: nil,
+        author: nil,
+        length: nil,
+        offset: nil,
+    };
+}

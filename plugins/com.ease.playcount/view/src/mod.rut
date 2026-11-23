@@ -1,0 +1,243 @@
+// Play Counts view — the emp-epoch port (apiVersion 3) of the
+// apiVersion-2 dashboard view. A ranked play-count list over the rows the
+// backend appends (`plays:YYYY-MM-DD` → `{musicId, title, ts}`), with two
+// dropdown filters: a time range (Today .. Last Year — the day-key scan
+// horizon) and a playlist-membership filter (a row counts only when its
+// musicId belongs to the selected playlist, per the host roster).
+//
+// Data flow (the TS shape, on the emp rails): the services are
+// constructed FROM the boot handle at `start` (boot-safe — constructors
+// only store the handle); `Library.playlists()` seeds the roster at MOUNT
+// (never at boot — the compile/boot check harness loads views headless
+// with no database, so host rows must not fire in `start`; on device the
+// mount mutation runs before the first frame paints). Every
+// roster/selection change re-runs the refresh (stats.rut): a synchronous
+// `Db.get_all_multi` scan of the range's day keys, the JS-epoch
+// aggregation ported line-for-line, covers for the top of the list via
+// `Library.covers`, then the ranked rows.
+//
+// No `Theme` class — theme colors are an Android-only row and views must
+// boot headless; the palette is the static light scheme (theme.rut).
+//
+// Covers ride one instance-lifetime MapHandle (musicId → resource id,
+// "0" = known-none): the TS `coverHandles` memo — never cleared, so a
+// range switch never re-registers a cover (tur image resources have no
+// free API). The map is written BEFORE the entries source is set, so the
+// row rebuild that reads it always sees the fresh ids.
+//
+// The two selectors are the TS `createSelector` port (selector.rut); the
+// page tree assembles here and the root Stack carries the selector
+// overlays (z0 page, z1 scrims, z2 menus) so the followers paint above
+// content and aren't clipped.
+//
+// Tree (the phase-4a pkg-tree law — `mod NAME;` children beside this
+// root; children resolve siblings by path, nothing references the root):
+//   state.rut   — the reactive state bundle + seeding
+//   theme.rut   — the static light palette + layout constants
+//   ranges.rut  — the time-range tables + filter-domain constants
+//   roster.rut  — the host playlist roster + the menus' option lists
+//   stats.rut   — the day-key scan + aggregation + ranking + covers
+//   selector.rut — the two dropdown filters (trigger / scrim / menu)
+//   rows.rut    — the ranked list + the status bodies
+
+mod ranges;
+mod roster;
+mod rows;
+mod selector;
+mod state;
+mod stats;
+mod theme;
+
+use emp::{ Db, Library };
+use tur_kit::control_flow::control::{ Condition, Fragment, Switch };
+use tur_kit::control_flow::lifecycle::{ Lifecycle };
+use tur_kit::flags::{ CrossAlign, MainAlign, MainAxisSize, StackFit };
+use tur_kit::gesture::pointer::{ MountEvent };
+use tur_kit::handles::{ View, mount, value_len };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::layout::flex::{ Column, Expanded, Row };
+use tur_kit::layout::stack::{ Stack };
+use tur_kit::reactive::{ DeriveCtx, MutationCtx, Readable, Source, derive, mutate, source, sv };
+use tur_kit::text::core::{ Text };
+
+// ---- boot: construct the services FROM the handle, build the tree,
+// mount. Views keep the u64 answer. Host rows fire only from mutations
+// (the boot law), never here.
+entry fn start(cx: opaque) -> u64 {
+    const db = Db(cx);
+    const lib = Library(cx);
+    let s = state::seed_state();
+
+    // ---- selectors' inputs -------------------------------------------------
+
+    let range_opts: Source<opaque> = source<opaque>(roster::range_options().raw());
+    let playlist_opts: Readable<opaque> = derive<opaque>(fn (ctx: DeriveCtx) -> opaque {
+        return roster::playlist_options(ctx.get<opaque>(s.roster)).raw();
+    });
+    let range_label: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        return ranges::range_label_of(ctx.get<str>(s.sel_range));
+    });
+    let playlist_label: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        let v = ctx.get<str>(s.sel_playlist);
+        if (v == ranges::PLAYLIST_ALL) {
+            return "All Playlists";
+        }
+        return roster::roster_title(ctx.get<opaque>(s.roster), v);
+    });
+
+    // ---- mutations (the writes flow through the ctx) -----------------------
+
+    let select_range = mutate(fn (ctx: MutationCtx, id: str) {
+        if (ranges::range_index_of(id) >= 0 && ctx.get<str>(s.sel_range) != id) {
+            ctx.set<str>(s.sel_range, id);
+            stats::refresh_now(ctx, s, db, lib);
+        }
+    });
+    let select_playlist = mutate(fn (ctx: MutationCtx, id: str) {
+        if (ctx.get<str>(s.sel_playlist) != id) {
+            ctx.set<str>(s.sel_playlist, id);
+            stats::refresh_now(ctx, s, db, lib);
+        }
+    });
+    // Mount: seed the roster from the host library, then the first scan.
+    let b_boot = mutate(fn (ctx: MutationCtx, _e: MountEvent) {
+        let raw = lib.playlists();
+        ctx.set<opaque>(s.roster, roster::parse_roster(raw).raw());
+        stats::refresh_now(ctx, s, db, lib);
+    });
+
+    // ---- derived page state --------------------------------------------------
+
+    let has_filters: Readable<bool> = derive<bool>(fn (ctx: DeriveCtx) -> bool {
+        return value_len(ctx.get<opaque>(s.roster)) > 0;
+    });
+    let status: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<bool>(s.loading)) {
+            return "loading";
+        }
+        if (value_len(ctx.get<opaque>(s.entries)) == 0) {
+            return "empty";
+        }
+        return "ready";
+    });
+    let total: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        return f"{stats::entries_total(ctx.get<opaque>(s.entries))}";
+    });
+    let unit: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        if (stats::entries_total(ctx.get<opaque>(s.entries)) == 1) {
+            return "play";
+        }
+        return "plays";
+    });
+
+    // ---- the tree ------------------------------------------------------------
+
+    let range_sel = selector::make_selector(range_opts, s.sel_range, range_label, select_range, 196.0);
+    let playlist_sel = selector::make_selector(playlist_opts, s.sel_playlist, playlist_label, select_playlist, 240.0);
+
+    let header = Row()
+        .main_alignment(MainAlign::SpaceBetween)
+        .cross_alignment(CrossAlign::Center)
+        .child(
+            Expanded()
+                .flex(sv(1.0f64))
+                .child(header_summary(total, unit))
+                .build(),
+        )
+        .child(SizedBox(8.0, 0.0).build())
+        .child(filter_bar(range_sel.trigger, playlist_sel.trigger, has_filters))
+        .build();
+
+    let body = Switch()
+        .value(status)
+        .cases("loading", rows::loading_body())
+        .cases("empty", rows::empty_body())
+        .cases("ready", rows::ready_body(s.entries, s.covers))
+        .build();
+
+    let page = Container()
+        .color(sv(theme::PAGE_BG))
+        .padding(theme::PAGE_PADDING)
+        .child(
+            Column()
+                .cross_alignment(CrossAlign::Stretch)
+                .child(header)
+                .child(SizedBox(0.0, 14.0).build())
+                .child(Expanded().flex(sv(1.0f64)).child(body).build())
+                .build(),
+        )
+        .build();
+
+    // The root Stack carries the selector overlays (z0 page, z1 scrims,
+    // z2 menus) so the followers paint above content and aren't clipped.
+    let p_scrim = playlist_sel.scrim;
+    let p_menu = playlist_sel.menu;
+    let root = Lifecycle()
+        .on_mount(b_boot)
+        .child(
+            Stack()
+                .fit(StackFit::Expand)
+                .child(page)
+                .child(range_sel.scrim)
+                .child(range_sel.menu)
+                .child(
+                    Condition(has_filters)
+                        .then_build(fn () -> View {
+                            return Fragment().children([p_scrim, p_menu]).build();
+                        })
+                        .else_build(fn () -> View { return SizedBox(0.0, 0.0).build(); })
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+    mount(root);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Page chrome (the header lives here — it is one-time page assembly)
+// ---------------------------------------------------------------------------
+
+fn header_summary(total: Readable<str>, unit: Readable<str>) -> View {
+    // The Compose top bar already carries the page title, so the in-view
+    // header is just the headline number + a muted unit.
+    return Row()
+        .cross_alignment(CrossAlign::Center)
+        .main_axis_size(MainAxisSize::Min)
+        .child(Text().text(total).font_size(22.0).color(theme::TEXT).build())
+        .child(SizedBox(6.0, 0.0).build())
+        .child(Text().text(unit).font_size(13.0).color(theme::TEXT_MUTED).build())
+        .build();
+}
+
+/// ONE tonal segmented container holding both filter triggers, so the two
+/// controls read as a single group. The playlist segment mounts only while
+/// the roster is non-empty.
+fn filter_bar(range_trigger: View, playlist_trigger: View, has_filters: Readable<bool>) -> View {
+    return Container()
+        .color(sv(theme::FILTER_BG))
+        .radius(sv(theme::CHIP_RADIUS))
+        .padding(4.0)
+        .child(
+            Row()
+                .cross_alignment(CrossAlign::Center)
+                .main_axis_size(MainAxisSize::Min)
+                .child(range_trigger)
+                .child(
+                    Condition(has_filters)
+                        .then(
+                            Fragment()
+                                .children([
+                                    Container().width(sv(1.0f64)).height(sv(20.0f64)).color(sv(theme::BAR_DIVIDER)).build(),
+                                    playlist_trigger,
+                                ])
+                                .build(),
+                        )
+                        .else_branch(SizedBox(0.0, 0.0).build())
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}

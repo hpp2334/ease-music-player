@@ -1,0 +1,6 @@
+// xml_host/src/mod.d.rut — the xml lib's host row. The body lives in
+// the embedder (ease `plugin_runtime/third::xml`), bound under this
+// scope with this exact name/signature — the boot verifies the join.
+
+// decode an XML document → the JSON tree string (nil = unparseable)
+pub host fn to_json(data: bytes) -> ?str;

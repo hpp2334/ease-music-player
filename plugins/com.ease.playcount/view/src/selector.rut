@@ -1,0 +1,280 @@
+// selector.rut — the two dropdown filters (the TS `createSelector` ported
+// onto the composited target/follower pair). The trigger goes anywhere in
+// normal flow; the scrim + menu are Stack children of the root page
+// (anchored bottom-right → top-right, so both menus open leftward).
+
+use tur_kit::control_flow::control::{ Condition, Each };
+use tur_kit::flags::{ Align, BorderPosition, CrossAlign, HitTestBehavior, MainAlign, MainAxisSize };
+use tur_kit::gesture::pointer::{ PointerInteract };
+use tur_kit::handles::{ View };
+use tur_kit::layout::box::{ Container, SizedBox };
+use tur_kit::layout::flex::{ Column, Flexible, Row };
+use tur_kit::layout::stack::{ Positioned };
+use tur_kit::reactive::{ DeriveCtx, Mutation, MutationCtx, Readable, Source, derive, mutate, source, sv };
+use tur_kit::text::core::{ Text };
+use tur_kit::virtual_app::{ CompositedFollower, CompositedTarget, layer_link };
+use json::{ JsonReader };
+
+
+/// The three placed pieces of one selector: the trigger goes anywhere in
+/// normal flow; the scrim + menu are Stack children of the root page.
+pub struct Selector {
+    trigger: View;
+    scrim: View;
+    menu: View;
+}
+
+pub fn make_selector(
+    options: Readable<opaque>,
+    selected: Source<str>,
+    label: Readable<str>,
+    on_select: Mutation<str>,
+    menu_width: f64,
+) -> Selector {
+    let open: Source<bool> = source<bool>(false);
+    let link = layer_link();
+    let b_toggle = mutate(fn (ctx: MutationCtx, _e: nil) {
+        ctx.set<bool>(open, !ctx.get<bool>(open));
+    });
+    let b_close = mutate(fn (ctx: MutationCtx, _e: nil) {
+        ctx.set<bool>(open, false);
+    });
+    // Dismiss backdrop: Condition-gated so it only exists while open — an
+    // always-mounted fill would steal taps from the trigger below it. It
+    // is fully transparent; it only captures an outside tap to close.
+    let scrim = Condition(open)
+        .then_build(fn () -> View {
+            return Positioned()
+                .left(sv(0.0f64))
+                .top(sv(0.0f64))
+                .right(0.0)
+                .bottom(0.0)
+                .child(
+                    PointerInteract()
+                        .behavior(HitTestBehavior::Opaque)
+                        .on_click(b_close)
+                        .child(Container().color(sv(0x00000000u64)).build())
+                        .build(),
+                )
+                .build();
+        })
+        .else_build(fn () -> View { return SizedBox(0.0, 0.0).build(); })
+        .build();
+    // Menu: a DIRECT Stack child (always mounted) so the composited
+    // transform tracks and repositions it; the open/close gating lives
+    // INSIDE. The default anchor pair extends the card leftward from the
+    // right-aligned trigger (both triggers live in the right-hand filter
+    // bar).
+    let menu = CompositedFollower()
+        .link(link)
+        .target_anchor(Align::BottomRight)
+        .follower_anchor(Align::TopRight)
+        .offset(0.0, 6.0)
+        .child(
+            Condition(open)
+                .then_build(fn () -> View {
+                    return menu_card(options, selected, on_select, open, menu_width);
+                })
+                .else_build(fn () -> View { return SizedBox(0.0, 0.0).build(); })
+                .build(),
+        )
+        .build();
+    return Selector {
+        trigger: CompositedTarget().link(link).child(trigger_pill(label, open, b_toggle)).build(),
+        scrim: scrim,
+        menu: menu,
+    };
+}
+
+/// The bare trigger: NO fill keyline — the shared FilterBar carries the
+/// tonal chrome for both triggers (a pill-in-a-pill would double the
+/// outline).
+fn trigger_pill(label: Readable<str>, open: Source<bool>, b_toggle: Mutation<nil>) -> View {
+    let caret: Readable<str> = derive<str>(fn (ctx: DeriveCtx) -> str {
+        if (ctx.get<bool>(open)) {
+            return "▲";
+        }
+        return "▼";
+    });
+    return PointerInteract()
+        .behavior(HitTestBehavior::Opaque)
+        .on_click(b_toggle)
+        .child(
+            Container()
+                .height(sv(theme::TRIGGER_HEIGHT))
+                .color(sv(theme::TRIGGER_BG))
+                .radius(sv(theme::CHIP_RADIUS))
+                .child(
+                    Row()
+                        .main_alignment(MainAlign::Start)
+                        .cross_alignment(CrossAlign::Center)
+                        .main_axis_size(MainAxisSize::Min)
+                        .child(SizedBox(14.0, 0.0).build())
+                        // Loose fit: the label shrink-wraps when it fits the
+                        // pill and ellipsizes at the pill's true budget when
+                        // it doesn't.
+                        .child(
+                            Flexible()
+                                .child(
+                                    Text()
+                                        .text(label)
+                                        .font_size(13.0)
+                                        .color(theme::PRIMARY)
+                                        .max_lines(1)
+                                        .ellipsis()
+                                        .build(),
+                                )
+                                .build(),
+                        )
+                        .child(SizedBox(8.0, 0.0).build())
+                        .child(Text().text(caret).font_size(10.0).color(theme::PRIMARY).build())
+                        .child(SizedBox(14.0, 0.0).build())
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}
+
+fn menu_card(
+    options: Readable<opaque>,
+    selected: Source<str>,
+    on_select: Mutation<str>,
+    open: Source<bool>,
+    menu_width: f64,
+) -> View {
+    return Container()
+        .width(sv(menu_width))
+        .color(sv(theme::CARD))
+        .border(theme::DIVIDER, 1.0, BorderPosition::Inside)
+        .radius(sv(14.0f64))
+        .shadow(theme::SHADOW, 16.0, 0.0, 6.0)
+        .child(
+            Container()
+                .padding(6.0)
+                .child(
+                    Column()
+                        .cross_alignment(CrossAlign::Stretch)
+                        .main_axis_size(MainAxisSize::Min)
+                        .child(
+                            Each(options)
+                                .item_builder(fn (i: u64, item: str) -> View {
+                                    return menu_row(i, item, selected, on_select, open);
+                                })
+                                .build(),
+                        )
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}
+
+/// A height-0 spacer fronts every menu row after the first.
+fn menu_row(i: u64, item: str, selected: Source<str>, on_select: Mutation<str>, open: Source<bool>) -> View {
+    let gap: f64 = if (i == 0) { 0.0 } else { 4.0 };
+    return Column()
+        .cross_alignment(CrossAlign::Stretch)
+        .main_axis_size(MainAxisSize::Min)
+        .child(SizedBox(0.0, gap).build())
+        .child(option_row(item, selected, on_select, open))
+        .build();
+}
+
+struct OptionV {
+    value: str;
+    label: str;
+}
+
+fn decode_option(item: str) -> ?OptionV {
+    let r = JsonReader::of(item);
+    let value = "";
+    let label = "";
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "value") {
+            value = r.read_str();
+        } else if (k == "label") {
+            label = r.read_str();
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return OptionV { value: value, label: label };
+}
+
+fn option_row(item: str, selected: Source<str>, on_select: Mutation<str>, open: Source<bool>) -> View {
+    let o = decode_option(item);
+    if (o == nil) {
+        return SizedBox(0.0, 0.0).build();
+    }
+    let opt: OptionV = o;
+    let value = opt.value;
+    let is_sel: Readable<bool> = derive<bool>(fn (ctx: DeriveCtx) -> bool {
+        return ctx.get<str>(selected) == value;
+    });
+    let label_plain = Text()
+        .text(sv(opt.label))
+        .font_size(13.0)
+        .color(theme::TEXT)
+        .max_lines(1)
+        .ellipsis()
+        .build();
+    let label_active = Text()
+        .text(sv(opt.label))
+        .font_size(13.0)
+        .color(theme::PRIMARY)
+        .max_lines(1)
+        .ellipsis()
+        .build();
+    let b_pick = mutate(fn (ctx: MutationCtx, _e: nil) {
+        ctx.set<bool>(open, false);
+        if (ctx.get<str>(selected) != value) {
+            ctx.run<str>(on_select, value);
+        }
+    });
+    return PointerInteract()
+        .behavior(HitTestBehavior::Opaque)
+        .on_click(b_pick)
+        .child(
+            Container()
+                .radius(sv(10.0f64))
+                .padding(12.0)
+                .color(sv(theme::CARD))
+                .child(
+                    Row()
+                        .main_alignment(MainAlign::SpaceBetween)
+                        .cross_alignment(CrossAlign::Center)
+                        .child(
+                            Flexible()
+                                .child(
+                                    Condition(is_sel)
+                                        .then(label_active)
+                                        .else_branch(label_plain)
+                                        .build(),
+                                )
+                                .build(),
+                        )
+                        .child(
+                            Condition(is_sel)
+                                .then(Text().text(sv("✓")).font_size(13.0).color(theme::PRIMARY).build())
+                                .else_branch(SizedBox(0.0, 0.0).build())
+                                .build(),
+                        )
+                        .build(),
+                )
+                .build(),
+        )
+        .build();
+}

@@ -1,0 +1,29 @@
+// crypto_host/src/mod.d.rut — the crypto lib's host rows. The bodies
+// live in the embedder (ease `plugin_runtime/third::crypto`), bound
+// under this scope with these exact names/signatures — the embedder's
+// boot verifies the join, so drift here is a loud boot error, never a
+// silent miss.
+
+// OS-entropy octets (capped at 1 MiB)
+pub host fn random_bytes(n: u64) -> bytes;
+
+// a random UUID v4 (hyphenated, lowercase)
+pub host fn random_uuid() -> str;
+
+// MD5 hex (WebDAV auth)
+pub host fn md5_hex(data: bytes) -> str;
+
+// MD5 base64 (HTTP Digest)
+pub host fn md5_base64(data: bytes) -> str;
+
+// standard base64 encode (padded, RFC 4648)
+pub host fn base64_encode(data: bytes) -> str;
+
+// strict standard base64 decode (invalid input traps Invalid)
+pub host fn base64_decode(s: str) -> bytes;
+
+// SHA-256 hex (S3 SigV4)
+pub host fn sha256_hex(data: bytes) -> str;
+
+// HMAC-SHA-256 hex (S3 SigV4 signing key)
+pub host fn hmac_sha256_hex(key: bytes, data: bytes) -> str;

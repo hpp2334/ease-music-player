@@ -22,10 +22,28 @@ import com.kutedev.easemusicplayer.R
 @Composable
 fun EaseCheckbox(
     value: Boolean,
-    onChange: (value: Boolean) -> Unit
+    onChange: (value: Boolean) -> Unit,
+    disabled: Boolean = false
 ) {
-    val borderColor = if (value) { MaterialTheme.colorScheme.primary } else { MaterialTheme.colorScheme.onSurface }
-    val bgColor = if (value) { MaterialTheme.colorScheme.primary } else { Color.Transparent }
+    val dim = if (disabled) {
+        0.38F
+    } else {
+        1F
+    }
+    // Outline style: unchecked = transparent interior + `onSurface`
+    // border (black in light theme); checked = primary fill + surface
+    // check. NB `Color.Transparent` is black-with-zero-alpha — never
+    // `.copy(alpha = …)` it, that yields an opaque black box.
+    val bgColor = if (value) {
+        MaterialTheme.colorScheme.primary.copy(alpha = dim)
+    } else {
+        Color.Transparent
+    }
+    val borderColor = if (value) {
+        MaterialTheme.colorScheme.primary.copy(alpha = dim)
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = dim)
+    }
 
     Box(
         modifier = Modifier
@@ -33,13 +51,19 @@ fun EaseCheckbox(
             .clip(RoundedCornerShape(4.dp))
             .size(16.dp)
             .background(bgColor)
-            .clickable { onChange(!value) },
+            .then(
+                if (disabled) {
+                    Modifier
+                } else {
+                    Modifier.clickable { onChange(!value) }
+                }
+            ),
         contentAlignment = Alignment.Center
     ) {
         if (value) {
             Icon(
                 painter = painterResource(id = R.drawable.icon_yes),
-                tint = MaterialTheme.colorScheme.surface,
+                tint = MaterialTheme.colorScheme.surface.copy(alpha = dim),
                 contentDescription = null,
                 modifier = Modifier.width(6.dp)
             )

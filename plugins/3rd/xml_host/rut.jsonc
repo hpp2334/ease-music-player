@@ -1,0 +1,8 @@
+{
+  // xml_host — the Rust-backed half of the xml lib (quick-xml → a
+  // serde_json tree). A pure declaration surface: the body installs in
+  // the embedder (the ease app's `plugin_runtime/third::xml`), bound
+  // under this scope. Identity-free.
+  "name": "xml_host",
+  "type": "host"
+}

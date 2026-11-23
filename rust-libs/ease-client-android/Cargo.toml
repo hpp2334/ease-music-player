@@ -1,0 +1,65 @@
+[package]
+name = "ease-client-android"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ease-client-backend = { path = "../ease-client-backend" }
+ease-client-schema = { workspace = true }
+ease-client-tokio = { path = "../ease-client-tokio" }
+ease-tur-rpc = { path = "../ease-tur-rpc" }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = "1.0"
+anyhow = { workspace = true }
+
+# 3b34983 = tur main (2026-11-22). Host modules stay typed `tur_host`
+# pkg rows with per-instance identity via `instance_data`; the rut pin
+# rides 460e8887 inside tur — the drop-mut law (bindings/params are
+# mutable by default, the `mut` keyword is gone), `host`/`when` now
+# reserved, the parser merge (rut-ast owns the parser), std-v18, the
+# glob leaf + the Name vocabulary, and tur's own .rut sources swept by
+# the rut formatter.
+# Phase 1 (plugin-epoch engine lanes): this git rev resolves through the
+# local [patch."https://github.com/hpp2334/tur"] section in ../Cargo.toml
+# (sibling checkout /tur) until the engine bump lands upstream.
+tur-android = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+tur-animation = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+# The `Http` capability type the `ease.net` rows resolve through the
+# instance (the NativeHttp backend registers via tur-android's defaults).
+tur-net-capability = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+# rut-driver — the pkg/manifest/decl lane (Mounted / Manifest /
+# parse_manifest / lower_decl_module) the phase-2 `emp` + 3rd-party lib
+# offerings mount through. Same pin rut-core/rut-vm ride (the checkout
+# is shared, no duplicate-version split).
+rut-driver = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+rut-core = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+rut-vm = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+futures = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# CJK fallback fonts for the tur text pipeline (plugin_runtime/fonts.rs).
+# Resolves to the same 0.9.0 instance tur's parley stack compiles against.
+fontique = "0.9"
+
+jni = "0.21"
+ndk-context = "0.1"
+
+# OS entropy for the `ease.crypto` rows (random_bytes / random_uuid).
+getrandom = "0.3"
+
+# `ease.xml` rows (xml_to_json) + `ease.crypto` hashing — the WebDAV/S3
+# plugin support surface that replaces the old npm deps (fast-xml-parser,
+# js-md5, @noble/hashes).
+quick-xml = "0.36"
+md-5 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }

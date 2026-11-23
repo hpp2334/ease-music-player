@@ -1,0 +1,28 @@
+[package]
+name = "ease-tur-rpc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Private tur plugin RPC bridge (host⇄rut): the bind-table contract — sealed handler closures dispatched through the module's rpc/rpc_bin entry lanes."
+
+[dependencies]
+tur-engine = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+# The rut row surface (types + the pkg_fn!/pkg_async_fn! registration
+# macros) — same rev tur's workspace pins (460e8887: drop-mut law,
+# `host`/`when` reserved, parser merged into rut-ast, std-v18).
+rut-core = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+rut-vm = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+# The host-row decls (`bind_rows_decl`) + the offered pkg mounts
+# (`bind_rows_ext`) — same rev as rut-core/rut-vm.
+rut-driver = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88", default-features = false }
+tokio = { version = "1", features = ["sync"] }
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tur-native = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+tur-integration-tests = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

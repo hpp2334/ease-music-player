@@ -1,0 +1,166 @@
+// backend/config.rut — the per-instance config document (the
+// `storage:<instance>` KV entry in this plugin's `Db`), the refresh-token
+// persistence over `Secret`, and the OAuth pending slots.
+//
+// The document keeps the exact key names the apiVersion 1 TS wrote
+// (`alias` / `secretId`), so legacy configs stay readable. The pending
+// slots (`oauth:<flowId>` = `{alias}`) are business data keyed by the
+// host-minted flow id — they never cross the host (the TS
+// `oauth-pending.ts` shape).
+//
+// The emp service handles ride IN as parameters (`db: Db`, `secret:
+// Secret`) — rut has no module globals on the new contract, so every
+// consumer passes the handles it captured at `start`.
+
+use emp::{ Db, Secret };
+use json::{ JsonReader, JsonWriter };
+use strutil::{ opt_str_or, read_opt_str };
+
+/// Per-instance config (the `storage:<id>` KV document).
+pub struct Config {
+    alias: str,
+    secret_id: i64,
+}
+
+pub fn kv_key(instance: str) -> str {
+    return f"storage:{instance}";
+}
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?Config {
+    let r = JsonReader::of(doc);
+    r.begin_object();
+    let alias: ?str = nil;
+    let secret_id: i64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> {
+                alias = read_opt_str(r);
+            },
+            "secretId" -> {
+                if (!r.try_null()) {
+                    secret_id = r.read_i64();
+                }
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    let a = "";
+    if (alias != nil) {
+        a = alias;
+    }
+    return Config { alias: a, secret_id: secret_id };
+}
+
+/// Load an instance's config; the alias defaults to the instance name (the
+/// TS `cfg.alias ?? instance`). Read fresh every call — the KV is the truth
+/// (the exchange writes it, the view's Save rewrites the alias, a rotated
+/// refresh token rewrites the secret id).
+pub fn config_of(db: Db, instance: str) -> ?Config {
+    let raw = db.get(kv_key(instance));
+    if (raw == nil) {
+        return nil;
+    }
+    let doc: str = raw;
+    let cfg = decode_config(doc);
+    if (cfg == nil) {
+        return nil;
+    }
+    let c: Config = cfg;
+    if (c.alias == "") {
+        c.alias = instance;
+    }
+    return c;
+}
+
+/// Persist a (possibly rotated) refresh token: delete + re-put (the secret
+/// store has no in-place update), rewriting the KV config when the store
+/// hands out a different id so future loads resolve it.
+pub fn save_refresh_token(db: Db, secret: Secret, instance: str, old_id: i64, token: str) {
+    secret.remove(old_id);
+    let new_id = secret.put(token);
+    if (new_id == old_id) {
+        return;
+    }
+    let raw = db.get(kv_key(instance));
+    if (raw == nil) {
+        return;
+    }
+    let doc: str = raw;
+    let cfg = decode_config(doc);
+    if (cfg == nil) {
+        return;
+    }
+    let c: Config = cfg;
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("alias");
+    w.write_str(c.alias);
+    w.key("secretId");
+    w.write_i64(new_id);
+    w.end_object();
+    db.set(kv_key(instance), w.finish());
+}
+
+/// Consume a flow's pending slot (`oauth:<oauthId>`, stashed by the view
+/// before the connect op fired the browser flow): read the alias + delete.
+/// Nil = absent / corrupt.
+pub fn take_pending(db: Db, oauth_id: str) -> ?str {    let key = f"oauth:{oauth_id}";
+    let raw = db.get(key);
+    db.delete(key);
+    if (raw == nil) {
+        return nil;
+    }
+    let doc: str = raw;
+    let r = JsonReader::of(doc);
+    r.begin_object();
+    let alias: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "alias") {
+            alias = read_opt_str(r);
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return alias;
+}
+
+/// Remove an instance's config document + refresh-token secret (the host
+/// trash button's `storage:removeInstance`; the caller drops the cached
+/// access token and asks the host to delete the storage row).
+pub fn drop_instance(db: Db, secret: Secret, instance: str) {
+    let raw = db.get(kv_key(instance));
+    if (raw != nil) {
+        let doc: str = raw;
+        let cfg = decode_config(doc);
+        if (cfg != nil) {
+            let conf: Config = cfg;
+            if (conf.secret_id != 0) {
+                secret.remove(conf.secret_id);
+            }
+        }
+    }
+    db.delete(kv_key(instance));
+}

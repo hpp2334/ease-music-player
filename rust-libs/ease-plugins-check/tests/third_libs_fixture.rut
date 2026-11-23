@@ -1,0 +1,22 @@
+// third_libs_fixture.rut — the 3rd-party util lib check's fixture: a
+// use of every lib (the offered pkgs only compile when used) plus a
+// drive of their rows with known-good expectations.
+
+use crypto::{ b64_encode, md5 };
+use net::fetch;
+use time::{ amz_date, http_date };
+use xml::parse;
+
+entry fn start(_cx: opaque) {}
+
+entry fn probe_libs(_cx: opaque) -> str {
+    let h = md5("abc".encode());
+    let b = b64_encode("hello".encode());
+    let zero: u64 = 0;
+    let t = http_date(zero);
+    let a = amz_date(zero);
+    let x = parse("<a><b>1</b></a>".encode());
+    // a closed port: the transport-failure envelope, never a trap
+    let n = fetch("{\"url\":\"http://127.0.0.1:9/no-such\",\"method\":\"GET\"}");
+    return f"{h}|{b}|{t}|{a}|{x}|{n}";
+}

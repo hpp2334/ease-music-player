@@ -1,0 +1,37 @@
+// backend/model.rut — the module state record: the chunked-pull session
+// pool + the Digest challenge cache, as one value the root's `start`
+// constructs and every bound handler passes down (rut closures capture
+// the record; writes through by-value params are the drop-mut law).
+//
+// Fixed columns (the json writer's idiom) — sessions slot 0..POOL,
+// keyed by `sess_sid` (0 = free); challenges slot by server address.
+// The pool is small because the host pulls sequentially per stream
+// (chunked PULL — no credit window), so 4 slots are ample.
+
+/// The pool size (sessions and challenge slots share it).
+pub let POOL: i32 = 4;
+
+pub struct Ctx {
+    sess_sid: [u64],
+    sess_url: [?str],
+    sess_auth: [?str],
+    sess_doff: [u64],
+    ch_addr: [?str],
+    ch_header: [?str],
+    ch_nc: [i64],
+    next_sid: u64,
+}
+
+/// The boot-time state: every slot free, the sid allocator at 1.
+pub fn new_ctx() -> Ctx {
+    return Ctx {
+        sess_sid: [0; 4],
+        sess_url: [nil; 4],
+        sess_auth: [nil; 4],
+        sess_doff: [0; 4],
+        ch_addr: [nil; 4],
+        ch_header: [nil; 4],
+        ch_nc: [0; 4],
+        next_sid: 1,
+    };
+}

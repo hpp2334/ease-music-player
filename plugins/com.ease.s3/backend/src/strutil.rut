@@ -1,0 +1,223 @@
+// backend/strutil.rut — the pure string scans (no URL/regex runtime).
+// Everything the other backend children reach for: casing, trims,
+// prefix/suffix probes, ordering, digit/hex parsing, and the last-segment
+// helper the listing rows use. All `pub` — this module is the shared
+// vocabulary; nothing here touches a host row.
+
+use pouch::{ Vec, freeze_bytes };
+use strbuild::{ StringBuilder };
+
+pub fn is_ws(c: u32) -> bool {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}
+
+pub fn lower_code(c: u32) -> u32 {
+    if (c >= 65 && c <= 90) {
+        return c + 32;
+    }
+    return c;
+}
+
+pub fn lower(s: str) -> str {
+    let n = s.len();
+    let b = StringBuilder::with_cap(n);
+    let i = 0;
+    while (i < n) {
+        b.append(str::from_code(lower_code(s.code_at(i))));
+        i += 1;
+    }
+    return b.build();
+}
+
+/// Case-insensitive equality (S3 tags arrive verbatim from servers that
+/// vary their casing — the TS pick()/pickAll() shape).
+pub fn ci_eq(a: str, b: str) -> bool {
+    let n = a.len();
+    if (n != b.len()) {
+        return false;
+    }
+    let i = 0;
+    while (i < n) {
+        if (lower_code(a.code_at(i)) != lower_code(b.code_at(i))) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+pub fn starts_with_ci(s: str, at: i32, prefix: str) -> bool {
+    let n = prefix.len();
+    if (at < 0 || s.len() < at + n) {
+        return false;
+    }
+    let i = 0;
+    while (i < n) {
+        if (lower_code(s.code_at(at + i)) != lower_code(prefix.code_at(i))) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+pub fn contains_ci(hay: str, needle: str) -> bool {
+    let n = hay.len();
+    let m = needle.len();
+    if (m == 0) {
+        return true;
+    }
+    let i = 0;
+    while (i + m <= n) {
+        if (starts_with_ci(hay, i, needle)) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+/// Codepoint-wise ordering (the listing's path sort).
+pub fn str_less(a: str, b: str) -> bool {
+    let n = a.len();
+    let m = b.len();
+    let i = 0;
+    while (i < n && i < m) {
+        let ca = a.code_at(i);
+        let cb = b.code_at(i);
+        if (ca != cb) {
+            return ca < cb;
+        }
+        i += 1;
+    }
+    return n < m;
+}
+
+pub fn trim(s: str) -> str {
+    let n = s.len();
+    let a = 0;
+    while (a < n && is_ws(s.code_at(a))) {
+        a += 1;
+    }
+    let b = n;
+    while (b > a && is_ws(s.code_at(b - 1))) {
+        b -= 1;
+    }
+    return s.slice(a, b);
+}
+
+pub fn ends_with(s: str, suffix: str) -> bool {
+    let n = s.len();
+    let m = suffix.len();
+    if (m == 0) {
+        return true;
+    }
+    if (n < m) {
+        return false;
+    }
+    return s.slice(n - m, n) == suffix;
+}
+
+pub fn find_from(s: str, from: i32, c: u32) -> i32 {
+    let n = s.len();
+    let i = from;
+    while (i < n) {
+        if (s.code_at(i) == c) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+pub fn find_last(s: str, c: u32) -> i32 {
+    let n = s.len();
+    let last = -1;
+    let i = 0;
+    while (i < n) {
+        if (s.code_at(i) == c) {
+            last = i;
+        }
+        i += 1;
+    }
+    return last;
+}
+
+pub fn is_digits(s: str) -> bool {
+    let n = s.len();
+    if (n == 0) {
+        return false;
+    }
+    let i = 0;
+    while (i < n) {
+        let c = s.code_at(i);
+        if (c < 48 || c > 57) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+pub fn str_to_i64(s: str) -> i64 {
+    let acc: i64 = 0;
+    let n = s.len();
+    let i = 0;
+    while (i < n) {
+        acc = acc * 10i64 + (s.code_at(i) as i64 - 48i64);
+        i += 1;
+    }
+    return acc;
+}
+
+pub fn hex_digit_val(c: u32) -> i32 {
+    if (c >= 48 && c <= 57) {
+        return c as i32 - 48;
+    }
+    if (c >= 97 && c <= 102) {
+        return c as i32 - 87;
+    }
+    if (c >= 65 && c <= 70) {
+        return c as i32 - 55;
+    }
+    return -1;
+}
+
+/// Hex → bytes (the signing-key chain: `crypto::hmac_sha256` answers hex,
+/// the next HMAC round needs the raw key bytes).
+pub fn hex_decode(s: str) -> bytes {
+    let n = s.len();
+    let v = Vec<u8>::new();
+    let i = 0;
+    while (i + 1 < n) {
+        let hi = hex_digit_val(s.code_at(i));
+        let lo = hex_digit_val(s.code_at(i + 1));
+        if (hi < 0 || lo < 0) {
+            i += 1;
+            continue;
+        }
+        v.push((hi * 16 + lo) as u8);
+        i += 2;
+    }
+    return freeze_bytes(v);
+}
+
+pub fn byte_hex(b: u64) -> str {
+    let hex = "0123456789ABCDEF";
+    let hi = (b / 16) as i32;
+    let lo = (b % 16) as i32;
+    return f"{hex.slice(hi, hi + 1)}{hex.slice(lo, lo + 1)}";
+}
+
+/// The last `/`-separated segment, tolerating a trailing slash.
+pub fn last_segment(p: str) -> str {
+    let t = p;
+    if (ends_with(t, "/")) {
+        t = t.slice(0, t.len() - 1);
+    }
+    let slash = find_last(t, 47);
+    if (slash == -1) {
+        return t;
+    }
+    return t.slice(slash + 1, t.len());
+}

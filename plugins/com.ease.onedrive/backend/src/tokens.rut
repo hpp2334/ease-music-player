@@ -1,0 +1,308 @@
+// backend/tokens.rut — the auth half: the token endpoint (the
+// x-www-form-urlencoded redeem + the TS message shapes), the access-token
+// cache, the refresh rotation, and the authorized Graph call (the TS
+// `withRetry` shape: ensure a token, send, on a 401 rotate once and
+// retry; a still-401 reply — or any other >= 400 — fails with the
+// host-mapped prefix).
+//
+// The token cache rode the old start-answer record; the new contract has
+// no start answer, so it serializes into the plugin KV (`Db`) under
+// `tokens` — `{"insts":[…],"toks":[…]}` parallel arrays, 8 entries ample
+// (one per configured account), the oldest evicted when full.
+//
+// The Graph/API constants live here (the token endpoint AND the authorize
+// URL are both auth concerns); rut lets don't cross modules, so the other
+// files keep their own copies of `ROOT_API` where they need it.
+
+use config::{ Config, config_of, save_refresh_token };
+use emp::{ Db, Secret };
+use httpx::{ GraphResp, graph_opts, http_send };
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strutil::{ form_component_encode, read_opt_str };
+use tur_host::clipboard::{ decode_utf8 };
+
+let ONEDRIVE_API_BASE: str = "https://login.microsoftonline.com/common/oauth2/v2.0";
+let REDIRECT_URI: str = "easem://oauth2redirect/";
+let CLIENT_ID: str = "5db0dade-b21c-4161-bd4f-027e0f3e4700";
+let SCOPES: str = "Files.Read offline_access";
+
+// 8 cached tokens (one per configured account, ample).
+let TOKEN_POOL: i32 = 8;
+
+let TOKENS_KEY: str = "tokens";
+
+/// The authorize URL the host opens (`oauth:url` — flow-independent, the
+/// TS minted it with no args either).
+pub fn authorize_url() -> str {
+    return f"{ONEDRIVE_API_BASE}/authorize?client_id={form_component_encode(CLIENT_ID)}&response_type=code&redirect_uri={form_component_encode(REDIRECT_URI)}&response_mode=query&scope={form_component_encode(SCOPES)}";
+}
+
+// ---------------------------------------------------------------------------
+// the token cache (the KV document)
+// ---------------------------------------------------------------------------
+
+/// The cache as parallel columns (the old Ctx shape — fixed 8 entries).
+struct TokenCache {
+    insts: Vec<str>,
+    toks: Vec<str>,
+}
+
+fn cache_new() -> TokenCache {
+    return TokenCache { insts: Vec<str>::new(), toks: Vec<str>::new() };
+}
+
+/// Load the persisted cache (a missing/corrupt document decodes as empty —
+/// a lost cache is a refresh round-trip, never an op failure).
+fn cache_load(db: Db) -> TokenCache {
+    let c = cache_new();
+    let raw = db.get(TOKENS_KEY);
+    if (raw == nil) {
+        return c;
+    }
+    let doc: str = raw;
+    let r = JsonReader::of(doc);
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return cache_new();
+        }
+        if (k == "insts") {
+            read_str_array(r, c.insts);
+        } else if (k == "toks") {
+            read_str_array(r, c.toks);
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) {
+            return cache_new();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return cache_new();
+    }
+    // the columns must pair up — a torn document decodes as empty
+    if (c.insts.len != c.toks.len) {
+        return cache_new();
+    }
+    return c;
+}
+
+fn read_str_array(r: JsonReader, out: Vec<str>) {
+    r.begin_array();
+    while (r.more()) {
+        if (r.try_null()) {
+            out.push("");
+        } else {
+            let v = r.read_str();
+            if (r.failed()) {
+                break;
+            }
+            out.push(v);
+        }
+    }
+    r.end_array();
+}
+
+fn cache_save(db: Db, c: TokenCache) {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("insts");
+    w.begin_array();
+    let i = 0;
+    while (i < c.insts.len) {
+        w.write_str(c.insts[i]);
+        i += 1;
+    }
+    w.end_array();
+    w.key("toks");
+    w.begin_array();
+    let j = 0;
+    while (j < c.toks.len) {
+        w.write_str(c.toks[j]);
+        j += 1;
+    }
+    w.end_array();
+    w.end_object();
+    db.set(TOKENS_KEY, w.finish());
+}
+
+fn cache_get(db: Db, instance: str) -> ?str {
+    let c = cache_load(db);
+    let i = 0;
+    while (i < c.insts.len) {
+        if (c.insts[i] == instance) {
+            return c.toks[i];
+        }
+        i += 1;
+    }
+    return nil;
+}
+
+/// Cache (or refresh) an instance's access token; a full cache evicts the
+/// oldest entry.
+pub fn cache_put(db: Db, instance: str, token: str) {
+    let c = cache_load(db);
+    let i = 0;
+    while (i < c.insts.len) {
+        if (c.insts[i] == instance) {
+            c.toks[i] = token;
+            cache_save(db, c);
+            return;
+        }
+        i += 1;
+    }
+    if (c.insts.len >= TOKEN_POOL) {
+        // drop the oldest (index 0) — rebuild both columns shifted
+        let insts = Vec<str>::new();
+        let toks = Vec<str>::new();
+        let j = 1;
+        while (j < c.insts.len) {
+            insts.push(c.insts[j]);
+            toks.push(c.toks[j]);
+            j += 1;
+        }
+        c.insts = insts;
+        c.toks = toks;
+    }
+    c.insts.push(instance);
+    c.toks.push(token);
+    cache_save(db, c);
+}
+
+/// Drop an instance's cached token (the instance was removed).
+pub fn cache_drop(db: Db, instance: str) {
+    let c = cache_load(db);
+    let insts = Vec<str>::new();
+    let toks = Vec<str>::new();
+    let i = 0;
+    while (i < c.insts.len) {
+        if (c.insts[i] != instance) {
+            insts.push(c.insts[i]);
+            toks.push(c.toks[i]);
+        }
+        i += 1;
+    }
+    c.insts = insts;
+    c.toks = toks;
+    cache_save(db, c);
+}
+
+// ---------------------------------------------------------------------------
+// the token endpoint
+// ---------------------------------------------------------------------------
+
+/// The x-www-form-urlencoded token request body
+/// (`client_id`/`redirect_uri`/`grant_type` + the one extra field).
+fn token_form(grant: str, extra_key: str, extra_value: str) -> str {
+    return f"client_id={form_component_encode(CLIENT_ID)}&redirect_uri={form_component_encode(REDIRECT_URI)}&grant_type={form_component_encode(grant)}&{extra_key}={form_component_encode(extra_value)}";
+}
+
+/// POST the token endpoint; `(access, refresh, err)` — err carries the TS
+/// message shape (`token {grant} failed: {status} {statusText}`).
+pub fn redeem_token(grant: str, extra_key: str, extra_value: str) -> (?str, ?str, str) {
+    let body = token_form(grant, extra_key, extra_value);
+    let resp = http_send(graph_opts(f"{ONEDRIVE_API_BASE}/token", "POST", nil, nil, body));
+    if (resp.failed) {
+        return (nil, nil, resp.err);
+    }
+    if (resp.status >= 400) {
+        return (nil, nil, f"token {grant} failed: {resp.status} {resp.status_text}");
+    }
+    let text = decode_utf8(resp.body);
+    let r = JsonReader::of(text);
+    r.begin_object();
+    let access: ?str = nil;
+    let refresh: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return (nil, nil, "onedrive: unparsable token response");
+        }
+        when (k) {
+            "access_token" -> {
+                access = read_opt_str(r);
+            },
+            "refresh_token" -> {
+                refresh = read_opt_str(r);
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return (nil, nil, "onedrive: unparsable token response");
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return (nil, nil, "onedrive: unparsable token response");
+    }
+    if (access == nil || refresh == nil) {
+        return (nil, nil, f"token {grant}: response missing tokens");
+    }
+    return (access, refresh, "");
+}
+
+// ---------------------------------------------------------------------------
+// the refresh rotation + the authorized Graph call
+// ---------------------------------------------------------------------------
+
+/// Rotate the refresh token, persist it, cache the fresh access token.
+/// Traps with the op's error text on any failure (the old `(nil, err)`
+/// tuple's error arm — the host builds the error envelope from the trap).
+fn refresh_access(db: Db, secret: Secret, instance: str) -> str {
+    let cfg = config_of(db, instance);
+    if (cfg == nil) {
+        panic(f"onedrive: no config for instance {instance}");
+    }
+    let conf: Config = cfg;
+    let rt = secret.get(conf.secret_id);
+    if (rt == nil) {
+        panic(f"onedrive: refresh token missing for secretId {conf.secret_id}");
+    }
+    let t: str = rt;
+    let got = redeem_token("refresh_token", "refresh_token", t);
+    let access = got.0;
+    let refresh = got.1;
+    if (access == nil || refresh == nil) {
+        let e: str = got.2;
+        panic(e);
+    }
+    let a: str = access;
+    let rf: str = refresh;
+    save_refresh_token(db, secret, instance, conf.secret_id, rf);
+    cache_put(db, instance, a);
+    return a;
+}
+
+/// The cached access token, or a fresh one (the TS `ensureToken`).
+fn ensure_token(db: Db, secret: Secret, instance: str) -> str {
+    let cached = cache_get(db, instance);
+    if (cached != nil) {
+        let t: str = cached;
+        return t;
+    }
+    return refresh_access(db, secret, instance);
+}
+
+/// One Graph call with the TS `withRetry` semantics: ensure a token, send,
+/// on a 401 rotate the refresh token once and retry; a still-401 reply (or
+/// any other >= 400) fails with the host-mapped prefix.
+pub fn graph_call(db: Db, secret: Secret, instance: str, method: str, url: str, range: ?str, body_text: ?str) -> GraphResp {
+    let tok = ensure_token(db, secret, instance);
+    let resp = http_send(graph_opts(url, method, f"bearer {tok}", range, body_text));
+    if (!resp.failed && resp.status == 401) {
+        let fresh = refresh_access(db, secret, instance);
+        resp = http_send(graph_opts(url, method, f"bearer {fresh}", range, body_text));
+        if (!resp.failed && resp.status == 401) {
+            resp.failed = true;
+            resp.err = f"UNAUTHORIZED: HTTP 401: {resp.status_text}";
+        }
+    }
+    if (!resp.failed && resp.status >= 400) {
+        resp.failed = true;
+        resp.err = f"HTTP {resp.status}: {resp.status_text}";
+    }
+    return resp;
+}

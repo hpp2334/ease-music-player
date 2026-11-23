@@ -1,0 +1,264 @@
+// backend/auth.rut — Basic + Digest (RFC 7616 subset: MD5 / MD5-sess,
+// qop=auth) over the `crypto` lib (md5 / rand_bytes / b64_encode), plus
+// the per-server challenge cache (the Digest retry's parked
+// `WWW-Authenticate` + its nc counter) riding the module state record.
+
+use crypto::{ b64_encode, md5, rand_bytes };
+use model::{ Ctx, POOL };
+use strbuild::{ StringBuilder };
+use strutil::{ byte_hex, find_from, is_ws, lower, reverse_str, starts_with_ci, trim, upper };
+use tur_host::clipboard::{ encode_utf8 };
+
+struct DigestParams {
+    realm: str,
+    nonce: str,
+    qop_auth: bool,
+    opaque: ?str,
+    algorithm: str,
+}
+
+pub fn basic_header(username: str, password: str) -> str {
+    let up = encode_utf8(f"{username}:{password}");
+    return f"Basic {b64_encode(up)}";
+}
+
+fn is_param_name_char(c: u32) -> bool {
+    return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+        || c == 95 || c == 45;
+}
+
+/// Parse a `WWW-Authenticate: Digest ...` header; nil for other schemes or
+/// unsupported algorithms (SHA-256 variants).
+fn parse_digest(header: str) -> ?DigestParams {
+    let n = header.len();
+    let i = 0;
+    while (i < n && is_ws(header.code_at(i))) {
+        i += 1;
+    }
+    if (!starts_with_ci(header, i, "Digest")) {
+        return nil;
+    }
+    i += 6;
+    let realm = "";
+    let nonce = "";
+    let qop_auth = false;
+    let opaque: ?str = nil;
+    let algorithm = "MD5";
+    while (i < n) {
+        while (i < n && (is_ws(header.code_at(i)) || header.code_at(i) == 44)) {
+            i += 1;
+        }
+        if (i >= n) {
+            break;
+        }
+        let name_start = i;
+        while (i < n && is_param_name_char(header.code_at(i))) {
+            i += 1;
+        }
+        if (i == name_start) {
+            break;
+        }
+        let name = lower(header.slice(name_start, i));
+        while (i < n && is_ws(header.code_at(i))) {
+            i += 1;
+        }
+        if (i >= n || header.code_at(i) != 61) {
+            break;
+        }
+        i += 1;
+        while (i < n && is_ws(header.code_at(i))) {
+            i += 1;
+        }
+        let value = "";
+        if (i < n && header.code_at(i) == 34) {
+            i += 1;
+            let b = StringBuilder::with_cap(16);
+            while (i < n && header.code_at(i) != 34) {
+                if (header.code_at(i) == 92 && i + 1 < n) {
+                    i += 1;
+                }
+                b.append(header.slice(i, i + 1));
+                i += 1;
+            }
+            i += 1;
+            value = b.build();
+        } else {
+            let vs = i;
+            while (i < n && header.code_at(i) != 44 && !is_ws(header.code_at(i))) {
+                i += 1;
+            }
+            value = header.slice(vs, i);
+        }
+        when (name) {
+            "realm" -> { realm = value; },
+            "nonce" -> { nonce = value; },
+            "qop" -> {
+                // the qop list is comma-separated; "auth" anywhere enables it
+                let rest = value;
+                while (rest != "") {
+                    let comma = find_from(rest, 0, 44);
+                    let item = rest;
+                    if (comma != -1) {
+                        item = rest.slice(0, comma);
+                        rest = rest.slice(comma + 1, rest.len());
+                    } else {
+                        rest = "";
+                    }
+                    if (lower(trim(item)) == "auth") {
+                        qop_auth = true;
+                    }
+                }
+            },
+            "opaque" -> { opaque = value; },
+            "algorithm" -> { algorithm = upper(trim(value)); },
+            else -> {},
+        }
+    }
+    if (algorithm != "MD5" && algorithm != "MD5-SESS") {
+        return nil;
+    }
+    return DigestParams {
+        realm: realm,
+        nonce: nonce,
+        qop_auth: qop_auth,
+        opaque: opaque,
+        algorithm: algorithm,
+    };
+}
+
+fn random_hex16() -> str {
+    let raw = rand_bytes(8);
+    let n = raw.len();
+    let b = StringBuilder::with_cap(16);
+    let i = 0;
+    while (i < n) {
+        b.append(byte_hex(raw[i] as u64));
+        i += 1;
+    }
+    return b.build();
+}
+
+/// nc as 8 lowercase hex digits (the RFC's count field).
+fn nc_hex(nc: i64) -> str {
+    let digits = "0123456789abcdef";
+    let v = nc;
+    let b = StringBuilder::with_cap(8);
+    let i = 0;
+    while (i < 8) {
+        let d = (v % 16i64) as i32;
+        v = v / 16i64;
+        b.append(digits.slice(d, d + 1));
+        i += 1;
+    }
+    return reverse_str(b.build());
+}
+
+/// Build the `Authorization` value for a challenge, or nil when the scheme
+/// is unsupported. `uri` is the request path as sent.
+pub fn authorization_for(scheme: str, username: str, password: str, uri: str, method: str, nc: i64) -> ?str {
+    if (starts_with_ci(scheme, 0, "Basic")) {
+        return basic_header(username, password);
+    }
+    let parsed = parse_digest(scheme);
+    if (parsed == nil) {
+        return nil;
+    }
+    let p: DigestParams = parsed;
+    let cnonce = random_hex16();
+    let ha1 = md5(encode_utf8(f"{username}:{p.realm}:{password}"));
+    if (p.algorithm == "MD5-SESS") {
+        ha1 = md5(encode_utf8(f"{ha1}:{p.nonce}:{cnonce}"));
+    }
+    let ha2 = md5(encode_utf8(f"{method}:{uri}"));
+    let ncx = nc_hex(nc);
+    // RFC 7616 (qop=auth) vs RFC 2069 (no qop) — different response hashes;
+    // older NAS/embedded DAV servers challenge without qop.
+    let response = md5(encode_utf8(f"{ha1}:{p.nonce}:{ha2}"));
+    let hdr = f"Digest username=\"{username}\", realm=\"{p.realm}\", nonce=\"{p.nonce}\", uri=\"{uri}\", algorithm={p.algorithm}, response=\"{response}\"";
+    if (p.qop_auth) {
+        response = md5(encode_utf8(f"{ha1}:{p.nonce}:{ncx}:{cnonce}:auth:{ha2}"));
+        hdr = f"Digest username=\"{username}\", realm=\"{p.realm}\", nonce=\"{p.nonce}\", uri=\"{uri}\", algorithm={p.algorithm}, qop=auth, nc={ncx}, cnonce=\"{cnonce}\", response=\"{response}\"";
+    }
+    if (p.opaque != nil) {
+        let op: str = p.opaque;
+        hdr = f"{hdr}, opaque=\"{op}\"";
+    }
+    return hdr;
+}
+
+/// The cached challenge header for `addr`, or nil when absent (read-only —
+/// the nc bump happens once per attempt in `next_nc`).
+pub fn challenge_for(c: Ctx, addr: str) -> ?str {
+    let i = 0;
+    while (i < POOL) {
+        let a = c.ch_addr[i];
+        if (a != nil) {
+            let s: str = a;
+            if (s == addr) {
+                return c.ch_header[i];
+            }
+        }
+        i += 1;
+    }
+    return nil;
+}
+
+pub fn cache_challenge(c: Ctx, addr: str, header: str) {
+    let slot = -1;
+    let i = 0;
+    while (i < POOL) {
+        let a = c.ch_addr[i];
+        if (a == nil) {
+            if (slot == -1) {
+                slot = i;
+            }
+        } else {
+            let s: str = a;
+            if (s == addr) {
+                slot = i;
+                break;
+            }
+        }
+        i += 1;
+    }
+    if (slot == -1) {
+        slot = 0;
+    }
+    c.ch_addr[slot] = addr;
+    c.ch_header[slot] = header;
+    c.ch_nc[slot] = 0;
+}
+
+/// Bump (or seed) the challenge counter for `addr` and answer the count for
+/// this attempt (the first Digest request on a challenge uses nc=1).
+pub fn next_nc(c: Ctx, addr: str) -> i64 {
+    let i = 0;
+    while (i < POOL) {
+        let a = c.ch_addr[i];
+        if (a != nil) {
+            let s: str = a;
+            if (s == addr) {
+                c.ch_nc[i] = c.ch_nc[i] + 1;
+                return c.ch_nc[i];
+            }
+        }
+        i += 1;
+    }
+    return 1;
+}
+
+pub fn drop_challenge(c: Ctx, addr: str) {
+    let i = 0;
+    while (i < POOL) {
+        let a = c.ch_addr[i];
+        if (a != nil) {
+            let s: str = a;
+            if (s == addr) {
+                c.ch_addr[i] = nil;
+                c.ch_header[i] = nil;
+                c.ch_nc[i] = 0;
+            }
+        }
+        i += 1;
+    }
+}

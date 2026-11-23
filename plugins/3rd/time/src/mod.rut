@@ -1,0 +1,115 @@
+// time/src/mod.rut — the `Date` replacement lib.
+//
+// - `now()` — unix ms (host clock row).
+// - `parse(s)` — the three HTTP date forms (IMF-fixdate, RFC 850,
+//   asctime) → unix ms; 0 on anything else (the old `http-dates.ts`
+//   contract).
+// - `http_date(ms)` / `amz_date(ms)` — the FORMATTERS, pure rut: the
+//   civil breakdown (Howard Hinnant's `civil_from_days`) + fixed
+//   tables, no host row. rut literals are i32-typed (suffix them for
+//   i64 math — the json pkg's law), carry no width spec in
+//   f-strings, and take no casts inside interpolations, so the
+//   padding and the renders go through small helpers.
+// - `unix_ms(secs)` — the old JS `Date.now()/1000` round-trip.
+
+use time_host::{ now_unix_ms, parse_http_date };
+
+// unix ms now (wall clock)
+pub fn now() -> u64 {
+    return now_unix_ms();
+}
+
+// parse an HTTP date (IMF-fixdate / RFC 850 / asctime) → unix ms;
+// 0 = unrecognized
+pub fn parse(s: str) -> u64 {
+    return parse_http_date(s);
+}
+
+// seconds-since-epoch (the JS `Date.now()/1000` shape) → unix ms
+pub fn unix_ms(secs: f64) -> u64 {
+    let ms = secs * 1000.0;
+    return ms as u64;
+}
+
+// ---- the civil breakdown (pure rut) ----------------------------------
+
+// 2-digit zero-pad
+fn two(n: i64) -> str {
+    if (n < 0i64) { return f"-{0i64 - n}"; }
+    if (n < 10i64) { return f"0{n}"; }
+    return f"{n}";
+}
+
+// 4-digit zero-pad (years)
+fn four(n: i64) -> str {
+    if (n < 0i64) { return f"-{0i64 - n}"; }
+    if (n < 10i64) { return f"000{n}"; }
+    if (n < 100i64) { return f"00{n}"; }
+    if (n < 1000i64) { return f"0{n}"; }
+    return f"{n}";
+}
+
+// the weekday short name for a DAY COUNT since the epoch (1970-01-01
+// was a Thursday)
+fn weekday_of(days: i64) -> str {
+    let idx = (days % 7i64 + 7i64) % 7i64;
+    if (idx == 0i64) { return "Thu"; }
+    if (idx == 1i64) { return "Fri"; }
+    if (idx == 2i64) { return "Sat"; }
+    if (idx == 3i64) { return "Sun"; }
+    if (idx == 4i64) { return "Mon"; }
+    if (idx == 5i64) { return "Tue"; }
+    return "Wed";
+}
+
+fn month_name(m: i64) -> str {
+    if (m == 1i64) { return "Jan"; }
+    if (m == 2i64) { return "Feb"; }
+    if (m == 3i64) { return "Mar"; }
+    if (m == 4i64) { return "Apr"; }
+    if (m == 5i64) { return "May"; }
+    if (m == 6i64) { return "Jun"; }
+    if (m == 7i64) { return "Jul"; }
+    if (m == 8i64) { return "Aug"; }
+    if (m == 9i64) { return "Sep"; }
+    if (m == 10i64) { return "Oct"; }
+    if (m == 11i64) { return "Nov"; }
+    return "Dec";
+}
+
+// civil breakdown of a unix-ms instant (UTC) — Howard Hinnant's
+// `civil_from_days`. Answers (year, month, day, hour, min, sec); the
+// month is 1-based, the rest zero-based.
+fn civil(ms: i64) -> (i64, i64, i64, i64, i64, i64) {
+    let secs = ms / 1000i64;
+    let days = secs / 86_400i64;
+    let rem = secs % 86_400i64;
+    let h = rem / 3600i64;
+    let m = (rem % 3600i64) / 60i64;
+    let s = rem % 60i64;
+    let z = days + 719_468i64;
+    let era = z / 146_097i64;
+    let doe = z % 146_097i64;
+    let yoe = (doe - doe / 1460i64 + doe / 36524i64 - doe / 146_096i64) / 365i64;
+    let y = yoe + era * 400i64;
+    let doy = doe - (365i64 * yoe + yoe / 4i64 - yoe / 100i64);
+    let mp = (5i64 * doy + 2i64) / 153i64;
+    let d = (doy - (153i64 * mp + 2i64) / 5i64 + 1i64);
+    let month = if (mp < 10i64) { mp + 3i64 } else { mp - 9i64 };
+    let year = if (month <= 2i64) { y + 1i64 } else { y };
+    return (year, month, d, h, m, s);
+}
+
+// RFC 1123 IMF-fixdate: `Mon, 02 Jan 2006 15:04:05 GMT`
+pub fn http_date(ms: u64) -> str {
+    let ms64 = ms as i64;
+    let (y, mo, d, h, m, s) = civil(ms64);
+    let days = ms64 / 86_400_000i64;
+    return f"{weekday_of(days)}, {two(d)} {month_name(mo)} {four(y)} {two(h)}:{two(m)}:{two(s)} GMT";
+}
+
+// `x-amz-date` compact form: `20060102T150405Z`
+pub fn amz_date(ms: u64) -> str {
+    let (y, mo, d, h, m, s) = civil(ms as i64);
+    return f"{four(y)}{two(mo)}{two(d)}T{two(h)}{two(m)}{two(s)}Z";
+}

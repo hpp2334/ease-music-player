@@ -1,0 +1,482 @@
+// backend/streaming.rut — the chunked-PULL stream sessions (storage:get /
+// get-chunk / release). Each chunk is an independently signed range GET
+// `offset..offset+len-1` until one answers `eof`; a 416 (range start
+// beyond EOF — the exact-multiple tail) is the clean end of the stream.
+//
+// `storage:get` opens with ONE single-byte range GET
+// (`bytes=offset-offset`) — it validates endpoint + bucket + keys +
+// signature + range support and reads the metadata off the response
+// headers (Content-Range still carries the full total), then parks the
+// signing inputs under a fresh `sid`; the chunk op carries only `sid`.
+//
+// Sessions live in the plugin KV (`Db`) under `sessions` — the new RPC
+// contract has no start-answer record to stash state in, so the pool (4
+// slots + the sid allocator) serializes to
+// `{"next":<u64>,"slots":[{sid,ep,region,bucket,key,ak,sk},…]}`. A slot
+// parked by a killed process is evicted oldest-first when the pool runs
+// full (a dead signing input never wedges new streams).
+
+use crypto::{ b64_decode };
+use emp::{ Db };
+use endpoint::{ path_to_key };
+use httpx::{ http_error_text, sync_get };
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use sigv4::{ build_signed_request };
+use strutil::{ find_last, is_digits, last_segment, str_to_i64, trim };
+
+/// The session pool size (4 concurrent streams are ample — the host pulls
+/// sequentially per stream).
+let POOL: i32 = 4;
+
+let POOL_KEY: str = "sessions";
+
+/// A parked stream session (the signing inputs the chunk pulls re-use; the
+/// chunk op carries only `sid`).
+struct Session {
+    ep: str,
+    region: str,
+    bucket: str,
+    key: str,
+    ak: str,
+    sk: str,
+}
+
+/// The pool, decoded into parallel columns (the old Ctx shape — fixed 4
+/// slots, `sids[i] == 0` = free).
+struct Pool {
+    sids: [u64],
+    eps: [?str],
+    regions: [?str],
+    buckets: [?str],
+    keys: [?str],
+    aks: [?str],
+    sks: [?str],
+    next_sid: u64,
+}
+
+fn pool_new() -> Pool {
+    return Pool {
+        sids: [0; 4],
+        eps: [nil; 4],
+        regions: [nil; 4],
+        buckets: [nil; 4],
+        keys: [nil; 4],
+        aks: [nil; 4],
+        sks: [nil; 4],
+        next_sid: 1,
+    };
+}
+
+/// Load the persisted pool (a missing/corrupt document decodes as empty —
+/// the sessions are re-openable, never worth failing an op over).
+fn pool_of(db: Db) -> Pool {
+    let p = pool_new();
+    let raw = db.get(POOL_KEY);
+    if (raw == nil) {
+        return p;
+    }
+    let doc: str = raw;
+    let r = JsonReader::of(doc);
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return pool_new();
+        }
+        if (k == "next") {
+            p.next_sid = r.read_i64() as u64;
+        } else if (k == "slots") {
+            r.begin_array();
+            while (r.more()) {
+                walk_slot(r, p);
+            }
+            r.end_array();
+        } else {
+            r.skip_value();
+        }
+        if (r.failed()) {
+            return pool_new();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return pool_new();
+    }
+    return p;
+}
+
+/// One persisted slot el: `{sid, ep, region, bucket, key, ak, sk}` —
+/// claimed into the first free column (over-long persisted pools just
+/// drop their tail; sids still advance past them).
+fn walk_slot(r: JsonReader, p: Pool) {
+    r.begin_object();
+    let sid: u64 = 0;
+    let ep: ?str = nil;
+    let region: ?str = nil;
+    let bucket: ?str = nil;
+    let key: ?str = nil;
+    let ak: ?str = nil;
+    let sk: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return;
+        }
+        if (k == "sid") {
+            sid = r.read_i64() as u64;
+        } else if (k == "ep") {
+            ep = read_slot_str(r);
+        } else if (k == "region") {
+            region = read_slot_str(r);
+        } else if (k == "bucket") {
+            bucket = read_slot_str(r);
+        } else if (k == "key") {
+            key = read_slot_str(r);
+        } else if (k == "ak") {
+            ak = read_slot_str(r);
+        } else if (k == "sk") {
+            sk = read_slot_str(r);
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed() || sid == 0) {
+        return;
+    }
+    if (p.next_sid <= sid) {
+        p.next_sid = sid + 1u64;
+    }
+    let slot = free_slot_of(p);
+    if (slot == -1) {
+        return;
+    }
+    p.sids[slot] = sid;
+    p.eps[slot] = ep;
+    p.regions[slot] = region;
+    p.buckets[slot] = bucket;
+    p.keys[slot] = key;
+    p.aks[slot] = ak;
+    p.sks[slot] = sk;
+}
+
+fn pool_save(db: Db, p: Pool) {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("next");
+    w.write_i64(p.next_sid as i64);
+    w.key("slots");
+    w.begin_array();
+    let i: i32 = 0;
+    while (i < POOL) {
+        if (p.sids[i] != 0) {
+            w.begin_object();
+            w.key("sid");
+            w.write_i64(p.sids[i] as i64);
+            write_slot_str(w, "ep", p.eps[i]);
+            write_slot_str(w, "region", p.regions[i]);
+            write_slot_str(w, "bucket", p.buckets[i]);
+            write_slot_str(w, "key", p.keys[i]);
+            write_slot_str(w, "ak", p.aks[i]);
+            write_slot_str(w, "sk", p.sks[i]);
+            w.end_object();
+        }
+        i += 1;
+    }
+    w.end_array();
+    w.end_object();
+    db.set(POOL_KEY, w.finish());
+}
+
+fn write_slot_str(w: JsonWriter, key: str, v: ?str) {
+    w.key(key);
+    if (v == nil) {
+        w.write_raw("\"\"");
+    } else {
+        let s: str = v;
+        w.write_str(s);
+    }
+}
+
+/// Read one slot member as a str (absent/invalid = nil).
+fn read_slot_str(r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+/// First slot index with `sids[i] == 0`, else -1.
+fn free_slot_of(p: Pool) -> i32 {
+    let i: i32 = 0;
+    while (i < POOL) {
+        if (p.sids[i] == 0) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+/// Lowest live sid (the oldest session — the eviction victim).
+fn lowest_sid(p: Pool) -> u64 {
+    let best: u64 = 0;
+    let i: i32 = 0;
+    while (i < POOL) {
+        let s = p.sids[i];
+        if (s != 0) {
+            if (best == 0 || s < best) {
+                best = s;
+            }
+        }
+        i += 1;
+    }
+    return best;
+}
+
+fn clear_slot(p: Pool, i: i32) {
+    p.sids[i] = 0;
+    p.eps[i] = nil;
+    p.regions[i] = nil;
+    p.buckets[i] = nil;
+    p.keys[i] = nil;
+    p.aks[i] = nil;
+    p.sks[i] = nil;
+}
+
+/// Claim a slot for `sid`, evicting the oldest session when the pool runs
+/// full (a slot parked by a killed process must never wedge new streams).
+fn claim_slot(p: Pool, sid: u64) -> i32 {
+    let slot = free_slot_of(p);
+    if (slot == -1) {
+        let victim = lowest_sid(p);
+        let i: i32 = 0;
+        while (i < POOL) {
+            if (p.sids[i] == victim) {
+                clear_slot(p, i);
+                slot = i;
+                break;
+            }
+            i += 1;
+        }
+    }
+    p.sids[slot] = sid;
+    return slot;
+}
+
+fn session_of(p: Pool, sid: u64) -> ?Session {
+    let i: i32 = 0;
+    while (i < POOL) {
+        if (sid != 0 && p.sids[i] == sid) {
+            let ep = p.eps[i];
+            let region = p.regions[i];
+            let bucket = p.buckets[i];
+            let key = p.keys[i];
+            let ak = p.aks[i];
+            let sk = p.sks[i];
+            if (ep == nil || region == nil || bucket == nil || key == nil || ak == nil || sk == nil) {
+                return nil;
+            }
+            let e: str = ep;
+            let rg: str = region;
+            let b: str = bucket;
+            let k: str = key;
+            let a: str = ak;
+            let s: str = sk;
+            return Session {
+                ep: e,
+                region: rg,
+                bucket: b,
+                key: k,
+                ak: a,
+                sk: s,
+            };
+        }
+        i += 1;
+    }
+    return nil;
+}
+
+// ---------------------------------------------------------------------------
+// the three ops
+// ---------------------------------------------------------------------------
+
+/// Open a stream: the single-byte range GET validates everything and the
+/// session parks its signing inputs under a fresh `sid`. Answers the
+/// opener document `{sid, meta:{...}}`; panics with the marked error on
+/// any failure.
+pub fn open_impl(db: Db, endpoint: str, region: str, bucket: str, access_key_id: str, secret_key: str, path: str, offset: u64) -> str {
+    let key = path_to_key(path);
+    let signed = build_signed_request(endpoint, region, bucket, access_key_id, secret_key, key, Vec<str>::new(), Vec<str>::new(), f"bytes={offset}-{offset}");
+    if (signed == nil) {
+        panic("s3: invalid endpoint");
+    }
+    let opts: str = signed;
+    let resp = sync_get(opts);
+    if (resp.failed) {
+        panic(resp.err);
+    }
+    if (resp.status >= 400) {
+        panic(http_error_text(resp.status, resp.status_text, resp.body_b64));
+    }
+    // S3 always honors Range (206 + Content-Range), but a gateway that
+    // doesn't gets the same `dataOffset: 0` fallback as the WebDAV plugin:
+    // the host drops the prefix bytes itself.
+    let range_honored = resp.status == 206;
+    if (resp.content_range != nil) {
+        range_honored = true;
+    }
+    let data_offset = offset;
+    if (!range_honored) {
+        data_offset = 0;
+    }
+    // totalLength: prefer Content-Range's total (`bytes start-end/total`) —
+    // Content-Length on a Range response is the partial length. (With the
+    // single-byte opener it only falls back to Content-Length when the
+    // server ignored the Range — where that length is the full size.)
+    let total: i64 = -1;
+    if (resp.content_range != nil) {
+        let s: str = resp.content_range;
+        let slash = find_last(s, 47);
+        if (slash != -1) {
+            let tail = trim(s.slice(slash + 1, s.len()));
+            if (is_digits(tail)) {
+                total = str_to_i64(tail);
+            }
+        }
+    }
+    if (total < 0 && resp.content_length != nil) {
+        let s: str = resp.content_length;
+        let t = trim(s);
+        if (is_digits(t)) {
+            total = str_to_i64(t);
+        }
+    }
+    // claim a session slot
+    let p = pool_of(db);
+    let sid = p.next_sid;
+    p.next_sid = p.next_sid + 1u64;
+    let slot = claim_slot(p, sid);
+    p.eps[slot] = endpoint;
+    p.regions[slot] = region;
+    p.buckets[slot] = bucket;
+    p.keys[slot] = key;
+    p.aks[slot] = access_key_id;
+    p.sks[slot] = secret_key;
+    pool_save(db, p);
+    let name = last_segment(path);
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("sid");
+    w.write_i64(sid as i64);
+    w.key("meta");
+    w.begin_object();
+    if (total >= 0) {
+        w.key("totalLength");
+        w.write_i64(total);
+    }
+    w.key("name");
+    w.write_str(name);
+    if (resp.content_type != nil) {
+        let ct: str = resp.content_type;
+        if (ct != "") {
+            w.key("contentType");
+            w.write_str(ct);
+        }
+    }
+    w.key("dataOffset");
+    w.write_i64(data_offset as i64);
+    w.end_object();
+    w.end_object();
+    return w.finish();
+}
+
+/// One chunk: an independently signed range GET `offset..offset+len-1`;
+/// `eof` when fewer bytes than `len` came back (the final chunk carries
+/// data AND eof). Answers `{data:<base64>,eof}`.
+pub fn chunk_impl(db: Db, sid: u64, offset: u64, len: u64) -> str {
+    let p = pool_of(db);
+    let sess = session_of(p, sid);
+    if (sess == nil) {
+        panic("s3: unknown stream session");
+    }
+    let s: Session = sess;
+    let end = offset + len - 1u64;
+    let signed = build_signed_request(s.ep, s.region, s.bucket, s.ak, s.sk, s.key, Vec<str>::new(), Vec<str>::new(), f"bytes={offset}-{end}");
+    if (signed == nil) {
+        panic("s3: invalid endpoint");
+    }
+    let opts: str = signed;
+    let resp = sync_get(opts);
+    if (resp.failed) {
+        panic(resp.err);
+    }
+    if (resp.status == 416) {
+        return chunk_json("", true);
+    }
+    if (resp.status >= 400) {
+        if (resp.status == 401 || resp.status == 403) {
+            panic(f"UNAUTHORIZED: HTTP {resp.status}: {trim(resp.status_text)}");
+        }
+        panic(f"HTTP {resp.status}: {resp.status_text}");
+    }
+    let data = b64_decode(resp.body_b64);
+    let eof = (data.len() as u64) < len;
+    return chunk_json(resp.body_b64, eof);
+}
+
+/// Free a session slot. True when the sid was live.
+pub fn release_impl(db: Db, sid: u64) -> bool {
+    let p = pool_of(db);
+    let i: i32 = 0;
+    while (i < POOL) {
+        if (sid != 0 && p.sids[i] == sid) {
+            clear_slot(p, i);
+            pool_save(db, p);
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+/// Free every session parked on an endpoint (the instance was removed —
+/// the chunk op carries only `sid`, so a surviving slot would serve a dead
+/// instance).
+pub fn free_instance_sessions(db: Db, endpoint: str) {
+    let p = pool_of(db);
+    let dropped = false;
+    let i: i32 = 0;
+    while (i < POOL) {
+        if (p.sids[i] != 0) {
+            let ep = p.eps[i];
+            if (ep != nil) {
+                let s: str = ep;
+                if (s == endpoint) {
+                    clear_slot(p, i);
+                    dropped = true;
+                }
+            }
+        }
+        i += 1;
+    }
+    if (dropped) {
+        pool_save(db, p);
+    }
+}
+
+fn chunk_json(data_b64: str, eof: bool) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("data");
+    w.write_str(data_b64);
+    w.key("eof");
+    w.write_bool(eof);
+    w.end_object();
+    return w.finish();
+}

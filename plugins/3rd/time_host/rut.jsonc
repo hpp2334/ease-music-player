@@ -1,0 +1,9 @@
+{
+  // time_host — the Rust-backed half of the time lib: the wall clock
+  // and the three-form HTTP date parser (the formatters live PURE RUT
+  // in the lib). A pure declaration surface: the bodies install in the
+  // embedder (the ease app's `plugin_runtime/third::time`), bound
+  // under this scope. Identity-free.
+  "name": "time_host",
+  "type": "host"
+}

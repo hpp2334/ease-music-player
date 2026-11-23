@@ -1,0 +1,10 @@
+[package]
+name = "ease-plugin-packer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Packs every plugin entrypoint pkg into its dist/ source-zip artifacts (the `rut pack --mode source` lane) — the build half of the phase-6 dist pipeline."
+
+[dependencies]
+rut-native = { git = "https://github.com/hpp2334/rut", rev = "460e8887ab6193dccc985aa253657a9681677e88" }
+serde_json = { workspace = true }

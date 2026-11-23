@@ -1,0 +1,150 @@
+// plays.rut — the `music:play` handler: decode the host payload, append
+// one play row. The bind-table lane delivers the RAW payload (no
+// `{"type","payload"}` stash wrapper, no `take_request` — the envelope
+// is host-built), so the decode walks `{musicId, title, ts}` directly.
+//
+// Malformed payloads answer nil: events are fire-and-forget (the host
+// ignores subscriber answers), and a trap would only spam the host log
+// for garbage input — a dropped junk event is the old error-envelope
+// outcome minus the noise. The regression gate for the decode lives in
+// the host suite (`playcount_event`): the host sends `musicId` as a
+// JSON NUMBER and the row must still land.
+
+use emp::{ Db };
+use json::{ JsonReader, JsonWriter };
+
+/// One play event: run the once-per-install repair pass first (a no-op
+/// once the KV flags land — see repair.rut), then append the row under
+/// the payload's UTC day key (`days.rut`, the calendar every module
+/// shares by path).
+pub fn on_play(db: Db, payload: str) -> ?str {
+    repair::compact_duplicate_rows(db);
+    let ev = decode_play(payload);
+    if (ev == nil) {
+        return nil;
+    }
+    let e: PlayEv = ev;
+    if (e.music_id == "") {
+        // Null/missing musicId: nothing to count — skip instead of writing
+        // a junk row the view would have to filter.
+        return nil;
+    }
+    db.append(days::day_key_from_ms(e.ts), play_row_json(e.music_id, e.title, e.ts));
+    // Fire-and-forget dispatch — the answer is ignored.
+    return nil;
+}
+
+/// One decoded `music:play` payload.
+struct PlayEv {
+    music_id: str,
+    title: str,
+    ts: i64,
+}
+
+/// Decode `{musicId, title, ts}`; nil on any malformed shape. Missing
+/// optional fields degrade to "" / 0 (the stored row schema stays
+/// `{musicId, title, ts}` either way).
+fn decode_play(text: str) -> ?PlayEv {
+    let r = JsonReader::of(text);
+    let music_id = "";
+    let title = "";
+    let ts: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (k == "musicId") {
+            let v = id_str(r);
+            if (r.failed()) {
+                return nil;
+            }
+            if (v != nil) {
+                music_id = v;
+            }
+        } else if (k == "title") {
+            let v = opt_str(r);
+            if (r.failed()) {
+                return nil;
+            }
+            if (v != nil) {
+                title = v;
+            }
+        } else if (k == "ts") {
+            if (!r.try_null()) {
+                ts = r.read_i64();
+            }
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return PlayEv { music_id: music_id, title: title, ts: ts };
+}
+
+/// The `null`-or-string read: `null` → nil, a string → some, anything else
+/// → the reader's sticky error.
+fn opt_str(r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+/// The host sends `musicId` as a JSON NUMBER (`MusicId.value: Long` in
+/// `PluginEvent.toJsonElement`), and TS-era stored rows carry the raw
+/// number too — while the roster (`Library.playlists`) uses stringified
+/// ids. Accept both spellings and normalize to the string. (The reader's
+/// failures are sticky, so discriminate on the next token's first non-ws
+/// codepoint — 34 = `"`. — before reading; keep in sync with
+/// view/stats.rut's `id_str`.)
+fn id_str(r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let rest = r.rest();
+    let i = 0;
+    let c: u32 = 0;
+    while (i < rest.len()) {
+        c = rest.code_at(i);
+        if (c != 32 && c != 10 && c != 13 && c != 9) {
+            break;
+        }
+        i += 1;
+    }
+    if (c == 34) {
+        let v = r.read_str();
+        if (r.failed()) {
+            return nil;
+        }
+        return v;
+    }
+    let n = r.read_i64();
+    if (r.failed()) {
+        return nil;
+    }
+    return f"{n}";
+}
+
+/// The stored play row — byte-shape-compatible with the TS append
+/// (`JSON.stringify({ musicId, title, ts })`).
+fn play_row_json(music_id: str, title: str, ts: i64) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("musicId");
+    w.write_str(music_id);
+    w.key("title");
+    w.write_str(title);
+    w.key("ts");
+    w.write_i64(ts);
+    w.end_object();
+    return w.finish();
+}
