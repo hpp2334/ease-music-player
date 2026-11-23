@@ -1,0 +1,208 @@
+// repair.rut — the duplicate-row compaction + local-day→UTC re-key
+// (the 0.0.8 repair). Runs lazily on the FIRST event — the compile/boot
+// check harness loads backends with no database, so KV rows must never
+// fire at boot — and the two KV flags make it once per INSTALL: after
+// the first pass every call is two cheap gets and an early return, and
+// a backend reload never re-scans.
+//
+// History: a host bug once delivered every `music:play` ×N (N = activity
+// starts in the host process), so byte-identical duplicate rows exist in
+// old installs — first occurrence wins (the duplicates were
+// byte-identical, down to the millisecond, and two genuine plays can
+// never share one millisecond).
+//
+// The re-key: the TS keyed day buckets by device-LOCAL midnight; this
+// port keys by UTC (see the root module's header). Upgraded installs
+// carry rows under local-day keys, which sit +/-1 day from their UTC day
+// (UTC-12..+14) — a play made 16:00-24:00 local (UTC+8) is keyed one day
+// AHEAD of its UTC day and surfaces under "Today" a day late, forever.
+// This second flag gates the one-time re-key: every scanned row moves to
+// the UTC day its own `ts` names. (Separate from the dedupe flag:
+// TS-era installs already consumed `repair:duplicate-rows` at module
+// start — their re-key still has to run.)
+//
+// Scan horizon: one key per day that has plays, newest first — extended
+// one day BEFORE today so legacy local-day keys one day behind (western
+// timezones) are inside the scan. Generous for this schema's lifetime;
+// a key older than the window simply stays un-migrated, never lost.
+
+use emp::{ Db };
+use json::{ JsonReader, JsonWriter };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+
+let REPAIR_FLAG_KEY: str = "repair:duplicate-rows";
+let REKEY_FLAG_KEY: str = "repair:utc-rekey";
+let REPAIR_SCAN_DAYS: i64 = 400;
+
+/// The once-per-install pass. Day keys come from `days.rut` (the
+/// calendar every backend module shares by path).
+pub fn compact_duplicate_rows(db: Db) {
+    let dup_done = db.get(REPAIR_FLAG_KEY) != nil;
+    let rekey_done = db.get(REKEY_FLAG_KEY) != nil;
+    if (dup_done && rekey_done) {
+        return;
+    }
+    let keys = Vec<str>::new();
+    let i: i64 = -1;
+    while (i < REPAIR_SCAN_DAYS) {
+        keys.push(days::day_key_offset(i));
+        i += 1;
+    }
+    let grouped = db.get_all_multi(json_str_array(keys));
+    // First occurrence wins; then every survivor moves to the UTC day
+    // its `ts` names (legacy local-day keys). Only days whose row set
+    // actually changed are rewritten — untouched days must NOT be
+    // re-appended (they'd duplicate; exactly the bug the TS's first
+    // attempt shipped), and the delete wipes a key's whole row set, so a
+    // no-op rewrite would lose data.
+    let changed = Vec<str>::new();
+    let re_append = Vec<str>::new();
+    let r = JsonReader::of(grouped);
+    r.begin_array();
+    while (r.more()) {
+        let key = "";
+        let values = Vec<str>::new();
+        r.begin_object();
+        while (r.more()) {
+            let k = r.next_key();
+            if (r.failed()) {
+                return;
+            }
+            if (k == "key") {
+                key = r.read_str();
+            } else if (k == "values") {
+                r.begin_array();
+                while (r.more()) {
+                    let v = r.read_str();
+                    if (r.failed()) {
+                        return;
+                    }
+                    values.push(v);
+                }
+                r.end_array();
+            } else {
+                r.skip_value();
+            }
+        }
+        r.end_object();
+        if (r.failed()) {
+            return;
+        }
+        let kept = Vec<str>::new();
+        for (let raw of values) {
+            if (!vec_contains(kept, raw)) {
+                kept.push(raw);
+            }
+        }
+        let key_changed = kept.len != values.len;
+        for (let v of kept) {
+            let target = row_target_key(key, v);
+            if (target != key) {
+                key_changed = true;
+            }
+        }
+        if (key_changed) {
+            changed.push(key);
+            // The delete wipes the key's whole list; the survivors go
+            // back under the UTC day each row's own `ts` names (rows
+            // without a usable ts stay where they are).
+            db.delete_all(key);
+            for (let v of kept) {
+                re_append.push(kv_entry_json(row_target_key(key, v), v));
+            }
+        }
+    }
+    r.end_array();
+    if (re_append.len > 0) {
+        // One flat append: `[{key, value}, …]` — the emp_host row's
+        // shape (one entry per appended row; the doc comment's grouped
+        // `{"key": […]}` map is wrong — the row wants a sequence, and
+        // the TS epoch lost data on exactly that grouping once).
+        db.append_multi(f"[{str_join(re_append, ",")}]");
+    }
+    db.set(REPAIR_FLAG_KEY, "done");
+    db.set(REKEY_FLAG_KEY, "done");
+}
+
+/// The UTC day key the row's own `ts` names — where the row belongs under
+/// UTC bucketing. Rows without a usable ts stay where they are.
+fn row_target_key(current: str, raw: str) -> str {
+    let ts = row_ts(raw);
+    if (ts <= 0) {
+        return current;
+    }
+    return days::day_key_from_ms(ts);
+}
+
+/// The `ts` field of a stored play row; 0 when absent/malformed.
+fn row_ts(raw: str) -> i64 {
+    let r = JsonReader::of(raw);
+    let ts: i64 = 0;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return 0;
+        }
+        if (k == "ts") {
+            ts = r.read_i64();
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return 0;
+    }
+    return ts;
+}
+
+/// `{"key":…,"value":…}` — one flat `append_multi` entry (the row's
+/// stored values are strings whose content is JSON; the value rides
+/// escaped, exactly like the TS epoch's appends).
+fn kv_entry_json(key: str, value: str) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("key");
+    w.write_str(key);
+    w.key("value");
+    w.write_str(value);
+    w.end_object();
+    return w.finish();
+}
+
+/// `",".join` over pre-encoded JSON fragments.
+fn str_join(items: Vec<str>, sep: str) -> str {
+    let b = StringBuilder::with_cap(256);
+    let first = true;
+    for (let s of items) {
+        if (!first) {
+            b.append(sep);
+        }
+        first = false;
+        b.append(s);
+    }
+    return b.build();
+}
+
+/// `["a","b"]` — the `get_all_multi` keys JSON (kept in sync with
+/// view/stats.rut's twin — module boundaries don't share fns).
+fn json_str_array(items: Vec<str>) -> str {
+    let w = JsonWriter::new();
+    w.begin_array();
+    for (let s of items) {
+        w.write_str(s);
+    }
+    w.end_array();
+    return w.finish();
+}
+
+fn vec_contains(items: Vec<str>, needle: str) -> bool {
+    for (let s of items) {
+        if (s == needle) {
+            return true;
+        }
+    }
+    return false;
+}

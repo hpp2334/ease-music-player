@@ -1,0 +1,54 @@
+// ranges.rut — the time-range filter tables + the filter-domain
+// constants. The time ranges (id / label / day-key scan horizon — "Last
+// N days" is inclusive of today). Module `let` initializers must be
+// scalars in this build, so the tables live in fns.
+//
+// Shared by path (`ranges::range_label_of`) by mod.rut / roster.rut /
+// stats.rut.
+
+/// Sentinel playlist-filter value: no membership filtering.
+pub let PLAYLIST_ALL: str = "all";
+
+pub let RANGE_COUNT: i32 = 6;
+
+pub fn range_ids() -> [str] {
+    return ["today", "2days", "3days", "week", "month", "year"];
+}
+
+pub fn range_labels() -> [str] {
+    return ["Today", "Last 2 Days", "Last 3 Days", "Last Week", "Last Month", "Last Year"];
+}
+
+pub fn range_days() -> [i64] {
+    return [1, 2, 3, 7, 30, 365];
+}
+
+pub fn range_index_of(id: str) -> i32 {
+    let ids = range_ids();
+    let i: i32 = 0;
+    while (i < RANGE_COUNT) {
+        if (ids[i] == id) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+pub fn range_days_of(id: str) -> i64 {
+    let i = range_index_of(id);
+    if (i >= 0) {
+        let days = range_days();
+        return days[i];
+    }
+    return 1;
+}
+
+pub fn range_label_of(id: str) -> str {
+    let i = range_index_of(id);
+    if (i >= 0) {
+        let labels = range_labels();
+        return labels[i];
+    }
+    return "Today";
+}

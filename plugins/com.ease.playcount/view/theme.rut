@@ -1,0 +1,42 @@
+// theme.rut — the app's light scheme, static (no `Theme` class here —
+// theme colors are an Android-only row and views must boot headless; the
+// palette is resolved statically instead). Packed 0xRRGGBBAA (the kit's
+// color law). primary #2E89B0 / secondary #C9EBFA are the app's own
+// overrides; the rest are the Material 3 light defaults the scheme
+// leaves stock. The medal colors are semantic tier colors and stay
+// fixed, exactly as in the TS.
+//
+// Shared by path (`theme::PRIMARY`) by rows.rut / selector.rut / mod.rut.
+
+pub let PRIMARY: u64 = 0xFF2E89B0u64;
+pub let PRIMARY_SOFT: u64 = 0xFFC9EBFAu64;
+pub let PRIMARY_TINT: u64 = 0xAA2E89B0u64;
+pub let PAGE_BG: u64 = 0xFFFFFBFEu64;
+pub let CARD: u64 = 0xFFECE6F0u64;
+pub let BAR_TRACK: u64 = 0xFFE6E0E9u64;
+pub let TEXT: u64 = 0xFF1C1B1Fu64;
+pub let TEXT_MUTED: u64 = 0xFF49454Fu64;
+pub let DIVIDER: u64 = 0xFFCAC4D0u64;
+pub let SHADOW: u64 = 0x0F172A1Cu64;
+pub let FILTER_BG: u64 = 0xCDC9EBFAu64;
+pub let TRIGGER_BG: u64 = 0xC8C9EBFAu64;
+pub let BAR_DIVIDER: u64 = 0x8CCAC4D0u64;
+
+// Medal fills — the SINGLE tier signal (gold / silver / bronze for the
+// podium; a muted disc for the long tail). Numerals stay dark on
+// gold/silver (legibility) and white on the darker bronze.
+pub let GOLD: u64 = 0xFFF5C400u64;
+pub let GOLD_RING: u64 = 0xFFE2B400u64;
+pub let GOLD_NUM: u64 = 0xFF3D2E00u64;
+pub let SILVER: u64 = 0xFFC6CDD6u64;
+pub let SILVER_RING: u64 = 0xFF98A3B3u64;
+pub let SILVER_NUM: u64 = 0xFF2F3640u64;
+pub let BRONZE: u64 = 0xFFCD7F32u64;
+pub let BRONZE_RING: u64 = 0xFFA05A1Eu64;
+pub let BRONZE_NUM: u64 = 0xFFFFFFFFu64;
+
+// Layout constants (the shared geometry of the page chrome).
+pub let PAGE_PADDING: f64 = 20.0;
+pub let CHIP_RADIUS: f64 = 999.0;
+pub let TRIGGER_HEIGHT: f64 = 36.0;
+pub let COVER_SIZE: f64 = 44.0;

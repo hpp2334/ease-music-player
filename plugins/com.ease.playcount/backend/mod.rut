@@ -1,0 +1,67 @@
+// Play Counts backend — the emp-epoch port (apiVersion 3) of the
+// apiVersion-2 stash-bus backend. A headless backend with exactly one
+// contract: the `music:play` event. The host (`RpcClient.emit_event`)
+// fans every play out through this module's dispatch entry under the
+// `event:music:play` bind-table key, delivering the RAW payload:
+//
+//   {"musicId":"7","title":"…","ts":173…}
+//
+// (the `PluginEvent.MusicPlay.toJsonElement` shape — the `{"ok":…}`
+// envelope is host-built and the old `{"type","payload"}` stash wrapper
+// is gone; `rpc.subscribe` files the handler, the answer is ignored).
+//
+// Data model (plugin KV multi-value, append-only — the exact keys/shapes
+// the TS epoch wrote, so existing installs stay readable):
+//   key   = "plays:YYYY-MM-DD"
+//   value = JSON `{ musicId, title, ts }`
+// The view tree (`view/`) scans the day keys back and aggregates
+// per musicId.
+//
+// Day keys: the TS bucketed by the device's LOCAL day (JS `Date`). rut
+// has no timezone row — every module here buckets by UTC day, so the
+// writer and the reader always agree (plays near local midnight may
+// land on the adjacent UTC day; counts stay internally consistent).
+//
+// Duplicate-row compaction (the 0.0.8 repair): a host bug once delivered
+// every `music:play` ×N (N = activity starts in the host process), so
+// byte-identical duplicate rows exist in old installs. The TS ran the
+// compaction at module start; the rut port runs it lazily on the FIRST
+// event instead — the compile/boot check harness loads backends with no
+// database, so KV rows must never fire at boot (same guard, same
+// once-per-install effect: the KV flags beneath make it a no-op after
+// the first run, and it survives backend reloads). The same lazy pass
+// also re-keys TS-era rows from device-local day buckets to this port's
+// UTC buckets (see repair.rut).
+//
+// Tree (the phase-4a pkg-tree law — `mod NAME;` children beside this
+// root; children resolve siblings by path, nothing references the root):
+//   plays.rut  — the event handler: decode the host payload, append the row
+//   repair.rut — the once-per-install duplicate-row compaction + UTC re-key
+//   days.rut   — the UTC day-key calendar (Howard Hinnant's civil_from_days)
+
+use emp::{ Db, Rpc };
+
+mod days;
+mod plays;
+mod repair;
+
+// ---- boot: construct the services FROM the handle and bind the event —
+// nothing else. No contract ops (the play counter serves no dispatch
+// op), no Android-only rows, no network, no return: under the
+// bind-table contract the identity rode the cx lane, and the dispatch
+// entry below is the boot proof the host's capability probe accepts.
+entry fn start(cx: opaque) {
+    const db = Db(cx);
+    const rpc = Rpc(cx);
+    rpc.subscribe("music:play", fn (payload: str) -> ?str {
+        return plays::on_play(db, payload);
+    });
+}
+
+// The one dispatch entry (str lane) — serves the `event:music:play`
+// fan-out and any future str op. No `rpc_bin` twin: the counter has no
+// binary ops (only backends with binary ops need the second lane).
+entry fn rpc(cx: opaque, op: str, args: str) -> ?str {
+    const rpc = Rpc(cx);
+    return rpc.dispatch(op, args);
+}

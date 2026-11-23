@@ -1,0 +1,39 @@
+// state.rut — the reactive state bundle + seeding. Handles bind by
+// capture; the fields stay CONCRETE-annotated (`Source<T>`) — they cross
+// ctx calls (the documented origin accommodation: a `Readable<T>` param's
+// write origin is untracked, and `Writable` is Source's alone).
+//
+// The State struct lives in a child (not the root) so both mod.rut and
+// stats.rut can name it — nothing references the root module.
+
+use tur_kit::handles::{ MapHandle, list_new, map_new };
+use tur_kit::reactive::{ Source, source };
+
+pub struct State {
+    /// The host playlist roster: a ListHandle of
+    /// `{"id","title","musicIds":[…]}` rows (seeded at mount).
+    roster: Source<opaque>;
+    /// The selected range id (`ranges::range_ids` member).
+    sel_range: Source<str>;
+    /// `ranges::PLAYLIST_ALL` or a playlist id. A vanished playlist
+    /// (deleted between page opens) degrades to no filtering, per the TS.
+    sel_playlist: Source<str>;
+    /// The ranked rows: a ListHandle of
+    /// `{"musicId","title","count","top"}` (count-desc; `top` is the
+    /// range's max count — every bar rescales off it).
+    entries: Source<opaque>;
+    loading: Source<bool>;
+    /// musicId → cover resource id ("0" = none, "" = unknown yet).
+    covers: MapHandle;
+}
+
+pub fn seed_state() -> State {
+    return State {
+        roster: source<opaque>(list_new().raw()),
+        sel_range: source<str>("today"),
+        sel_playlist: source<str>(ranges::PLAYLIST_ALL),
+        entries: source<opaque>(list_new().raw()),
+        loading: source<bool>(false),
+        covers: map_new(),
+    };
+}
