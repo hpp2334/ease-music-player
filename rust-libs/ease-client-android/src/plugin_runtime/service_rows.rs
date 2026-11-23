@@ -1,32 +1,31 @@
-//! The `ease` service rows — the host services plugins reach from rut.
+//! The service ops — the per-op WORK behind the `emp_host` rows.
 //!
-//! One `push_rut_ext` installer covering six namespaces (the `ease.rpc` bus
-//! rows live in `ease-tur-rpc`'s [`ease_tur_rpc::TurRpcBusPlugin`] plus the
-//! `call` row registered here; the `crypto` / `xml` / `net` / `time`
-//! utilities live in [`super::util_rows`]):
+//! One body source, one identity law: the phase-2 `emp_host` rows
+//! ([`super::emp`]) forward these helpers with the identity decoded from
+//! the leading handle opaque ([`super::emp::PluginHandle`]). Phase 5
+//! deleted the old `tur_host::ease` row registrations — these helpers are
+//! all that remains of this module, plus the view→backend
+//! [`rpc_call_envelope`] (the `emp_host::rpc::call` row's body) and the
+//! JNI upcalls the ops fire into the Kotlin host statics.
 //!
-//! - `ease.db` — plugin-scoped KV over [`DatabaseServer`] (JSON in/out for
+//! The namespaces (all `emp:`-prefixed at the row layer):
+//!
+//! - `db` — plugin-scoped KV over [`DatabaseServer`] (JSON in/out for
 //!   the composite ops, `?str` for nullable gets).
-//! - `ease.secret` — plugin-scoped secret store (`SecretScope::Plugin`).
-//! - `ease.oauth` — flow-id mint + the Kotlin OAuth upcall.
-//! - `ease.themes` — the host theme colors (`#RRGGBBAA` strings) + dark.
-//! - `ease.context` — storage-row lifecycle (`notify_change` /
+//! - `secret` — plugin-scoped secret store (`SecretScope::Plugin`).
+//! - `oauth` — flow-id mint + the Kotlin OAuth upcall.
+//! - `themes` — the host theme colors (`#RRGGBBAA` strings) + dark.
+//! - `context` — storage-row lifecycle (`notify_change` /
 //!   `create_storage` / `remove_storage`) + the instance's `storage_id`.
-//! - `ease.library` — read-only playlist roster + cover thumbnails as
+//! - `library` — read-only playlist roster + cover thumbnails as
 //!   engine image resources (pixel bytes never enter the script).
-//! - `ease.rpc.call` — a view calling its own backend's bus.
+//! - `rpc` — a view calling its own backend's bus.
 //!
-//! Identity: every scoped row resolves the calling plugin from the
-//! per-instance [`PluginId`] data slot — never from a rut argument.
+//! Identity: every scoped op receives the calling plugin's id from the
+//! decoded handle — never from a rut argument.
 //! Blocking: DB round-trips `block_on` the shared tokio runtime (ms-scale,
 //! the old bridges' discipline); storage-lifecycle mutations spawn instead
 //! (they can chain upcalls and must never re-enter the pump).
-//!
-//! The per-op WORK lives in the identity-parametrized `op_*` helpers
-//! (plugin id + context in, [`rut_vm::Trap`] out) — the phase-2 `emp_host`
-//! rows ([`super::emp`]) forward the same helpers with the identity
-//! decoded from the leading handle opaque instead of the instance slot.
-//! One body source, two identity laws.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,289 +35,17 @@ use ease_client_backend::error::BResult;
 use ease_client_backend::repositories::core::DatabaseServer;
 use ease_client_backend::repositories::secret::SecretStore;
 use ease_client_schema::{MusicId, PluginKvEntry, SecretId, SecretScope};
-use rut_core::types::{TY_BOOL, TY_I64, TY_NIL, TY_OPAQUE, TY_OPT_STR, TY_STR, TY_U64};
 use rut_vm::TrapKind;
-use tur_engine::core::rut_runtime::{host_row_at, RutHandles, RutPkgCx};
-
-use crate::plugin_runtime::{backend_cx, plugin_id, rpc_bus_cell, PluginId};
 
 /// OAuth flow-id sequence (host keeps no state — the plugin keys its flow
 /// data by the id in its own KV).
 static OAUTH_FLOW_SEQ: AtomicU64 = AtomicU64::new(1);
 
-/// The installer. Called twice by the engine (decl probe, then boot).
-pub fn install(cx: &mut RutPkgCx<'_>) {
-    let row = |path: &str, n: &str, p: Vec<rut_core::types::TypeId>, r: rut_core::types::TypeId, a: bool| {
-        host_row_at(path, n, p, r, a)
-    };
-    cx.decl.extend(
-        vec![
-            // ---- db (plugin-scoped KV). Composites ride JSON strings. ----
-            row("ease/db", "single_get", vec![TY_STR], TY_OPT_STR, false),
-            row("ease/db", "single_get_multi", vec![TY_STR], TY_STR, false),
-            row("ease/db", "single_set", vec![TY_STR, TY_STR], TY_NIL, false),
-            row("ease/db", "single_set_multi", vec![TY_STR], TY_NIL, false),
-            row("ease/db", "single_delete", vec![TY_STR], TY_NIL, false),
-            row("ease/db", "single_delete_multi", vec![TY_STR], TY_NIL, false),
-            row("ease/db", "multi_append", vec![TY_STR, TY_STR], TY_NIL, false),
-            row("ease/db", "multi_append_multi", vec![TY_STR], TY_NIL, false),
-            row("ease/db", "multi_get_all", vec![TY_STR], TY_STR, false),
-            row("ease/db", "multi_get_all_multi", vec![TY_STR], TY_STR, false),
-            row("ease/db", "multi_count", vec![TY_STR], TY_U64, false),
-            row("ease/db", "multi_count_multi", vec![TY_STR], TY_STR, false),
-            row("ease/db", "multi_delete", vec![TY_STR], TY_NIL, false),
-            row("ease/db", "multi_delete_multi", vec![TY_STR], TY_NIL, false),
-            row("ease/db", "list_keys", vec![TY_STR], TY_STR, false),
-            // ---- secret (plugin-scoped secret store) ----
-            row("ease/secret", "get", vec![TY_I64], TY_OPT_STR, false),
-            row("ease/secret", "put", vec![TY_STR], TY_I64, false),
-            row("ease/secret", "remove", vec![TY_I64], TY_NIL, false),
-            // ---- oauth (flow mint + Kotlin upcall) ----
-            row("ease/oauth", "new", vec![], TY_STR, false),
-            row("ease/oauth", "begin", vec![TY_STR], TY_NIL, false),
-            // ---- themes (host palette) ----
-            row("ease/themes", "color", vec![TY_STR], TY_STR, false),
-            row("ease/themes", "is_dark", vec![], TY_BOOL, false),
-            // ---- context (storage lifecycle) ----
-            row("ease/context", "notify_change", vec![], TY_NIL, false),
-            row("ease/context", "create_storage", vec![TY_STR], TY_NIL, false),
-            row("ease/context", "remove_storage", vec![TY_STR], TY_NIL, false),
-            row("ease/context", "storage_id", vec![], TY_OPT_STR, false),
-            // ---- library (read-only host data) ----
-            row("ease/library", "playlists", vec![], TY_STR, false),
-            row("ease/library", "covers", vec![TY_STR], TY_STR, false),
-            // ---- rpc (view → its own backend; the envelope passes through) ----
-            row("ease/rpc", "call", vec![TY_STR, TY_STR], TY_STR, false),
-        ]
-        .into_iter(),
-    );
-
-    let Some(handles) = cx.handles else {
-        return; // compile-time decl probe — bodies install at boot only
-    };
-    let handles = handles.clone();
-    let pkg = &mut *cx.pkg;
-
-    /// One decl-row binding: clones the per-instance handles into the
-    /// closure (each row owns its `Rc`) and rebinds the call-site `handles`
-    /// ident to the clone inside the body.
-    macro_rules! row_fn {
-        ($handles:ident, $key:literal, ($($arg:ident: $ty:ty),*) -> $ret:ty, $($body:tt)*) => {{
-            let h = $handles.clone();
-            rut_vm::pkg_fn!(pkg, $key, ($($ty,)*) -> $ret, move |vm: &mut rut_vm::interp::Vm, $($arg: $ty),*| {
-                #[allow(unused_variables)]
-                let $handles = &h;
-                #[allow(unused_variables)]
-                let _ = vm;
-                $($body)*
-            })
-        }};
-    }
-
-    // ---- db ---------------------------------------------------------------
-
-    row_fn!(handles, "ease::db::single_get", (key: &str) -> Option<String>, {
-        let pid = plugin_id("db", &handles)?;
-        op_db_single_get(&db_of(&handles)?, pid.as_str(), key)
-    });
-
-    row_fn!(handles, "ease::db::single_get_multi", (keys_json: &str) -> String, {
-        let pid = plugin_id("db", &handles)?;
-        op_db_single_get_multi(&db_of(&handles)?, pid.as_str(), keys_json)
-    });
-
-    row_fn!(handles, "ease::db::single_set", (key: &str, value: &str) -> (), {
-        let pid = plugin_id("db", &handles)?;
-        op_db_single_set(&db_of(&handles)?, pid.as_str(), key, value)
-    });
-
-    row_fn!(handles, "ease::db::single_set_multi", (entries_json: &str) -> (), {
-        let pid = plugin_id("db", &handles)?;
-        op_db_single_set_multi(&db_of(&handles)?, pid.as_str(), entries_json)
-    });
-
-    row_fn!(handles, "ease::db::single_delete", (key: &str) -> (), {
-        let pid = plugin_id("db", &handles)?;
-        op_db_single_delete(&db_of(&handles)?, pid.as_str(), key)
-    });
-
-    row_fn!(handles, "ease::db::single_delete_multi", (keys_json: &str) -> (), {
-        let pid = plugin_id("db", &handles)?;
-        op_db_single_delete_multi(&db_of(&handles)?, pid.as_str(), keys_json)
-    });
-
-    row_fn!(handles, "ease::db::multi_append", (key: &str, value: &str) -> (), {
-        let pid = plugin_id("db", &handles)?;
-        op_db_multi_append(&db_of(&handles)?, pid.as_str(), key, value)
-    });
-
-    row_fn!(handles, "ease::db::multi_append_multi", (entries_json: &str) -> (), {
-        let pid = plugin_id("db", &handles)?;
-        op_db_multi_append_multi(&db_of(&handles)?, pid.as_str(), entries_json)
-    });
-
-    row_fn!(handles, "ease::db::multi_get_all", (key: &str) -> String, {
-        let pid = plugin_id("db", &handles)?;
-        op_db_multi_get_all(&db_of(&handles)?, pid.as_str(), key)
-    });
-
-    row_fn!(handles, "ease::db::multi_get_all_multi", (keys_json: &str) -> String, {
-        let pid = plugin_id("db", &handles)?;
-        op_db_multi_get_all_multi(&db_of(&handles)?, pid.as_str(), keys_json)
-    });
-
-    row_fn!(handles, "ease::db::multi_count", (key: &str) -> u64, {
-        let pid = plugin_id("db", &handles)?;
-        op_db_multi_count(&db_of(&handles)?, pid.as_str(), key)
-    });
-
-    row_fn!(handles, "ease::db::multi_count_multi", (keys_json: &str) -> String, {
-        let pid = plugin_id("db", &handles)?;
-        op_db_multi_count_multi(&db_of(&handles)?, pid.as_str(), keys_json)
-    });
-
-    row_fn!(handles, "ease::db::multi_delete", (key: &str) -> (), {
-        let pid = plugin_id("db", &handles)?;
-        op_db_multi_delete(&db_of(&handles)?, pid.as_str(), key)
-    });
-
-    row_fn!(handles, "ease::db::multi_delete_multi", (keys_json: &str) -> (), {
-        let pid = plugin_id("db", &handles)?;
-        op_db_multi_delete_multi(&db_of(&handles)?, pid.as_str(), keys_json)
-    });
-
-    row_fn!(handles, "ease::db::list_keys", (prefix: &str) -> String, {
-        let pid = plugin_id("db", &handles)?;
-        op_db_list_keys(&db_of(&handles)?, pid.as_str(), prefix)
-    });
-
-    // ---- secret -------------------------------------------------------------
-
-    row_fn!(handles, "ease::secret::get", (id: i64) -> Option<String>, {
-        let (pid, db) = secret_parts(&handles)?;
-        op_secret_get(&db, pid.as_str(), id)
-    });
-
-    row_fn!(handles, "ease::secret::put", (secret: &str) -> i64, {
-        let (pid, db) = secret_parts(&handles)?;
-        op_secret_put(&db, pid.as_str(), secret)
-    });
-
-    row_fn!(handles, "ease::secret::remove", (id: i64) -> (), {
-        let (pid, db) = secret_parts(&handles)?;
-        op_secret_remove(&db, pid.as_str(), id)
-    });
-
-    // ---- oauth ---------------------------------------------------------------
-
-    row_fn!(handles, "ease::oauth::new", () -> String, {
-        plugin_id("oauth", &handles)?; // gate to plugin-bound instances
-        Ok(op_oauth_new())
-    });
-
-    row_fn!(handles, "ease::oauth::begin", (oauth_id: &str) -> (), {
-        let pid = plugin_id("oauth", &handles)?;
-        op_oauth_begin(pid.as_str(), oauth_id)
-    });
-
-    // ---- themes ---------------------------------------------------------------
-
-    row_fn!(handles, "ease::themes::color", (name: &str) -> String, {
-        let _ = plugin_id("themes", &handles)?;
-        op_theme_color(name)
-    });
-
-    row_fn!(handles, "ease::themes::is_dark", () -> bool, {
-        let _ = plugin_id("themes", &handles)?;
-        op_theme_is_dark()
-    });
-
-    // ---- context --------------------------------------------------------------
-
-    row_fn!(handles, "ease::context::notify_change", () -> (), {
-        let (pid, inst) = resolve_instance(&handles)?;
-        op_context_notify_change(pid.as_str(), inst.0);
-        Ok(())
-    });
-
-    row_fn!(handles, "ease::context::create_storage", (plugin_storage_id: &str) -> (), {
-        let pid = plugin_id("context", &handles)?;
-        let cx = backend_cx("context", &handles)?;
-        op_context_create_storage(cx, pid.as_str(), plugin_storage_id);
-        Ok(())
-    });
-
-    row_fn!(handles, "ease::context::remove_storage", (plugin_storage_id: &str) -> (), {
-        let pid = plugin_id("context", &handles)?;
-        let cx = backend_cx("context", &handles)?;
-        op_context_remove_storage(cx, pid.as_str(), plugin_storage_id);
-        Ok(())
-    });
-
-    row_fn!(handles, "ease::context::storage_id", () -> Option<String>, {
-        // The instance's storage identity: `nil` = create-mode view or the
-        // headless backend, `Some` = an edit-mode view. Never changes for
-        // the instance lifetime — read once at start.
-        Ok(handles
-            .inst
-            .data::<crate::plugin_runtime::PluginInstance>()
-            .and_then(|i| i.0))
-    });
-
-    // ---- library ---------------------------------------------------------------
-
-    row_fn!(handles, "ease::library::playlists", () -> String, {
-        let cx = backend_cx("library", &handles)?;
-        op_library_playlists(&cx)
-    });
-
-    row_fn!(handles, "ease::library::covers", (music_ids_json: &str) -> String, {
-        let cx = backend_cx("library", &handles)?;
-        op_library_covers(&cx, &handles, music_ids_json)
-    });
-
-    // ---- rpc.call (view → its own backend) --------------------------------------
-
-    row_fn!(handles, "ease::rpc::call", (op: &str, args_json: &str) -> String, {
-        Ok(rpc_call_row(&handles, op, args_json)?)
-    });
-}
-
-// ---------------------------------------------------------------------------
-// the per-op helpers — identity-parametrized work shared with emp_host
-// ---------------------------------------------------------------------------
-
-/// The context-bridge identity pair (plugin id + storage instance).
-fn resolve_instance(
-    handles: &std::rc::Rc<RutHandles>,
-) -> Result<(PluginId, crate::plugin_runtime::PluginInstance), rut_vm::Trap> {
-    let pid = plugin_id("context", handles)?;
-    let inst = handles
-        .inst
-        .data::<crate::plugin_runtime::PluginInstance>()
-        .unwrap_or(crate::plugin_runtime::PluginInstance(None));
-    Ok((pid, inst))
-}
-
-fn db_of(
-    handles: &std::rc::Rc<RutHandles>,
-) -> Result<Arc<DatabaseServer>, rut_vm::Trap> {
-    Ok(backend_cx("db", handles)?.database_server().clone())
-}
-
-fn secret_parts(
-    handles: &std::rc::Rc<RutHandles>,
-) -> Result<(PluginId, Arc<DatabaseServer>), rut_vm::Trap> {
-    let pid = plugin_id("secret", handles)?;
-    let db = backend_cx("secret", handles)?.database_server().clone();
-    Ok((pid, db))
-}
-
 fn parse_json<T: serde::de::DeserializeOwned>(s: &str, what: &str) -> Result<T, rut_vm::Trap> {
     serde_json::from_str(s).map_err(|e| {
         rut_vm::Trap::new(
             TrapKind::Invalid,
-            format!("ease:db: {what} is not valid JSON: {e}"),
+            format!("emp:db: {what} is not valid JSON: {e}"),
         )
     })
 }
@@ -332,7 +59,7 @@ fn block_on<R>(what: &str, fut: impl std::future::Future<Output = BResult<R>>) -
         .map_err(|e| {
             rut_vm::Trap::new(
                 TrapKind::Invalid,
-                format!("ease:db {what} failed: {e:?}"),
+                format!("emp:db {what} failed: {e:?}"),
             )
         })
 }
@@ -347,7 +74,7 @@ fn block_on_async<R, E: std::fmt::Debug>(
         .map_err(|e| {
             rut_vm::Trap::new(
                 TrapKind::Invalid,
-                format!("ease:db {what} failed: {e:?}"),
+                format!("emp:db {what} failed: {e:?}"),
             )
         })
 }
@@ -550,13 +277,13 @@ pub(crate) fn op_oauth_begin(pid: &str, oauth_id: &str) -> Result<(), rut_vm::Tr
     #[cfg(target_os = "android")]
     {
         if let Err(e) = upcall_start_oauth(pid, &oauth_id) {
-            tracing::warn!("ease:oauth.begin({oauth_id}) upcall failed: {e}");
+            tracing::warn!("emp:oauth.begin({oauth_id}) upcall failed: {e}");
         }
     }
     #[cfg(not(target_os = "android"))]
     {
         let _ = (pid, oauth_id);
-        tracing::debug!("ease:oauth.begin ignored (non-Android target)");
+        tracing::debug!("emp:oauth.begin ignored (non-Android target)");
     }
     Ok(())
 }
@@ -570,7 +297,7 @@ pub(crate) fn op_theme_color(name: &str) -> Result<String, rut_vm::Trap> {
         theme_upcall_color(&name).map_err(|e| {
             rut_vm::Trap::new(
                 TrapKind::Invalid,
-                format!("ease:themes.color: host upcall failed: {e}"),
+                format!("emp:themes.color: host upcall failed: {e}"),
             )
         })
     }
@@ -579,7 +306,7 @@ pub(crate) fn op_theme_color(name: &str) -> Result<String, rut_vm::Trap> {
         let _ = name;
         Err(rut_vm::Trap::new(
             TrapKind::Invalid,
-            "ease:themes.color: theme is only available on Android",
+            "emp:themes.color: theme is only available on Android",
         ))
     }
 }
@@ -595,7 +322,7 @@ pub(crate) fn op_theme_is_dark() -> Result<bool, rut_vm::Trap> {
     {
         Err(rut_vm::Trap::new(
             TrapKind::Invalid,
-            "ease:themes.is_dark: theme is only available on Android",
+            "emp:themes.is_dark: theme is only available on Android",
         ))
     }
 }
@@ -607,13 +334,13 @@ pub(crate) fn op_context_notify_change(pid: &str, instance: Option<String>) {
     #[cfg(target_os = "android")]
     {
         if let Err(e) = upcall_storage_host(pid, &instance_str, "notifyChange") {
-            tracing::warn!("ease:context.notify_change upcall failed: {e}");
+            tracing::warn!("emp:context.notify_change upcall failed: {e}");
         }
     }
     #[cfg(not(target_os = "android"))]
     {
         let _ = (pid, instance_str);
-        tracing::debug!("ease:context.notify_change ignored (non-Android target)");
+        tracing::debug!("emp:context.notify_change ignored (non-Android target)");
     }
 }
 
@@ -653,12 +380,12 @@ pub(crate) fn op_context_create_storage(
                 #[cfg(target_os = "android")]
                 {
                     if let Err(e) = upcall_storage_host(&pid_str, &instance, "storageCreated") {
-                        tracing::warn!("ease:context.create_storage upcall failed: {e}");
+                        tracing::warn!("emp:context.create_storage upcall failed: {e}");
                     }
                 }
             }
             Err(e) => {
-                tracing::error!("ease:context.create_storage failed for {instance}: {e:?}");
+                tracing::error!("emp:context.create_storage failed for {instance}: {e:?}");
             }
         }
     });
@@ -760,7 +487,7 @@ pub(crate) fn op_library_playlists(
 /// register into — identity rides `cx` + the caller's plugin id.
 pub(crate) fn op_library_covers(
     cx: &ease_client_backend::ctx::BackendContext,
-    handles: &std::rc::Rc<RutHandles>,
+    handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
     music_ids_json: &str,
 ) -> Result<String, rut_vm::Trap> {
     let db: Arc<DatabaseServer> = cx.database_server().clone();
@@ -768,7 +495,7 @@ pub(crate) fn op_library_covers(
     let ids: Vec<String> = parse_json(music_ids_json, "musicIds")?;
     if ids.len() > COVER_MAX_BATCH {
         tracing::warn!(
-            "ease:library covers: {} ids requested — truncating to {COVER_MAX_BATCH}",
+            "emp:library covers: {} ids requested — truncating to {COVER_MAX_BATCH}",
             ids.len()
         );
     }
@@ -780,7 +507,7 @@ pub(crate) fn op_library_covers(
         .map_err(|_| {
             rut_vm::Trap::new(
                 TrapKind::Invalid,
-                "ease:library covers: musicIds entries must be numeric id strings",
+                "emp:library covers: musicIds entries must be numeric id strings",
             )
         })?;
 
@@ -821,10 +548,10 @@ pub(crate) fn op_library_covers(
 // ---------------------------------------------------------------------------
 
 /// `call(op, argsJson) -> envelope str` — route a view's call to its
-/// plugin's backend bus (the OLD row's body, shared with the NEW
-/// `emp_host::rpc::call` row — the identity comes in resolved either
-/// way). Blocking (control calls are ms-scale; the view's VM task waits
-/// on the backend's host-thread round-trip). The envelope passes through:
+/// plugin's backend bus (the `emp_host::rpc::call` row's body — the
+/// identity rides the decoded handle). Blocking (control calls are
+/// ms-scale; the view's VM task waits on the backend's host-thread
+/// round-trip). The envelope passes through:
 /// `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`.
 pub(crate) fn rpc_call_envelope(
     cx: &ease_client_backend::ctx::BackendContext,
@@ -847,17 +574,6 @@ pub(crate) fn rpc_call_envelope(
         Err(e) => Ok(serde_json::to_string(&ease_tur_rpc::err_envelope(&e.to_string()))
             .expect("envelope serializes")),
     }
-}
-
-/// The OLD row: identity resolved from the per-instance slot.
-fn rpc_call_row(
-    handles: &std::rc::Rc<RutHandles>,
-    op: &str,
-    args_json: &str,
-) -> Result<String, rut_vm::Trap> {
-    let pid = plugin_id("rpc", handles)?;
-    let cx = backend_cx("rpc", handles)?;
-    rpc_call_envelope(&cx, pid.as_str(), op, args_json)
 }
 
 // ---------------------------------------------------------------------------

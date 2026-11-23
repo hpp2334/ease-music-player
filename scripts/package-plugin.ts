@@ -6,13 +6,15 @@ import { ROOT } from "./base";
 
 // Package rut plugin sources into the committed registry:
 //
-//   plugins/registry/zips/<id>-<version>.zip   (manifest.json + *.rut + icons at zip root)
+//   plugins/registry/zips/<id>-<version>.zip   (manifest.json + rut sources + icons)
 //   plugins/registry/plugins.json              (index: id/name/version/zip/sha256/size/apiVersion)
 //
 // Plugins are raw rut sources since the apiVersion 2 epoch — there is no
 // build step (no rspack/pnpm/bundlers; the engine compiles the sources).
-// Everything at the plugin dir's top level ships: `manifest.json`, every
-// `.rut` source, and every manifest-referenced icon.
+// The sources ship in the epoch-3 LAYOUT (pkg trees): `manifest.json`,
+// every `.rut` file at ANY depth (`backend/mod.rut` + children, `view/…` —
+// the zip preserves relative paths so the installed folder matches the
+// source tree), and every manifest-referenced icon.
 //
 // `--bundle <id[,id…]>` (repeatable) additionally copies those zips into
 // the APK assets (`android/app/src/main/assets/plugin-bundles/<id>.zip`)
@@ -32,8 +34,9 @@ const ASSET_BUNDLES_DIR = path.join(ROOT, "android/app/src/main/assets/plugin-bu
 /** The current plugin API epoch — must match `PLUGIN_API_MIN/MAX` in
  *  `rust-libs/ease-client-backend/src/services/plugin_manager.rs` (the app
  *  refuses installs outside its range, so packaging an out-of-epoch zip is
- *  a loud error). */
-const PLUGIN_API_VERSION = 2;
+ *  a loud error). 3 = the emp epoch (pkg trees + the `emp` SDK; apiVersion
+ *  2 = the retired single-file rut epoch). */
+const PLUGIN_API_VERSION = 3;
 
 interface RegistryEntry {
   id: string;
@@ -85,6 +88,25 @@ function collectIconFiles(node: unknown, out: Set<string> = new Set()): Set<stri
   return out;
 }
 
+/** Walk `dir` recursively and collect every regular file whose path
+ *  (POSIX, relative to the plugin root) passes `keep` — the pkg-tree
+ *  source collector (a plugin's `backend/mod.rut` tree and `view/` trees
+ *  live in subdirectories; the zip carries the relative paths so the
+ *  installed folder matches the source tree). `dist/` is the staging dir
+ *  this script itself writes — never collected. */
+function collectFiles(dir: string, keep: (rel: string) => boolean, out: string[] = [], prefix = ""): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name === "dist") continue;
+      collectFiles(path.join(dir, entry.name), keep, out, rel);
+    } else if (entry.isFile() && keep(rel)) {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
 function packagePlugin(pluginDir: string): RegistryEntry {
   const manifestPath = path.join(pluginDir, "manifest.json");
   if (!existsSync(manifestPath)) {
@@ -105,26 +127,31 @@ function packagePlugin(pluginDir: string): RegistryEntry {
   const apiVersion: number = manifest.apiVersion;
   if (apiVersion !== PLUGIN_API_VERSION) {
     throw new Error(
-      `manifest apiVersion ${apiVersion} != the packaging epoch ${PLUGIN_API_VERSION} — port the plugin to rut first: ${manifestPath}`,
+      `manifest apiVersion ${apiVersion} != the packaging epoch ${PLUGIN_API_VERSION} (the emp epoch) — port the plugin first: ${manifestPath}`,
     );
   }
 
-  // Stage the zip contents: manifest + every .rut source + every
-  // manifest-referenced icon. Entry files named by the manifest
-  // (`backend` / contribution `view`) must exist — a missing entry is a
-  // packaging error (the runtime would load a blank view / no backend).
+  // Stage the zip contents: manifest + every `.rut` source at any depth
+  // (pkg trees — `backend/`, `view/`) + every manifest-referenced icon.
+  // Entry points named by the manifest (`backend` / contribution `view`)
+  // must resolve — a single file, or a pkg tree rooted at its directory's
+  // `mod.rut` — a missing entry is a packaging error (the runtime would
+  // load a blank view / no backend).
   const staging = path.join(pluginDir, "dist");
   execSync(`rm -rf "${staging}" && mkdir -p "${staging}"`);
   copyFileSync(manifestPath, path.join(staging, "manifest.json"));
 
-  const sources = readdirSync(pluginDir, { withFileTypes: true })
-    .filter((d) => d.isFile() && d.name.endsWith(".rut"))
-    .map((d) => d.name);
+  const sources = collectFiles(
+    pluginDir,
+    (rel) => rel.endsWith(".rut"),
+  ).sort();
   if (sources.length === 0) {
     throw new Error(`no .rut sources found — port the plugin to rut: ${pluginDir}`);
   }
   for (const src of sources) {
-    copyFileSync(path.join(pluginDir, src), path.join(staging, src));
+    const dest = path.join(staging, src);
+    mkdirSync(path.dirname(dest), { recursive: true });
+    copyFileSync(path.join(pluginDir, src), dest);
   }
 
   const entryFiles = [
@@ -133,8 +160,14 @@ function packagePlugin(pluginDir: string): RegistryEntry {
     ...(manifest.contributions?.dashboard ?? []).map((c: { view?: string }) => c.view),
   ];
   for (const f of entryFiles) {
-    if (typeof f === "string" && f && !existsSync(path.join(staging, f))) {
-      throw new Error(`manifest entry file not found among the .rut sources: ${f} (${pluginDir})`);
+    if (typeof f !== "string" || !f) continue;
+    // A directory entry is a pkg tree — its `mod.rut` must have been staged.
+    const direct = path.join(staging, f);
+    const modRut = path.join(staging, f, "mod.rut");
+    if (!existsSync(direct) && !existsSync(modRut)) {
+      throw new Error(
+        `manifest entry not found among the .rut sources (file or <dir>/mod.rut): ${f} (${pluginDir})`,
+      );
     }
   }
 
@@ -149,9 +182,10 @@ function packagePlugin(pluginDir: string): RegistryEntry {
 
   mkdirSync(ZIPS_DIR, { recursive: true });
   const zipPath = path.join(ZIPS_DIR, `${id}-${version}.zip`);
-  // Zip the staged contents (manifest + sources + icons at zip root),
-  // stored-only (-X drops extra attrs; -0 keeps installs fast on-device —
-  // rut sources are small). Recreated from scratch each run.
+  // Zip the staged contents (manifest + icons at zip root, the rut trees
+  // under their relative paths), stored-only (-X drops extra attrs; -0
+  // keeps installs fast on-device — rut sources are small). Recreated
+  // from scratch each run.
   execSync(`rm -f "${zipPath}" && zip -rX -0 "${zipPath}" .`, { cwd: staging, stdio: "inherit" });
 
   // `name` / `description` may be localized (`{ "en-US": …, "zh-CN": … }`) —

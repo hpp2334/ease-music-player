@@ -18,7 +18,7 @@ mod storage_dispatch {
     use ease_client_android::plugin_runtime::{EaseMusicPlugin, PluginId, PluginInstance};
     use ease_client_backend::ctx::BackendContext;
     use ease_client_backend::services::plugin_pkg::{read_entry_source, EntrySource};
-    use ease_tur_rpc::{DispatchAnswer, RpcBus, RpcClient, RpcError, RutDriver, TurRpcBusPlugin};
+    use ease_tur_rpc::{DispatchAnswer, RpcClient, RpcError, RutDriver, TurRpcBindPlugin};
     use std::path::Path;
     use std::sync::mpsc;
     use std::sync::Arc;
@@ -43,7 +43,6 @@ mod storage_dispatch {
             Vec<u8>,
             mpsc::SyncSender<Result<DispatchAnswer, String>>,
         ),
-        Token(mpsc::SyncSender<u64>),
     }
 
     struct TestDriver {
@@ -51,20 +50,6 @@ mod storage_dispatch {
     }
 
     impl RutDriver for TestDriver {
-        fn call_entry_str(&self, _name: &str, _cx: u64) -> Result<String, String> {
-            Err("the storage backends serve no stash-bus entries".to_string())
-        }
-
-        fn call_entry(&self, _name: &str, _cx: u64) -> Result<(), String> {
-            Err("the storage backends serve no stash-bus entries".to_string())
-        }
-
-        fn start_token(&self) -> u64 {
-            let (rtx, rrx) = mpsc::sync_channel(1);
-            self.tx.send(Cmd::Token(rtx)).ok();
-            rrx.recv().unwrap_or(0)
-        }
-
         fn call_dispatch_str(
             &self,
             name: &str,
@@ -155,10 +140,8 @@ mod storage_dispatch {
         ease_client_tokio::tokio_runtime().block_on(
             cx.database_server().init(db_dir.to_string_lossy().to_string()),
         ).expect("db init");
-        let bus = RpcBus::new();
         let (tx, rx) = mpsc::channel::<Cmd>();
         let (ready_tx, ready_rx) = mpsc::channel::<u64>();
-        let bus_for_plugin = Some(bus.clone());
         let pid = plugin_id.to_string();
         std::thread::spawn(move || {
             let driver = TestSchedulerDriver::new();
@@ -170,7 +153,7 @@ mod storage_dispatch {
                 .clock(Arc::new(MutexFixedClock::new(0)))
                 .worker_pool(pool.clone())
                 .plugin(TurStdPlugin)
-                .plugin(TurRpcBusPlugin::new(bus_for_plugin))
+                .plugin(TurRpcBindPlugin::new())
                 .plugin(EaseMusicPlugin::new(cx))
                 .build()
                 .expect("runtime build");
@@ -234,14 +217,11 @@ mod storage_dispatch {
                             .map_err(|e| e.to_string()),
                         );
                     }
-                    Cmd::Token(rtx) => {
-                        let _ = rtx.send(futures::executor::block_on(app.rut_start_answer()));
-                    }
                 }
             }
         });
         let boot_cx = ready_rx.recv().expect("driver thread booted");
-        RpcClient::new(bus, Arc::new(TestDriver { tx }), boot_cx)
+        RpcClient::new(Arc::new(TestDriver { tx }), boot_cx)
     }
 
     /// One host-shaped op call through the bind-table dispatch entry,

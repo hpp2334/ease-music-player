@@ -6,22 +6,33 @@
 //! plugin's parsers (`parserId` rides the payload). This module resolves
 //! candidate `(pluginId, parserId)` pairs for a file extension (scan
 //! order, user selection from the Lyric Parser settings page applied),
-//! ships the raw bytes as base64 to each candidate in turn (a `null`
-//! reply / error / timeout falls through to the next), and maps the
-//! winner's normalized result into the wire [`Lyrics`] shape.
+//! ships the raw bytes to each candidate in turn over the RPC **binary
+//! lane** (a `nil` reply / error / timeout falls through to the next),
+//! and maps the winner's normalized result into the wire [`Lyrics`]
+//! shape.
 //!
-//! Contract (see `plugins/com.ease.lyricformats/src/backend.ts`):
+//! Contract (see `plugins/com.ease.lyricformats/backend/`), the binary
+//! lane's minimal framing — a small JSON header + the raw bytes:
 //!
-//! ```ts
-//! hostRpc.registerHandler("lyric:parse", (args: {
-//!     pluginId: string; parserId: string;
-//!     fileName: string; size: number; contentBase64: string;
-//! }) => {
-//!     lines: Array<{ timeMs: number; durationMs?: number; text: string }>;
-//!     metadata?: { artist?; album?; title?; lyricist?; author?;
-//!                  length?; offset? };  // strings, pass-through
-//! } | null)   // null = "not mine" → host tries the next parser
+//! ```text
+//! <JSON header>\n<content bytes>
 //! ```
+//!
+//! The header carries the fields the parser needs (the plugin decodes
+//! the whole payload lossily as UTF-8 and splits at the FIRST newline —
+//! JSON strings never contain a literal `\n`):
+//!
+//! ```json
+//! {"parserId": "lrc", "fileName": "song.lrc"}
+//! ```
+//!
+//! The answer is raw UTF-8 bytes:
+//!
+//! ```json
+//! {"lines": [{ "timeMs": 0, "durationMs": 1, "text": "…" }], "metadata"?}
+//! ```
+//!
+//! or the nil answer ("not mine" → host tries the next parser).
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -33,8 +44,8 @@ use crate::objects::{LyricLine, Lyrics};
 
 use super::plugin_manager::{LyricParserEntry, PluginManagerShared};
 
-/// Hard cap on lyric bytes handed to a parser (base64 inflates by ~4/3 on
-/// the JSON control channel — keep lyric-sized).
+/// Hard cap on lyric bytes handed to a parser (raw bytes cross the binary
+/// lane — keep lyric-sized anyway).
 pub(crate) const MAX_LYRIC_BYTES: usize = 2 * 1024 * 1024;
 
 /// Per-candidate RPC budget; a timeout falls through to the next parser.
@@ -124,28 +135,30 @@ pub(crate) async fn parse_lyric_content(
         return Err(LyricDispatchError::NoParser(ext));
     }
 
-    use base64::Engine as _;
-    let content_base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     for (plugin_id, parser_id) in &candidates {
         let Some(rpc) = cx.service_rpc_for(plugin_id) else {
             // Backend not up (mid teardown / never loaded) — skip.
             continue;
         };
-        let args = json!({
-            "pluginId": plugin_id,
+        let header = serde_json::to_vec(&json!({
             "parserId": parser_id,
             "fileName": file_name,
-            "size": bytes.len(),
-            "contentBase64": content_base64,
-        });
-        let call = rpc.call_host("lyric:parse", args);
+        }))
+        .expect("the lyric header serializes");
+        let mut payload = header;
+        payload.push(b'\n');
+        payload.extend_from_slice(bytes);
+        let call = rpc.call_host_bytes("lyric:parse", payload);
         match tokio::time::timeout(PARSE_TIMEOUT, call).await {
-            Ok(Ok(value)) => match map_plugin_result(&value) {
+            Ok(Ok(Some(reply))) => match map_plugin_result(&reply) {
                 Some(lyrics) => return Ok(lyrics),
                 None => {
                     tracing::warn!("lyric:parse '{plugin_id}:{parser_id}': unrecognized content");
                 }
             },
+            // The nil answer — "not mine", fall through silently (this is
+            // the lane's designed multi-parser shape).
+            Ok(Ok(None)) => {}
             Ok(Err(e)) => {
                 tracing::warn!("lyric:parse '{plugin_id}:{parser_id}' failed: {e}");
             }
@@ -161,8 +174,8 @@ pub(crate) async fn parse_lyric_content(
 /// ignored, `timeMs` accepts int/float), `None` when the reply is not a
 /// usable result (empty/malformed lines — the host then falls through to
 /// the next parser).
-fn map_plugin_result(value: &serde_json::Value) -> Option<Lyrics> {
-    let parsed: PluginLyricResult = serde_json::from_value(value.clone()).ok()?;
+fn map_plugin_result(reply: &[u8]) -> Option<Lyrics> {
+    let parsed: PluginLyricResult = serde_json::from_slice(reply).ok()?;
     if parsed.lines.is_empty() {
         return None;
     }
@@ -317,7 +330,8 @@ mod tests {
             ],
             "metadata": {"artist": "X", "length": "03:45", "offset": "+500"},
         });
-        let lyrics = map_plugin_result(&value).unwrap();
+        let reply = serde_json::to_vec(&value).unwrap();
+        let lyrics = map_plugin_result(&reply).unwrap();
         let times: Vec<u64> = lyrics
             .lines
             .iter()
@@ -330,9 +344,12 @@ mod tests {
         assert_eq!(lyrics.metdata.offset, "+500");
 
         // Empty / malformed / non-object replies fall through.
-        assert!(map_plugin_result(&serde_json::json!({"lines": []})).is_none());
-        assert!(map_plugin_result(&serde_json::json!({"lines": [{"timeMs": 1}]})).is_none());
-        assert!(map_plugin_result(&serde_json::Value::Null).is_none());
+        let empty = serde_json::to_vec(&serde_json::json!({"lines": []})).unwrap();
+        assert!(map_plugin_result(&empty).is_none());
+        let sparse = serde_json::to_vec(&serde_json::json!({"lines": [{"timeMs": 1}]})).unwrap();
+        assert!(map_plugin_result(&sparse).is_none());
+        assert!(map_plugin_result(b"not json").is_none());
+        assert!(map_plugin_result(b"").is_none());
     }
 
     #[test]

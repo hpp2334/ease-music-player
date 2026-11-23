@@ -1,8 +1,6 @@
 //! `xml_host` bodies — quick-xml → a serde_json tree (the
-//! PROPFIND/multistatus decoder; the old `fast-xml-parser` npm-dep
-//! replacement). Identity-free. The same body the old
-//! `tur_host::ease::xml` row binds (D5) — one body source, two
-//! namespaces.
+//! PROPFIND/multistatus decoder; the JS epoch's `fast-xml-parser`
+//! npm-dep replacement). Identity-free.
 
 use std::collections::HashMap;
 
@@ -17,7 +15,7 @@ pub(crate) fn pkg() -> rut_vm::interp::HostPkg {
     pkg
 }
 
-/// The shared body (the old ease row calls this too): quick-xml → JSON
+/// The shared body: quick-xml → JSON
 /// tree. Element: `{"attrs…": …, "text": "…", "children": {tag: el |
 /// [el, …]}}`. Namespace prefixes stay verbatim (the plugins match
 /// `D:multistatus` / `d:response` case-insensitively downstream).

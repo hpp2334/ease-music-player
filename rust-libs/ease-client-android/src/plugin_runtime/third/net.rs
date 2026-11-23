@@ -2,8 +2,7 @@
 //! capability (upstream's rut net rows carry no headers/body; every
 //! provider needs `Authorization` / `Depth` / PROPFIND bodies).
 //! Identity-free (the capability resolves off the instance, never a
-//! plugin). The same bodies the old `tur_host::ease::net` rows bind
-//! (D5) — one body source, two namespaces.
+//! plugin).
 
 use std::cell::RefCell;
 use std::rc::Rc;

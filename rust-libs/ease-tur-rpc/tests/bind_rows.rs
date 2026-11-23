@@ -1,26 +1,24 @@
-//! The phase-3 closure spike (plan risk 2's remainder) + the bind-table
-//! dispatch lane, proven end-to-end on a real rut module.
+//! The bind-table dispatch lane, proven end-to-end on a real rut module.
 //!
-//! The spike: a rut closure (`fn (args: str) -> ?str { … db.greeting … }`)
-//! is SEALED as an opaque (`opaque(f)`), filed through the `rpc::bind` row
-//! into the host-side per-instance table (keyed by the bind key — the
-//! instance's handle stamps the table, the key the slot), and later
-//! INVOKED with a raw str (and bytes) through the module's dispatch
-//! entry, the result returned. No module-global state anywhere: the
-//! closures live host-side, the entry fetches them back by the `cx`
-//! handle.
+//! A rut closure (`fn (args: str) -> ?str { … db.greeting … }`) is SEALED
+//! as an opaque (`opaque(f)`), filed through the `rpc::bind` row into the
+//! host-side per-instance table (keyed by the bind key — the instance's
+//! handle stamps the table, the key the slot), and later INVOKED with a
+//! raw str (and bytes) through the module's dispatch entry, the result
+//! returned. No module-global state anywhere: the closures live host-side,
+//! the entry fetches them back by the `cx` handle.
 //!
 //! The fixture is the plan's shape WITHOUT the `emp` class (rows only) —
 //! `emp`'s `Rpc` is a thin forwarder over exactly these rows (the
 //! emp-class E2E lives in ease-plugins-check). Driven through
-//! [`RpcClient`]'s new dispatch lane (the capability probe rides the same
-//! entry calls). The OLD stash contract keeps its own suite (`echo.rs`)
-//! — the dual-mode bridge.
+//! [`RpcClient`]'s dispatch lane (the capability probe rides the same
+//! entry calls). Phase 5 made this the ONLY contract — there is no other
+//! lane left to cover.
 
 use std::sync::Arc;
 
 use ease_tur_rpc::{
-    DispatchAnswer, RpcBus, RpcClient, RpcError, RutDriver, TurRpcBindPlugin, TurRpcBusPlugin,
+    DispatchAnswer, RpcClient, RpcError, RutDriver, TurRpcBindPlugin,
 };
 use serde_json::json;
 use tur_integration_tests::TurTestApp;
@@ -92,6 +90,16 @@ entry fn start(cx: opaque) {
         }));
         return "bound";
     }));
+    // the probe op's name is RESERVED — this bind must trap (the
+    // capability check dispatches it expecting the inert nil arm).
+    bind(cx, "test:probe-reserved", opaque(fn (args: str) -> ?str {
+        let _ = args;
+        bind(opaque(987654321), "__tur_rpc_probe", opaque(fn (a: str) -> ?str {
+            let _ = a;
+            return "hijacked";
+        }));
+        return "bound";
+    }));
     // the new contract's boot shape: no answer (the identity rode the
     // cx lane, not the return).
 }
@@ -123,8 +131,6 @@ const BOOT_CX: u64 = 7;
 
 /// The driver's command rail (all payloads `Send` — the app never is).
 enum Cmd {
-    CallStr(String, u64, std::sync::mpsc::SyncSender<Result<String, String>>),
-    Call(String, u64, std::sync::mpsc::SyncSender<Result<(), String>>),
     DispatchStr(
         String,
         u64,
@@ -139,26 +145,9 @@ enum Cmd {
         Vec<u8>,
         std::sync::mpsc::SyncSender<Result<DispatchAnswer, String>>,
     ),
-    Token(std::sync::mpsc::SyncSender<u64>),
 }
 
 impl RutDriver for TestDriver {
-    fn call_entry_str(&self, name: &str, cx: u64) -> Result<String, String> {
-        let (rtx, rrx) = std::sync::mpsc::sync_channel(1);
-        self.tx
-            .send(Cmd::CallStr(name.to_string(), cx, rtx))
-            .map_err(|_| "driver thread gone".to_string())?;
-        rrx.recv().map_err(|_| "driver dropped".to_string())?
-    }
-
-    fn call_entry(&self, name: &str, cx: u64) -> Result<(), String> {
-        let (rtx, rrx) = std::sync::mpsc::sync_channel(1);
-        self.tx
-            .send(Cmd::Call(name.to_string(), cx, rtx))
-            .map_err(|_| "driver thread gone".to_string())?;
-        rrx.recv().map_err(|_| "driver dropped".to_string())?
-    }
-
     fn call_dispatch_str(
         &self,
         name: &str,
@@ -198,12 +187,6 @@ impl RutDriver for TestDriver {
             .map_err(|_| "driver thread gone".to_string())?;
         rrx.recv().map_err(|_| "driver dropped".to_string())?
     }
-
-    fn start_token(&self) -> u64 {
-        let (rtx, rrx) = std::sync::mpsc::sync_channel(1);
-        self.tx.send(Cmd::Token(rtx)).ok();
-        rrx.recv().unwrap_or(0)
-    }
 }
 
 struct TestDriver {
@@ -211,20 +194,18 @@ struct TestDriver {
 }
 
 /// Boot the fixture through the phase-1 cx lane (stamped with the
-/// identity) and return the client over the shared bus.
+/// identity) and return the client.
 fn boot() -> RpcClient {
-    let bus = RpcBus::new();
     let (tx, rx) = std::sync::mpsc::channel::<Cmd>();
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
-    let bus_for_plugin = Some(bus.clone());
     std::thread::spawn(move || {
         let app = TurTestApp::new_with_extra_plugins(
             400.0,
             400.0,
             vec![
-                Box::new(TurRpcBusPlugin::new(bus_for_plugin)),
-                // The standalone bind rows + the fixed identity stamp (the
-                // host-test shape of the embedder's instance-data stamp).
+                // The standalone bind rows + the fixed identity stamp +
+                // the sealed-handler table (the host-test shape of the
+                // embedder's stamps).
                 Box::new(TurRpcBindPlugin::with_identity(BOOT_CX)),
             ],
         )
@@ -234,19 +215,6 @@ fn boot() -> RpcClient {
         ready_tx.send(()).expect("test still waiting");
         for cmd in rx {
             match cmd {
-                Cmd::CallStr(name, cx, rtx) => {
-                    let _ = rtx.send(
-                        app.call_rut_entry_cx_str(&name, cx)
-                            .map_err(|e| e.to_string()),
-                    );
-                }
-                Cmd::Call(name, cx, rtx) => {
-                    let _ = rtx.send(
-                        app.call_rut_entry_cx(&name, cx)
-                            .map(|_| ())
-                            .map_err(|e| e.to_string()),
-                    );
-                }
                 Cmd::DispatchStr(name, cx, op, args, rtx) => {
                     let _ = rtx.send(
                         app.call_rut_entry_cx_str_str(&name, cx, &op, &args)
@@ -261,18 +229,15 @@ fn boot() -> RpcClient {
                             .map_err(|e| e.to_string()),
                     );
                 }
-                Cmd::Token(rtx) => {
-                    let _ = rtx.send(app.rut_start_answer());
-                }
             }
         }
     });
     ready_rx.recv().expect("driver thread booted");
-    RpcClient::new(bus, Arc::new(TestDriver { tx }), BOOT_CX)
+    RpcClient::new(Arc::new(TestDriver { tx }), BOOT_CX)
 }
 
-/// The engine's nil-flattened answer map: `Ans::Nil` / `Ans::Str` /
-/// `Ans::Bytes` onto the dispatch answer.
+/// The engine's nil-flattened answer map: `Nil` / `Str` / `Bytes` onto the
+/// dispatch answer.
 fn dispatch_answer(a: tur_engine::RutEntryAnswer) -> DispatchAnswer {
     match a {
         tur_engine::RutEntryAnswer::Nil => DispatchAnswer::Nil,
@@ -394,54 +359,30 @@ fn a_forged_handle_never_binds() {
 }
 
 // ---------------------------------------------------------------------------
-// The bus lane still serves un-migrated shapes on the same client type.
+// The probe-op reservation (the phase-5 cleanup): the capability probe
+// dispatches `__tur_rpc_probe` expecting the inert nil arm — the table
+// must refuse to bind anything under it.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn an_old_style_module_falls_back_to_the_stash_bus() {
-    // A module with NEITHER dispatch entry: the probe detects the bus
-    // lane, and the stash contract serves the ops (echo.rs covers it
-    // end-to-end; here the detection verdict is the point).
-    let bus = RpcBus::new();
-    bus.register_op("echo", "op_echo");
-    struct BusOnlyDriver;
-    impl RutDriver for BusOnlyDriver {
-        fn call_entry_str(&self, name: &str, _cx: u64) -> Result<String, String> {
-            assert_eq!(name, "op_echo", "the bus lane resolves the export");
-            Ok("{\"ok\":true,\"result\":\"bus\"}".to_string())
+fn the_probe_op_name_is_reserved_at_bind_time() {
+    let client = boot();
+    let err = runtime()
+        .block_on(client.call_host("test:probe-reserved", json!({})))
+        .expect_err("binding under the probe op must trap");
+    match err {
+        RpcError::Handler(msg) => {
+            assert!(
+                msg.contains("reserved probe key"),
+                "the trap must name the reservation, got: {msg}"
+            );
         }
-        fn call_entry(&self, _name: &str, _cx: u64) -> Result<(), String> {
-            Ok(())
-        }
-        fn start_token(&self) -> u64 {
-            7 // an old-style boot answer
-        }
-        fn call_dispatch_str(
-            &self,
-            name: &str,
-            _cx: u64,
-            _op: &str,
-            _args: &str,
-        ) -> Result<DispatchAnswer, String> {
-            Err(format!(
-                "module eval: call_rut_entry: no export `{name}` (a control entry must exist)"
-            ))
-        }
-        fn call_dispatch_bytes(
-            &self,
-            name: &str,
-            _cx: u64,
-            _op: &str,
-            _args: &[u8],
-        ) -> Result<DispatchAnswer, String> {
-            Err(format!(
-                "module eval: call_rut_entry: no export `{name}` (a control entry must exist)"
-            ))
-        }
+        other => panic!("expected Handler, got {other:?}"),
     }
-    let client = RpcClient::new(bus, Arc::new(BusOnlyDriver), 0);
-    let reply = runtime()
-        .block_on(client.call_host("echo", json!({})))
-        .expect("the bus lane answered");
-    assert_eq!(reply, json!("bus"));
+    // And the capability probe still answers the inert nil arm (the
+    // reservation held — nothing is bound under the probe op).
+    let value = runtime()
+        .block_on(client.call_host("__tur_rpc_probe", json!({})))
+        .expect("the probe dispatch stays inert");
+    assert_eq!(value, serde_json::Value::Null);
 }

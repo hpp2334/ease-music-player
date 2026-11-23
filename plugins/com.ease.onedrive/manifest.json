@@ -1,7 +1,7 @@
 {
   "id": "com.ease.onedrive",
   "name": { "en-US": "OneDrive", "zh-CN": "OneDrive" },
-  "version": "0.3.0",
+  "version": "0.4.0",
   "apiVersion": 3,
   "description": {
     "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless rut plugin.",

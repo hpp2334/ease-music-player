@@ -3,7 +3,7 @@ name = "ease-tur-rpc"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Private tur plugin RPC bridge (host⇄rut): a per-instance bus table (op → rut export) dispatched over the engine's guarded by-name entry calls."
+description = "Private tur plugin RPC bridge (host⇄rut): the bind-table contract — sealed handler closures dispatched through the module's rpc/rpc_bin entry lanes."
 
 [dependencies]
 tur-engine = { git = "https://github.com/hpp2334/tur", rev = "3b349831ab22cb464c7e6a556479cd2c4f383521" }

@@ -1,8 +1,7 @@
 //! `time_host` bodies — the wall clock + the three-form HTTP date
 //! parser. The FORMATTERS are pure rut in the lib
-//! (`plugins/3rd/time/src/mod.rut`) — the old
-//! `tur_host::ease::time` rows keep the Rust formatters (D5, unchanged
-//! surface), shared from here. Identity-free.
+//! (`plugins/3rd/time/src/mod.rut`); the Rust forms live here, shared.
+//! Identity-free.
 
 pub(crate) fn pkg() -> rut_vm::interp::HostPkg {
     let mut pkg = rut_vm::interp::HostPkg::new("time_host");
@@ -18,7 +17,7 @@ pub(crate) fn pkg() -> rut_vm::interp::HostPkg {
     pkg
 }
 
-// ---- the shared bodies (the old ease rows call these too) ------------
+// ---- the shared bodies ----------------------------------------------
 
 /// `unix ms` now (wall clock).
 pub(crate) fn now_unix_ms() -> u64 {

@@ -20,7 +20,7 @@
 mod emp_grammar {
     use ease_client_android::plugin_runtime::EaseMusicPlugin;
     use ease_client_backend::ctx::BackendContext;
-    use ease_tur_rpc::TurRpcBusPlugin;
+    use ease_tur_rpc::TurRpcBindPlugin;
     use tur_engine::core::plugin::Plugin;
     use tur_integration_tests::TurTestApp;
 
@@ -29,7 +29,7 @@ mod emp_grammar {
     /// EaseMusicPlugin once phase 2 lands it).
     fn app_plugins() -> Vec<Box<dyn Plugin>> {
         vec![
-            Box::new(TurRpcBusPlugin::new(None)),
+            Box::new(TurRpcBindPlugin::new()),
             Box::new(EaseMusicPlugin::new(BackendContext::new())),
         ]
     }
@@ -113,7 +113,7 @@ entry fn probe_theme() -> str {
 
     #[test]
     fn class_grammar_and_start_cx_compile_and_boot() {
-        let mut app = TurTestApp::new_with_extra_plugins(400.0, 400.0, app_plugins())
+        let app = TurTestApp::new_with_extra_plugins(400.0, 400.0, app_plugins())
             .expect("harness app");
         // The phase-1 lane: boot with the embedder-supplied start cx (42).
         app.load_rut_module_cx(GRAMMAR_RUT, 42)

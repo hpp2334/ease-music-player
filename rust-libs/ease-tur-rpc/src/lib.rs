@@ -5,10 +5,10 @@
 //! the `RpcClient` surface (`call_host` / `call_host_bytes` / `emit_event`)
 //! the backend services already use. There is no injected script module and
 //! no JS anywhere: the contract with a plugin backend is a **rut entry-fn
-//! convention**, served in one of two shapes — the phase-3 redesign is
-//! capability-driven and both stay live until the old one is retired:
+//! convention** — the bind table (phase 5 made it the ONLY contract; the
+//! old stash-bus lane is deleted).
 //!
-//! # The bind-table contract (new — `emp`'s `Rpc` class)
+//! # The bind-table contract (`emp`'s `Rpc` class)
 //!
 //! A backend serves ALL ops through **one** dispatch entry per lane,
 //! declared once in the app module:
@@ -45,28 +45,17 @@
 //! delivers the embedder-supplied handle, so dispatch needs no module
 //! state to find the identity.
 //!
-//! # The stash-bus contract (old — un-migrated plugins)
+//! # Lane capability
 //!
-//! Each plugin backend instance carries a per-instance [`RpcBus`] (stamped
-//! as instance data by the embedder at `createInstance`):
-//!
-//! - `ops: op → rut export name` — the backend registers each contract op
-//!   as its own `entry fn` (`ease.rpc.register("storage:list", "op_…")`).
-//! - `events: type → [export names]` — `ease.rpc.subscribe_event`.
-//! - `inbox: single pending request` — the host stashes
-//!   `{"op":…,"args":…}` before firing the entry; the rut side pulls it
-//!   with `ease.rpc.take_request()` and answers the reply envelope.
-//!
-//! # Dual-mode dispatch
-//!
-//! [`RpcClient`] picks the lane per instance with a **lazy capability
-//! probe** (the detection point is recorded on the client): on first use
-//! it fires an inert probe op at the `rpc` / `rpc_bin` entries — a reply
-//! (typically the nil "not bound" arm) proves the export, the engine's
-//! `no export` refusal proves its absence. Entries present ⇒ the
-//! bind-table lane; both absent ⇒ the stash bus. Phase 5 deletes the bus
-//! lane; the split lives entirely inside [`RpcClient::call_host`] /
-//! [`RpcClient::call_host_bytes`] / [`RpcClient::emit_event`].
+//! [`RpcClient`] probes the two dispatch entries ONCE (eagerly, at
+//! `extract_rpc` — the detection point is recorded on the client): an
+//! inert probe op fires at each entry — a reply (typically the nil
+//! "not bound" arm) proves the export, the engine's `no export` refusal
+//! proves its absence. [`RpcClient::has_dispatch_entries`] is the boot
+//! gate: a backend that exports neither entry has no bind table (the
+//! module failed to boot / is not a backend) and extracts no client. The
+//! probe op's name is RESERVED at bind time — a handler bound under it
+//! would make the capability fire run plugin code.
 //!
 //! # Streaming (chunked pull)
 //!
@@ -76,31 +65,29 @@
 //! `storage:get-chunk` (`{sid, offset, len}` → `{data: <base64>, eof}`),
 //! `storage:release` (`{sid}`). Pull = natural backpressure; str ops keep
 //! the base64 crossing (the binary lane exists for the ops that want raw
-//! bytes, e.g. `lyric:parse` after migration).
+//! bytes, e.g. `lyric:parse`).
 //!
 //! # Threading
 //!
 //! [`RpcClient`] is `Clone` + `Send`; every call serializes through a
-//! shared gate (the old lane's inbox is single-slot; the entry rail is one
-//! VM call at a time) and crosses onto the instance's tur-host thread via
-//! the [`RutDriver`] impl (a blocking round-trip, the same pattern tur's
-//! own `loadModule` uses). Never call back into the *same* instance from
-//! inside a dispatch (single-slot inbox + face re-entrancy). The sealed
-//! closures in [`RpcHandlers`] are `!Send` on purpose — they are VM-heap
-//! cells and never leave the instance's thread.
+//! shared gate (the entry rail is one VM call at a time) and crosses onto
+//! the instance's tur-host thread via the [`RutDriver`] impl (a blocking
+//! round-trip, the same pattern tur's own `loadModule` uses). Never call
+//! back into the *same* instance from inside a dispatch (entry
+//! re-entrancy). The sealed closures in [`RpcHandlers`] are `!Send` on
+//! purpose — they are VM-heap cells and never leave the instance's thread.
 //!
 //! # Testability
 //!
 //! [`RutDriver`] abstracts the engine hop, so host tests drive a real rut
 //! module through the plugins + `TurTestApp` without Android.
 //! [`TurRpcBindPlugin`] mounts the bind-table rows standalone (the same
-//! bodies `emp_host` installs) for fixtures that exercise the new lane
+//! bodies `emp_host` installs) for fixtures that exercise the lane
 //! without the full SDK surface.
 
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
@@ -119,10 +106,10 @@ pub const BIN_KEY_PREFIX: &str = "bin:";
 /// Key prefix for event handlers (`event:<type>`) — composed host-side by
 /// [`RpcClient::emit_event`], rut-side by `Rpc.subscribe`.
 pub const EVENT_KEY_PREFIX: &str = "event:";
-/// The capability probe's op — inert by construction: the bind table has
-/// no handler bound under it (contract ops are `domain:verb` literals or
-/// `bin:` / `event:` prefixed keys), so a probe dispatch answers the nil
-/// "not bound" arm without running any handler. Reserved namespace.
+/// The capability probe's op — inert by construction: the bind table
+/// refuses to bind anything under it (the reservation in
+/// [`install_rows`]), so a probe dispatch answers the nil "not bound" arm
+/// without running any handler. Reserved namespace.
 const PROBE_OP: &str = "__tur_rpc_probe";
 /// The engine's missing-export refusal (`RutRuntime::export_ret`'s error,
 /// verbatim) — the capability probe's discriminator.
@@ -130,6 +117,12 @@ const NO_EXPORT_MARKER: &str = "no export";
 /// The engine's trap decode appends `{entry}: {kind}` before the trap
 /// message after this separator — [`trap_message`] splits it back off.
 const TRAP_SEPARATOR: &str = " \u{2014} "; // " — "
+
+/// Whether a bind key collides with the capability probe (the bare probe
+/// op on either lane — the bin lane composes the [`BIN_KEY_PREFIX`] form).
+fn is_probe_key(key: &str) -> bool {
+    key == PROBE_OP || key == format!("{BIN_KEY_PREFIX}{PROBE_OP}")
+}
 
 /// Split the plugin's trap message out of the engine's eval decode
 /// (`module eval: rpc: Panic — UNAUTHORIZED: expired`). Everything after
@@ -144,9 +137,9 @@ fn trap_message(err: &str) -> &str {
     }
 }
 
-/// Map a new-lane dispatch failure onto the client error: a rut trap is
-/// the plugin's own failure ([`RpcError::Handler`] — the envelope error
-/// arm), anything else is transport.
+/// Map a dispatch failure onto the client error: a rut trap is the
+/// plugin's own failure ([`RpcError::Handler`] — the envelope error arm),
+/// anything else is transport.
 fn rpc_error_of_transport(err: String) -> RpcError {
     if err.contains(TRAP_SEPARATOR) {
         RpcError::Handler(trap_message(&err).trim().to_string())
@@ -200,7 +193,7 @@ impl RpcHandlers {
 }
 
 /// The plugin-state wrapper the rows resolve the table through (stamped by
-/// [`TurRpcBusPlugin::register`] — the rows pair with the bus plugin).
+/// [`TurRpcBindPlugin::register`] — the rows pair with the bind plugin).
 #[derive(Clone)]
 pub struct RpcHandlersCell(pub std::rc::Rc<std::cell::RefCell<RpcHandlers>>);
 
@@ -212,7 +205,7 @@ fn handlers_of(
         .inst
         .plugin_state::<RpcHandlersCell>()
         .map(|c| c.0.clone())
-        .expect("rpc bind rows: no RpcHandlersCell in plugin state (the bus plugin is not installed)")
+        .expect("rpc bind rows: no RpcHandlersCell in plugin state (the bind plugin is not installed)")
 }
 
 /// The bind-table rows' leading-handle decode: the engine-sealed boot box
@@ -292,8 +285,19 @@ pub fn install_rows(
     handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
 ) {
     // bind(key, f) — the sealed closure enters the per-instance table.
+    // The probe op's name is RESERVED (phase-5 cleanup): the capability
+    // probe dispatches it expecting the inert nil arm — a handler bound
+    // under it would run plugin code on every capability check. The key
+    // check runs before the identity decode (a key-space law, not an
+    // identity one).
     let h = handles.clone();
     rut_vm::pkg_fn!(pkg, "rpc::bind", (rut_vm::OpaqueRef, &str, rut_vm::OpaqueRef) -> (), move |vm: &mut rut_vm::interp::Vm, hdl: rut_vm::OpaqueRef, key: &str, f: rut_vm::OpaqueRef| {
+        if is_probe_key(key) {
+            return Err(rut_vm::Trap::new(
+                rut_vm::TrapKind::Invalid,
+                format!("emp:rpc: `{key}` is a reserved probe key — bind your ops under their own names"),
+            ));
+        }
         decode_rpc_handle(vm, &hdl, &h)?;
         handlers_of(&h).borrow_mut().bind(key, f);
         Ok(())
@@ -329,13 +333,15 @@ pub fn bind_rows_ext(cx: &mut tur_engine::core::rut_runtime::RutPkgCx<'_>) {
     cx.boot_pkgs.push(pkg);
 }
 
-/// Host-test plugin: installs the [`bind_rows_ext`] mount (`rpc_host`).
-/// Pair with [`TurRpcBusPlugin`] (it stamps the
-/// [`RpcHandlersCell`] the bodies resolve).
+/// Host-test plugin: installs the [`bind_rows_ext`] mount (`rpc_host`) and
+/// stamps the [`RpcHandlersCell`] every bind-row body resolves — the same
+/// stamps production installs through `emp_host` (the `EaseMusicPlugin`
+/// set). `with_identity` additionally stamps a fixed [`RpcIdentity`] (the
+/// host-test shape of the embedder's instance-data stamp; production
+/// stamps it per instance from the minted handle).
 pub struct TurRpcBindPlugin {
-    /// The fixed identity stamped into every instance's plugin state (the
-    /// host-test lane — production stamps instance data from the minted
-    /// handle at spawn).
+    /// The fixed identity stamped into every instance's plugin state
+    /// (`None` = production shape — the embedder stamps instance data).
     identity: Option<u64>,
 }
 
@@ -345,8 +351,7 @@ impl TurRpcBindPlugin {
     }
 
     /// Stamp a fixed boot identity ([`RpcIdentity`]) for the rows to
-    /// decode against — the host-test shape of the embedder's
-    /// instance-data stamp.
+    /// decode against.
     pub fn with_identity(id: u64) -> Self {
         Self { identity: Some(id) }
     }
@@ -366,138 +371,28 @@ impl tur_engine::core::plugin::Plugin for TurRpcBindPlugin {
         if let Some(id) = self.identity {
             ctx.define_plugin_state(std::rc::Rc::new(RpcIdentity(id)));
         }
+        ctx.define_plugin_state(std::rc::Rc::new(RpcHandlersCell(std::rc::Rc::new(
+            std::cell::RefCell::new(RpcHandlers::default()),
+        ))));
         ctx.push_rut_ext(std::rc::Rc::new(bind_rows_ext));
         Ok(())
     }
 }
 
-// ---------------------------------------------------------------------------
-// The stash-bus state (the old contract — live until phase 5).
-// ---------------------------------------------------------------------------
-
-/// Per-instance bus state: the op/event tables + the request inbox.
-///
-/// Shared three ways: the rut rows (`ease.rpc.*`) reach it through the
-/// instance's plugin state / instance data ([`RpcBusCell`]), the embedder
-/// stamps it at `createInstance`, and the [`RpcClient`] holds the same
-/// `Arc`.
-pub struct RpcBus {
-    ops: Mutex<HashMap<String, String>>,
-    events: Mutex<HashMap<String, Vec<String>>>,
-    inbox: Mutex<Option<String>>,
-    /// Set once the first `register_op` lands — diagnostics for "the backend
-    /// loaded but registered nothing".
-    registered: AtomicBool,
-}
-
-impl RpcBus {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            ops: Mutex::new(HashMap::new()),
-            events: Mutex::new(HashMap::new()),
-            inbox: Mutex::new(None),
-            registered: AtomicBool::new(false),
-        })
-    }
-
-    /// `ease.rpc.register(op, export)` — bind a contract op to the entry fn
-    /// that serves it. Re-registering an op replaces the binding.
-    pub fn register_op(&self, op: &str, export: &str) {
-        self.registered.store(true, Ordering::Relaxed);
-        self.ops
-            .lock()
-            .expect("rpc bus ops poisoned")
-            .insert(op.to_string(), export.to_string());
-    }
-
-    /// `ease.rpc.subscribe_event(type, export)` — append the export to the
-    /// event's fan-out list (idempotent per export).
-    pub fn subscribe_event(&self, event_type: &str, export: &str) {
-        let mut events = self.events.lock().expect("rpc bus events poisoned");
-        let list = events.entry(event_type.to_string()).or_default();
-        if !list.iter().any(|e| e == export) {
-            list.push(export.to_string());
-        }
-    }
-
-    /// `ease.rpc.take_request()` — drain the inbox ("" when empty).
-    pub fn take_request(&self) -> String {
-        self.inbox
-            .lock()
-            .expect("rpc bus inbox poisoned")
-            .take()
-            .unwrap_or_default()
-    }
-
-    /// Look up the export serving `op`.
-    pub fn export_for_op(&self, op: &str) -> Option<String> {
-        self.ops
-            .lock()
-            .expect("rpc bus ops poisoned")
-            .get(op)
-            .cloned()
-    }
-
-    /// The exports subscribed to `event_type`.
-    pub fn exports_for_event(&self, event_type: &str) -> Vec<String> {
-        self.events
-            .lock()
-            .expect("rpc bus events poisoned")
-            .get(event_type)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn stash(&self, json: String) {
-        *self.inbox.lock().expect("rpc bus inbox poisoned") = Some(json);
-    }
-
-    /// Test/driver seam: enqueue a request payload directly (the same slot
-    /// `call_host` fills). The next `take_request()` in the plugin drains
-    /// it.
-    pub fn stash_request(&self, json: String) {
-        self.stash(json);
-    }
-
-    /// Whether any op was ever registered (diagnostics).
-    pub fn has_registrations(&self) -> bool {
-        self.registered.load(Ordering::Relaxed)
-    }
-}
-
-impl Default for RpcBus {
-    fn default() -> Self {
-        Self {
-            ops: Mutex::new(HashMap::new()),
-            events: Mutex::new(HashMap::new()),
-            inbox: Mutex::new(None),
-            registered: AtomicBool::new(false),
-        }
-    }
-}
-
-/// The plugin-state / instance-data wrapper the rows resolve the bus through.
-///
-/// A distinct newtype (instead of bare `Arc<RpcBus>`) so the instance-data
-/// slot never collides with an embedder's own `Arc<_>` types.
-#[derive(Clone)]
-pub struct RpcBusCell(pub Arc<RpcBus>);
-
 #[derive(Error, Debug)]
 pub enum RpcError {
-    /// The backend cannot serve this op — never bound on the bus (old
-    /// lane) or no binary entry exported (new lane). Carries the op name.
+    /// The backend cannot serve this op — the binary lane's entry is not
+    /// exported (a str-only backend asked for bytes).
     #[error("unknown rpc op `{0}` (not registered by the plugin backend)")]
     UnknownOp(String),
-    /// The handler failed — the plugin's own failure. New lane: the trap
-    /// message (keep the `UNAUTHORIZED` / `TIMEOUT` prefix law); old lane:
-    /// the answered error envelope's message.
+    /// The handler failed — the plugin's own failure: the trap message
+    /// (keep the `UNAUTHORIZED` / `TIMEOUT` prefix law).
     #[error("{0}")]
     Handler(String),
     /// The engine hop failed (stale instance, module gone, trap).
     #[error("rpc transport: {0}")]
     Transport(String),
-    /// The reply was not a valid payload / envelope.
+    /// The reply was not a valid payload.
     #[error("rpc reply decode: {0}")]
     Decode(String),
 }
@@ -507,7 +402,7 @@ pub enum RpcError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DispatchAnswer {
     /// The nil answer — "not mine" (the lyric dispatch's fall-through) /
-    /// the unsubscribed arm.
+    /// the unsubscribed arm / nothing bound under the op.
     Nil,
     Str(String),
     Bytes(Vec<u8>),
@@ -517,15 +412,6 @@ pub enum DispatchAnswer {
 /// the Android runtime. All methods are blocking; impls cross onto the
 /// instance's tur-host thread (see the crate docs).
 pub trait RutDriver: Send + Sync {
-    /// Call `entry fn(opaque) -> str` and return the answered string.
-    fn call_entry_str(&self, name: &str, cx: u64) -> Result<String, String>;
-    /// Call `entry fn(opaque)` (answer ignored — event dispatch).
-    fn call_entry(&self, name: &str, cx: u64) -> Result<(), String>;
-    /// The `entry fn start() -> opaque` answer token; 0 until the module
-    /// boots (callers treat 0 as "not loaded"). The OLD lane's context
-    /// token — the bind-table lane addresses the boot identity the client
-    /// already holds ([`RpcClient::new`]'s `start_cx`).
-    fn start_token(&self) -> u64;
     /// The str dispatch lane: `entry fn(opaque, str, str)` — the by-name
     /// entry (the module's `rpc` export), `(op, args)` riding the call,
     /// the answer decoded nil-flattened.
@@ -546,12 +432,10 @@ pub trait RutDriver: Send + Sync {
     ) -> Result<DispatchAnswer, String>;
 }
 
-/// The per-instance lane verdict (recorded once — the detection point).
+/// The per-instance lane capability (recorded once — the detection
+/// point): which of the two dispatch entries the module exports.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Lane {
-    /// Neither dispatch entry exported — the stash-bus contract.
-    Bus,
-    /// The bind-table contract; the entries the module exports.
     Entries { str: bool, bin: bool },
 }
 
@@ -562,41 +446,31 @@ impl Lane {
     fn has_bin(&self) -> bool {
         matches!(self, Lane::Entries { bin: true, .. })
     }
-    /// Whether ANY dispatch entry exported (the extract gate: a new-style
-    /// backend never answers a start token — the entries ARE the boot
-    /// proof).
     fn is_entries(&self) -> bool {
         matches!(self, Lane::Entries { .. })
     }
 }
 
-/// The client half. `Clone` shares the bus, driver, call gate, boot
-/// identity and the recorded lane.
+/// The client half. `Clone` shares the driver, call gate, boot identity
+/// and the recorded lane capability.
 pub struct RpcClient {
-    bus: Arc<RpcBus>,
     driver: Arc<dyn RutDriver>,
     /// Serializes call_host/call_host_bytes/emit_event per instance — the
-    /// old lane's inbox is single-slot and the entry rail is one VM call
-    /// at a time.
+    /// entry rail is one VM call at a time.
     gate: Arc<tokio::sync::Mutex<()>>,
-    /// The OLD lane's context token (the start answer), resolved once.
-    token: std::sync::OnceLock<u64>,
-    /// The NEW lane's context: the embedder-supplied boot identity (the
-    /// minted plugin handle id — the host already holds it). 0 = unknown
-    /// (the old-lane fixtures) — the bind-table lane can't be addressed
-    /// and the probe falls straight to [`Lane::Bus`].
+    /// The boot identity: the embedder-supplied minted plugin handle id.
+    /// 0 = unknown — the bind-table lane can't be addressed and the probe
+    /// records no entries (the boot gate then refuses the client).
     start_cx: u64,
-    /// The capability verdict (the lazy probe records it once).
+    /// The capability verdict (the probe records it once).
     lane: std::sync::OnceLock<Lane>,
 }
 
 impl Clone for RpcClient {
     fn clone(&self) -> Self {
         Self {
-            bus: self.bus.clone(),
             driver: self.driver.clone(),
             gate: self.gate.clone(),
-            token: self.token.clone(),
             start_cx: self.start_cx,
             lane: self.lane.clone(),
         }
@@ -604,41 +478,27 @@ impl Clone for RpcClient {
 }
 
 impl RpcClient {
-    /// Pair a bus with a driver. `start_cx` is the embedder-supplied boot
-    /// identity (the minted plugin handle id — phase 5's identity rail);
-    /// old-lane-only fixtures pass 0.
-    pub fn new(bus: Arc<RpcBus>, driver: Arc<dyn RutDriver>, start_cx: u64) -> Self {
+    /// Pair a driver with the boot identity — the embedder-supplied minted
+    /// plugin handle id (the same value the instance's `RpcIdentity` stamp
+    /// carries; the bind rows decode it, the dispatch entries address it).
+    pub fn new(driver: Arc<dyn RutDriver>, start_cx: u64) -> Self {
         Self {
-            bus,
             driver,
             gate: Arc::new(tokio::sync::Mutex::new(())),
-            token: std::sync::OnceLock::new(),
             start_cx,
             lane: std::sync::OnceLock::new(),
         }
     }
 
-    /// The OLD lane's context token, resolved once (0 = the module never
-    /// answered an opaque start — the bus dispatch then fails with
-    /// [`RpcError::Transport`]).
-    fn token(&self) -> Result<u64, RpcError> {
-        match self.token.get() {
-            Some(t) => Ok(*t),
-            None => {
-                let t = self.driver.start_token();
-                let _ = self.token.set(t);
-                Ok(*self.token.get().unwrap_or(&0))
-            }
-        }
-    }
-
     /// The capability probe: fire the inert [`PROBE_OP`] at one dispatch
-    /// entry. A reply proves the export (the bind table has no handler
-    /// under the probe op, so nothing runs); the engine's `no export`
-    /// refusal proves its absence; any other failure (worker gone, module
-    /// not booted) conservatively reads as absent — the old lane surfaces
-    /// the familiar errors. No identity to address with ([`RpcClient::new`]'s
-    /// `start_cx == 0`) is an immediate absent.
+    /// entry. A reply proves the export (the bind table refuses the probe
+    /// key, so nothing runs); the engine's `no export` refusal proves its
+    /// absence; exists-but-trapped ALSO proves the export (the probe op
+    /// binds nothing, so a trap means the entry's own body is broken —
+    /// the real dispatch will surface it). Any other failure (worker
+    /// gone, module not booted) conservatively reads as absent. No
+    /// identity to address with ([`RpcClient::new`]'s `start_cx == 0`) is
+    /// an immediate absent.
     fn probe_entry(&self, name: &str, bin: bool) -> bool {
         if self.start_cx == 0 {
             return false;
@@ -656,45 +516,38 @@ impl RpcClient {
             Ok(_) => true,
             // The engine's `no export` refusal: definitively absent.
             Err(e) if e.contains(NO_EXPORT_MARKER) => false,
-            // Exists-but-trapped ALSO proves the export (the probe op
-            // binds nothing, so a trap means the entry's own body is
-            // broken — the real dispatch will surface it).
+            // Exists-but-trapped ALSO proves the export.
             Err(e) if e.contains(TRAP_SEPARATOR) => true,
             // Anything else is transport (worker gone, module not booted)
-            // — conservatively absent: the old lane surfaces the
-            // familiar errors.
+            // — conservatively absent.
             Err(_) => false,
         }
     }
 
-    /// The lane verdict, resolved once (the detection point). Eagerly
+    /// The lane capability, resolved once (the detection point). Eagerly
     /// callable — `extract_rpc` probes up front so the dispatch paths
     /// never pay the probe cost.
     fn detect(&self) -> Lane {
         *self.lane.get_or_init(|| {
             let str_entry = self.probe_entry(DISPATCH_ENTRY, false);
             let bin_entry = self.probe_entry(DISPATCH_ENTRY_BIN, true);
-            if !str_entry && !bin_entry {
-                Lane::Bus
-            } else {
-                Lane::Entries {
-                    str: str_entry,
-                    bin: bin_entry,
-                }
+            Lane::Entries {
+                str: str_entry,
+                bin: bin_entry,
             }
         })
     }
 
-    /// The recorded lane's shape (probing on first call) — `extract_rpc`'s
-    /// boot gate: a new-style backend answers no start token, the
-    /// dispatch entries ARE its boot proof.
+    /// The recorded capability (probing on first call) — `extract_rpc`'s
+    /// boot gate: a backend must export at least one dispatch entry (the
+    /// bind table IS the boot proof; the module answered no start token).
     pub fn has_dispatch_entries(&self) -> bool {
         self.detect().is_entries()
     }
 
-    /// The new lane's str dispatch: one by-name entry call with `(op,
-    /// args)`; the host builds the envelope from the value/trap (nil ⇒
-    /// the null result — "not mine"; trap ⇒ the error arm).
+    /// The str dispatch: one by-name entry call with `(op, args)`; the
+    /// host builds the envelope from the value/trap (nil ⇒ the null
+    /// result — "not mine"; trap ⇒ the error arm).
     fn dispatch_str(&self, op: &str, args: &str) -> Result<Value, RpcError> {
         match self
             .driver
@@ -714,44 +567,26 @@ impl RpcClient {
         }
     }
 
-    /// Resolve `op → export`, stash the payload, fire the entry, decode
-    /// the envelope (old lane). `args` rides verbatim as the payload's
-    /// `args` field.
-    fn call_host_bus(&self, op: &str, args: &Value) -> Result<Value, RpcError> {
-        let export = self
-            .bus
-            .export_for_op(op)
-            .ok_or_else(|| RpcError::UnknownOp(op.to_string()))?;
-        let token = self.token()?;
-        if token == 0 {
-            return Err(RpcError::Transport(
-                "the plugin module has not booted (no context token)".into(),
-            ));
-        }
-        self.bus.stash(serde_json::json!({ "op": op, "args": args }).to_string());
-        let reply = self
-            .driver
-            .call_entry_str(&export, token)
-            .map_err(RpcError::Transport)?;
-        decode_envelope(&reply)
-    }
-
-    /// Serve a str op — raw JSON args in, the result payload out (`Value::Null`
-    /// = the plugin answered "not mine"). Both lanes: the bind-table
-    /// dispatch when the module exports the `rpc` entry, the stash bus
-    /// otherwise (un-migrated plugins — dual-mode until phase 5).
+    /// Serve a str op — raw JSON args in, the result payload out
+    /// (`Value::Null` = the plugin answered "not mine"). A nil answer
+    /// with no binding behind it is worth a warn (the phase-5 cleanup):
+    /// contract ops answer real payloads, so nil usually means the op
+    /// was never bound (or a view called a name the backend doesn't
+    /// serve) — the legible "not mine" fall-throughs ride the bytes lane
+    /// ([`RpcClient::call_host_bytes`]) and stay silent.
     pub async fn call_host(&self, op: &str, args: Value) -> Result<Value, RpcError> {
         let _guard = self.gate.lock().await;
-        if self.detect().has_str() {
-            return self.dispatch_str(op, &args.to_string());
+        let value = self.dispatch_str(op, &args.to_string())?;
+        if value.is_null() {
+            tracing::warn!("rpc dispatch `{op}` answered nil (nothing bound under the op / not-mine)");
         }
-        self.call_host_bus(op, &args)
+        Ok(value)
     }
 
     /// Serve a bytes op over the binary lane — raw bytes in, raw bytes
     /// out (no base64). `Ok(None)` = the plugin answered "not mine"
-    /// (nil); a module without the `rpc_bin` export is an
-    /// [`RpcError::UnknownOp`].
+    /// (nil; the lyric dispatch's fall-through — silent by design); a
+    /// module without the `rpc_bin` export is an [`RpcError::UnknownOp`].
     pub async fn call_host_bytes(&self, op: &str, args: Vec<u8>) -> Result<Option<Vec<u8>>, RpcError> {
         let _guard = self.gate.lock().await;
         if !self.detect().has_bin() {
@@ -770,77 +605,24 @@ impl RpcClient {
         }
     }
 
-    /// Fire-and-forget event fan-out. Payload errors are logged, never
-    /// surfaced (the old event semantics). New lane: ONE dispatch with the
-    /// `event:<type>` key (the bind table's subscriber answers, if any,
-    /// are ignored); old lane: the per-export stash fan-out.
+    /// Fire-and-forget event fan-out: ONE dispatch with the `event:<type>`
+    /// key (the bind table's subscriber answers, if any, are ignored).
+    /// Payload errors are logged, never surfaced.
     pub async fn emit_event(&self, event_type: &str, payload: Value) {
         let _guard = self.gate.lock().await;
-        if self.detect().has_str() {
-            let key = format!("{EVENT_KEY_PREFIX}{event_type}");
-            if let Err(e) = self.driver.call_dispatch_str(
-                DISPATCH_ENTRY,
-                self.start_cx,
-                &key,
-                &payload.to_string(),
-            ) {
-                tracing::warn!(event = event_type, "plugin event dispatch failed: {e}");
-            }
+        if !self.detect().has_str() {
+            tracing::warn!(event = event_type, "plugin backend exports no `{DISPATCH_ENTRY}` entry — event dropped");
             return;
         }
-        let exports = self.bus.exports_for_event(event_type);
-        if exports.is_empty() {
-            return;
+        let key = format!("{EVENT_KEY_PREFIX}{event_type}");
+        if let Err(e) = self.driver.call_dispatch_str(
+            DISPATCH_ENTRY,
+            self.start_cx,
+            &key,
+            &payload.to_string(),
+        ) {
+            tracing::warn!(event = event_type, "plugin event dispatch failed: {e}");
         }
-        let Ok(token) = self.token() else {
-            return;
-        };
-        if token == 0 {
-            return;
-        }
-        for export in exports {
-            self.bus.stash(
-                serde_json::json!({ "type": event_type, "payload": payload })
-                    .to_string(),
-            );
-            if let Err(e) = self.driver.call_entry(&export, token) {
-                tracing::warn!(event = event_type, export, "plugin event dispatch failed: {e}");
-            }
-        }
-    }
-
-    /// The bus this client drives (diagnostics / tests).
-    pub fn bus(&self) -> &Arc<RpcBus> {
-        &self.bus
-    }
-
-    /// Eagerly resolve the OLD lane's context token (0 = the module has
-    /// not booted / answers no opaque start — the new contract's shape).
-    pub fn bus_token(&self) -> u64 {
-        self.token().unwrap_or(0)
-    }
-}
-
-/// Decode `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`.
-fn decode_envelope(reply: &str) -> Result<Value, RpcError> {
-    let v: Value = serde_json::from_str(reply)
-        .map_err(|e| RpcError::Decode(format!("reply is not JSON: {e} — `{reply}`")))?;
-    match v.get("ok") {
-        Some(Value::Bool(true)) => Ok(v
-            .get("result")
-            .cloned()
-            .ok_or_else(|| RpcError::Decode("ok envelope missing `result`".into()))?),
-        Some(Value::Bool(false)) => {
-            let msg = v
-                .get("error")
-                .and_then(|e| e.as_str())
-                .unwrap_or("unspecified plugin error");
-            Err(RpcError::Handler(msg.to_string()))
-        }
-        _ => Err(RpcError::Decode(format!(
-            "reply envelope missing `ok` — `{}`",
-            truncate(reply)
-        ))),
     }
 }
 
@@ -861,136 +643,19 @@ pub fn err_envelope(message: &str) -> Value {
     serde_json::json!({ "ok": false, "error": message })
 }
 
-// ---------------------------------------------------------------------------
-// The `ease.rpc` host rows (the bus plugin — the OLD contract's rows).
-// ---------------------------------------------------------------------------
-
-/// Registers the `ease.rpc` rows the rut side needs to serve the bus:
-///
-/// - `register(op: str, export: str)` — bind a contract op.
-/// - `subscribe_event(type: str, export: str)` — join an event fan-out.
-/// - `take_request() -> str` — drain the pending call/event payload ("" = none).
-///
-/// and stamps the per-instance [`RpcHandlersCell`] the bind-table rows
-/// resolve (the two contracts share this plugin: the bus rows retire in
-/// phase 5, the sealed-handler cell stays).
-///
-/// The bus comes from the per-instance data slot (`RpcBusCell`, stamped by
-/// the embedder); when absent (host tests), `register` mints a private one
-/// into plugin state so the harness flows work unchanged.
-pub struct TurRpcBusPlugin {
-    /// The shared bus for engine-stamped instances (`None` = mint fresh per
-    /// instance — the host-test path).
-    bus: Option<Arc<RpcBus>>,
-}
-
-impl TurRpcBusPlugin {
-    pub fn new(bus: Option<Arc<RpcBus>>) -> Self {
-        Self { bus }
-    }
-}
-
-impl tur_engine::core::plugin::Plugin for TurRpcBusPlugin {
-    fn register(&self, ctx: &mut tur_engine::core::plugin::PluginRegisterContext) -> Result<(), tur_engine::error::TurError> {
-        let cell = match &self.bus {
-            Some(b) => RpcBusCell(b.clone()),
-            None => RpcBusCell(RpcBus::new()),
-        };
-        // Per-instance plugin state: `register` re-runs per instance, so the
-        // minted cells are instance-fresh on the test path.
-        ctx.define_plugin_state(std::rc::Rc::new(cell));
-        ctx.define_plugin_state(std::rc::Rc::new(RpcHandlersCell(std::rc::Rc::new(
-            std::cell::RefCell::new(RpcHandlers::default()),
-        ))));
-        ctx.push_rut_ext(std::rc::Rc::new(install_rpc_rows));
-        Ok(())
-    }
-}
-
-fn install_rpc_rows(cx: &mut tur_engine::core::rut_runtime::RutPkgCx<'_>) {
-    use rut_core::types::{TY_NIL, TY_STR};
-
-
-    cx.decl.extend(
-        vec![
-            ("register", vec![TY_STR, TY_STR], TY_NIL, false),
-            ("subscribe_event", vec![TY_STR, TY_STR], TY_NIL, false),
-            ("take_request", vec![], TY_STR, false),
-        ]
-        .into_iter()
-        .map(|(n, p, r, a)| {
-            tur_engine::core::rut_runtime::host_row_at("ease/rpc", n, p, r, a)
-        }),
-    );
-
-    let Some(handles) = cx.handles else {
-        return; // compile-time decl probe
-    };
-    let pkg = &mut *cx.pkg;
-
-    // register(op, export) — bind op → entry fn name.
-    let h = handles.clone();
-    rut_vm::pkg_fn!(pkg, "ease::rpc::register", (&str, &str) -> (), move |_vm: &mut rut_vm::interp::Vm, op: &str, export: &str| {
-        bus_of(&h).register_op(op, export);
-        Ok(())
-    });
-
-    // subscribe_event(type, export).
-    let h = handles.clone();
-    rut_vm::pkg_fn!(pkg, "ease::rpc::subscribe_event", (&str, &str) -> (), move |_vm: &mut rut_vm::interp::Vm, ty: &str, export: &str| {
-        bus_of(&h).subscribe_event(ty, export);
-        Ok(())
-    });
-
-    // take_request() -> str — the pending call/event payload ("" = none).
-    let h = handles.clone();
-    rut_vm::pkg_fn!(pkg, "ease::rpc::take_request", () -> String, move |_vm: &mut rut_vm::interp::Vm| {
-        Ok(bus_of(&h).take_request())
-    });
-}
-
-/// Resolve the bus: instance data first (the embedder-stamped slot), then
-/// the plugin state (the host-test path minted at register).
-fn bus_of(handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>) -> Arc<RpcBus> {
-    handles
-        .inst
-        .data::<RpcBusCell>()
-        .map(|c| c.0)
-        .or_else(|| {
-            handles
-                .inst
-                .plugin_state::<RpcBusCell>()
-                .map(|c| c.0.clone())
-        })
-        .expect("rpc bus: no RpcBusCell in instance data or plugin state")
-}
-
 #[cfg(test)]
-mod envelope_tests {
+mod tests {
     use super::*;
 
     #[test]
-    fn envelope_roundtrip() {
+    fn envelope_builders_shape_the_pass_through() {
         let ok = ok_envelope(serde_json::json!({ "a": 1 }));
-        assert_eq!(decode_envelope(&ok.to_string()).unwrap(), serde_json::json!({ "a": 1 }));
+        assert_eq!(ok["ok"], serde_json::json!(true));
+        assert_eq!(ok["result"], serde_json::json!({ "a": 1 }));
 
         let err = err_envelope("boom");
-        match decode_envelope(&err.to_string()) {
-            Err(RpcError::Handler(m)) => assert_eq!(m, "boom"),
-            other => panic!("expected Handler, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn envelope_garbage() {
-        assert!(matches!(
-            decode_envelope("not json"),
-            Err(RpcError::Decode(_))
-        ));
-        assert!(matches!(
-            decode_envelope("{\"result\":1}"),
-            Err(RpcError::Decode(_))
-        ));
+        assert_eq!(err["ok"], serde_json::json!(false));
+        assert_eq!(err["error"], serde_json::json!("boom"));
     }
 
     #[test]
@@ -1015,5 +680,14 @@ mod envelope_tests {
             rpc_error_of_transport("worker gone".to_string()),
             RpcError::Transport(_)
         ));
+    }
+
+    #[test]
+    fn the_probe_keys_are_reserved_both_lanes() {
+        assert!(is_probe_key("__tur_rpc_probe"));
+        assert!(is_probe_key("bin:__tur_rpc_probe"));
+        assert!(!is_probe_key("storage:list"));
+        assert!(!is_probe_key("bin:lyric:parse"));
+        assert!(!is_probe_key("event:music:play"));
     }
 }

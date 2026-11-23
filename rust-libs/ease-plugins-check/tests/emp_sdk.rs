@@ -23,10 +23,10 @@ mod emp_sdk {
     use ease_client_android::plugin_runtime::emp::PluginHandle;
     use ease_client_android::plugin_runtime::{EaseMusicPlugin, PluginId, PluginInstance};
     use ease_client_backend::ctx::BackendContext;
-    use ease_tur_rpc::TurRpcBusPlugin;
+    use ease_tur_rpc::TurRpcBindPlugin;
     use std::sync::mpsc;
     use std::sync::Arc;
-    use tur_engine::core::plugin::Plugin;
+    
     use tur_engine::core::scheduler::WorkerPoolHandle;
     use tur_engine::{TurStdPlugin, TurRuntime};
     use tur_integration_tests::{MutexFixedClock, TestSchedulerDriver};
@@ -70,7 +70,7 @@ mod emp_sdk {
                 .clock(Arc::new(MutexFixedClock::new(0)))
                 .worker_pool(pool.clone())
                 .plugin(TurStdPlugin)
-                .plugin(TurRpcBusPlugin::new(None))
+                .plugin(TurRpcBindPlugin::new())
                 .plugin(EaseMusicPlugin::new(cx))
                 .build()
                 .expect("runtime build");

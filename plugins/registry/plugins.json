@@ -6,15 +6,15 @@
         "en-US": "Lyric Formats",
         "zh-CN": "歌词格式"
       },
-      "version": "0.4.0",
+      "version": "0.6.0",
       "description": {
         "en-US": "Lyric file parsers for LRC, SRT and WebVTT. The app's lyric pane is powered entirely by this plugin — there is no built-in parser.",
         "zh-CN": "LRC、SRT、WebVTT 歌词文件解析器。应用的歌词显示完全由本插件驱动，应用内没有内置解析器。"
       },
-      "zip": "zips/com.ease.lyricformats-0.4.0.zip",
-      "sha256": "c45a11151bfa3614556e280b7353bb0646822cb783fdee2132a96d74b17fe3c2",
-      "size": 30521,
-      "apiVersion": 2
+      "zip": "zips/com.ease.lyricformats-0.6.0.zip",
+      "sha256": "be82633a47818cb857a8d997bb3c366979c938a584d2cd24bd1e11945d1c911b",
+      "size": 37857,
+      "apiVersion": 3
     },
     {
       "id": "com.ease.onedrive",
@@ -22,16 +22,16 @@
         "en-US": "OneDrive",
         "zh-CN": "OneDrive"
       },
-      "version": "0.2.0",
+      "version": "0.4.0",
       "description": {
         "en-US": "OneDrive cloud storage provider (directory listing + byte-range download) implemented as a headless rut plugin.",
         "zh-CN": "OneDrive 云存储插件（目录列表 + 区间下载）。"
       },
-      "zip": "zips/com.ease.onedrive-0.2.0.zip",
-      "sha256": "a3350cb4b0014ccc53006ecdd64ee449127880f50c23068e5cf1a057228e7f2f",
-      "size": 71235,
+      "zip": "zips/com.ease.onedrive-0.4.0.zip",
+      "sha256": "17f934fb0c5806850d700df4acda342c771c3f58952527dc936eec60c8da03a8",
+      "size": 84510,
       "icon": "icons/com.ease.onedrive.png",
-      "apiVersion": 2
+      "apiVersion": 3
     },
     {
       "id": "com.ease.playcount",
@@ -39,16 +39,16 @@
         "en-US": "Play Counts",
         "zh-CN": "播放计数"
       },
-      "version": "0.2.0",
+      "version": "0.4.0",
       "description": {
         "en-US": "Counts how many times each music has been played, filterable by time period (Today through Last Year) and by playlist membership.",
         "zh-CN": "统计每首歌的播放次数，支持按时间段（今天到最近一年）和按播放列表成员过滤。"
       },
-      "zip": "zips/com.ease.playcount-0.2.0.zip",
-      "sha256": "cb699e3aca703668e14a6f50c52d1a43e1c743146b4f025ac4c60d8cef0cfa6d",
-      "size": 68620,
+      "zip": "zips/com.ease.playcount-0.4.0.zip",
+      "sha256": "df69dd4f54426421246a30b67ef54dd5c5d5c3640eebf57e54d7c33b8868072d",
+      "size": 75310,
       "icon": "icons/com.ease.playcount.png",
-      "apiVersion": 2
+      "apiVersion": 3
     },
     {
       "id": "com.ease.s3",
@@ -56,15 +56,15 @@
         "en-US": "S3",
         "zh-CN": "S3"
       },
-      "version": "0.3.0",
-      "apiVersion": 2,
+      "version": "0.5.0",
+      "apiVersion": 3,
       "description": {
         "en-US": "Amazon S3 / S3-compatible object storage provider (ListObjectsV2 directory listing + SigV4 signed byte-range download; works with AWS S3, Cloudflare R2, MinIO, B2, ...) implemented as a headless rut plugin.",
         "zh-CN": "S3 / 兼容 S3 的对象存储插件（ListObjectsV2 目录列表 + SigV4 签名区间下载；支持 AWS S3、Cloudflare R2、MinIO、B2 等）。"
       },
-      "zip": "zips/com.ease.s3-0.3.0.zip",
-      "sha256": "2d0c614acd0a772d1efe8eb1090fd85042683c05c555a1ec854975253337c4fc",
-      "size": 104477,
+      "zip": "zips/com.ease.s3-0.5.0.zip",
+      "sha256": "cfd918bd3926919a4773f5aade4d9e4ef6c2cf9de2f6bc6a0db3dac1f3f6283f",
+      "size": 117989,
       "icon": "icons/com.ease.s3.png"
     },
     {
@@ -73,16 +73,16 @@
         "en-US": "WebDAV",
         "zh-CN": "WebDAV"
       },
-      "version": "0.2.0",
+      "version": "0.4.0",
       "description": {
         "en-US": "WebDAV cloud storage provider (directory listing + byte-range download, Basic/Digest auth) implemented as a headless rut plugin.",
         "zh-CN": "WebDAV 云存储插件（目录列表 + 区间下载，支持 Basic/Digest 认证）。"
       },
-      "zip": "zips/com.ease.webdav-0.2.0.zip",
-      "sha256": "9ebf2f8efac117df70ae7d1e4f6ad5bcb6a76ba830c6f94641c6c8b4e03865af",
-      "size": 101213,
+      "zip": "zips/com.ease.webdav-0.4.0.zip",
+      "sha256": "021f55a3b01d05805212b3f4a27a9e6964ac406ca7dfda73c8c8f9fc6a3efc23",
+      "size": 107455,
       "icon": "icons/com.ease.webdav.png",
-      "apiVersion": 2
+      "apiVersion": 3
     }
   ]
 }

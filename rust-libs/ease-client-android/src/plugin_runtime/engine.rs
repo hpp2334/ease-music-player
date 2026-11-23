@@ -15,7 +15,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use ease_client_backend::services::plugin_manager::PluginEngineHost;
-use ease_tur_rpc::{RpcBus, RpcBusCell, RpcClient};
+
+#[cfg(target_os = "android")]
+use ease_tur_rpc::RpcClient;
 
 /// The host implementation. Constructed by the `bindPluginRuntime` JNI
 /// trampoline ([`crate::plugin_runtime::plugin_jni`]) and attached to the
@@ -32,15 +34,11 @@ pub(crate) struct TurEngineHost {
     /// its `AtomicLong` handle cell (the zeroable pump guard — see
     /// `FrameLoop.closeInstance`). Dropped when the instance closes.
     loops: std::sync::Mutex<HashMap<i64, (jni::objects::GlobalRef, jni::objects::GlobalRef)>>,
-    /// Per spawned headless instance: the RPC bus stamped into the instance
-    /// at build time — `extract_rpc` pairs it with the driver into the
-    /// [`RpcClient`]. Popped on extract / dropped on close.
-    buses: std::sync::Mutex<HashMap<i64, Arc<RpcBus>>>,
     /// Per spawned headless instance: the minted [`PluginHandle`] id —
     /// `load_headless_module` passes it as the boot's `start_cx` (the
     /// phase-1 lane) so the module's `entry fn start(cx: opaque)`
-    /// receives its plugin handle. Popped at load (one shot) / dropped
-    /// on close.
+    /// receives its plugin handle, and `extract_rpc` addresses the
+    /// dispatch entries with the same id. Popped on close.
     cxs: std::sync::Mutex<HashMap<i64, u64>>,
 }
 
@@ -50,7 +48,6 @@ impl TurEngineHost {
             runtime_handle,
             asset_manager,
             loops: Default::default(),
-            buses: Default::default(),
             cxs: Default::default(),
         }
     }
@@ -84,32 +81,6 @@ struct AndroidDriver {
 
 #[cfg(target_os = "android")]
 impl ease_tur_rpc::RutDriver for AndroidDriver {
-    fn call_entry_str(&self, name: &str, cx: u64) -> Result<String, String> {
-        // `with_app` takes a `'static` closure — own the (borrowed) name.
-        let name = name.to_string();
-        tur_android::ops::with_app(self.handle, move |app| {
-            futures::executor::block_on(app.call_rut_entry_cx_str(&name, cx))
-        })
-        .ok_or_else(|| format!("instance {self:?} gone"))?
-        .map_err(|e| e.to_string())
-    }
-
-    fn call_entry(&self, name: &str, cx: u64) -> Result<(), String> {
-        let name = name.to_string();
-        tur_android::ops::with_app(self.handle, move |app| {
-            futures::executor::block_on(app.call_rut_entry_cx(&name, cx)).map(|_| ())
-        })
-        .ok_or_else(|| format!("instance {self:?} gone"))?
-        .map_err(|e| e.to_string())
-    }
-
-    fn start_token(&self) -> u64 {
-        tur_android::ops::with_app(self.handle, |app| {
-            futures::executor::block_on(app.rut_start_answer())
-        })
-        .unwrap_or(0)
-    }
-
     fn call_dispatch_str(
         &self,
         name: &str,
@@ -267,12 +238,12 @@ impl PluginEngineHost for TurEngineHost {
     /// the Kotlin `FrameLoop` (main-looper-safe by construction), hand it
     /// to the engine's `create_instance` (which globalizes the ref itself)
     /// along with the per-instance stamps — [`PluginId`], the backend
-    /// worker pool, and a fresh RPC [`RpcBus`] (stamped as
-    /// [`RpcBusCell`] instance data so the `ease.rpc` rows and the
-    /// [`RpcClient`] share it) — then wire the loop's wake callbacks
-    /// through a zeroable `AtomicLong` cell — the exact `TurInstance`
-    /// guard semantics, so a wake that lands after `close_headless` reads
-    /// 0 and no-ops instead of pumping a freed route.
+    /// worker pool, and the minted [`emp::PluginHandle`] (+ its
+    /// [`RpcIdentity`] view, the same id the [`RpcClient`] dispatches
+    /// with) — then wire the loop's wake callbacks through a zeroable
+    /// `AtomicLong` cell — the exact `TurInstance` guard semantics, so a
+    /// wake that lands after `close_headless` reads 0 and no-ops instead
+    /// of pumping a freed route.
     fn spawn_headless(&self, plugin_id: &str) -> anyhow::Result<i64> {
         #[cfg(target_os = "android")]
         {
@@ -280,10 +251,7 @@ impl PluginEngineHost for TurEngineHost {
 
             let pid = plugin_id.to_string();
             let runtime_handle = self.runtime_handle;
-            let bus = RpcBus::new();
-            let bus_for_stamp = bus.clone();
             let loops = &self.loops;
-            let buses = &self.buses;
             let cxs = &self.cxs;
             let backend_pool =
                 crate::plugin_runtime::plugin_jni::backend_pool_for(runtime_handle);
@@ -325,7 +293,6 @@ impl PluginEngineHost for TurEngineHost {
                             cx.define::<crate::plugin_runtime::PluginInstance>(
                                 crate::plugin_runtime::PluginInstance(None),
                             );
-                            cx.define::<RpcBusCell>(RpcBusCell(bus_for_stamp.clone()));
                             cx.define::<crate::plugin_runtime::emp::PluginHandle>(
                                 plugin_handle,
                             );
@@ -342,7 +309,6 @@ impl PluginEngineHost for TurEngineHost {
                 if instance == 0 {
                     anyhow::bail!("create_instance returned 0 (see logcat)");
                 }
-                buses.lock().unwrap().insert(instance, bus);
                 cxs.lock().unwrap().insert(instance, start_cx);
                 // Guard cell + wake wiring (mirrors TurInstance.init).
                 let cell = env
@@ -396,23 +362,21 @@ impl PluginEngineHost for TurEngineHost {
         }
     }
 
-    /// Pair the instance's bus with an [`AndroidDriver`] into an
-    /// [`RpcClient`]. The boot identity comes from the minted handle the
-    /// host already holds (the phase-5 identity rail — NOT the start
-    /// answer: a new-style backend's `start(cx)` answers nothing). The
-    /// capability probe (bind-table entries vs the stash bus) records its
-    /// verdict here, eagerly, so dispatch never pays the probe cost; the
-    /// boot gate then accepts either contract's proof — the dispatch
-    /// entries, or the old `start() -> opaque` answer token. FIFO behind
+    /// Pair the instance with an [`AndroidDriver`] into an [`RpcClient`].
+    /// The boot identity comes from the minted handle the host already
+    /// holds (the identity rail — a new-style backend's `start(cx)`
+    /// answers nothing). The capability probe records its verdict here,
+    /// eagerly, and the boot gate REQUIRES the bind-table proof: a module
+    /// exporting neither dispatch entry has no RPC surface (it failed to
+    /// boot, or is not a backend) and extracts no client. FIFO behind
     /// the spawn + load posts, so the module has booted.
     fn extract_rpc(&self, instance_handle: i64) -> Option<ease_tur_rpc::RpcClient> {
         #[cfg(target_os = "android")]
         {
-            let bus = self.buses.lock().unwrap().get(&instance_handle).cloned();
             let start_cx = self.cxs.lock().unwrap().get(&instance_handle).copied();
-            let (Some(bus), Some(start_cx)) = (bus, start_cx) else {
+            let Some(start_cx) = start_cx else {
                 tracing::error!(
-                    "extract_rpc: instance {instance_handle} has no RPC bus / boot identity \
+                    "extract_rpc: instance {instance_handle} has no boot identity \
                      — not spawned here?"
                 );
                 return None;
@@ -420,13 +384,11 @@ impl PluginEngineHost for TurEngineHost {
             let driver: Arc<dyn ease_tur_rpc::RutDriver> = Arc::new(AndroidDriver {
                 handle: instance_handle,
             });
-            let client = RpcClient::new(bus, driver, start_cx);
-            let entries = client.has_dispatch_entries();
-            let token = client.bus_token();
-            if token == 0 && !entries {
+            let client = RpcClient::new(driver, start_cx);
+            if !client.has_dispatch_entries() {
                 tracing::error!(
-                    "extract_rpc: instance {instance_handle} has no boot proof — \
-                     no dispatch entries and no start token (the module failed to boot)"
+                    "extract_rpc: instance {instance_handle} exports no dispatch entries \
+                     (no `rpc` / `rpc_bin` — the module failed to boot or serves no bind table)"
                 );
                 return None;
             }
@@ -443,7 +405,6 @@ impl PluginEngineHost for TurEngineHost {
         #[cfg(target_os = "android")]
         {
             let globals = self.loops.lock().unwrap().remove(&instance_handle);
-            self.buses.lock().unwrap().remove(&instance_handle);
             self.cxs.lock().unwrap().remove(&instance_handle);
             let _ = with_attached_env(|env| {
                 if let Some((loop_ref, cell_ref)) = globals {

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use ease_client_android::plugin_runtime::EaseMusicPlugin;
 use ease_client_backend::ctx::BackendContext;
 use ease_client_backend::services::plugin_pkg::{read_entry_source, EntrySource};
-use ease_tur_rpc::TurRpcBusPlugin;
+use ease_tur_rpc::TurRpcBindPlugin;
 use tur_engine::core::plugin::Plugin;
 use tur_engine::core::rut_runtime::RutModuleFiles;
 use tur_integration_tests::TurTestApp;
@@ -27,7 +27,7 @@ fn fixture_root() -> PathBuf {
 /// The app plugin set, host-buildable (parity with the lib harness).
 fn app_plugins() -> Vec<Box<dyn Plugin>> {
     vec![
-        Box::new(TurRpcBusPlugin::new(None)),
+        Box::new(TurRpcBindPlugin::new()),
         Box::new(EaseMusicPlugin::new(BackendContext::new())),
     ]
 }
@@ -36,7 +36,7 @@ fn app_plugins() -> Vec<Box<dyn Plugin>> {
 /// failure. Single file = the single rail, file set = the engine's
 /// multi-file rail.
 fn assert_boots(source: EntrySource, what: &str) {
-    let mut app =
+    let app =
         TurTestApp::new_with_extra_plugins(400.0, 400.0, app_plugins()).expect("harness app");
     let result = match source {
         EntrySource::Single(src) => app.load_rut_module(&src),

@@ -8,8 +8,8 @@
 mod probes {
     use ease_client_android::plugin_runtime::EaseMusicPlugin;
     use ease_client_backend::ctx::BackendContext;
-    use ease_tur_rpc::TurRpcBusPlugin;
-    use tur_engine::core::plugin::Plugin;
+    use ease_tur_rpc::TurRpcBindPlugin;
+    
     use tur_integration_tests::TurTestApp;
 
     /// `set_in_place` writes through the downcast binding directly;
@@ -73,11 +73,11 @@ entry fn get(cx: opaque) -> str {
 
     #[test]
     fn documents_ctx_mutation_semantics() {
-        let mut app = TurTestApp::new_with_extra_plugins(
+        let app = TurTestApp::new_with_extra_plugins(
             400.0,
             400.0,
             vec![
-                Box::new(TurRpcBusPlugin::new(None)),
+                Box::new(TurRpcBindPlugin::new()),
                 Box::new(EaseMusicPlugin::new(BackendContext::new())),
             ],
         )

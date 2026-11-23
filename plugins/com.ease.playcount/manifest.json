@@ -1,7 +1,7 @@
 {
   "id": "com.ease.playcount",
   "name": { "en-US": "Play Counts", "zh-CN": "播放计数" },
-  "version": "0.3.0",
+  "version": "0.4.0",
   "apiVersion": 3,
   "description": {
     "en-US": "Counts how many times each music has been played, filterable by time period (Today through Last Year) and by playlist membership.",

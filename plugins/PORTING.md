@@ -1,73 +1,135 @@
-# Plugin porting guide — the rut epoch (apiVersion 2)
+# Plugin porting guide — the emp epoch (apiVersion 3)
 
-Plugins are **rut sources** since apiVersion 2. There is no JS, no npm, no
-rspack — the engine compiles the sources; `pnpm test` (the
+Plugins are **rut sources** (since apiVersion 2) laid out as **pkg trees**
+and served through the **`emp` SDK** (apiVersion 3). There is no JS, no
+npm, no rspack — the engine compiles the sources; `pnpm test` (the
 `ease-plugins-check` suite) compile+boot-checks every plugin host-side.
+apiVersion 2 (single-file rut sources, `tur_host::ease.*` rows, the
+stash-bus RPC) is RETIRED — the engine refuses installs outside its
+`PLUGIN_API_MIN..MAX` range (currently `3..=3`), and the bundled
+bootstrap re-installs the shipped ids from their apiVersion-3 zips.
 
-## Manifest (v2)
+## Layout (pkg trees)
+
+```text
+plugins/com.ease.webdav/
+  manifest.json
+  icon.png                 # optional plugin-level icon (≤128 KiB raster)
+  backend/                 # the headless service ("backend": "backend")
+    mod.rut                # the pkg-tree ROOT — declares `mod NAME;` children
+    auth.rut  dav.rut  ops.rut  …
+  view/                    # per-contribution views ("view": "view")
+    mod.rut
+    form.rut  actions.rut
+```
+
+A manifest entry names either a single `.rut` file (still loads — the
+legacy spelling) or a **directory carrying `mod.rut`**. The scan walks the
+`mod NAME;` declarations to the sibling files (`NAME/mod.rut` dir form
+first, `NAME.rut` single-file form second; both present = the loud
+ambiguity) and registers the whole set as one file set. Per-file use
+binding: EVERY file writes every import it calls.
+
+## Manifest (v3)
 
 ```json
 {
   "id": "com.ease.webdav",
   "name": { "en-US": "WebDAV", "zh-CN": "WebDAV" },
   "author": "ease",
-  "version": "0.1.0",
-  "apiVersion": 2,
-  "backend": "backend.rut",
+  "version": "0.4.0",
+  "apiVersion": 3,
+  "backend": "backend",
   "events": ["music:play"],
   "contributions": {
-    "storages":  [{ "id": "webdav", "title": "…", "desc": "…", "view": "view.rut" }],
-    "dashboard": [{ "id": "main", "title": "…", "view": "view.rut" }],
+    "storages":  [{ "id": "webdav", "title": "…", "desc": "…", "view": "view" }],
+    "dashboard": [{ "id": "main", "title": "…", "view": "view" }],
     "lyricParsers": [{ "id": "lrc", "title": "…", "extensions": ["lrc"] }]
   }
 }
 ```
 
-Entry files are `backend.rut` / `view.rut` at the zip root (packaging zips
-the manifest + every root-level `.rut` + referenced icons).
+`apiVersion` is REQUIRED — an integer, and the packaging epoch gate
+(`scripts/package-plugin.ts`) fails any build whose level ≠ 3.
 
-## The RPC contract (backends)
-
-Each contract op is its own **entry fn** answering the reply envelope
-string. Register the mapping at `start` through the bus rows; the host
-stashes the request and calls the entry with the context token:
+## The emp SDK (constructor-injected handle)
 
 ```rut
-use tur_host::ease::rpc::{ register, subscribe_event, take_request };
+use emp::{ Db, Secret, OAuth, Theme, Context, Library, Rpc };
+```
 
-struct Ctx { /* module state */ }
+`entry fn start(cx: opaque)` receives the **plugin handle** — the
+host-minted identity (`cx`'s u64 is the whole crossing; a rut-side
+`opaque(<u64>)` forgery can only name the forger's own id, a foreign id
+or any other box shape traps `emp:{ns}:`). Every service class is
+constructed FROM the handle and its members are one forwarded `emp_host`
+row each:
 
-entry fn start() -> opaque {
-    register("storage:list", "op_storage_list");
-    register("storage:get", "op_storage_get");
-    register("storage:get-chunk", "op_storage_get_chunk");
-    register("storage:release", "op_storage_release");
-    register("lyric:parse", "op_lyric_parse");
-    register("oauth:url", "op_oauth_url");
-    register("oauth:exchange", "op_oauth_exchange");
-    register("storage:removeInstance", "op_storage_remove_instance");
-    register("webdav:test", "op_webdav_test");   // view ops registered too
-    subscribe_event("music:play", "op_on_music_play");
-    return opaque(Ctx { ... });
+- `Db(cx)`: `get(key) -> ?str`, `set(key, value)`, `delete(key)`,
+  `append(key, value)`, `get_all(key) -> [v]` (JSON), `count(key) -> u64`,
+  `list_keys(prefix) -> [{key,kind}]`; the `*_multi` twins take/answer
+  JSON strings.
+- `Secret(cx)`: `get(id) -> ?str`, `put(secret) -> i64`, `remove(id)`.
+- `OAuth(cx)`: `mint() -> flowId`, `begin(flowId)` (the browser flow;
+  the redirect lands in your backend's `oauth:exchange` op).
+- `Theme` (no field): `color(name) -> "#RRGGBBAA"`, `is_dark() -> bool`
+  (Android-only rows — never at boot).
+- `Context(cx)`: `notify_change()`, `create_storage(id)`,
+  `remove_storage(id)`, `storage_id() -> ?str` (nil = create mode,
+  Some = edit — read once at `start`).
+- `Library(cx)`: `playlists() -> [{id,title,musicIds}]` (ids are
+  strings), `covers(musicIdsJson) -> [{musicId, id}]` (`id` = the
+  registered engine image resource or null; render via the kit's
+  `Image(id)`).
+
+Boot law: constructors only STORE the handle — constructing services at
+`start` touches no host row, no network, nothing Android-only.
+
+## The RPC contract (bind table — the only contract)
+
+A backend serves ALL ops through **one dispatch entry per lane**,
+declared once in the root `mod.rut`, plus `rpc.bind` per op at `start`.
+Handlers are plain fns closing over the service handles; **args are RAW
+— the handler decodes its own args** (`json` lib for str ops):
+
+```rut
+use emp::{ Db, Rpc };
+
+entry fn start(cx: opaque) {
+    const db = Db(cx);
+    const rpc = Rpc(cx);
+    rpc.bind("storage:list", fn (args: str) -> ?str { return storage_list(db, args); });
+    rpc.bind("storage:get", fn (args: str) -> ?str { return storage_get(db, args); });
+    rpc.bind("storage:get-chunk", fn (args: str) -> ?str { return storage_get_chunk(db, args); });
+    rpc.bind("storage:release", fn (args: str) -> ?str { return storage_release(db, args); });
+    rpc.bind("webdav:test", fn (args: str) -> ?str { return webdav_test(db, args); });  // view op
+    rpc.subscribe("music:play", fn (payload: str) -> ?str { return on_play(db, payload); });
+    // no answer — the identity rode the cx lane, not a return
 }
 
-entry fn op_storage_list(cx: opaque) -> str {
-    let c = opaque::downcast<Ctx>(cx);
-    if (c == nil) { panic("no ctx"); }
-    let req = take_request();          // {"op":…,"args":{pluginId, storageId, dir}}
-    ...                                // serve it
-    return f"{{\"ok\":true,\"result\":{result_json}}}";
+entry fn rpc(cx: opaque, op: str, args: str) -> ?str {
+    const rpc = Rpc(cx);
+    return rpc.dispatch(op, args);
+}
+
+// only backends with binary ops need the twin lane
+entry fn rpc_bin(cx: opaque, op: str, args: bytes) -> ?bytes {
+    const rpc = Rpc(cx);
+    return rpc.dispatch_bin(op, args);
 }
 ```
 
-- The envelope is exactly `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}`.
-  Error messages beginning `UNAUTHORIZED` / `TIMEOUT` map to typed host UI
-  states — prefix your auth/timeouts with those.
-- `take_request()` drains the pending payload ("" = none). Events use the
-  same stash: read `args.payload` from it.
-- The context token: `start() -> opaque` boxes the module record
-  (`opaque(Ctx{...})`); entries receive `cx: opaque` and
-  `opaque::downcast<Ctx>(cx)` (nil-check + `panic` on mismatch).
+- The handler answers the RAW payload; **`nil` = "not mine"** (the lyric
+  dispatch's fall-through arm). An error is a rut `panic(...)` — the trap
+  message rides the host's error arm, and **messages beginning
+  `UNAUTHORIZED` / `TIMEOUT` map to typed host UI states** — prefix
+  your auth/timeouts with those.
+- The `{"ok":true,"result":…}` / `{"ok":false,"error":"…"}` envelope is
+  built HOST-side from the answer/trap — no envelope code exists in rut.
+- Views call the backend with `Rpc(cx).call(op, argsJson) -> str` (the
+  envelope passes through; blocking — call it inside mutations, not
+  tasks). Events are dispatched through the str entry under the
+  `event:<type>` key; `rpc.subscribe(type, f)` files the handler.
 - Contract literals (the host calls these exact strings):
   - storage backends: `storage:list`, `storage:get` (opener →
     `{sid, meta:{totalLength?, name?, contentType?, dataOffset?}}`),
@@ -75,40 +137,49 @@ entry fn op_storage_list(cx: opaque) -> str {
     eof: bool}` — the final chunk carries data AND eof), `storage:release`
     (`{sid}`), plus `oauth:url` / `oauth:exchange` /
     `storage:removeInstance` for OAuth providers.
-  - lyric parsers: `lyric:parse` (`{pluginId, parserId, fileName, size,
-    contentBase64}` → `lines: [{timeMs, durationMs?, text}], metadata?` —
-    answer `nil`-ish result (result: null) when the format isn't yours).
-  - view ops (plugin-private names, e.g. `webdav:test`) are registered on
-    the same bus; views reach them via `ease.rpc.call`.
-- Keep per-session state (the `storage:get` session map) in the module's
-  state record. `storage:release` must drop the session.
+  - lyric parsers: `lyric:parse` on the **binary lane** (see below).
+  - view ops (plugin-private names, e.g. `webdav:test`) bind on the same
+    table; views reach them via `Rpc.call`.
+- Keep per-session state (the `storage:get` session map) in the module
+  (`let` bindings at file scope or behind `Db`). `storage:release` must
+  drop the session.
 
-## The host surface (`tur_host::ease::*` rows)
+### The binary lane + the lyric framing
 
-All rows are typed; composites ride JSON strings; binary is `bytes`.
+`rpc.bind_bin(op, fn (args: bytes) -> ?bytes)` — raw bytes in, raw bytes
+out, **no base64 anywhere**. Only ops that want raw content need the
+twin `entry fn rpc_bin`; the per-op lane is declared by which entry the
+host addresses (`rpc` = str args, `rpc_bin` = bytes args).
 
-```rut
-use tur_host::ease::db::{ single_get, single_set, single_delete, multi_append, multi_get_all, multi_count, list_keys };
-use tur_host::ease::secret::{ get as secret_get, put as secret_put, remove as secret_remove };
-use tur_host::ease::oauth::{ begin, new };   // `begin` fires the browser flow (the engine's `start` leaf is unspellable from a module exporting `entry fn start`)
-use tur_host::ease::themes::{ color, is_dark };
-use tur_host::ease::context::{ notify_change, create_storage, remove_storage, storage_id };
-use tur_host::ease::library::{ playlists, covers };
-use tur_host::ease::rpc::call;                       // view → its own backend
-use tur_host::ease::crypto::{ random_uuid, md5_hex, md5_base64, base64_encode, base64_decode, sha256_hex, hmac_sha256_hex };
-use tur_host::ease::xml::to_json;                    // bytes -> ?str (JSON tree)
-use tur_host::ease::net::{ request, finish, status, status_text, headers, body, error };
-use tur_host::ease::time::{ now_unix_ms, format_http_date, format_amz_date, parse_http_date };
+Binary ops need a way to carry a few control fields beside the bytes.
+The convention (used by `lyric:parse`, keep it for your own binary ops):
+
+```text
+<compact JSON header>\n<raw content bytes>
 ```
 
-- `db`: `single_get(key) -> ?str`; `single_set(key, value)`; composites
-  take/return JSON (`single_get_multi(keysJson) -> [{key,value}]`,
-  `multi_get_all(key) -> [value]`, `multi_count(key) -> u64`,
-  `list_keys(prefix) -> [{key,kind}]`).
-- `secret`: `get(id: i64) -> ?str`, `put(secret: str) -> i64`, `remove(id)`.
-- `oauth`: `new() -> flowId`; `start(flowId)` fires the browser flow; the
-  redirect lands in `oauth:exchange` on the backend.
-- `net` (full HTTP — upstream's net rows carry no headers/bodies, ours do):
+The header (`{"parserId":"lrc","fileName":"song.lrc"}`) never contains a
+literal newline (JSON string escaping), so the FIRST `\n` byte ends it.
+Decode: read the whole payload lossily as UTF-8
+(`tur_host::clipboard::decode_utf8`), split at the first `\n` (str ops —
+no bytes slicing anywhere), parse the header with the `json` lib, and
+answer `tur_host::clipboard::encode_utf8(payload)`. The host owns the
+size cap (≤2 MiB for lyrics) and the timeout (10 s).
+
+## The 3rd-party libs (utilities)
+
+The identity-free utilities left the SDK — they are standard rut pkgs
+imported by name:
+
+```rut
+use crypto::{ random_uuid, md5_hex, md5_base64, base64_encode, base64_decode, sha256_hex, hmac_sha256_hex, random_bytes };
+use xml::to_json;                    // bytes -> ?str (JSON tree)
+use net::{ request, finish, status, status_text, headers, body, error, request_sync };
+use time::{ now_unix_ms, format_http_date, format_amz_date, parse_http_date, unix_ms };
+```
+
+- `net` (full HTTP — upstream's rut net rows carry no headers/bodies,
+  ours do):
   ```rut
   let opts = f"{{\"url\":\"{url}\",\"method\":\"PROPFIND\",\"headers\":{{\"Depth\":\"1\",\"Authorization\":\"Basic {auth}\"}},\"body\":{{\"text\":{body_json}}}}}";
   let t = request(opts);
@@ -118,26 +189,28 @@ use tur_host::ease::time::{ now_unix_ms, format_http_date, format_amz_date, pars
   let err = error(t);              // "" on success
   ```
   Response body is raw `bytes`; decode with `decode_utf8(data)` from
-  `tur_host::clipboard` (or base64-encode via `ease.crypto.base64_encode`).
-  Request body: `{"text": …}` or `{"base64": …}`.
+  `tur_host::clipboard` (or base64-encode via `crypto.base64_encode`).
+  Request body: `{"text": …}` or `{"base64": …}`. `request_sync(opts)
+  -> str` is the blocking one-shot (entry-fn-safe — the async `request`/
+  `finish` pair must not be awaited from a sync entry).
 - `xml.to_json(xmlBytes) -> ?str`: JSON tree
   `{attrs…, "text": "…", "children": {tag: el | [el…]}}` — the
   PROPFIND/multistatus decoder. Walk it with std json.
 - `time`: `now_unix_ms()`, `format_http_date(ms)` (RFC 1123),
-  `format_amz_date(ms)` (`20060102T150405Z`), `parse_http_date(s) -> u64`.
-- `context.storage_id() -> ?str`: nil = create mode, Some = edit (read
-  once at `start` — it never changes for the instance).
-- `library.playlists() -> [{id,title,musicIds}]` (ids are strings),
-  `library.covers(musicIdsJson) -> [{musicId, id}]` (id = image resource
-  or null; render via the kit's `Image(id)`).
+  `format_amz_date(ms)` (`20060102T150405Z`), `parse_http_date(s) -> u64`,
+  `unix_ms(secs) -> u64` (the JS `Date.now()/1000` round-trip).
+
+`tur_host::clipboard::{ decode_utf8, encode_utf8 }` are the engine's own
+rows (UTF-8 both ways) — the one `tur_host` import a plugin may still
+spell.
 
 ## rut survival kit
 
 Rust-family syntax. The corpus (`tur-upstream rut/cases/`, esp.
 `github-viewer`, `countdown`, `todolist`) is the reference.
 
-- Entries: `entry fn start() -> opaque` (+ optional `entry fn stop()`);
-  op entries as above.
+- Entries: `entry fn start(cx: opaque)` (+ optional `entry fn stop()`);
+  one dispatch entry per lane as above.
 - Structs: `struct S { a: str, b: u64 }` — literal `S { a: "x", b: 0 }`;
   fields always public; bindings/params are mutable by default (the
   drop-mut law — `mut` is gone from the grammar; write fields freely:
@@ -145,34 +218,35 @@ Rust-family syntax. The corpus (`tur-upstream rut/cases/`, esp.
 - Locals: `let x: ?str = nil;` optionals; `when v { "a" -> {...}, else -> {...} }`;
   `for (let row of rows)`; `while (cond)`; `f"…{x}…"` with `{{`/`}}`
   escapes for literal braces; `x as u64` casts; unannotated float locals
-  are `f32` — annotate `: f64` when handing them to rows.
+  are `f32` — annotate `: f64` when handing them to rows. A tail
+  `panic(...)` statement is a missing-return parse repro at this pin —
+  wrap the panic in an `if`.
 - str: `len()`, `slice(a, b)`, `code_at(i)` (u32 codepoint),
-  `starts_with(at, prefix)`, comparisons `==`. bytes: `.len()`, decode via
-  `decode_utf8`.
+  `starts_with(at, prefix)`, comparisons `==` — all three use the SAME
+  index units, so scan+slice compose. bytes: `.len()`, `.clone()`;
+  decode/encode via `tur_host::clipboard`.
 - JSON (std pkg, offered): `use json::{ decodeJson, JsonReader,
-  JsonDeserialize, DecodeErrorKind, DecodeJsonError };` — records spell
-  `impl S { pub fn decode(r: JsonReader) -> (?Self, ?DecodeJsonError)
-  { ... } }` (see github-viewer/schema.rut for the full reader idiom:
-  `r.begin_object() / while (r.more()) { when (r.next_key()) { "k" ->
-  {…}, else -> { r.skip_value(); } } / r.end_object() / r.failed() /
-  r.read_str() / r.read_i64() / r.read_f64() / r.read_bool() /
-  r.try_null() }`). Arrays ride a local generic shim
-  (`fn decode_rows<T requires JsonDeserialize>(...) -> (?Vec<T>,
-  ?DecodeJsonError)` with `use pouch::{ Vec };`).
+  JsonWriter, JsonDeserialize, DecodeErrorKind, DecodeJsonError };` —
+  records spell `impl S { pub fn decode(r: JsonReader) -> (?Self,
+  ?DecodeJsonError) { ... } }` (see github-viewer/schema.rut for the
+  full reader idiom: `r.begin_object() / while (r.more()) { when
+  (r.next_key()) { "k" -> {…}, else -> { r.skip_value(); } } /
+  r.end_object() / r.failed() / r.read_str() / r.read_i64() /
+  r.read_f64() / r.read_bool() / r.try_null() }`). Arrays ride a local
+  generic shim (`fn decode_rows<T requires JsonDeserialize>(...) ->
+  (?Vec<T>, ?DecodeJsonError)` with `use pouch::{ Vec };`).
 - Async: `use futures::{ launch_future, sleep };` — `async fn f() -> str`,
   `await f(x)` / `await sleep(ms)`, launched from mutations/entries via
   `launch_future(f(...))`.
-- Per-file use binding: EVERY file writes every import it calls; deep
-  paths, one grouped use per module, names ASCII-sorted.
-- No DOM/Node: no Date (use ease.time), no setTimeout (sleep), no btoa
-  (ease.crypto).
+- No DOM/Node: no Date (use time), no setTimeout (sleep), no btoa
+  (crypto).
 
 ## Views (tur_kit — the fluent law)
 
-`view.rut` builds UI in `start` and mounts it. Construction is the class
-call form, chained; `.build()` is the only terminal; handlers are sealed
-mutations; reactive props take one method over `Readable<T>`; statics wrap
-`sv(v)`.
+`view/mod.rut` builds UI in `start` and mounts it. Construction is the
+class call form, chained; `.build()` is the only terminal; handlers are
+sealed mutations; reactive props take one method over `Readable<T>`;
+statics wrap `sv(v)`.
 
 ```rut
 use tur_kit::flags::{ Align, CrossAlign, MainAlign, MainAxisSize, BorderPosition };
@@ -210,17 +284,19 @@ View state: kit sources `let draft: Source<str> = source<str>("");` read
 `ctx.get<str>(draft)` write `ctx.set<str>(draft, v)` inside mutations;
 derive labels `derive<str>(fn (ctx: DeriveCtx) -> str { ... })`. Field
 edits write the source; the connect button's mutation reads it, calls the
-backend (`ease.rpc.call` — blocking control call), reports via a status
-source. Long journeys: `launch_future(...)` + `await ease.rpc.call`-free
-pattern (rpc.call is blocking — call it inside mutations, not tasks).
+backend (`Rpc(cx).call(op, args)` — a blocking control call), reports via
+a status source. Long journeys: `launch_future(...)` + `await` — but
+`call` is blocking: call it inside mutations, not tasks.
 
 ## House rules
 
-- apiVersion **2**, versions bumped per plugin.
-- Delete: `src/`, `package.json`, `pnpm-lock.yaml`, `rspack.config.cjs`,
-  `tsconfig.json`, `scripts/`, `node_modules/` (never committed anyway).
+- apiVersion **3**, versions bumped per plugin.
 - Validate: `cd rust-libs && cargo nextest run -p ease-plugins-check`
-  (compile+boot for every entry file; contract-op registration checks).
-- Boot law: `start` must not call Android-only rows (`themes`, `oauth`)
-  or touch the network — register ops, seed state, return the ctx.
-- The plugin dir ships ONLY: `manifest.json`, `*.rut`, icons.
+  (compile+boot for every entrypoint through the scan's own pkg-tree
+  lane; bind-table greps for the contract ops; the bytes-lane E2E).
+- Package: `pnpm build:plugins` (stamps the registry zips + index —
+  fails any build whose manifest apiVersion ≠ 3).
+- Boot law: `start` must not call Android-only rows (`Theme`,
+  `OAuth.begin`) or touch the network — construct services, bind the
+  ops, return nothing.
+- The plugin dir ships ONLY: `manifest.json`, the rut trees, icons.

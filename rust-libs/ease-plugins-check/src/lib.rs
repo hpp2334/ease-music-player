@@ -25,9 +25,9 @@ mod plugin_checks {
     use ease_client_android::plugin_runtime::{EaseMusicPlugin, PluginId, PluginInstance};
     use ease_client_backend::ctx::BackendContext;
     use ease_client_backend::services::plugin_pkg::{read_entry_source, EntrySource};
-    use ease_tur_rpc::TurRpcBusPlugin;
+    use ease_tur_rpc::TurRpcBindPlugin;
     use std::sync::Arc;
-    use tur_engine::core::plugin::Plugin;
+    
     use tur_engine::core::rut_runtime::RutModuleFiles;
     use tur_engine::core::scheduler::WorkerPoolHandle;
     use tur_engine::{TurRuntime, TurStdPlugin};
@@ -75,7 +75,9 @@ mod plugin_checks {
                 .clock(Arc::new(MutexFixedClock::new(0)))
                 .worker_pool(pool.clone())
                 .plugin(TurStdPlugin)
-                .plugin(TurRpcBusPlugin::new(None))
+                // The rpc bind-table rows + the sealed-handler table (the
+                // stamps `emp_host`'s bodies resolve).
+                .plugin(TurRpcBindPlugin::new())
                 .plugin(EaseMusicPlugin::new(cx))
                 .build()
                 .expect("runtime build");
@@ -188,9 +190,10 @@ mod plugin_checks {
         assert!(checked > 0, "no rut sources checked — the plugins are gone?");
     }
 
-    /// The contract ops every storage backend must serve (the literals
-    /// `ease-js-storage` dispatches). A backend with `storages`
-    /// contributions must register all four.
+    /// The contract ops every storage backend must BIND (the literals
+    /// `ease-js-storage` dispatches, through the bind table —
+    /// `rpc.bind("op", …)` in the rut sources). A backend with `storages`
+    /// contributions must bind all four.
     #[test]
     fn storage_backends_register_the_contract_ops() {
         for dir in plugin_dirs() {
@@ -213,15 +216,16 @@ mod plugin_checks {
                 "storage:release",
             ] {
                 assert!(
-                    texts.iter().any(|t| t.contains(&format!("\"{op}\""))),
-                    "{id}: storage backend must register the contract op `{op}`"
+                    texts.iter().any(|t| t.contains(&format!("bind(\"{op}\""))),
+                    "{id}: storage backend must bind the contract op `{op}` (rpc.bind)"
                 );
             }
         }
     }
 
-    /// Lyric-parser backends must register `lyric:parse` (the literal the
-    /// Rust lyric dispatch calls).
+    /// Lyric-parser backends must bind `lyric:parse` on the BINARY lane
+    /// (`rpc.bind_bin` — the host's lyric seam ships raw bytes through the
+    /// `<json header>\n<content>` framing).
     #[test]
     fn lyric_parsers_register_the_parse_op() {
         for dir in plugin_dirs() {
@@ -238,8 +242,8 @@ mod plugin_checks {
             }
             let texts = entry_texts(&dir, backend);
             assert!(
-                texts.iter().any(|t| t.contains("\"lyric:parse\"")),
-                "{id}: lyric parser backend must register `lyric:parse`"
+                texts.iter().any(|t| t.contains("bind_bin(\"lyric:parse\"")),
+                "{id}: lyric parser backend must bind `lyric:parse` on the binary lane (rpc.bind_bin)"
             );
         }
     }

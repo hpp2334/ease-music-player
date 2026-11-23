@@ -11,10 +11,9 @@
 //! `ease_tur_rpc::install_rows` (the one-owner rule — emp_host is the
 //! single mount), their identity decode is `ease_tur_rpc`'s
 //! [`RpcIdentity`] stamp (the same minted id the `RpcClient` dispatches
-//! with), and the view→backend `rpc::call` row keeps the old row's
-//! envelope shape behind the handle. The OLD stash-bus rows
-//! (`ease.rpc.register` / `subscribe_event` / `take_request`) stay in
-//! `tur_host` only (never dual-mounted here) until phase 5 deletes them.
+//! with), and the view→backend `rpc::call` row keeps the envelope shape
+//! behind the handle (phase 5 deleted the old stash-bus rows — this is
+//! the only rpc surface).
 
 use std::sync::Arc;
 

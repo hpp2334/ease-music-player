@@ -22,7 +22,7 @@ mod playcount_event {
     use ease_client_android::plugin_runtime::{EaseMusicPlugin, PluginId, PluginInstance};
     use ease_client_backend::ctx::BackendContext;
     use ease_client_backend::services::plugin_pkg::{read_entry_source, EntrySource};
-    use ease_tur_rpc::{DispatchAnswer, RpcBus, RpcClient, RutDriver, TurRpcBusPlugin};
+    use ease_tur_rpc::{DispatchAnswer, RpcClient, RutDriver, TurRpcBindPlugin};
     use std::path::Path;
     use std::sync::mpsc;
     use std::sync::Arc;
@@ -48,7 +48,6 @@ mod playcount_event {
             Vec<u8>,
             mpsc::SyncSender<Result<DispatchAnswer, String>>,
         ),
-        Token(mpsc::SyncSender<u64>),
     }
 
     struct TestDriver {
@@ -56,20 +55,6 @@ mod playcount_event {
     }
 
     impl RutDriver for TestDriver {
-        fn call_entry_str(&self, _name: &str, _cx: u64) -> Result<String, String> {
-            Err("the playcount backend serves no stash-bus entries".to_string())
-        }
-
-        fn call_entry(&self, _name: &str, _cx: u64) -> Result<(), String> {
-            Err("the playcount backend serves no stash-bus entries".to_string())
-        }
-
-        fn start_token(&self) -> u64 {
-            let (rtx, rrx) = mpsc::sync_channel(1);
-            self.tx.send(Cmd::Token(rtx)).ok();
-            rrx.recv().unwrap_or(0)
-        }
-
         fn call_dispatch_str(
             &self,
             name: &str,
@@ -133,7 +118,6 @@ mod playcount_event {
     /// dispatch-entry commands.
     fn spawn_app(
         cx: BackendContext,
-        bus: std::sync::Arc<RpcBus>,
         source: EntrySource,
         ready_tx: mpsc::Sender<(u64, ())>,
         rx: mpsc::Receiver<Cmd>,
@@ -148,7 +132,7 @@ mod playcount_event {
                 .clock(Arc::new(MutexFixedClock::new(0)))
                 .worker_pool(pool.clone())
                 .plugin(TurStdPlugin)
-                .plugin(TurRpcBusPlugin::new(Some(bus)))
+                .plugin(TurRpcBindPlugin::new())
                 .plugin(EaseMusicPlugin::new(cx))
                 .build()
                 .expect("runtime build");
@@ -215,9 +199,6 @@ mod playcount_event {
                             .map_err(|e| e.to_string()),
                         );
                     }
-                    Cmd::Token(rtx) => {
-                        let _ = rtx.send(futures::executor::block_on(app.rut_start_answer()));
-                    }
                 }
             }
         });
@@ -263,18 +244,16 @@ mod playcount_event {
         let backend = manifest["backend"].as_str().expect("manifest backend field");
         let source = read_entry_source(dir, backend).expect("playcount backend entrypoint readable");
 
-        let bus = RpcBus::new();
         let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
         let (ready_tx, ready_rx) = mpsc::channel::<(u64, ())>();
-        spawn_app(cx, bus.clone(), source, ready_tx, cmd_rx);
+        spawn_app(cx, source, ready_tx, cmd_rx);
         let (boot_cx, ()) = ready_rx.recv().expect("driver thread booted");
         (
-            RpcClient::new(bus, Arc::new(TestDriver { tx: cmd_tx }), boot_cx),
+            RpcClient::new(Arc::new(TestDriver { tx: cmd_tx }), boot_cx),
             db,
             db_dir,
         )
     }
-
     /// One `music:play` dispatch, exactly as the host emits it:
     /// `RpcClient::emit_event` → the bind-table's `event:music:play` key.
     fn fire_play(client: &RpcClient, payload: &str) {

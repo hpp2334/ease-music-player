@@ -10,29 +10,16 @@
 //! ([`PluginBackendCx`]), and the host rows read it back from the instance —
 //! no process-wide singleton whose entry could outlive a destroyed backend.
 //!
-//! The bridge exposes the `ease` host pkg to rut modules — the `ease`
-//! rows (the OLD surface, alive until phase 5 so un-migrated plugins
-//! keep compiling):
-//!
-//! - `ease.db` / `ease.secret` / `ease.oauth` / `ease.themes` /
-//!   `ease.context` / `ease.library` — the host services (KV, secrets,
-//!   OAuth flows, theme colors, storage lifecycle, read-only library).
-//! - `ease.rpc` — the plugin RPC bus ([`ease_tur_rpc::TurRpcBusPlugin`]:
-//!   `register` / `subscribe_event` / `take_request`) plus `call` (a view
-//!   reaching its own backend).
-//! - `ease.crypto` / `ease.xml` / `ease.net` / `ease.time` — the utility
-//!   surface that replaced the old npm plugin deps (md5 / base64 / SHA-2 /
-//!   HMAC / UUID, XML, full-featured HTTP, HTTP dates).
-//!
-//! Phase 2 of the plugin epoch ADDED the new surface beside it (never
-//! replacing — the migration is phase 5):
+//! The host surface is the phase-2 `emp` SDK (phase 5 deleted the old
+//! `tur_host::ease` rows — there is one surface):
 //!
 //! - `emp_host` + `emp` ([`emp`]) — the SDK: the host rows carry a
 //!   leading handle opaque (the host-minted [`emp::PluginHandle`],
 //!   delivered to `entry fn start(cx: opaque)` through the phase-1
 //!   boot lane), and the `emp` classes (`Db` / `Secret` / `OAuth` /
-//!   `Theme` / `Context` / `Library`) wrap them one forwarded call per
-//!   member.
+//!   `Theme` / `Context` / `Library` / `Rpc`) wrap them one forwarded
+//!   call per member. The rpc bind table (`rpc.bind` / `rpc.handler`,
+//!   bodies in `ease-tur-rpc`) is part of the one `emp_host` mount.
 //! - `crypto` / `xml` / `net` / `time` ([`third`]) — the identity-free
 //!   utilities as standard rut pkg folders (`plugins/3rd/`), offered
 //!   into the compile session by `include_str!` (one source of truth
@@ -41,12 +28,11 @@
 //! Rows are **typed** (`rut_core::types`): scalars cross as str/u64/i64/
 //! f64/bool, binary as bytes, composites as JSON strings, host objects as
 //! opaques. Per-instance identity: the host stamps a [`PluginId`] (and for
-//! edit-mode views a [`PluginInstance`]) into the engine's `instance_data`
-//! at build time (`TurAppBuilder::instance_data`) — the OLD rows resolve
-//! the calling plugin through it, never from a rut argument; the `emp_host`
-//! rows resolve it through the decoded handle instead (same stamps, minted
-//! into a [`emp::PluginHandle`] at build time). Both are script-
-//! unforgeable.
+//! edit-mode views a [`PluginInstance`]) plus the minted [`emp::PluginHandle`]
+//! into the engine's `instance_data` at build time
+//! (`TurAppBuilder::instance_data`) — the `emp_host` rows decode the
+//! calling plugin from the handle against the instance's own stamp, never
+//! from a rut argument. Both stamps are script-unforgeable.
 //!
 //! There is no JS in the plugin system: modules are rut sources loaded by
 //! opaque `ModuleSourceRegistry` handles, and every host entry point is a
@@ -61,15 +47,12 @@ pub mod plugin;
 pub mod plugin_jni;
 pub mod service_rows;
 pub mod third;
-pub mod util_rows;
 
 pub use plugin::EaseMusicPlugin;
 
-use ease_tur_rpc::RpcBusCell;
-
 /// Per-instance plugin identity, stamped into the tur engine's
 /// `instance_data` slot at build time (via `TurAppBuilder::instance_data`)
-/// and read back by `ease:*` rows to resolve the calling plugin.
+/// and minted into the [`emp::PluginHandle`] the `emp_host` rows decode.
 ///
 /// The wrapped `String` is the plugin's stable identifier (e.g.
 /// `"com.ease.onedrive"`). The field is private so external code must go
@@ -101,7 +84,7 @@ impl AsRef<str> for PluginId {
 ///
 /// `None` for create-mode setup views (no storage row yet) and for the
 /// headless service instance (which serves *all* instances, not one).
-/// The `ease.context.storage_id()` row surfaces this to rut (`?str`:
+/// The `emp` `Context.storage_id()` row surfaces this to rut (`?str`:
 /// `nil` = create, a real id = edit).
 #[derive(Debug, Clone)]
 pub struct PluginInstance(pub Option<String>);
@@ -118,7 +101,7 @@ pub struct PluginInstance(pub Option<String>);
 pub struct PluginBackendCx(pub ease_client_backend::ctx::BackendContext);
 
 /// Resolve the [`ease_client_backend::ctx::BackendContext`] bound to the
-/// calling plugin instance ([`PluginBackendCx`]). `ns` names the `ease`
+/// calling plugin instance ([`PluginBackendCx`]). `ns` names the `emp`
 /// row family for the error message. Fails loudly when the engine was
 /// built without a backend binding.
 pub(crate) fn backend_cx(
@@ -133,35 +116,9 @@ pub(crate) fn backend_cx(
             rut_vm::Trap::new(
                 rut_vm::TrapKind::Invalid,
                 format!(
-                    "ease:{ns}: backend context not bound to this instance \
+                    "emp:{ns}: backend context not bound to this instance \
                      (engine built without a backend handle)"
                 ),
             )
         })
-}
-
-/// Resolve the calling plugin's [`PluginId`] (the instance-data slot).
-pub(crate) fn plugin_id(
-    ns: &str,
-    handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
-) -> Result<PluginId, rut_vm::Trap> {
-    handles.inst.data::<PluginId>().ok_or_else(|| {
-        rut_vm::Trap::new(
-            rut_vm::TrapKind::Invalid,
-            format!("ease:{ns}: no plugin context bound to this instance"),
-        )
-    })
-}
-
-/// Resolve the per-instance RPC bus cell (see [`RpcBusCell`]) — stamped by
-/// the embedder for headless backend instances; views fall back to the
-/// per-instance cell [`ease_tur_rpc::TurRpcBusPlugin`] mints at register.
-pub(crate) fn rpc_bus_cell(
-    handles: &std::rc::Rc<tur_engine::core::rut_runtime::RutHandles>,
-) -> RpcBusCell {
-    handles
-        .inst
-        .data::<RpcBusCell>()
-        .or_else(|| handles.inst.plugin_state::<RpcBusCell>().map(|c| (*c).clone()))
-        .expect("ease:rpc: no RpcBusCell in instance data or plugin state")
 }

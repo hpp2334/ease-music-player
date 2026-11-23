@@ -1,9 +1,7 @@
 //! `crypto_host` bodies — OS entropy, UUID v4, MD5, Base64, SHA-256 +
-//! HMAC-SHA-256 (the WebDAV/S3 support surface that replaced the old
-//! npm deps `js-md5` / `@noble/hashes` / `uuid`). Identity-free: no
-//! handle, no instance slot. The same bodies the old
-//! `tur_host::ease::crypto` rows bind (D5) — one body source, two
-//! namespaces.
+//! HMAC-SHA-256 (the WebDAV/S3 support surface that replaced the JS
+//! epoch's npm deps `js-md5` / `@noble/hashes` / `uuid`). Identity-free:
+//! no handle, no instance slot.
 
 use base64::Engine as _;
 use rut_vm::TrapKind;
@@ -47,7 +45,7 @@ pub(crate) fn pkg() -> rut_vm::interp::HostPkg {
     pkg
 }
 
-// ---- the shared bodies (the old ease rows call these too) ------------
+// ---- the shared bodies ----------------------------------------------
 
 pub(crate) fn random_bytes_body(n: u64) -> Result<Vec<u8>, rut_vm::Trap> {
     let n = n.min(1 << 20) as usize;

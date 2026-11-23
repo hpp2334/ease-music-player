@@ -1,16 +1,16 @@
-//! The phase-3 bind-table contract, end-to-end through `emp`'s `Rpc`
-//! class: the fixture (the plan's exact shape — `start(cx)` + `rpc.bind`
-//! + plain fns + the two dispatch entries) compiles and boots against the
-//! full app plugin set, and `RpcClient`'s new dispatch lane serves it —
-//! str ops, raw-bytes ops, the nil "not mine" arm, the trap prefix law,
-//! the event fan-out — with the OLD stash contract's fixtures
-//! (`storage_dispatch.rs` / `playcount_event.rs`) still green beside it.
+//! The bind-table contract, end-to-end through `emp`'s `Rpc` class: the
+//! fixture (the plan's exact shape — `start(cx)` + `rpc.bind` + plain fns
+//! + the two dispatch entries) compiles and boots against the full app
+//! plugin set, and `RpcClient`'s dispatch lane serves it — str ops,
+//! raw-bytes ops, the nil "not mine" arm, the trap prefix law, the event
+//! fan-out. Phase 5 made this the only contract.
 //!
 //! The storage ops additionally ride [`JsStorageBackend`] — the full
 //! chunked-pull chain over the bind-table lane. The identity rides the
 //! host-minted `PluginHandle` (stamped beside its `RpcIdentity` view);
-//! `extract_rpc`'s boot gate accepts the entries as a new-style backend's
-//! boot proof (no start answer exists on this contract).
+//! `extract_rpc`'s boot gate REQUIRES the dispatch entries (the bind
+//! table is a backend's only boot proof — no start answer exists on this
+//! contract).
 
 #[cfg(test)]
 mod emp_rpc {
@@ -19,10 +19,10 @@ mod emp_rpc {
     use ease_client_backend::ctx::BackendContext;
     use ease_js_storage::JsStorageBackend;
     use ease_remote_storage::StorageBackend;
-    use ease_tur_rpc::{DispatchAnswer, RpcBus, RpcClient, RpcError, RutDriver, TurRpcBusPlugin};
+    use ease_tur_rpc::{DispatchAnswer, RpcClient, RpcError, RutDriver, TurRpcBindPlugin};
     use std::sync::mpsc;
     use std::sync::Arc;
-    use tur_engine::core::plugin::Plugin;
+    
     use tur_engine::core::scheduler::WorkerPoolHandle;
     use tur_engine::{TurStdPlugin, TurRuntime};
     use tur_integration_tests::{MutexFixedClock, TestSchedulerDriver};
@@ -45,24 +45,9 @@ mod emp_rpc {
             Vec<u8>,
             mpsc::SyncSender<Result<DispatchAnswer, String>>,
         ),
-        Token(mpsc::SyncSender<u64>),
     }
 
     impl RutDriver for TestDriver {
-        fn call_entry_str(&self, _name: &str, _cx: u64) -> Result<String, String> {
-            Err("the bind-table fixture serves no stash-bus entries".to_string())
-        }
-
-        fn call_entry(&self, _name: &str, _cx: u64) -> Result<(), String> {
-            Err("the bind-table fixture serves no stash-bus entries".to_string())
-        }
-
-        fn start_token(&self) -> u64 {
-            let (rtx, rrx) = mpsc::sync_channel(1);
-            self.tx.send(Cmd::Token(rtx)).ok();
-            rrx.recv().unwrap_or(0)
-        }
-
         fn call_dispatch_str(
             &self,
             name: &str,
@@ -128,10 +113,8 @@ mod emp_rpc {
             .block_on(cx.database_server().init(db_dir.to_string_lossy().to_string()))
             .expect("db init");
 
-        let bus = RpcBus::new();
         let (tx, rx) = mpsc::channel::<Cmd>();
         let (ready_tx, ready_rx) = mpsc::channel::<(u64, ())>();
-        let bus_for_plugin = Some(bus.clone());
         std::thread::spawn(move || {
             let driver = TestSchedulerDriver::new();
             let pool = WorkerPoolHandle::new("test", 2);
@@ -142,7 +125,7 @@ mod emp_rpc {
                 .clock(Arc::new(MutexFixedClock::new(0)))
                 .worker_pool(pool.clone())
                 .plugin(TurStdPlugin)
-                .plugin(TurRpcBusPlugin::new(bus_for_plugin))
+                .plugin(TurRpcBindPlugin::new())
                 .plugin(EaseMusicPlugin::new(cx))
                 .build()
                 .expect("runtime build");
@@ -183,14 +166,11 @@ mod emp_rpc {
                             .map_err(|e| e.to_string()),
                         );
                     }
-                    Cmd::Token(rtx) => {
-                        let _ = rtx.send(futures::executor::block_on(app.rut_start_answer()));
-                    }
                 }
             }
         });
         let (boot_cx, ()) = ready_rx.recv().expect("driver thread booted");
-        RpcClient::new(bus, Arc::new(TestDriver { tx }), boot_cx)
+        RpcClient::new(Arc::new(TestDriver { tx }), boot_cx)
     }
 
     fn dispatch_answer(a: tur_engine::RutEntryAnswer) -> DispatchAnswer {

@@ -272,16 +272,15 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_TurNative
 /// Spawns an isolated **renderer-less** VIEW instance for the given
 /// `pluginId` — the INITIALIZE half of tur's two-phase lifecycle (#215).
 /// The plugin id is stamped into the instance's per-instance data slot at
-/// build time (via `TurAppBuilder::instance_data`) so `ease:*` rows can
-/// resolve the calling plugin — without trusting a rut argument. No
+/// build time (via `TurAppBuilder::instance_data`) so the `emp_host` rows
+/// can resolve the calling plugin — without trusting a rut argument. No
 /// surface is involved: the Kotlin host ATTACHES one later via
 /// [`Java_..._TurNative_attachInstance`] (`surfaceCreated`).
 ///
 /// The instance is assigned the shared `ease-plugin-view` worker pool
 /// (filed at `createRuntime`). Headless backend instances are NOT spawned
 /// through this symbol — the backend crate's `spawn_headless` calls
-/// `ops::create_instance` directly (it additionally stamps the per-instance
-/// RPC bus and picks the backend pool).
+/// `ops::create_instance` directly (it additionally picks the backend pool).
 ///
 /// `instance` is the storage's `plugin_storage_id` for edit-mode views
 /// (stamped as `PluginInstance::Some`); pass an empty string for
@@ -441,7 +440,7 @@ fn backend_cx_for(
 /// headless backends spawn Rust-side (`PluginEngineHost::spawn_headless`).
 /// Allocates the two capped shared worker pools and files them under the
 /// returned runtime handle. `backendHandle` binds the engine to a specific
-/// backend instance — the `ease:*` rows of every spawned instance resolve
+/// backend instance — the `emp_host` rows of every spawned instance resolve
 /// their DB/KV/RPC services through it (see
 /// [`crate::plugin_runtime::PluginBackendCx`]); an invalid handle fails the
 /// call (returns 0).
@@ -452,14 +451,14 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
     context: tur_android::JObject,
     backend_handle: tur_android::jlong,
 ) -> tur_android::jlong {
-    use ease_tur_rpc::TurRpcBusPlugin;
+    use ease_tur_rpc::TurRpcBindPlugin;
     use tur_animation::TurAnimationPlugin;
     use tur_engine::TurStdPlugin;
 
     use crate::plugin_runtime::EaseMusicPlugin;
 
     // Bind this engine (and every instance spawned from it) to the backend
-    // instance the Kotlin host named. Without it the `ease:*` rows would
+    // instance the Kotlin host named. Without it the `emp_host` rows would
     // be unbound, so an unknown handle is a hard failure.
     let Some(ease_cx) = backend_cx_for(backend_handle, "createRuntime") else {
         return 0;
@@ -493,7 +492,9 @@ pub extern "system" fn Java_com_kutedev_easemusicplayer_turintegration_EasePlugi
             .worker_pool(view)
             .plugin(TurStdPlugin)
             .plugin(TurAnimationPlugin)
-            .plugin(TurRpcBusPlugin::new(None))
+            // The rpc bind-table rows + their per-instance sealed-handler
+            // table (the same stamps `emp_host`'s bodies resolve).
+            .plugin(TurRpcBindPlugin::new())
             .plugin(EaseMusicPlugin::new(ease_cx))
     });
     if runtime != 0 {

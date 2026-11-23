@@ -14,9 +14,8 @@
 //! `time`), and the boot's `verify_against` traps any drift between
 //! the two.
 //!
-//! Installer shape ([`install`], a `RutPkgExt` beside the old
-//! `util_rows::install` — the old `tur_host::ease` rows stay alive
-//! until phase 5, D5): the offered mounts push in BOTH phases (the
+//! Installer shape ([`install`], a `RutPkgExt` pushed by `EaseMusicPlugin`
+//! beside `emp::install`): the offered mounts push in BOTH phases (the
 //! compile probe needs the surfaces), the body pkgs only at boot —
 //! one owner per host pkg spec (`crypto_host` et al install exactly
 //! once).

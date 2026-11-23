@@ -1,39 +1,49 @@
-// parse.rut — the `lyric:parse` op: the bound handler decodes its OWN
-// args (raw str — the op owns its schema), base64-decodes the content
-// (`crypto::b64_decode`, the 3rd lib) and hands the UTF-8 text to the
-// parser chosen by `parserId` (the manifest's two ids; the file-name
-// extension is the fallback key for an unknown id, the old dispatch's
-// own key). The answer is the RAW payload (`{lines, metadata}`, built
-// in result.rut) or nil = "not mine"; a malformed request is the
-// plugin's own failure — a trap the host's envelope turns into the
-// error arm (logged, next parser tried), exactly like the thrown
-// decode error did in the JS backend.
+// parse.rut — the `lyric:parse` op on the BINARY lane: the bound handler
+// decodes its OWN framing (raw bytes — the op owns its schema):
+//
+//   <JSON header>\n<content bytes>
+//
+// The header is one compact JSON object (`parserId`, `fileName` — its
+// string values never contain a literal newline, so the FIRST \n byte
+// ends it); the content is the raw lyric bytes. The whole payload is
+// decoded lossily as UTF-8 (`tur_host::clipboard::decode_utf8`) and the
+// split rides STR ops — no bytes slicing anywhere (lyric formats are
+// text). The answer is the RAW payload (`{lines, metadata}`, built in
+// result.rut, encoded UTF-8 back over `encode_utf8`) or nil = "not
+// mine"; a malformed request is the plugin's own failure — a trap the
+// host's envelope turns into the error arm (logged, next parser tried),
+// exactly like the thrown decode error did in the JS backend.
 
-use crypto::{ b64_decode };
 use json::{ JsonReader };
 use lrc::{ parse_lrc };
 use result::{ LyricResult, write_result };
 use srt::{ parse_srt };
-use text::{ file_ext_lower, split_lines, strip_bom };
-use tur_host::clipboard::{ decode_utf8 };
+use text::{ file_ext_lower, index_of, split_lines, strip_bom };
+use tur_host::clipboard::{ decode_utf8, encode_utf8 };
 use vtt::{ parse_vtt };
 
-// The args fields this op reads; unknown keys (`pluginId`, `size`) are
-// skipped, never a failure.
+// The header fields this op reads; unknown keys (`size`, …) are skipped,
+// never a failure.
 struct Req {
     parser_id: str,
     file_name: str,
-    content_base64: str,
 }
 
-pub fn lyric_parse(args: str) -> ?str {
-    let req = decode_request(args);
+pub fn lyric_parse_bin(args: bytes) -> ?bytes {
+    let all = decode_utf8(args);
+    // The first \n ends the header; the rest is the content text. An
+    // unframed payload (no newline) is the host's own bug — a trap.
+    let nl = index_of(all, 0x0A, 0);
+    if (nl < 0) {
+        panic("lyric:parse: unframed payload (missing header newline)");
+    }
+    let header = all.slice(0, nl);
+    let text = all.slice(nl + 1, all.len());
+    let req = decode_request(header);
     if (req == nil) {
-        panic("lyric:parse: malformed request");
+        panic("lyric:parse: malformed header");
     }
     let r: Req = req;
-    let bytes = b64_decode(r.content_base64);
-    let text = decode_utf8(bytes);
     let parsed: ?LyricResult = dispatch_parser(r.parser_id, r.file_name, text);
     if (parsed == nil) {
         // Unknown parser/extension or no usable content — "not mine",
@@ -41,7 +51,7 @@ pub fn lyric_parse(args: str) -> ?str {
         return nil;
     }
     let res: LyricResult = parsed;
-    return write_result(res);
+    return encode_utf8(write_result(res));
 }
 
 // Pick the lexer: the manifest's parserId first ("lrc" / "subtitle"),
@@ -90,13 +100,12 @@ fn has_vtt_header(text: str) -> bool {
     return r0.starts_with(0, "WEBVTT");
 }
 
-// Decode the raw args object — only the fields this op reads; unknown
+// Decode the raw header object — only the fields this op reads; unknown
 // keys are skipped, never a failure. Nil on any malformed shape.
-fn decode_request(args: str) -> ?Req {
-    let r = JsonReader::of(args);
+fn decode_request(header: str) -> ?Req {
+    let r = JsonReader::of(header);
     let parser_id = "";
     let file_name = "";
-    let content = "";
     r.begin_object();
     while (r.more()) {
         let k = r.next_key();
@@ -105,8 +114,6 @@ fn decode_request(args: str) -> ?Req {
             parser_id = r.read_str();
         } else if (k == "fileName") {
             file_name = r.read_str();
-        } else if (k == "contentBase64") {
-            content = r.read_str();
         } else {
             r.skip_value();
         }
@@ -114,5 +121,5 @@ fn decode_request(args: str) -> ?Req {
     }
     r.end_object();
     if (r.failed()) { return nil; }
-    return Req { parser_id: parser_id, file_name: file_name, content_base64: content };
+    return Req { parser_id: parser_id, file_name: file_name };
 }
