@@ -1,0 +1,189 @@
+// backend/url.rut — the percent-encode/decode + server-address splitting
+// (the TS `encodePath` / `decodeURIComponent` / URL join, all pure scans).
+// `AddrParts` is the shared `{origin, base_path}` record every request
+// builder starts from.
+
+use pouch::{ Vec, freeze_bytes };
+use strbuild::{ StringBuilder };
+use strutil::{ byte_hex, ends_with, find_from, hex_digit_val, starts_with_ci };
+use tur_host::clipboard::{ decode_utf8 };
+
+pub struct AddrParts {
+    origin: str,
+    /// Base path of the server root, starting (not ending) with '/'.
+    base_path: str,
+}
+
+/// Percent-encode a path, preserving existing `%XX` escapes and the RFC 3986
+/// path-safe characters (the TS `encodePath`; encodeURIComponent's
+/// uppercase-hex UTF-8 escaping for everything else).
+pub fn encode_path(p: str) -> str {
+    let n = p.len();
+    let b = StringBuilder::with_cap(n * 3 + 1);
+    let i = 0;
+    while (i < n) {
+        let c = p.code_at(i);
+        let keep = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+            || c == 45 || c == 46 || c == 95 || c == 126 || c == 33 || c == 36 || c == 38
+            || c == 39 || c == 40 || c == 41 || c == 42 || c == 43 || c == 44 || c == 59
+            || c == 61 || c == 58 || c == 64 || c == 37 || c == 47;
+        if (keep) {
+            b.append(p.slice(i, i + 1));
+        } else if (c < 0x80) {
+            b.append(f"%{byte_hex(c as u64)}");
+        } else if (c < 0x800) {
+            b.append(f"%{byte_hex((c >> 6) as u64 | 192)}");
+            b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+        } else if (c < 0x10000) {
+            b.append(f"%{byte_hex((c >> 12) as u64 | 224)}");
+            b.append(f"%{byte_hex(((c >> 6) & 63) as u64 | 128)}");
+            b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+        } else {
+            b.append(f"%{byte_hex((c >> 18) as u64 | 240)}");
+            b.append(f"%{byte_hex(((c >> 12) & 63) as u64 | 128)}");
+            b.append(f"%{byte_hex(((c >> 6) & 63) as u64 | 128)}");
+            b.append(f"%{byte_hex((c & 63) as u64 | 128)}");
+        }
+        i += 1;
+    }
+    return b.build();
+}
+
+/// Percent-DECODE (the `decodeURIComponent` shape — paths only, `+` is not
+/// a space). Invalid escapes pass through; malformed UTF-8 degrades lossily
+/// (the TS threw and kept the raw text — close enough for display names).
+pub fn url_decode(s: str) -> str {
+    let n = s.len();
+    let bytes = Vec<u8>::new();
+    let i = 0;
+    while (i < n) {
+        let c = s.code_at(i);
+        if (c == 37 && i + 2 < n) {
+            let hi = hex_digit_val(s.code_at(i + 1));
+            let lo = hex_digit_val(s.code_at(i + 2));
+            if (hi >= 0 && lo >= 0) {
+                bytes.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        // re-encode the codepoint as UTF-8 bytes
+        if (c < 0x80) {
+            bytes.push(c as u8);
+        } else if (c < 0x800) {
+            bytes.push((c >> 6) as u8 | 192);
+            bytes.push((c & 63) as u8 | 128);
+        } else if (c < 0x10000) {
+            bytes.push((c >> 12) as u8 | 224);
+            bytes.push(((c >> 6) & 63) as u8 | 128);
+            bytes.push((c & 63) as u8 | 128);
+        } else {
+            bytes.push((c >> 18) as u8 | 240);
+            bytes.push(((c >> 12) & 63) as u8 | 128);
+            bytes.push(((c >> 6) & 63) as u8 | 128);
+            bytes.push((c & 63) as u8 | 128);
+        }
+        i += 1;
+    }
+    return decode_utf8(freeze_bytes(bytes));
+}
+
+pub fn rstrip_slashes(s: str) -> str {
+    // Strip ALL trailing slashes — a root-only address (`http://host/`)
+    // must yield an empty base path, or `build_url`'s join would double
+    // the slash (`//music/`), which strict routers 301-redirect.
+    let n = s.len();
+    let b = n;
+    while (b > 0 && s.code_at(b - 1) == 47) {
+        b -= 1;
+    }
+    return s.slice(0, b);
+}
+
+pub fn lstrip_slashes(s: str) -> str {
+    let n = s.len();
+    let a = 0;
+    while (a < n && s.code_at(a) == 47) {
+        a += 1;
+    }
+    return s.slice(a, n);
+}
+
+pub fn split_addr(addr: str) -> ?AddrParts {
+    let n = addr.len();
+    // find "://"
+    let colon = find_from(addr, 0, 58);
+    if (colon <= 0) {
+        return nil;
+    }
+    if (colon + 2 >= n || addr.code_at(colon + 1) != 47 || addr.code_at(colon + 2) != 47) {
+        return nil;
+    }
+    let slash = find_from(addr, colon + 3, 47);
+    if (slash == -1) {
+        return AddrParts { origin: addr, base_path: "/" };
+    }
+    return AddrParts { origin: addr.slice(0, slash), base_path: addr.slice(slash, n) };
+}
+
+/// Build the request URL for a WebDAV path (dirs get a trailing slash).
+pub fn build_url(addr: str, path: str, is_dir: bool) -> ?str {
+    let parts = split_addr(addr);
+    if (parts == nil) {
+        return nil;
+    }
+    let p: AddrParts = parts;
+    let base = rstrip_slashes(p.base_path);
+    let rest = lstrip_slashes(path);
+    let joined = f"{base}/{rest}";
+    if (is_dir && !ends_with(joined, "/")) {
+        joined = f"{joined}/";
+    }
+    return f"{p.origin}{encode_path(joined)}";
+}
+
+/// Map a PROPFIND `<href>` back to a plugin path (percent-encoded,
+/// base-path stripped). Handles path-relative and absolute-URL hrefs.
+pub fn href_to_path(addr: str, href: str) -> str {
+    let parts = split_addr(addr);
+    if (parts == nil) {
+        return "/";
+    }
+    let p: AddrParts = parts;
+    let h = href;
+    if (starts_with_ci(h, 0, "http://") || starts_with_ci(h, 0, "https://")) {
+        let colon = find_from(h, 0, 58);
+        let slash = find_from(h, colon + 3, 47);
+        if (slash == -1) {
+            h = "/";
+        } else {
+            h = h.slice(slash, h.len());
+        }
+    }
+    // case-sensitive prefix strip of the base path (as sent)
+    let bl = p.base_path.len();
+    if (bl > 1 && h.len() >= bl && h.slice(0, bl) == p.base_path) {
+        h = h.slice(bl, h.len());
+    }
+    if (!starts_with_ci(h, 0, "/")) {
+        h = f"/{h}";
+    }
+    return h;
+}
+
+/// The last `/`-separated segment (the TS `path.split("/").pop()`).
+pub fn last_segment(path: str) -> str {
+    let n = path.len();
+    let last = -1;
+    let i = 0;
+    while (i < n) {
+        if (path.code_at(i) == 47) {
+            last = i;
+        }
+        i += 1;
+    }
+    if (last == -1) {
+        return path;
+    }
+    return path.slice(last + 1, n);
+}

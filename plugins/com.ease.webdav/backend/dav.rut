@@ -1,0 +1,309 @@
+// backend/dav.rut — the HTTP core: one blocking round trip through
+// `net::fetch` (the 3rd lib's entry-fn-safe one-shot; the reply envelope is
+// one JSON doc decoded here), the challenge/retry flow around it
+// (preemptive Basic when credentials exist, or the cached Digest challenge;
+// one 401 retry answering the server's `WWW-Authenticate`), and the error
+// mapping — `UNAUTHORIZED` / `TIMEOUT` heads are the host's prefix law.
+
+use auth::{ authorization_for, cache_challenge, challenge_for, next_nc };
+use config::{ Creds };
+use crypto::{ b64_decode };
+use json::{ JsonReader, JsonWriter };
+use model::{ Ctx };
+use net::{ fetch };
+use pouch::{ Vec, freeze_bytes };
+use strutil::{ contains_ci, lower, trim };
+
+/// `<?xml?><D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>` — the TS
+/// request body, byte for byte.
+let PROPFIND_BODY: str = "<?xml version=\"1.0\" ?>\n<D:propfind xmlns:D=\"DAV:\">\n  <D:allprop/>\n</D:propfind>";
+
+/// The request spec dav_request turns into headers/body.
+pub struct ReqSpec {
+    method: str,
+    url: str,
+    /// Request path as sent (the Digest `uri` parameter).
+    uri: str,
+    /// PROPFIND: Depth 1 + the allprop body.
+    propfind: bool,
+    /// Raw `Range` header value (e.g. "bytes=0-262143"), or nil.
+    range: ?str,
+}
+
+/// The settled response (or the marked failure).
+pub struct DavResp {
+    failed: bool,
+    err: str,
+    status: u64,
+    status_text: str,
+    /// JSON `{name: value}` with lowercased names (the net row's shape).
+    headers: str,
+    body: bytes,
+    /// The Authorization value the successful attempt used (session carry).
+    auth_used: ?str,
+}
+
+fn empty_bytes() -> bytes {
+    let v = Vec<u8>::new();
+    return freeze_bytes(v);
+}
+
+/// Transport failures: `timeout`-ish messages get the host's TIMEOUT prefix,
+/// everything else passes through (the TS `markedError`).
+fn marked_transport_error(msg: str) -> str {
+    if (contains_ci(msg, "timeout") || contains_ci(msg, "timed out")) {
+        return f"TIMEOUT: {msg}";
+    }
+    return msg;
+}
+
+fn request_opts(spec: ReqSpec, auth: ?str) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("url");
+    w.write_str(spec.url);
+    w.key("method");
+    w.write_str(spec.method);
+    w.key("headers");
+    w.begin_object();
+    if (spec.propfind) {
+        w.key("Depth");
+        w.write_str("1");
+        w.key("Content-Type");
+        w.write_str("application/xml");
+        w.key("Accept");
+        w.write_str("application/xml");
+    }
+    if (spec.range != nil) {
+        let rg: str = spec.range;
+        w.key("Range");
+        w.write_str(rg);
+    }
+    if (auth != nil) {
+        let a: str = auth;
+        w.key("Authorization");
+        w.write_str(a);
+    }
+    w.end_object();
+    if (spec.propfind) {
+        w.key("body");
+        w.begin_object();
+        w.key("text");
+        w.write_str(PROPFIND_BODY);
+        w.end_object();
+    }
+    w.end_object();
+    return w.finish();
+}
+
+/// Read one header out of the net reply's `{name: value}` JSON
+/// (names arrive lowercased).
+pub fn header_of(headers_json: str, name: str) -> ?str {
+    let r = JsonReader::of(headers_json);
+    r.begin_object();
+    let found: ?str = nil;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        if (lower(k) == name) {
+            let v = r.read_str();
+            if (r.failed()) {
+                return nil;
+            }
+            found = v;
+        } else {
+            r.skip_value();
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    return found;
+}
+
+/// The reply envelope's `headers` member as one `{name: value}` JSON
+/// string (names arrive lowercased; copied key-by-key so the envelope
+/// walk keeps its cursor — rut has no map to park it in).
+fn copy_headers(r: JsonReader) -> str {
+    let w = JsonWriter::new();
+    w.begin_object();
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            break;
+        }
+        let v = r.read_str();
+        if (r.failed()) {
+            break;
+        }
+        let s: str = v;
+        w.key(k);
+        w.write_str(s);
+    }
+    if (!r.failed()) {
+        r.end_object();
+    }
+    w.end_object();
+    return w.finish();
+}
+
+/// Decode one `net::fetch` reply envelope (`{"status": u64,
+/// "statusText": str, "headers": {...}, "body": <base64>, "error": str}`)
+/// into the DavResp columns (`auth_used` is stamped by the caller). A set
+/// `error` — status 0, empty body — is the transport-failure lane;
+/// `timeout`-ish messages get the host's TIMEOUT prefix.
+fn decode_sync_reply(reply: str) -> ?DavResp {
+    let r = JsonReader::of(reply);
+    let status: u64 = 0;
+    let status_text: ?str = nil;
+    let headers_json = "{}";
+    let body_b64: ?str = nil;
+    let err: ?str = nil;
+    r.begin_object();
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "status" -> { status = r.read_i64() as u64; },
+            "statusText" -> { status_text = r.read_str(); },
+            "headers" -> { headers_json = copy_headers(r); },
+            "body" -> { body_b64 = r.read_str(); },
+            "error" -> { err = r.read_str(); },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    if (err != nil) {
+        let e: str = err;
+        if (e != "") {
+            return DavResp {
+                failed: true,
+                err: marked_transport_error(e),
+                status: 0,
+                status_text: "",
+                headers: "{}",
+                body: empty_bytes(),
+                auth_used: nil,
+            };
+        }
+    }
+    let bt = "";
+    if (body_b64 != nil) {
+        bt = body_b64;
+    }
+    let st = "";
+    if (status_text != nil) {
+        st = status_text;
+    }
+    return DavResp {
+        failed: false,
+        err: "",
+        status: status,
+        status_text: st,
+        headers: headers_json,
+        body: b64_decode(bt),
+        auth_used: nil,
+    };
+}
+
+/// One blocking round trip: `net::fetch` + reply-envelope decode, the
+/// given auth stamped into the answer. Nil on an unparsable reply.
+fn sync_round_trip(opts: str, auth: ?str) -> ?DavResp {
+    let resp = decode_sync_reply(fetch(opts));
+    if (resp == nil) {
+        return nil;
+    }
+    let d: DavResp = resp;
+    d.auth_used = auth;
+    return d;
+}
+
+pub fn resp_failed(err: str, auth: ?str) -> DavResp {
+    return DavResp {
+        failed: true,
+        err: err,
+        status: 0,
+        status_text: "",
+        headers: "{}",
+        body: empty_bytes(),
+        auth_used: auth,
+    };
+}
+
+/// One attempt: send with the given scheme (nil = unauthenticated) through
+/// the blocking `net::fetch`; the reply envelope decodes into the DavResp
+/// columns (transport failures ride the reply's `error`).
+pub fn dav_attempt(spec: ReqSpec, creds: Creds, scheme: ?str, c: Ctx) -> DavResp {
+    let auth: ?str = nil;
+    if (scheme != nil && !creds.is_anonymous) {
+        let s: str = scheme;
+        auth = authorization_for(s, creds.username, creds.password, spec.uri, spec.method, next_nc(c, creds.addr));
+    }
+    let resp = sync_round_trip(request_opts(spec, auth), auth);
+    if (resp == nil) {
+        return resp_failed("webdav: unparsable net reply", auth);
+    }
+    let d: DavResp = resp;
+    return d;
+}
+
+/// Perform a single-shot WebDAV request with the challenge/retry flow:
+/// preemptive Basic when credentials exist (or the cached Digest challenge),
+/// one 401 retry answering the server's `WWW-Authenticate` (Basic or
+/// Digest).
+pub fn dav_request(spec: ReqSpec, creds: Creds, c: Ctx) -> DavResp {
+    let cached = challenge_for(c, creds.addr);
+    let first: ?str = cached;
+    if (first == nil && !creds.is_anonymous && creds.username != "") {
+        first = "Basic";
+    }
+    let r = dav_attempt(spec, creds, first, c);
+    if (!r.failed && r.status == 401 && !creds.is_anonymous) {
+        let www = header_of(r.headers, "www-authenticate");
+        if (www != nil) {
+            let challenge: str = www;
+            cache_challenge(c, creds.addr, challenge);
+            let auth = authorization_for(challenge, creds.username, creds.password, spec.uri, spec.method, next_nc(c, creds.addr));
+            if (auth != nil) {
+                let resp = sync_round_trip(request_opts(spec, auth), auth);
+                if (resp == nil) {
+                    return resp_failed("webdav: unparsable net reply", auth);
+                }
+                let d: DavResp = resp;
+                r = d;
+            }
+        }
+    }
+    if (r.failed) {
+        return r;
+    }
+    if (r.status >= 400) {
+        let st = r.status_text;
+        if (r.status == 401) {
+            let www = header_of(r.headers, "www-authenticate");
+            let detail = st;
+            if (www != nil) {
+                let w: str = www;
+                detail = f"{st} {w}";
+            }
+            r.failed = true;
+            r.err = f"UNAUTHORIZED: HTTP 401: {trim(detail)}";
+        } else {
+            r.failed = true;
+            r.err = f"HTTP {r.status}: {st}";
+        }
+    }
+    return r;
+}

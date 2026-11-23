@@ -1,0 +1,97 @@
+// backend/listing.rut — `storage:list`'s implementation: the Depth-1
+// PROPFIND (via `dav_request`), the `xml::parse` decode + row walk
+// (props.rut), then the sort (the row prefix does the ordering — dirs
+// first, then by path) and the JSON array render.
+
+use config::{ Creds };
+use dav::{ ReqSpec, dav_request };
+use model::{ Ctx };
+use props::{ ListCx, walk_multistatus };
+use pouch::{ Vec };
+use strbuild::{ StringBuilder };
+use strutil::{ ends_with, find_from, str_less };
+use url::{ AddrParts, build_url, split_addr };
+use xml::{ parse };
+
+/// The listing: `("", err)` on failure (err carries the marked prefix),
+/// the result JSON otherwise.
+pub fn list_impl(creds: Creds, dir: str, c: Ctx) -> (?str, str) {
+    let url = build_url(creds.addr, dir, true);
+    if (url == nil) {
+        return (nil, "webdav: invalid server address");
+    }
+    let u: str = url;
+    let parts = split_addr(creds.addr);
+    if (parts == nil) {
+        return (nil, "webdav: invalid server address");
+    }
+    let p: AddrParts = parts;
+    let uri = u.slice(p.origin.len(), u.len());
+    let resp = dav_request(ReqSpec {
+        method: "PROPFIND",
+        url: u,
+        uri: uri,
+        propfind: true,
+        range: nil,
+    }, creds, c);
+    if (resp.failed) {
+        return (nil, resp.err);
+    }
+    let tree = parse(resp.body);
+    if (tree == nil) {
+        return (nil, "webdav: unparsable PROPFIND response");
+    }
+    let t: str = tree;
+    let dir_trimmed = dir;
+    if (ends_with(dir_trimmed, "/")) {
+        dir_trimmed = dir_trimmed.slice(0, dir_trimmed.len() - 1);
+    }
+    let cx = ListCx { addr: creds.addr, dir_trimmed: dir_trimmed, rows: Vec<str>::new() };
+    if (!walk_multistatus(t, cx)) {
+        return (nil, "webdav: unparsable PROPFIND response");
+    }
+    return (render_entries(cx), "");
+}
+
+/// Sort (the prefix does the ordering), strip the prefix, join the JSON
+/// objects into the result array.
+fn render_entries(cx: ListCx) -> str {
+    let rows = cx.rows;
+    sort_rows(rows);
+    let out = StringBuilder::with_cap(256);
+    out.append("[");
+    let first = true;
+    for (let row of rows) {
+        if (!first) {
+            out.append(",");
+        }
+        first = false;
+        out.append(row_json(row));
+    }
+    out.append("]");
+    return out.build();
+}
+
+/// Dirs first, then by path — the row's sort prefix makes this a plain str
+/// ordering (insertion sort; listings are small).
+fn sort_rows(rows: Vec<str>) {
+    let n = rows.len;
+    let i = 1;
+    while (i < n) {
+        let key = rows[i];
+        let j = i - 1;
+        while (j >= 0 && str_less(key, rows[j])) {
+            rows[j + 1] = rows[j];
+            j -= 1;
+        }
+        rows[j + 1] = key;
+        i += 1;
+    }
+}
+
+/// The row's JSON tail (everything past the second `\u{1}` separator).
+fn row_json(row: str) -> str {
+    let sep1 = find_from(row, 0, 1);
+    let sep2 = find_from(row, sep1 + 1, 1);
+    return row.slice(sep2 + 1, row.len());
+}

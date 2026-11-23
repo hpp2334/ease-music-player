@@ -1,0 +1,231 @@
+// backend/session.rut — the chunked-pull sessions (the module state
+// record's session pool): `storage:get` opens with a **1-byte ranged
+// probe** (working auth + metadata without pulling the file), the host
+// then pulls `storage:get-chunk`s (each a range GET) until `eof`, and
+// `storage:release` frees the slot. The auth parked at open time is the
+// fast path; a 401 (rotated nonce / evicted slot) falls back to the full
+// challenge/retry and re-parks its working auth.
+
+use config::{ Creds };
+use crypto::{ b64_encode };
+use dav::{ ReqSpec, dav_attempt, dav_request, header_of };
+use json::{ JsonWriter };
+use model::{ Ctx, POOL };
+use strutil::{ find_from, is_digits, str_to_i64, trim };
+use url::{ AddrParts, build_url, last_segment, split_addr };
+
+/// A parked stream session (the pool slot's columns as one value).
+pub struct Session {
+    slot: i32,
+    url: str,
+    auth: ?str,
+}
+
+/// Open a stream: a **1-byte ranged probe** (`bytes=offset-offset`)
+/// establishes the working auth + metadata (status 206, Content-Range's
+/// total, content type) without pulling the whole remaining file — the
+/// body the server sends for the probe is discarded, and the actual bytes
+/// arrive through the host's chunk pulls. The session (url + auth +
+/// dataOffset) parks in the pool under a fresh `sid`.
+/// The opener: `("", err)` on failure (err carries the marked prefix),
+/// the `{sid, meta}` JSON otherwise.
+pub fn open_impl(creds: Creds, path: str, offset: u64, c: Ctx) -> (?str, str) {
+    let url = build_url(creds.addr, path, false);
+    if (url == nil) {
+        return (nil, "webdav: invalid server address");
+    }
+    let u: str = url;
+    let parts = split_addr(creds.addr);
+    if (parts == nil) {
+        return (nil, "webdav: invalid server address");
+    }
+    let p: AddrParts = parts;
+    let uri = u.slice(p.origin.len(), u.len());
+    let resp = dav_request(ReqSpec {
+        method: "GET",
+        url: u,
+        uri: uri,
+        propfind: false,
+        range: f"bytes={offset}-{offset}",
+    }, creds, c);
+    if (resp.failed) {
+        return (nil, resp.err);
+    }
+    // A server that ignored the Range answers 200 with the full body from
+    // byte 0 — meta.dataOffset tells the host to drop the prefix itself.
+    let content_range = header_of(resp.headers, "content-range");
+    let range_honored = resp.status == 206;
+    if (content_range != nil) {
+        range_honored = true;
+    }
+    let data_offset = offset;
+    if (!range_honored) {
+        data_offset = 0;
+    }
+    // totalLength: prefer Content-Range's total (`bytes start-end/total`) —
+    // Content-Length on a Range response is the partial length (for the
+    // 1-byte probe: literally 1). A Content-Range with a `*` total
+    // (`bytes o-o/*`, server doesn't know the size) must stay unknown —
+    // only fall back to Content-Length when NO Content-Range rode the
+    // response at all (the range-ignoring 200's full-body length).
+    let total: i64 = -1;
+    let cr = header_of(resp.headers, "content-range");
+    if (cr != nil) {
+        let s: str = cr;
+        let slash = find_from(s, 0, 47);
+        if (slash != -1) {
+            let tail = trim(s.slice(slash + 1, s.len()));
+            if (tail != "*" && is_digits(tail)) {
+                total = str_to_i64(tail);
+            }
+        }
+    } else {
+        let cl = header_of(resp.headers, "content-length");
+        if (cl != nil) {
+            let s: str = cl;
+            let t = trim(s);
+            if (is_digits(t)) {
+                total = str_to_i64(t);
+            }
+        }
+    }
+    // claim a session slot
+    let slot = -1;
+    let i = 0;
+    while (i < POOL) {
+        if (c.sess_sid[i] == 0) {
+            slot = i;
+            break;
+        }
+        i += 1;
+    }
+    if (slot == -1) {
+        return (nil, "webdav: too many concurrent streams");
+    }
+    let sid = c.next_sid;
+    c.next_sid = c.next_sid + 1;
+    c.sess_sid[slot] = sid;
+    c.sess_url[slot] = u;
+    c.sess_auth[slot] = resp.auth_used;
+    c.sess_doff[slot] = data_offset;
+    let name = last_segment(path);
+    let ctype = header_of(resp.headers, "content-type");
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("sid");
+    w.write_i64(sid as i64);
+    w.key("meta");
+    w.begin_object();
+    if (total >= 0) {
+        w.key("totalLength");
+        w.write_i64(total);
+    }
+    w.key("name");
+    w.write_str(name);
+    if (ctype != nil) {
+        let ct: str = ctype;
+        if (ct != "") {
+            w.key("contentType");
+            w.write_str(ct);
+        }
+    }
+    w.key("dataOffset");
+    w.write_i64(data_offset as i64);
+    w.end_object();
+    w.end_object();
+    return (w.finish(), "");
+}
+
+pub fn session_of(c: Ctx, sid: u64) -> ?Session {
+    let i = 0;
+    while (i < POOL) {
+        if (sid != 0 && c.sess_sid[i] == sid) {
+            let u = c.sess_url[i];
+            if (u == nil) {
+                return nil;
+            }
+            let us: str = u;
+            return Session { slot: i, url: us, auth: c.sess_auth[i] };
+        }
+        i += 1;
+    }
+    return nil;
+}
+
+pub fn release_impl(c: Ctx, sid: u64) -> bool {
+    let i = 0;
+    while (i < POOL) {
+        if (sid != 0 && c.sess_sid[i] == sid) {
+            c.sess_sid[i] = 0;
+            c.sess_url[i] = nil;
+            c.sess_auth[i] = nil;
+            c.sess_doff[i] = 0;
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+/// One chunk: a range GET `offset..offset+len-1`; `eof` when fewer bytes
+/// than `len` came back (the final chunk carries data AND eof). The auth
+/// parked at open time is the fast path (no re-resolution); a 401 — the
+/// server rotated its Digest nonce or the challenge slot was evicted —
+/// falls back to the full challenge/retry.
+/// One chunk: `("", err)` on failure (err carries the marked prefix),
+/// the `{data, eof}` JSON otherwise.
+pub fn chunk_impl(creds: Creds, sess: Session, offset: u64, len: u64, c: Ctx) -> (?str, str) {
+    let end = offset + len - 1u64;
+    let parts = split_addr(sess.url);
+    if (parts == nil) {
+        return (nil, "webdav: invalid session");
+    }
+    let p: AddrParts = parts;
+    let uri = sess.url.slice(p.origin.len(), sess.url.len());
+    let spec = ReqSpec {
+        method: "GET",
+        url: sess.url,
+        uri: uri,
+        propfind: false,
+        range: f"bytes={offset}-{end}",
+    };
+    let resp = dav_attempt(spec, creds, sess.auth, c);
+    if (resp.failed || resp.status == 401) {
+        resp = dav_request(spec, creds, c);
+        // The fallback re-authed against a fresh challenge — re-park its
+        // working auth so the remaining chunks of this stream don't pay
+        // 401 + retry every pull.
+        if (!resp.failed) {
+            c.sess_auth[sess.slot] = resp.auth_used;
+        }
+    }
+    if (resp.failed) {
+        return (nil, resp.err);
+    }
+    // 416 = the pull landed past EOF (exact-multiple-of-len files): the
+    // stream is done, not failed — match S3's mapping.
+    if (resp.status == 416) {
+        let w0 = JsonWriter::new();
+        w0.begin_object();
+        w0.key("data");
+        w0.write_str("");
+        w0.key("eof");
+        w0.write_bool(true);
+        w0.end_object();
+        return (w0.finish(), "");
+    }
+    if (resp.status >= 400) {
+        return (nil, f"HTTP {resp.status}: {resp.status_text}");
+    }
+    let data = resp.body;
+    let n = data.len();
+    let eof = (n as u64) < len;
+    let w = JsonWriter::new();
+    w.begin_object();
+    w.key("data");
+    w.write_str(b64_encode(data));
+    w.key("eof");
+    w.write_bool(eof);
+    w.end_object();
+    return (w.finish(), "");
+}

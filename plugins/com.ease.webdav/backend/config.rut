@@ -1,0 +1,221 @@
+// backend/config.rut — the per-instance config document: `Db` (this
+// plugin's KV) under `storage:<instance>` = JSON `{ alias, addr, username,
+// isAnonymous, secretId }` (the exact key names the TS wrote — legacy
+// configs stay readable); the password lives in `Secret` under that
+// `secretId` (scope `plugin:com.ease.webdav`). The db/secret handles are
+// PARAMETERS (the root constructs them from the boot handle and every
+// caller passes them through) — nothing here resolves identity itself.
+
+use emp::{ Db, Secret };
+use json::{ JsonReader };
+use pouch::{ Vec };
+use url::{ AddrParts, split_addr };
+
+/// Per-instance config (the `storage:<id>` KV document).
+pub struct Config {
+    alias: str,
+    addr: str,
+    username: str,
+    is_anonymous: bool,
+    secret_id: i64,
+}
+
+/// Resolved credentials for one request batch.
+pub struct Creds {
+    addr: str,
+    username: str,
+    password: str,
+    is_anonymous: bool,
+}
+
+pub fn kv_key(instance: str) -> str {
+    return f"storage:{instance}";
+}
+
+/// The optional-string read: `null` → nil, a string → some, anything else
+/// (or a truncated body) → the reader's sticky error.
+pub fn read_opt_str(r: JsonReader) -> ?str {
+    if (r.try_null()) {
+        return nil;
+    }
+    let v = r.read_str();
+    if (r.failed()) {
+        return nil;
+    }
+    return v;
+}
+
+pub fn opt_str_or(v: ?str, fallback: str) -> str {
+    if (v == nil) {
+        return fallback;
+    }
+    let s: str = v;
+    return s;
+}
+
+/// Decode the persisted config document; nil on corrupt JSON.
+fn decode_config(doc: str) -> ?Config {
+    let r = JsonReader::of(doc);
+    r.begin_object();
+    let alias: ?str = nil;
+    let addr: ?str = nil;
+    let username: ?str = nil;
+    let anon = false;
+    let secret_id: i64 = 0;
+    while (r.more()) {
+        let k = r.next_key();
+        if (r.failed()) {
+            return nil;
+        }
+        when (k) {
+            "alias" -> {
+                alias = read_opt_str(r);
+            },
+            "addr" -> {
+                addr = read_opt_str(r);
+            },
+            "username" -> {
+                username = read_opt_str(r);
+            },
+            "isAnonymous" -> {
+                anon = r.read_bool();
+            },
+            "secretId" -> {
+                if (!r.try_null()) {
+                    secret_id = r.read_i64();
+                }
+            },
+            else -> { r.skip_value(); },
+        }
+        if (r.failed()) {
+            return nil;
+        }
+    }
+    r.end_object();
+    if (r.failed()) {
+        return nil;
+    }
+    let a = "";
+    if (alias != nil) {
+        a = alias;
+    }
+    let ad = "";
+    if (addr != nil) {
+        ad = addr;
+    }
+    let u = "";
+    if (username != nil) {
+        u = username;
+    }
+    return Config { alias: a, addr: ad, username: u, is_anonymous: anon, secret_id: secret_id };
+}
+
+/// Load an instance's config; the alias defaults to the instance name (the
+/// TS `cfg.alias ?? instance`).
+pub fn config_of(db: Db, instance: str) -> ?Config {
+    let raw = db.get(kv_key(instance));
+    if (raw == nil) {
+        return nil;
+    }
+    let doc: str = raw;
+    let cfg = decode_config(doc);
+    if (cfg == nil) {
+        return nil;
+    }
+    let c: Config = cfg;
+    if (c.alias == "") {
+        c.alias = instance;
+    }
+    return c;
+}
+
+pub fn load_password(secret: Secret, cfg: Config) -> str {
+    if (cfg.is_anonymous) {
+        return "";
+    }
+    if (cfg.secret_id == 0) {
+        return "";
+    }
+    let v = secret.get(cfg.secret_id);
+    if (v == nil) {
+        return "";
+    }
+    let p: str = v;
+    return p;
+}
+
+pub fn creds_of(secret: Secret, cfg: Config) -> Creds {
+    return Creds {
+        addr: cfg.addr,
+        username: cfg.username,
+        password: load_password(secret, cfg),
+        is_anonymous: cfg.is_anonymous,
+    };
+}
+
+/// The configured instance ids (the `storage:<id>` single keys).
+pub fn list_instance_keys(db: Db) -> Vec<str> {
+    let out = Vec<str>::new();
+    let raw = db.list_keys("storage:");
+    let r = JsonReader::of(raw);
+    r.begin_array();
+    while (r.more()) {
+        r.begin_object();
+        let key: ?str = nil;
+        while (r.more()) {
+            let k = r.next_key();
+            if (r.failed()) {
+                break;
+            }
+            if (k == "key") {
+                let v = r.read_str();
+                if (!r.failed()) {
+                    key = v;
+                }
+            } else {
+                r.skip_value();
+            }
+        }
+        r.end_object();
+        if (key != nil) {
+            let k: str = key;
+            // "storage:<id>" — strip the prefix (8 codepoints)
+            out.push(k.slice(8, k.len()));
+        }
+        if (r.failed()) {
+            break;
+        }
+    }
+    r.end_array();
+    return out;
+}
+
+/// The chunk op carries only `sid` — resolve the server credentials by
+/// matching the parked session url's origin against the configured
+/// instances (same-origin instances share credentials anyway).
+pub fn creds_for_session(db: Db, secret: Secret, sess_url: str) -> ?Creds {
+    let parts = split_addr(sess_url);
+    if (parts == nil) {
+        return nil;
+    }
+    let want: AddrParts = parts;
+    let keys = list_instance_keys(db);
+    let n = keys.len;
+    let i = 0;
+    while (i < n) {
+        let key = keys[i];
+        let cfg = config_of(db, key);
+        if (cfg != nil) {
+            let conf: Config = cfg;
+            let cparts = split_addr(conf.addr);
+            if (cparts != nil) {
+                let cp: AddrParts = cparts;
+                if (cp.origin == want.origin) {
+                    return creds_of(secret, conf);
+                }
+            }
+        }
+        i += 1;
+    }
+    return nil;
+}
